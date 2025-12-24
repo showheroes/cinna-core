@@ -394,8 +394,10 @@ class EnvironmentLifecycleManager:
         auth_token: str,
         anthropic_api_key: str | None = None
     ):
-        """Generate .env file for docker-compose."""
-        logger.debug(f"Generating .env file for environment {environment.id}")
+        """Generate .env files for docker-compose and application."""
+        logger.debug(f"Generating .env files for environment {environment.id}")
+
+        # 1. Generate root .env file for docker-compose (without ANTHROPIC_API_KEY)
         env_content = f"""# Environment Identification
 ENV_ID={environment.id}
 AGENT_ID={agent.id}
@@ -408,33 +410,41 @@ AGENT_PORT={port}
 # Security
 AGENT_AUTH_TOKEN={auth_token}
 
-# AI Service Credentials
-ANTHROPIC_API_KEY={anthropic_api_key or ''}
-
-# Database
+# Database (optional - for agent to access main DB)
 DATABASE_URL={settings.SQLALCHEMY_DATABASE_URI}
 
 # Resource Limits
 CPU_LIMIT={environment.config.get('cpu_limit', '1.0')}
 MEMORY_LIMIT={environment.config.get('memory_limit', '512M')}
-CPU_RESERVATION=0.25
-MEMORY_RESERVATION=128M
+CPU_RESERVATION={environment.config.get('cpu_reservation', '0.25')}
+MEMORY_RESERVATION={environment.config.get('memory_reservation', '128M')}
 
-# Agent Configuration
+# Agent Configuration (will be set dynamically)
 WORKFLOW_PROMPT={agent.workflow_prompt or ''}
 ENTRYPOINT_PROMPT={agent.entrypoint_prompt or ''}
+
+# Logging
+LOG_LEVEL=INFO
 
 # Claude Code Configuration
 CLAUDE_CODE_WORKSPACE=/app/app
 CLAUDE_CODE_PERMISSION_MODE=acceptEdits
-
-# Logging
-LOG_LEVEL=INFO
 """
 
         env_path = instance_dir / ".env"
         with open(env_path, 'w') as f:
             f.write(env_content)
+
+        # 2. Generate app/.env file for application code (with ANTHROPIC_API_KEY)
+        app_env_content = f"""# AI Service Credentials (injected at runtime)
+ANTHROPIC_API_KEY={anthropic_api_key or ''}
+"""
+
+        app_dir = instance_dir / "app"
+        app_dir.mkdir(parents=True, exist_ok=True)
+        app_env_path = app_dir / ".env"
+        with open(app_env_path, 'w') as f:
+            f.write(app_env_content)
 
     def _allocate_port(self) -> int:
         """Allocate available port."""
