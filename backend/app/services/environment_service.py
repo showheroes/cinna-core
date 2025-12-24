@@ -1,9 +1,48 @@
 from uuid import UUID
 from datetime import datetime
+import random
 from sqlmodel import Session, select
 from app.models import AgentEnvironment, AgentEnvironmentCreate, AgentEnvironmentUpdate, Agent, User
 from app import crud
 from .environment_lifecycle import EnvironmentLifecycleManager
+
+
+def generate_environment_name() -> str:
+    """Generate a memorable 3-word name with dashes (e.g., 'brave-blue-dragon')"""
+    adjectives = [
+        "brave", "clever", "bright", "swift", "gentle", "noble", "wise", "calm",
+        "bold", "keen", "sharp", "quick", "fierce", "proud", "strong", "silent",
+        "agile", "mighty", "golden", "silver", "cosmic", "stellar", "lunar", "solar",
+        "ancient", "mystic", "radiant", "serene", "vivid", "royal", "divine", "eternal",
+        "wild", "free", "pure", "grand", "epic", "vital", "dynamic", "blessed",
+        "elegant", "graceful", "daring", "fearless", "infinite", "supreme", "perfect", "pristine"
+    ]
+
+    colors = [
+        "red", "blue", "green", "yellow", "purple", "orange", "pink", "teal",
+        "amber", "jade", "ruby", "azure", "violet", "crimson", "emerald", "indigo",
+        "coral", "pearl", "onyx", "ivory", "cobalt", "bronze", "copper", "chrome",
+        "sapphire", "topaz", "turquoise", "magenta", "scarlet", "lime", "mint", "lavender",
+        "maroon", "navy", "olive", "platinum", "slate", "steel", "graphite", "charcoal",
+        "frost", "snow", "cloud", "smoke", "shadow", "obsidian", "diamond", "crystal"
+    ]
+
+    nouns = [
+        "tiger", "dragon", "eagle", "falcon", "phoenix", "wolf", "lion", "bear",
+        "hawk", "raven", "fox", "puma", "lynx", "cobra", "viper", "panther",
+        "orca", "shark", "whale", "dolphin", "owl", "sparrow", "swan", "crane",
+        "mountain", "river", "ocean", "forest", "canyon", "valley", "summit", "peak",
+        "leopard", "jaguar", "cheetah", "gryphon", "unicorn", "pegasus", "sphinx", "hydra",
+        "thunder", "lightning", "storm", "tempest", "blizzard", "aurora", "comet", "meteor",
+        "warrior", "guardian", "sentinel", "champion", "ranger", "scout", "voyager", "explorer",
+        "glacier", "waterfall", "volcano", "desert", "prairie", "tundra", "reef", "archipelago"
+    ]
+
+    adjective = random.choice(adjectives)
+    color = random.choice(colors)
+    noun = random.choice(nouns)
+
+    return f"{adjective}-{color}-{noun}"
 
 
 class EnvironmentService:
@@ -45,8 +84,13 @@ class EnvironmentService:
         ai_credentials = crud.get_user_ai_credentials(user=user)
         anthropic_api_key = ai_credentials.anthropic_api_key if ai_credentials else None
 
+        # Generate a memorable instance name if not provided
+        instance_name = data.instance_name if data.instance_name != "Instance" else generate_environment_name()
+
         # Create DB record
-        environment = AgentEnvironment.model_validate(data, update={"agent_id": agent_id})
+        environment = AgentEnvironment.model_validate(
+            data, update={"agent_id": agent_id, "instance_name": instance_name}
+        )
         session.add(environment)
         session.commit()
         session.refresh(environment)
