@@ -1,6 +1,7 @@
 import os
 import shutil
 import logging
+import asyncio
 from pathlib import Path
 from uuid import UUID
 from sqlmodel import Session
@@ -62,7 +63,8 @@ class EnvironmentLifecycleManager:
         self,
         db_session: Session,
         environment: AgentEnvironment,
-        agent: Agent
+        agent: Agent,
+        anthropic_api_key: str | None = None
     ) -> bool:
         """
         Create environment instance:
@@ -75,6 +77,7 @@ class EnvironmentLifecycleManager:
             db_session: Database session
             environment: Environment model
             agent: Agent model
+            anthropic_api_key: User's Anthropic API key (optional)
 
         Returns:
             True if creation successful
@@ -95,7 +98,7 @@ class EnvironmentLifecycleManager:
         logger.debug(f"Instance directory created: {instance_dir}")
 
         # 2. Copy template files
-        self._copy_template(template_dir, instance_dir)
+        await self._copy_template(template_dir, instance_dir)
 
         # 3. Allocate port and generate auth token
         port = self._allocate_port()
@@ -112,7 +115,7 @@ class EnvironmentLifecycleManager:
         self._generate_compose_file(instance_dir, environment, agent, port, auth_token)
 
         # 5. Generate .env file
-        self._generate_env_file(instance_dir, environment, agent, port, auth_token)
+        self._generate_env_file(instance_dir, environment, agent, port, auth_token, anthropic_api_key)
 
         # 6. Build image
         logger.info(f"Building Docker image for environment {environment.id}")
@@ -147,6 +150,11 @@ class EnvironmentLifecycleManager:
         3. Wait for health check
         4. Set prompts and credentials
         5. Update status to 'running'
+
+        Args:
+            db_session: Database session
+            environment: Environment instance
+            agent: Agent instance
         """
         # Update status
         environment.status = "starting"
@@ -296,10 +304,13 @@ class EnvironmentLifecycleManager:
             # Log error but continue with directory cleanup
             logger.warning(f"Failed to delete container resources for {environment.id}: {e}")
 
-        # Remove instance directory
+        # Remove instance directory (run in thread pool to avoid blocking)
         instance_dir = self.instances_dir / str(environment.id)
         if instance_dir.exists():
-            shutil.rmtree(instance_dir)
+            logger.debug(f"Removing instance directory: {instance_dir}")
+            # Run blocking I/O operation in thread pool executor
+            await asyncio.to_thread(shutil.rmtree, instance_dir)
+            logger.debug(f"Instance directory removed: {instance_dir}")
 
         # Release port
         if "port" in environment.config:
@@ -309,20 +320,26 @@ class EnvironmentLifecycleManager:
 
     # === Helper Methods ===
 
-    def _copy_template(self, template_dir: Path, instance_dir: Path):
+    async def _copy_template(self, template_dir: Path, instance_dir: Path):
         """Copy template files to instance directory."""
         logger.debug(f"Copying template from {template_dir} to {instance_dir}")
-        for item in template_dir.iterdir():
-            if item.name.startswith('.'):
-                logger.debug(f"Skipping hidden file: {item.name}")
-                continue  # Skip hidden files
 
-            dest = instance_dir / item.name
+        def _copy_sync():
+            """Synchronous copy operation to run in thread pool."""
+            for item in template_dir.iterdir():
+                if item.name.startswith('.'):
+                    logger.debug(f"Skipping hidden file: {item.name}")
+                    continue  # Skip hidden files
 
-            if item.is_dir():
-                shutil.copytree(item, dest, dirs_exist_ok=True)
-            else:
-                shutil.copy2(item, dest)
+                dest = instance_dir / item.name
+
+                if item.is_dir():
+                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dest)
+
+        # Run blocking I/O operation in thread pool executor
+        await asyncio.to_thread(_copy_sync)
         logger.debug(f"Template copy completed")
 
     def _generate_compose_file(
@@ -374,7 +391,8 @@ class EnvironmentLifecycleManager:
         environment: AgentEnvironment,
         agent: Agent,
         port: int,
-        auth_token: str
+        auth_token: str,
+        anthropic_api_key: str | None = None
     ):
         """Generate .env file for docker-compose."""
         logger.debug(f"Generating .env file for environment {environment.id}")
@@ -390,6 +408,9 @@ AGENT_PORT={port}
 # Security
 AGENT_AUTH_TOKEN={auth_token}
 
+# AI Service Credentials
+ANTHROPIC_API_KEY={anthropic_api_key or ''}
+
 # Database
 DATABASE_URL={settings.SQLALCHEMY_DATABASE_URI}
 
@@ -402,6 +423,10 @@ MEMORY_RESERVATION=128M
 # Agent Configuration
 WORKFLOW_PROMPT={agent.workflow_prompt or ''}
 ENTRYPOINT_PROMPT={agent.entrypoint_prompt or ''}
+
+# Claude Code Configuration
+CLAUDE_CODE_WORKSPACE=/app/app
+CLAUDE_CODE_PERMISSION_MODE=acceptEdits
 
 # Logging
 LOG_LEVEL=INFO

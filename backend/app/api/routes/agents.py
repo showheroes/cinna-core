@@ -80,7 +80,7 @@ async def create_agent(
     Create new agent with default environment.
     """
     agent = await AgentService.create_agent(
-        session=session, user_id=current_user.id, data=agent_in
+        session=session, user_id=current_user.id, data=agent_in, user=current_user
     )
     return agent
 
@@ -214,7 +214,7 @@ async def create_agent_environment(
         raise HTTPException(status_code=400, detail="Not enough permissions")
 
     environment = await EnvironmentService.create_environment(
-        session=session, agent_id=id, data=environment_in
+        session=session, agent_id=id, data=environment_in, user=current_user
     )
     return environment
 

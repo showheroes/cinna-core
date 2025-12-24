@@ -1,13 +1,13 @@
 from uuid import UUID
 from sqlmodel import Session, select
-from app.models import Agent, AgentCreate, AgentUpdate
+from app.models import Agent, AgentCreate, AgentUpdate, User
 from app.models.environment import AgentEnvironmentCreate
 from app.services.environment_service import EnvironmentService
 
 
 class AgentService:
     @staticmethod
-    async def create_agent(session: Session, user_id: UUID, data: AgentCreate) -> Agent:
+    async def create_agent(session: Session, user_id: UUID, data: AgentCreate, user: User) -> Agent:
         """Create new agent with default environment"""
         agent = Agent.model_validate(data, update={"owner_id": user_id})
         session.add(agent)
@@ -25,7 +25,8 @@ class AgentService:
         default_env = await EnvironmentService.create_environment(
             session=session,
             agent_id=agent.id,
-            data=default_env_data
+            data=default_env_data,
+            user=user
         )
 
         # Activate the default environment (starts it)

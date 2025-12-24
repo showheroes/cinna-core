@@ -1,7 +1,8 @@
 from uuid import UUID
 from datetime import datetime
 from sqlmodel import Session, select
-from app.models import AgentEnvironment, AgentEnvironmentCreate, AgentEnvironmentUpdate, Agent
+from app.models import AgentEnvironment, AgentEnvironmentCreate, AgentEnvironmentUpdate, Agent, User
+from app import crud
 from .environment_lifecycle import EnvironmentLifecycleManager
 
 
@@ -26,7 +27,7 @@ class EnvironmentService:
         return cls._lifecycle_manager
     @staticmethod
     async def create_environment(
-        session: Session, agent_id: UUID, data: AgentEnvironmentCreate
+        session: Session, agent_id: UUID, data: AgentEnvironmentCreate, user: User
     ) -> AgentEnvironment:
         """
         Create environment for agent.
@@ -40,6 +41,10 @@ class EnvironmentService:
         if not agent:
             raise ValueError(f"Agent {agent_id} not found")
 
+        # Get user's AI credentials
+        ai_credentials = crud.get_user_ai_credentials(user=user)
+        anthropic_api_key = ai_credentials.anthropic_api_key if ai_credentials else None
+
         # Create DB record
         environment = AgentEnvironment.model_validate(data, update={"agent_id": agent_id})
         session.add(environment)
@@ -49,7 +54,9 @@ class EnvironmentService:
         # Create Docker instance (copy template, build image)
         try:
             lifecycle_manager = EnvironmentService.get_lifecycle_manager()
-            await lifecycle_manager.create_environment_instance(session, environment, agent)
+            await lifecycle_manager.create_environment_instance(
+                session, environment, agent, anthropic_api_key
+            )
         except Exception as e:
             # Rollback DB record if Docker creation fails
             session.delete(environment)

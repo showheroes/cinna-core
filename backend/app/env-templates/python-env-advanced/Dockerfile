@@ -1,16 +1,31 @@
-FROM python:3.10
+FROM python:3.11-slim
 
 LABEL maintainer="workflow-runner"
-LABEL env.name="python-env-basic"
+LABEL env.name="python-env-advanced"
 LABEL env.version="1.0.0"
 
 ENV PYTHONUNBUFFERED=1
 
-WORKDIR /app/
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#installing-uv
+# Install Node.js 20.x (required for Claude Code)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (Python package manager)
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /bin/
+
+# Install Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+# Set working directory
+WORKDIR /app
 
 # Place executables in the environment at the front of the path
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#using-the-environment
@@ -24,11 +39,10 @@ ENV UV_COMPILE_BYTECODE=1
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#caching
 ENV UV_LINK_MODE=copy
 
-# Copy dependency files
-COPY ./pyproject.toml ./uv.lock /app/
+# Copy project files
+COPY pyproject.toml uv.lock* ./
 
-# Install dependencies only (not the project itself, since app/ will be mounted)
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
+# Install Python dependencies (including claude-agent-sdk)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project
 

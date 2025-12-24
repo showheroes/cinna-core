@@ -43,9 +43,7 @@ export function EnvironmentCard({ environment, agentId, onActivate }: Environmen
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
             <h3 className="text-lg font-semibold break-words">
-              {environment.env_name === "python-env-advanced"
-                ? "Python Advanced"
-                : environment.env_name}
+              {environment.type}:  {environment.id}
             </h3>
             {environment.is_active && (
               <Badge variant="default" className="gap-1">
