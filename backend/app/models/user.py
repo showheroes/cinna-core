@@ -1,7 +1,7 @@
 import uuid
 from typing import List
 from pydantic import EmailStr
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship, SQLModel, Column, Text
 
 
 # Shared properties
@@ -44,6 +44,8 @@ class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     hashed_password: str | None = None
     google_id: str | None = Field(default=None, max_length=255, unique=True, index=True)
+    # AI Service Credentials (encrypted JSON)
+    ai_credentials_encrypted: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     items: List["app.models.item.Item"] = Relationship(back_populates="owner", cascade_delete=True)
     agents: List["app.models.agent.Agent"] = Relationship(back_populates="owner", cascade_delete=True)
     credentials: List["app.models.credential.Credential"] = Relationship(back_populates="owner", cascade_delete=True)
@@ -89,3 +91,25 @@ class SetPassword(SQLModel):
 
 class OAuthConfig(SQLModel):
     google_enabled: bool
+
+
+# AI Service Credentials schemas
+class AIServiceCredentials(SQLModel):
+    """Decrypted AI service credentials"""
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None  # For future use
+    google_ai_api_key: str | None = None  # For future use
+
+
+class AIServiceCredentialsUpdate(SQLModel):
+    """Update AI service credentials (partial update)"""
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None
+    google_ai_api_key: str | None = None
+
+
+class UserPublicWithAICredentials(UserPublic):
+    """User info indicating which AI credentials are set (not the actual keys)"""
+    has_anthropic_api_key: bool = False
+    has_openai_api_key: bool = False
+    has_google_ai_api_key: bool = False

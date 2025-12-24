@@ -25,6 +25,11 @@ from app.models import (
     UserUpdate,
     UserUpdateMe,
 )
+from app.models.user import (
+    AIServiceCredentials,
+    AIServiceCredentialsUpdate,
+    UserPublicWithAICredentials,
+)
 from app.utils import generate_new_account_email, send_email
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -254,3 +259,65 @@ def delete_user(
     session.delete(user)
     session.commit()
     return Message(message="User deleted successfully")
+
+
+# AI Service Credentials endpoints
+@router.get("/me/ai-credentials/status", response_model=UserPublicWithAICredentials)
+def get_ai_credentials_status(
+    current_user: CurrentUser,
+) -> UserPublicWithAICredentials:
+    """
+    Get AI credentials status (which keys are set, without revealing the keys).
+    """
+    credentials = crud.get_user_ai_credentials(user=current_user)
+
+    return UserPublicWithAICredentials(
+        **current_user.model_dump(),
+        has_google_account=bool(current_user.google_id),
+        has_password=bool(current_user.hashed_password),
+        has_anthropic_api_key=bool(credentials and credentials.anthropic_api_key),
+        has_openai_api_key=bool(credentials and credentials.openai_api_key),
+        has_google_ai_api_key=bool(credentials and credentials.google_ai_api_key),
+    )
+
+
+@router.get("/me/ai-credentials", response_model=AIServiceCredentials)
+def get_ai_credentials(
+    current_user: CurrentUser,
+) -> AIServiceCredentials:
+    """
+    Get decrypted AI service credentials.
+    SECURITY: Only returns to the credential owner.
+    """
+    credentials = crud.get_user_ai_credentials(user=current_user)
+    if not credentials:
+        return AIServiceCredentials()
+    return credentials
+
+
+@router.patch("/me/ai-credentials", response_model=Message)
+def update_ai_credentials(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    credentials_in: AIServiceCredentialsUpdate,
+) -> Message:
+    """
+    Update AI service credentials (partial update).
+    Only updates the fields provided.
+    """
+    crud.update_user_ai_credentials(
+        session=session, user=current_user, credentials_update=credentials_in
+    )
+    return Message(message="AI credentials updated successfully")
+
+
+@router.delete("/me/ai-credentials", response_model=Message)
+def delete_ai_credentials(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Message:
+    """Delete all AI service credentials"""
+    crud.delete_user_ai_credentials(session=session, user=current_user)
+    return Message(message="AI credentials deleted successfully")

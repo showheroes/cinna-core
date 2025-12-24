@@ -18,6 +18,7 @@ from app.models import (
     CredentialCreate,
     CredentialUpdate,
 )
+from app.models.user import AIServiceCredentials, AIServiceCredentialsUpdate
 
 
 def create_user(*, session: Session, user_create: UserCreate) -> User:
@@ -213,3 +214,51 @@ def get_agent_credentials(*, session: Session, agent_id: uuid.UUID) -> list[Cred
     )
     credentials = session.exec(statement).all()
     return list(credentials)
+
+
+# AI Service Credentials CRUD
+def get_user_ai_credentials(*, user: User) -> AIServiceCredentials | None:
+    """Get decrypted AI service credentials for user."""
+    if not user.ai_credentials_encrypted:
+        return None
+
+    try:
+        decrypted_json = decrypt_field(user.ai_credentials_encrypted)
+        credential_data = json.loads(decrypted_json)
+        return AIServiceCredentials(**credential_data)
+    except Exception:
+        return None
+
+
+def update_user_ai_credentials(
+    *, session: Session, user: User, credentials_update: AIServiceCredentialsUpdate
+) -> User:
+    """Update AI service credentials (partial update)."""
+    # Get existing credentials or create new
+    existing = get_user_ai_credentials(user=user)
+    if existing:
+        current_data = existing.model_dump()
+    else:
+        current_data = {}
+
+    # Update only provided fields
+    update_data = credentials_update.model_dump(exclude_unset=True)
+    current_data.update(update_data)
+
+    # Encrypt and save
+    credential_data_json = json.dumps(current_data)
+    user.ai_credentials_encrypted = encrypt_field(credential_data_json)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    return user
+
+
+def delete_user_ai_credentials(*, session: Session, user: User) -> User:
+    """Delete all AI service credentials."""
+    user.ai_credentials_encrypted = None
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user

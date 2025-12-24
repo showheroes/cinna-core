@@ -71,6 +71,24 @@ export type AgentUpdate = {
     is_active?: (boolean | null);
 };
 
+/**
+ * Decrypted AI service credentials
+ */
+export type AIServiceCredentials = {
+    anthropic_api_key?: (string | null);
+    openai_api_key?: (string | null);
+    google_ai_api_key?: (string | null);
+};
+
+/**
+ * Update AI service credentials (partial update)
+ */
+export type AIServiceCredentialsUpdate = {
+    anthropic_api_key?: (string | null);
+    openai_api_key?: (string | null);
+    google_ai_api_key?: (string | null);
+};
+
 export type Body_login_login_access_token = {
     grant_type?: (string | null);
     username: string;
@@ -254,6 +272,22 @@ export type UserPublic = {
     id: string;
     has_google_account?: boolean;
     has_password?: boolean;
+};
+
+/**
+ * User info indicating which AI credentials are set (not the actual keys)
+ */
+export type UserPublicWithAICredentials = {
+    email: string;
+    is_active?: boolean;
+    is_superuser?: boolean;
+    full_name?: (string | null);
+    id: string;
+    has_google_account?: boolean;
+    has_password?: boolean;
+    has_anthropic_api_key?: boolean;
+    has_openai_api_key?: boolean;
+    has_google_ai_api_key?: boolean;
 };
 
 export type UserRegister = {
@@ -650,6 +684,18 @@ export type UsersDeleteUserData = {
 };
 
 export type UsersDeleteUserResponse = (Message);
+
+export type UsersGetAiCredentialsStatusResponse = (UserPublicWithAICredentials);
+
+export type UsersGetAiCredentialsResponse = (AIServiceCredentials);
+
+export type UsersDeleteAiCredentialsResponse = (Message);
+
+export type UsersUpdateAiCredentialsData = {
+    requestBody: AIServiceCredentialsUpdate;
+};
+
+export type UsersUpdateAiCredentialsResponse = (Message);
 
 export type UtilsTestEmailData = {
     emailTo: string;

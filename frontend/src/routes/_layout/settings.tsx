@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
+import { AICredentialsSettings } from "@/components/UserSettings/AICredentials"
 import ChangePassword from "@/components/UserSettings/ChangePassword"
 import DeleteAccount from "@/components/UserSettings/DeleteAccount"
 import OAuthAccounts from "@/components/UserSettings/OAuthAccounts"
@@ -13,6 +14,7 @@ const tabsConfig = [
   { value: "password", title: "Password", component: ChangePassword },
   { value: "set-password", title: "Set Password", component: SetPassword },
   { value: "oauth", title: "Connected Accounts", component: OAuthAccounts },
+  { value: "ai-credentials", title: "AI Credentials", component: AICredentialsSettings },
   { value: "danger-zone", title: "Danger zone", component: DeleteAccount },
 ]
 
