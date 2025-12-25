@@ -160,7 +160,6 @@ function Dashboard() {
         <div className="w-full max-w-3xl space-y-6">
           {/* Agent Selector Pills */}
           <div className="space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">Select Agent</p>
             <div className="flex flex-wrap gap-2">
               {agentsWithActiveEnv.map((agent) => (
                 <Badge
