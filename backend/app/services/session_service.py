@@ -51,6 +51,31 @@ class SessionService:
         return session
 
     @staticmethod
+    def update_session_status(
+        db_session: DBSession, session_id: UUID, status: str
+    ) -> Session | None:
+        """
+        Update session status.
+
+        Valid statuses:
+        - "active": Streaming is currently happening
+        - "completed": All messages received successfully, nothing to process
+        - "error": Server-side error occurred (SDK response failed, HTTP errors, etc.)
+        - "paused": Not implemented yet
+        """
+        session = db_session.get(Session, session_id)
+        if not session:
+            return None
+
+        session.status = status
+        session.updated_at = datetime.utcnow()
+
+        db_session.add(session)
+        db_session.commit()
+        db_session.refresh(session)
+        return session
+
+    @staticmethod
     def switch_mode(db_session: DBSession, session_id: UUID, new_mode: str) -> Session | None:
         """Switch session mode (building <-> conversation)"""
         session = db_session.get(Session, session_id)

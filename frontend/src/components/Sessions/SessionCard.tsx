@@ -56,9 +56,20 @@ export function SessionCard({ session, agentName }: SessionCardProps) {
             {session.last_message_at ? (
               <p>
                 Last message{" "}
-                {formatDistanceToNow(new Date(session.last_message_at + 'Z'), {
-                  addSuffix: true,
-                })}
+                {(() => {
+                  try {
+                    // Handle timestamp - it might already have 'Z'
+                    const timestampStr = typeof session.last_message_at === 'string'
+                      ? (session.last_message_at.endsWith('Z') ? session.last_message_at : session.last_message_at + 'Z')
+                      : session.last_message_at
+                    const date = new Date(timestampStr)
+                    return !isNaN(date.getTime())
+                      ? formatDistanceToNow(date, { addSuffix: true })
+                      : "recently"
+                  } catch {
+                    return "recently"
+                  }
+                })()}
               </p>
             ) : (
               <p>No messages yet</p>

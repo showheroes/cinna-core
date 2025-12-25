@@ -29,8 +29,27 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const numTurns = message.message_metadata?.num_turns as number | undefined
   const streamingEvents = (message.message_metadata?.streaming_events || []) as any[]
 
-  // Format UTC timestamp
-  const utcTimestamp = new Date(message.timestamp + 'Z').toUTCString()
+  // Format UTC timestamp - handle invalid dates
+  let formattedTime = "Just now"
+  let utcTimestamp = ""
+
+  try {
+    if (message.timestamp) {
+      // Handle timestamp - it might already have 'Z' from optimistic updates
+      const timestampStr = typeof message.timestamp === 'string'
+        ? (message.timestamp.endsWith('Z') ? message.timestamp : message.timestamp + 'Z')
+        : message.timestamp
+
+      const date = new Date(timestampStr)
+      if (!isNaN(date.getTime())) {
+        formattedTime = formatDistanceToNow(date, { addSuffix: true })
+        utcTimestamp = date.toUTCString()
+      }
+    }
+  } catch (error) {
+    console.error("Error formatting timestamp:", error, message.timestamp)
+  }
+
   const durationSec = durationMs ? (durationMs / 1000).toFixed(2) : null
 
   return (
@@ -54,9 +73,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 isUser ? "text-primary-foreground/70" : "text-muted-foreground"
               }`}
             >
-              {formatDistanceToNow(new Date(message.timestamp + 'Z'), {
-                addSuffix: true,
-              })}
+              {formattedTime}
             </p>
             {!isUser && (model || totalCost || durationSec || numTurns) && (
               <div

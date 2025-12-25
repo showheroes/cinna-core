@@ -146,6 +146,13 @@ async def send_message_stream(
         content=message_in.content,
     )
 
+    # Set session status to "active" before streaming starts
+    SessionService.update_session_status(
+        db_session=session,
+        session_id=session_id,
+        status="active"
+    )
+
     # Extract data from ORM objects BEFORE async generator
     # (to avoid detached instance errors)
     base_url = MessageService.get_environment_url(environment)
@@ -175,6 +182,20 @@ async def send_message_stream(
                 mode=session_mode,
                 external_session_id=external_session_id
             ):
+                # Handle error events from message service
+                if event.get("type") == "error":
+                    # Update session status to "error" on SDK/HTTP errors
+                    with DBSession(engine) as db:
+                        SessionService.update_session_status(
+                            db_session=db,
+                            session_id=session_id,
+                            status="error"
+                        )
+                    # Forward error event and continue (will exit loop after this)
+                    event_json = json.dumps(event)
+                    yield f"data: {event_json}\n\n"
+                    return  # Exit early on error
+
                 # Capture external session ID from done event (contains actual session_id from ResultMessage)
                 if event.get("type") == "done" and not external_session_id:
                     # Get session_id from metadata (set by SDK manager from ResultMessage)
@@ -254,6 +275,14 @@ async def send_message_stream(
                     )
                 logger.info(f"Agent response saved ({len(streaming_events)} events, model={response_metadata.get('model')})")
 
+            # Update session status to "completed" after successful streaming
+            with DBSession(engine) as db:
+                SessionService.update_session_status(
+                    db_session=db,
+                    session_id=session_id,
+                    status="completed"
+                )
+
             # Send final done event to frontend to trigger UI refresh
             done_event = json.dumps({
                 "type": "done",
@@ -264,6 +293,15 @@ async def send_message_stream(
 
         except Exception as e:
             logger.error(f"Error in message stream: {e}", exc_info=True)
+
+            # Update session status to "error" when streaming fails
+            with DBSession(engine) as db:
+                SessionService.update_session_status(
+                    db_session=db,
+                    session_id=session_id,
+                    status="error"
+                )
+
             error_event = json.dumps({
                 "type": "error",
                 "content": str(e),
