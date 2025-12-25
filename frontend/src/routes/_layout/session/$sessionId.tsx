@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { ArrowLeft, EllipsisVertical } from "lucide-react"
 
 import { SessionsService, MessagesService } from "@/client"
@@ -21,14 +21,21 @@ import { usePageHeader } from "@/routes/_layout"
 
 export const Route = createFileRoute("/_layout/session/$sessionId")({
   component: ChatInterface,
+  validateSearch: (search: Record<string, unknown>) => {
+    return {
+      initialMessage: (search.initialMessage as string) || undefined,
+    }
+  },
 })
 
 function ChatInterface() {
   const { sessionId } = Route.useParams()
+  const { initialMessage } = Route.useSearch()
   const navigate = useNavigate()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { setHeaderContent } = usePageHeader()
   const [menuOpen, setMenuOpen] = useState(false)
+  const initialMessageSent = useRef(false)
 
   const {
     data: session,
@@ -60,17 +67,54 @@ function ChatInterface() {
     },
   })
 
-  const handleSendMessage = async (content: string) => {
-    await sendMessage(content)
-  }
+  const handleSendMessage = useCallback(
+    async (content: string) => {
+      await sendMessage(content)
+    },
+    [sendMessage]
+  )
 
-  const handleBack = () => {
-    navigate({ to: "/sessions" })
-  }
+  // Send initial message if provided - wait for session and messages to load
+  useEffect(() => {
+    if (
+      initialMessage &&
+      !initialMessageSent.current &&
+      !isStreaming &&
+      session &&
+      messagesData &&
+      !sessionLoading &&
+      !messagesLoading
+    ) {
+      initialMessageSent.current = true
+      // Use the same handleSendMessage that the UI uses
+      handleSendMessage(initialMessage)
+      // Clear the search param after sending
+      navigate({
+        to: "/session/$sessionId",
+        params: { sessionId },
+        search: {},
+        replace: true,
+      })
+    }
+  }, [
+    initialMessage,
+    isStreaming,
+    session,
+    messagesData,
+    sessionLoading,
+    messagesLoading,
+    sessionId,
+    navigate,
+    handleSendMessage,
+  ])
 
-  const handleDeleteSuccess = () => {
+  const handleBack = useCallback(() => {
     navigate({ to: "/sessions" })
-  }
+  }, [navigate])
+
+  const handleDeleteSuccess = useCallback(() => {
+    navigate({ to: "/sessions" })
+  }, [navigate])
 
   // Update header when session loads
   useEffect(() => {
@@ -112,7 +156,7 @@ function ChatInterface() {
       )
     }
     return () => setHeaderContent(null)
-  }, [session, setHeaderContent, menuOpen])
+  }, [session, setHeaderContent, menuOpen, handleBack, handleDeleteSuccess])
 
   if (sessionLoading || messagesLoading) {
     return <PendingItems />
