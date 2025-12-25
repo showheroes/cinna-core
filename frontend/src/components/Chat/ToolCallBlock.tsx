@@ -1,5 +1,8 @@
 import { Wrench } from "lucide-react"
 import { MarkdownRenderer } from "./MarkdownRenderer"
+import { ReadToolBlock } from "./ReadToolBlock"
+import { TodoWriteToolBlock } from "./TodoWriteToolBlock"
+import { WriteToolBlock } from "./WriteToolBlock"
 
 interface ToolCallBlockProps {
   toolName: string
@@ -7,6 +10,22 @@ interface ToolCallBlockProps {
 }
 
 export function ToolCallBlock({ toolName, toolInput }: ToolCallBlockProps) {
+  // Special rendering for Read tool
+  if (toolName === "Read" && toolInput?.file_path) {
+    return <ReadToolBlock filePath={toolInput.file_path} />
+  }
+
+  // Special rendering for Write tool
+  if (toolName === "Write" && toolInput?.file_path && toolInput?.content) {
+    return <WriteToolBlock filePath={toolInput.file_path} content={toolInput.content} />
+  }
+
+  // Special rendering for TodoWrite tool
+  if (toolName === "TodoWrite" && toolInput?.todos && Array.isArray(toolInput.todos)) {
+    return <TodoWriteToolBlock todos={toolInput.todos} />
+  }
+
+  // Default rendering for other tools
   return (
     <div className="flex items-start gap-2 text-sm bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded px-3 py-2">
       <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
