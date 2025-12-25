@@ -21,6 +21,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL}
       - CLAUDE_CODE_WORKSPACE=/app/app
       - CLAUDE_CODE_PERMISSION_MODE=acceptEdits
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DUMP_LLM_SESSION=${DUMP_LLM_SESSION:-true}
 
     # NO port exposure - communication via agent-bridge network only
     # Backend connects via http://agent-${ENV_ID}:${AGENT_PORT}

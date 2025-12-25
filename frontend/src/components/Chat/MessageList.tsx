@@ -3,13 +3,16 @@ import { Button } from "@/components/ui/button"
 import { ArrowDown } from "lucide-react"
 import type { MessagePublic } from "@/client"
 import { MessageBubble } from "./MessageBubble"
+import { StreamingMessage } from "./StreamingMessage"
 
 interface MessageListProps {
   messages: MessagePublic[]
   isLoading?: boolean
+  streamingContent?: string
+  isStreaming?: boolean
 }
 
-export function MessageList({ messages, isLoading }: MessageListProps) {
+export function MessageList({ messages, isLoading, streamingContent, isStreaming }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -39,12 +42,12 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
     scrollToBottom()
   }, [])
 
-  // Auto-scroll when new messages arrive (only if user hasn't manually scrolled up)
+  // Auto-scroll when new messages arrive or streaming content updates (only if user hasn't manually scrolled up)
   useEffect(() => {
     if (!userHasScrolled) {
       scrollToBottom()
     }
-  }, [messages.length, userHasScrolled])
+  }, [messages.length, streamingContent, userHasScrolled])
 
   if (isLoading) {
     return (
@@ -72,6 +75,7 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
             {messages.map((message) => (
               <MessageBubble key={message.id} message={message} />
             ))}
+            {isStreaming && <StreamingMessage content={streamingContent || ""} />}
             <div ref={messagesEndRef} />
           </>
         )}

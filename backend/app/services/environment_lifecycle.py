@@ -466,15 +466,19 @@ LOG_LEVEL=INFO
 # Claude Code Configuration
 CLAUDE_CODE_WORKSPACE=/app/app
 CLAUDE_CODE_PERMISSION_MODE=acceptEdits
+
+# AI Service Credentials (passed to container)
+ANTHROPIC_API_KEY={anthropic_api_key or ''}
 """
 
         env_path = instance_dir / ".env"
         with open(env_path, 'w') as f:
             f.write(env_content)
 
-        # 2. Generate app/.env file for application code (with ANTHROPIC_API_KEY)
-        app_env_content = f"""# AI Service Credentials (injected at runtime)
-ANTHROPIC_API_KEY={anthropic_api_key or ''}
+        # 2. Generate app/.env file for application-specific variables (if needed)
+        # Note: ANTHROPIC_API_KEY is now provided via container environment variables
+        app_env_content = """# Application-specific environment variables can be added here
+# Note: ANTHROPIC_API_KEY is provided via container environment variables
 """
 
         app_dir = instance_dir / "app"

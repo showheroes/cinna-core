@@ -207,6 +207,17 @@ export const AgentEnvironmentPublicSchema = {
             type: 'string',
             title: 'Status'
         },
+        status_message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Status Message'
+        },
         is_active: {
             type: 'boolean',
             title: 'Is Active'
@@ -235,7 +246,7 @@ export const AgentEnvironmentPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'agent_id', 'env_name', 'env_version', 'instance_name', 'type', 'status', 'is_active', 'created_at', 'updated_at', 'last_health_check'],
+    required: ['id', 'agent_id', 'env_name', 'env_version', 'instance_name', 'type', 'status', 'status_message', 'is_active', 'created_at', 'updated_at', 'last_health_check'],
     title: 'AgentEnvironmentPublic'
 } as const;
 
@@ -1050,6 +1061,93 @@ export const SessionPublicSchema = {
     title: 'SessionPublic'
 } as const;
 
+export const SessionPublicExtendedSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        environment_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Environment Id'
+        },
+        user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'User Id'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        mode: {
+            type: 'string',
+            title: 'Mode'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        last_message_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Message At'
+        },
+        external_session_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Session Id'
+        },
+        sdk_type: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sdk Type'
+        }
+    },
+    type: 'object',
+    required: ['id', 'environment_id', 'user_id', 'title', 'mode', 'status', 'created_at', 'updated_at', 'last_message_at'],
+    title: 'SessionPublicExtended',
+    description: 'Session with external session metadata'
+} as const;
+
 export const SessionUpdateSchema = {
     properties: {
         title: {
@@ -1090,11 +1188,11 @@ export const SessionUpdateSchema = {
     title: 'SessionUpdate'
 } as const;
 
-export const SessionsPublicSchema = {
+export const SessionsPublicExtendedSchema = {
     properties: {
         data: {
             items: {
-                '$ref': '#/components/schemas/SessionPublic'
+                '$ref': '#/components/schemas/SessionPublicExtended'
             },
             type: 'array',
             title: 'Data'
@@ -1106,7 +1204,7 @@ export const SessionsPublicSchema = {
     },
     type: 'object',
     required: ['data', 'count'],
-    title: 'SessionsPublic'
+    title: 'SessionsPublicExtended'
 } as const;
 
 export const SetPasswordSchema = {

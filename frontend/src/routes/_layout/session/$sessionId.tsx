@@ -7,6 +7,7 @@ import { MessageList } from "@/components/Chat/MessageList"
 import { MessageInput } from "@/components/Chat/MessageInput"
 import PendingItems from "@/components/Pending/PendingItems"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useMessageStream } from "@/hooks/useMessageStream"
 
 export const Route = createFileRoute("/_layout/session/$sessionId")({
   component: ChatInterface,
@@ -52,17 +53,12 @@ function ChatInterface() {
     },
   })
 
-  const sendMessageMutation = useMutation({
-    mutationFn: (content: string) =>
-      MessagesService.sendMessage({
-        sessionId,
-        requestBody: { content },
-      }),
+  const { sendMessage, isStreaming, streamingContent } = useMessageStream({
+    sessionId,
     onSuccess: () => {
-      // Refetch messages to get the agent's response
-      queryClient.invalidateQueries({ queryKey: ["messages", sessionId] })
+      // Messages are already refreshed by the hook
     },
-    onError: (error: any) => {
+    onError: (error) => {
       showErrorToast(error.message || "Failed to send message")
     },
   })
@@ -73,8 +69,8 @@ function ChatInterface() {
     switchModeMutation.mutate(newMode)
   }
 
-  const handleSendMessage = (content: string) => {
-    sendMessageMutation.mutate(content)
+  const handleSendMessage = async (content: string) => {
+    await sendMessage(content)
   }
 
   const handleBack = () => {
@@ -115,18 +111,23 @@ function ChatInterface() {
     )
   }
 
-  const isDisabled = sendMessageMutation.isPending || session.status !== "active"
+  const isDisabled = isStreaming || session.status !== "active"
 
   return (
     <div className="flex flex-col h-screen">
       <ChatHeader session={session} onModeSwitch={handleModeSwitch} onBack={handleBack} />
-      <MessageList messages={messages} isLoading={messagesLoading} />
+      <MessageList
+        messages={messages}
+        isLoading={messagesLoading}
+        streamingContent={streamingContent}
+        isStreaming={isStreaming}
+      />
       <MessageInput
         onSend={handleSendMessage}
         disabled={isDisabled}
         placeholder={
-          sendMessageMutation.isPending
-            ? "Sending message..."
+          isStreaming
+            ? "Agent is responding..."
             : session.status !== "active"
             ? "Session is not active"
             : "Type your message..."

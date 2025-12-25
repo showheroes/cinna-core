@@ -165,20 +165,29 @@ async def chat_stream(request: ChatRequest):
     }
     """
     if request.mode == "building":
+        logger.info(f"Starting stream for mode=building, session_id={request.session_id}, message={request.message[:50]}...")
 
         async def event_stream():
             """Generate SSE events from SDK stream"""
+            event_count = 0
             try:
+                logger.info("Calling sdk_manager.send_message_stream()...")
                 async for chunk in sdk_manager.send_message_stream(
                     message=request.message,
                     session_id=request.session_id,
                     system_prompt=_workflow_prompt or request.system_prompt,
                 ):
+                    event_count += 1
+                    logger.info(f"[Stream event #{event_count}] Received chunk type={chunk.get('type')}, content_length={len(chunk.get('content', ''))}")
+
                     # Format as SSE event
                     event_data = json.dumps(chunk)
                     yield f"data: {event_data}\n\n"
 
+                logger.info(f"SDK stream completed. Total events: {event_count}")
+
                 # Send done event
+                logger.info("Sending final done event")
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
             except Exception as e:

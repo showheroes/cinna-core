@@ -29,6 +29,7 @@ export type AgentEnvironmentPublic = {
     instance_name: string;
     type: string;
     status: string;
+    status_message: (string | null);
     is_active: boolean;
     created_at: string;
     updated_at: string;
@@ -231,8 +232,25 @@ export type SessionPublic = {
     last_message_at: (string | null);
 };
 
-export type SessionsPublic = {
-    data: Array<SessionPublic>;
+/**
+ * Session with external session metadata
+ */
+export type SessionPublicExtended = {
+    id: string;
+    environment_id: string;
+    user_id: string;
+    title: (string | null);
+    mode: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    last_message_at: (string | null);
+    external_session_id?: (string | null);
+    sdk_type?: (string | null);
+};
+
+export type SessionsPublicExtended = {
+    data: Array<SessionPublicExtended>;
     count: number;
 };
 
@@ -565,6 +583,13 @@ export type MessagesSendMessageData = {
 
 export type MessagesSendMessageResponse = (MessagePublic);
 
+export type MessagesSendMessageStreamData = {
+    requestBody: MessageCreate;
+    sessionId: string;
+};
+
+export type MessagesSendMessageStreamResponse = (unknown);
+
 export type OauthGetOauthConfigResponse = (OAuthConfig);
 
 export type OauthGoogleAuthorizeResponse = ({
@@ -591,7 +616,7 @@ export type PrivateCreateUserData = {
 
 export type PrivateCreateUserResponse = (UserPublic);
 
-export type SessionsListSessionsResponse = (SessionsPublic);
+export type SessionsListSessionsResponse = (SessionsPublicExtended);
 
 export type SessionsCreateSessionData = {
     requestBody: SessionCreate;
@@ -603,7 +628,7 @@ export type SessionsGetSessionData = {
     id: string;
 };
 
-export type SessionsGetSessionResponse = (SessionPublic);
+export type SessionsGetSessionResponse = (SessionPublicExtended);
 
 export type SessionsUpdateSessionData = {
     id: string;
@@ -619,11 +644,18 @@ export type SessionsDeleteSessionData = {
 export type SessionsDeleteSessionResponse = (Message);
 
 export type SessionsSwitchSessionModeData = {
+    clearExternalSession?: boolean;
     id: string;
     newMode: string;
 };
 
-export type SessionsSwitchSessionModeResponse = (SessionPublic);
+export type SessionsSwitchSessionModeResponse = (SessionPublicExtended);
+
+export type SessionsResetSdkSessionData = {
+    id: string;
+};
+
+export type SessionsResetSdkSessionResponse = (Message);
 
 export type UsersReadUsersData = {
     limit?: number;
