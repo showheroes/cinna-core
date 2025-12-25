@@ -1,7 +1,7 @@
 import { formatDistanceToNow } from "date-fns"
 import type { MessagePublic } from "@/client"
 import ReactMarkdown from "react-markdown"
-import { Wrench } from "lucide-react"
+import { StreamEventRenderer } from "./StreamEventRenderer"
 
 interface MessageBubbleProps {
   message: MessagePublic
@@ -25,10 +25,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const model = message.message_metadata?.model
   const totalCost = message.message_metadata?.total_cost_usd
   const claudeVersion = message.message_metadata?.claude_code_version
-
-  // Parse content to separate text from tool calls
-  const parts = !isUser && !isSystem ? message.content.split(/\n---\n/) : [message.content]
-  const hasMixedContent = parts.length > 1
+  const streamingEvents = message.message_metadata?.streaming_events || []
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
@@ -42,44 +39,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         <div className="space-y-2">
           {isUser ? (
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
-          ) : hasMixedContent ? (
-            // Agent message with both text and tool calls
-            <div className="space-y-3">
-              {parts.map((part, idx) => {
-                if (part.trim().startsWith("🔧 Using tool:")) {
-                  // Tool call section
-                  return (
-                    <div key={idx} className="flex items-start gap-2 text-sm bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded px-3 py-2">
-                      <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-                      <pre className="text-blue-900 dark:text-blue-100 whitespace-pre-wrap font-sans text-xs">
-                        {part.replace("🔧 ", "")}
-                      </pre>
-                    </div>
-                  )
-                } else if (part.trim()) {
-                  // Regular text section
-                  return (
-                    <div key={idx} className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown>{part}</ReactMarkdown>
-                    </div>
-                  )
-                }
-                return null
-              })}
-            </div>
-          ) : message.content.trim().startsWith("🔧 Using tool:") ? (
-            // Pure tool call
-            <div className="flex items-start gap-2 text-sm bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded px-3 py-2">
-              <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-              <pre className="text-blue-900 dark:text-blue-100 whitespace-pre-wrap font-sans text-xs">
-                {message.content.replace("🔧 ", "")}
-              </pre>
-            </div>
           ) : (
-            // Pure text
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <ReactMarkdown>{message.content}</ReactMarkdown>
-            </div>
+            <StreamEventRenderer events={streamingEvents} />
           )}
           <div className="flex items-center justify-between gap-2">
             <p

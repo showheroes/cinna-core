@@ -53,7 +53,7 @@ function ChatInterface() {
     },
   })
 
-  const { sendMessage, isStreaming, streamingContent } = useMessageStream({
+  const { sendMessage, isStreaming, streamingEvents } = useMessageStream({
     sessionId,
     onSuccess: () => {
       // Messages are already refreshed by the hook
@@ -119,7 +119,7 @@ function ChatInterface() {
       <MessageList
         messages={messages}
         isLoading={messagesLoading}
-        streamingContent={streamingContent}
+        streamingEvents={streamingEvents}
         isStreaming={isStreaming}
       />
       <MessageInput

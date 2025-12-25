@@ -5,14 +5,25 @@ import type { MessagePublic } from "@/client"
 import { MessageBubble } from "./MessageBubble"
 import { StreamingMessage } from "./StreamingMessage"
 
+interface StreamEvent {
+  type: "assistant" | "tool" | "thinking"
+  content: string
+  tool_name?: string
+  metadata?: {
+    tool_id?: string
+    tool_input?: Record<string, any>
+    model?: string
+  }
+}
+
 interface MessageListProps {
   messages: MessagePublic[]
   isLoading?: boolean
-  streamingContent?: string
+  streamingEvents?: StreamEvent[]
   isStreaming?: boolean
 }
 
-export function MessageList({ messages, isLoading, streamingContent, isStreaming }: MessageListProps) {
+export function MessageList({ messages, isLoading, streamingEvents, isStreaming }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -42,12 +53,12 @@ export function MessageList({ messages, isLoading, streamingContent, isStreaming
     scrollToBottom()
   }, [])
 
-  // Auto-scroll when new messages arrive or streaming content updates (only if user hasn't manually scrolled up)
+  // Auto-scroll when new messages arrive or streaming events update (only if user hasn't manually scrolled up)
   useEffect(() => {
     if (!userHasScrolled) {
       scrollToBottom()
     }
-  }, [messages.length, streamingContent, userHasScrolled])
+  }, [messages.length, streamingEvents, userHasScrolled])
 
   if (isLoading) {
     return (
@@ -75,7 +86,7 @@ export function MessageList({ messages, isLoading, streamingContent, isStreaming
             {messages.map((message) => (
               <MessageBubble key={message.id} message={message} />
             ))}
-            {isStreaming && <StreamingMessage content={streamingContent || ""} />}
+            {isStreaming && <StreamingMessage events={streamingEvents || []} />}
             <div ref={messagesEndRef} />
           </>
         )}

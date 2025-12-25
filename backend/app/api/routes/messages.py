@@ -155,6 +155,7 @@ async def send_message_stream(
 
     # Variables to collect agent response
     agent_response_parts = []
+    streaming_events = []  # Store raw streaming events for visualization
     new_external_session_id = external_session_id
     response_metadata = {
         "external_session_id": external_session_id,
@@ -193,6 +194,23 @@ async def send_message_stream(
                                     sdk_type="claude_code"
                                 )
 
+                # Store raw event for visualization (exclude done/error events from storage)
+                if event.get("type") not in ["done", "error", "session_created"]:
+                    # Create a clean copy of event for storage
+                    event_copy = {
+                        "type": event.get("type"),
+                        "content": event.get("content", ""),
+                    }
+                    if event.get("tool_name"):
+                        event_copy["tool_name"] = event["tool_name"]
+                    if event.get("metadata"):
+                        # Store relevant metadata fields
+                        event_copy["metadata"] = {
+                            k: v for k, v in event["metadata"].items()
+                            if k in ["tool_id", "tool_input", "model"]
+                        }
+                    streaming_events.append(event_copy)
+
                 # Collect agent response content
                 if event.get("content"):
                     agent_response_parts.append(event["content"])
@@ -217,9 +235,14 @@ async def send_message_stream(
                 yield f"data: {event_json}\n\n"
 
             # After stream completes, save agent response to database (use new DB session)
-            if agent_response_parts:
-                agent_content = "\n".join(agent_response_parts)
+            if streaming_events:
+                # Create summary content from text events only
+                text_parts = [e["content"] for e in streaming_events if e["type"] == "assistant" and e.get("content")]
+                agent_content = "\n\n".join(text_parts) if text_parts else "Agent response"
+
+                # Store structured events in metadata
                 response_metadata["external_session_id"] = new_external_session_id
+                response_metadata["streaming_events"] = streaming_events
 
                 with DBSession(engine) as db:
                     MessageService.create_message(
@@ -229,7 +252,7 @@ async def send_message_stream(
                         content=agent_content,
                         message_metadata=response_metadata
                     )
-                logger.info(f"Agent response saved ({len(agent_content)} chars, model={response_metadata.get('model')})")
+                logger.info(f"Agent response saved ({len(streaming_events)} events, model={response_metadata.get('model')})")
 
             # Send final done event to frontend to trigger UI refresh
             done_event = json.dumps({

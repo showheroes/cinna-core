@@ -10,6 +10,17 @@ interface StreamEvent {
   tool_name?: string
 }
 
+interface StructuredStreamEvent {
+  type: "assistant" | "tool" | "thinking"
+  content: string
+  tool_name?: string
+  metadata?: {
+    tool_id?: string
+    tool_input?: Record<string, any>
+    model?: string
+  }
+}
+
 interface UseMessageStreamOptions {
   sessionId: string
   onSuccess?: () => void
@@ -18,13 +29,11 @@ interface UseMessageStreamOptions {
 
 export function useMessageStream({ sessionId, onSuccess, onError }: UseMessageStreamOptions) {
   const [isStreaming, setIsStreaming] = useState(false)
-  const [streamingContent, setStreamingContent] = useState("")
-  const [streamingEvents, setStreamingEvents] = useState<StreamEvent[]>([])
+  const [streamingEvents, setStreamingEvents] = useState<StructuredStreamEvent[]>([])
   const queryClient = useQueryClient()
 
   const sendMessage = useCallback(async (content: string) => {
     setIsStreaming(true)
-    setStreamingContent("")
     setStreamingEvents([])
 
     // Optimistically add user message to the cache immediately
@@ -80,7 +89,6 @@ export function useMessageStream({ sessionId, onSuccess, onError }: UseMessageSt
       const decoder = new TextDecoder()
 
       let buffer = ""
-      let contentParts: string[] = []
       let streamCompleted = false
 
       while (true) {
@@ -105,24 +113,12 @@ export function useMessageStream({ sessionId, onSuccess, onError }: UseMessageSt
             try {
               const event: StreamEvent = JSON.parse(dataStr)
 
-              // Skip events with no content (system init, empty results, etc.)
-              // But allow "tool" type even with minimal content to show tool usage
-              if (!event.content || (event.content.trim() === "" && event.type !== "tool")) {
-                // Still track the event but don't display it
-                setStreamingEvents(prev => [...prev, event])
+              // Skip system and done events
+              if (event.type === "session_created" || event.type === "done") {
+                if (event.type === "done") {
+                  streamCompleted = true
+                }
                 continue
-              }
-
-              setStreamingEvents(prev => [...prev, event])
-
-              // Accumulate content from assistant and tool messages
-              if (event.type === "assistant") {
-                contentParts.push(event.content)
-                setStreamingContent(contentParts.join("\n"))
-              } else if (event.type === "tool") {
-                // Add tool usage as separate section
-                contentParts.push(`\n---\n${event.content}\n---`)
-                setStreamingContent(contentParts.join("\n"))
               }
 
               // Handle errors
@@ -131,9 +127,26 @@ export function useMessageStream({ sessionId, onSuccess, onError }: UseMessageSt
                 throw new Error(event.content || "Unknown stream error")
               }
 
-              // Stream is done
-              if (event.type === "done") {
-                streamCompleted = true
+              // Convert to structured event
+              if (event.type === "assistant" || event.type === "tool" || event.type === "thinking") {
+                const structuredEvent: StructuredStreamEvent = {
+                  type: event.type,
+                  content: event.content || "",
+                }
+
+                if (event.tool_name) {
+                  structuredEvent.tool_name = event.tool_name
+                }
+
+                if (event.metadata) {
+                  structuredEvent.metadata = {
+                    tool_id: event.metadata.tool_id,
+                    tool_input: event.metadata.tool_input,
+                    model: event.metadata.model,
+                  }
+                }
+
+                setStreamingEvents(prev => [...prev, structuredEvent])
               }
             } catch (parseError) {
               console.error("Failed to parse SSE event:", dataStr, parseError)
@@ -154,12 +167,10 @@ export function useMessageStream({ sessionId, onSuccess, onError }: UseMessageSt
       }
 
       setIsStreaming(false)
-      setStreamingContent("")
       setStreamingEvents([])
     } catch (error) {
       console.error("Message stream error:", error)
       setIsStreaming(false)
-      setStreamingContent("")
       setStreamingEvents([])
 
       // Remove optimistic message and refresh from server
@@ -177,7 +188,6 @@ export function useMessageStream({ sessionId, onSuccess, onError }: UseMessageSt
   return {
     sendMessage,
     isStreaming,
-    streamingContent,
     streamingEvents,
   }
 }
