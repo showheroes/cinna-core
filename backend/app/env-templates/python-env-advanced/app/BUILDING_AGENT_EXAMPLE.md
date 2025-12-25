@@ -169,28 +169,65 @@ Keep descriptions SHORT and ACTIONABLE. Focus on what users need to know to use 
 
 ### WORKFLOW_PROMPT.md
 
-This file defines the system prompt for the conversation mode agent. Update it to describe:
-- **Role and responsibilities**: What this workflow agent does
-- **Available resources**: Scripts, data sources, APIs
-- **Execution flow**: Step-by-step process
-- **Tools and capabilities**: What Python packages, integrations, and tools are available
-- **Decision-making guidelines**: How to handle edge cases
+This file defines the **system prompt** for the conversation mode agent. Update it to describe:
+- **Role and responsibilities**: What this workflow agent does and its purpose
+- **Available resources**: Scripts, data sources, APIs, credentials
+- **Execution flow**: Step-by-step process of how the workflow operates
+- **Tools and capabilities**: Python packages, integrations, and tools available
+- **Decision-making guidelines**: How to handle edge cases, errors, and variations
+- **Data structures**: Database schemas, file formats, expected inputs/outputs
+
+**Example**: For a mailbox invoice parser workflow, this would describe:
+- "You are an invoice extraction agent that monitors email inboxes"
+- "Available scripts: `scripts/connect_email.py`, `scripts/parse_invoice.py`"
+- "Database schema: invoices table with vendor, amount, date fields"
+- "When an email contains PDF attachments, extract text and identify invoice fields"
 
 ### ENTRYPOINT_PROMPT.md
 
-This file defines how the workflow should be triggered. Update it to describe:
-- **Trigger type**: Interactive, scheduled, or hybrid
-- **Entry point examples**: Sample prompts that invoke this workflow
-- **Context requirements**: What information is needed to run the workflow
-- **Expected responses**: What the workflow returns
+This file defines the **trigger message** - a concise user instruction that starts workflow execution.
+
+**Key Points**:
+- This is NOT a system prompt - it's a short **user message**
+- Think of it as the first message a user would send to trigger the workflow
+- For scheduled workflows, this message is sent automatically
+- Keep it brief, clear, and actionable (1-2 sentences)
+- Can include parameters or configuration if needed
+
+**Examples**:
+
+*Mailbox Invoice Parser*:
+```
+Collect from my mailbox unread emails, detect invoices, and give summary about them
+```
+
+*Daily Report Generator*:
+```
+Generate yesterday's sales report and send to the team
+```
+
+*Database Backup Workflow*:
+```
+Run database backup for all production databases and verify integrity
+```
+
+*Social Media Monitor*:
+```
+Check mentions of our brand in the last 24 hours and summarize sentiment
+```
 
 ### When to Update Documentation
 
-Update `./docs/WORKFLOW_PROMPT.md` and `./docs/ENTRYPOINT_PROMPT.md` when you:
+**Update `./docs/WORKFLOW_PROMPT.md` when you**:
 - Create scripts that expand the workflow's capabilities
 - Integrate new APIs or data sources
 - Define the workflow's execution logic
-- Establish patterns for how the workflow should be used
+- Add new decision-making rules
+
+**Update `./docs/ENTRYPOINT_PROMPT.md` when you**:
+- Finalize how the workflow should be triggered
+- Determine the default execution parameters
+- Define what the workflow does in its primary use case
 
 ## Remember
 

@@ -23,6 +23,80 @@ The building mode system prompt is composed of three layers:
    - Loaded at runtime if file exists and is not empty
    - Provides agent with awareness of what scripts already exist
 
+4. **docs/WORKFLOW_PROMPT.md** (Dynamic Context)
+   - System prompt for conversation mode agent
+   - Loaded at runtime and included in building mode prompt
+   - Agent updates this as workflow capabilities evolve
+
+5. **docs/ENTRYPOINT_PROMPT.md** (Dynamic Context)
+   - Trigger message for workflow execution
+   - Loaded at runtime and included in building mode prompt
+   - Agent defines concise command to start the workflow
+
+## Workflow Documentation Prompts
+
+The building agent maintains two key documentation files that define how the completed workflow will be used:
+
+### 1. WORKFLOW_PROMPT.md (System Prompt for Conversation Mode)
+
+**Purpose**: Comprehensive system prompt for the conversation mode agent that will execute the workflow.
+
+**Location**: `{instance_dir}/app/docs/WORKFLOW_PROMPT.md`
+
+**Template**: `backend/app/env-templates/python-env-advanced/app/docs/WORKFLOW_PROMPT.md`
+
+**Content**:
+- Agent's role and responsibilities
+- Available scripts, APIs, and data sources
+- Execution flow and decision-making guidelines
+- Database schemas and file formats
+- Error handling patterns
+
+**Loading**: `sdk_manager.py::_load_workflow_prompt()` - included in building mode system prompt
+
+**Sync**: `MessageService.sync_agent_prompts_from_environment()` - synced to backend Agent model after building sessions
+
+### 2. ENTRYPOINT_PROMPT.md (Trigger Message)
+
+**Purpose**: Concise user message (1-2 sentences) that triggers workflow execution.
+
+**Location**: `{instance_dir}/app/docs/ENTRYPOINT_PROMPT.md`
+
+**Template**: `backend/app/env-templates/python-env-advanced/app/docs/ENTRYPOINT_PROMPT.md`
+
+**Content**:
+- Short, actionable command (e.g., "Collect from my mailbox unread emails, detect invoices, and give summary")
+- NOT a system prompt - this is a user message
+- Used for scheduled workflow execution
+- Can include parameters or configuration
+
+**Loading**: `sdk_manager.py::_load_entrypoint_prompt()` - included in building mode system prompt
+
+**Sync**: `MessageService.sync_agent_prompts_from_environment()` - synced to backend Agent model after building sessions
+
+### Bidirectional Sync
+
+**From Environment → Backend** (automatic):
+- Triggered after building mode sessions complete
+- `messages.py` route calls `MessageService.sync_agent_prompts_from_environment()`
+- Reads prompts via `docker_adapter.py::get_agent_prompts()` (calls `/config/agent-prompts`)
+- Updates `Agent.workflow_prompt` and `Agent.entrypoint_prompt` fields
+
+**From Backend → Environment** (manual):
+- User edits prompts in backend UI
+- Calls `agents.py::sync_agent_prompts()` route
+- Pushes via `docker_adapter.py::set_agent_prompts()` (calls `/config/agent-prompts`)
+- Updates files in `{instance_dir}/app/docs/`
+
+### Building Agent Instructions
+
+The building agent sees both prompts in its system prompt and is instructed to:
+- Update `WORKFLOW_PROMPT.md` as scripts and capabilities are developed
+- Fill in `ENTRYPOINT_PROMPT.md` with a concise trigger message
+- Keep both files current as the workflow evolves
+
+**Reference**: `BUILDING_AGENT_EXAMPLE.md` section "Workflow Documentation"
+
 ## File Locations
 
 ### Template Files (Version Controlled)
@@ -73,16 +147,15 @@ The building mode system prompt is composed of three layers:
 
 **Prompt Construction Logic**:
 1. Start with base `building_prompt = self.building_agent_prompt`
-2. Call `_load_scripts_readme()` to check for existing scripts catalog
-3. If scripts/README.md exists and is not empty:
-   - Append it to building_prompt with context header
-   - Inform agent these are existing scripts and to keep catalog updated
-4. Create `SystemPromptPreset`:
+2. Call `_load_scripts_readme()` to append existing scripts catalog if available
+3. Call `_load_workflow_prompt()` to append current workflow system prompt if available
+4. Call `_load_entrypoint_prompt()` to append current trigger message if available
+5. Create `SystemPromptPreset`:
    ```python
    {
        "type": "preset",
        "preset": "claude_code",
-       "append": building_prompt  # BUILDING_AGENT.md + scripts catalog
+       "append": building_prompt  # BUILDING_AGENT.md + dynamic context
    }
    ```
 

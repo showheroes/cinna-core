@@ -1,43 +1,55 @@
-# Workflow Entry Point
+# Workflow Trigger Message
 
-**Trigger Type**: [INTERACTIVE/SCHEDULED]
-
-## Entry Point Prompt
-
-[TO BE FILLED: The initial prompt/command that triggers this workflow execution]
-
-### Examples
-
-**Interactive Mode**:
-```
-"Process my mailbox and tell me what unread emails I have"
-"Check for dunning notifications in today's emails"
-```
-
-**Scheduled Mode**:
-```
-"Process all emails received in the last 24 hours and detect dunning notifications"
-"Run daily mailbox scan and update ERP with detected dunnings"
-```
-
-## Context Provided on Execution
-
-[TO BE FILLED: What information/context is passed to the agent when the workflow starts]
-
-- **User context**: [e.g., user email, credentials, preferences]
-- **Temporal context**: [e.g., date range, time window]
-- **Data context**: [e.g., input files, database state]
-
-## Expected Response
-
-[TO BE FILLED: What the agent should return after execution]
-
-**Interactive Mode**:
-[Expected response format for user-facing output]
-
-**Scheduled Mode**:
-[Expected output format for logging/monitoring]
+This is the **user message** that triggers the workflow execution. Keep it concise and actionable.
 
 ---
 
-**Note**: This entry point will be defined during the specification and clarification phases based on the workflow's intended use case.
+[TO BE FILLED: Write a 1-2 sentence instruction that triggers this workflow]
+
+---
+
+## Guidelines
+
+- **Be specific**: Clearly state what action should be performed
+- **Be concise**: 1-2 sentences maximum
+- **Be actionable**: Use command verbs (e.g., "Collect", "Generate", "Process", "Check")
+- **Include key parameters**: If the workflow needs configuration, include it here
+
+## Examples for Different Workflow Types
+
+**Data Processing**:
+```
+Process all CSV files in the input folder and generate summary statistics
+```
+
+**Email Monitoring**:
+```
+Collect from my mailbox unread emails, detect invoices, and give summary about them
+```
+
+**Report Generation**:
+```
+Generate yesterday's sales report and send to the team
+```
+
+**Database Tasks**:
+```
+Run database backup for all production databases and verify integrity
+```
+
+**API Integration**:
+```
+Fetch latest orders from Shopify and sync to our ERP system
+```
+
+**Social Media**:
+```
+Check mentions of our brand in the last 24 hours and summarize sentiment
+```
+
+---
+
+**Note**: This message will be used as the first user message when:
+- Running the workflow on a schedule
+- Demonstrating the workflow's default behavior
+- Explaining to users how to trigger the workflow manually
