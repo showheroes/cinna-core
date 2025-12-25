@@ -62,34 +62,36 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming 
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center min-h-0">
         <p className="text-muted-foreground">Loading messages...</p>
       </div>
     )
   }
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div className="relative flex-1 overflow-hidden min-h-0">
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto px-4 py-6"
+        className="h-full overflow-y-auto px-6 py-6"
       >
-        {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-muted-foreground text-center">
-              No messages yet. Start the conversation!
-            </p>
-          </div>
-        ) : (
-          <>
-            {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
-            ))}
-            {isStreaming && <StreamingMessage events={streamingEvents || []} />}
-            <div ref={messagesEndRef} />
-          </>
-        )}
+        <div className="max-w-7xl mx-auto">
+          {messages.length === 0 ? (
+            <div className="flex items-center justify-center min-h-[400px]">
+              <p className="text-muted-foreground text-center">
+                No messages yet. Start the conversation!
+              </p>
+            </div>
+          ) : (
+            <>
+              {messages.map((message) => (
+                <MessageBubble key={message.id} message={message} />
+              ))}
+              {isStreaming && <StreamingMessage events={streamingEvents || []} />}
+              <div ref={messagesEndRef} />
+            </>
+          )}
+        </div>
       </div>
 
       {showScrollButton && (

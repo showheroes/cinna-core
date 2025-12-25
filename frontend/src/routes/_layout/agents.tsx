@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Bot } from "lucide-react"
+import { useEffect } from "react"
 
 import { AgentsService } from "@/client"
 import AddAgent from "@/components/Agents/AddAgent"
 import { AgentCard } from "@/components/Agents/AgentCard"
 import PendingItems from "@/components/Pending/PendingItems"
+import { usePageHeader } from "@/routes/_layout"
 
 export const Route = createFileRoute("/_layout/agents")({
   component: Agents,
@@ -70,16 +72,26 @@ function AgentsGrid() {
 }
 
 function Agents() {
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
-          <p className="text-muted-foreground">Create and manage your agents</p>
+  const { setHeaderContent } = usePageHeader()
+
+  useEffect(() => {
+    setHeaderContent(
+      <>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold truncate">Agents</h1>
+          <p className="text-xs text-muted-foreground">Create and manage your agents</p>
         </div>
         <AddAgent />
+      </>
+    )
+    return () => setHeaderContent(null)
+  }, [setHeaderContent])
+
+  return (
+    <div className="p-6 md:p-8 overflow-y-auto">
+      <div className="mx-auto max-w-7xl">
+        <AgentsGrid />
       </div>
-      <AgentsGrid />
     </div>
   )
 }

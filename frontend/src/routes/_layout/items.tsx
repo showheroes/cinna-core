@@ -1,13 +1,14 @@
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Search } from "lucide-react"
-import { Suspense } from "react"
+import { Suspense, useEffect } from "react"
 
 import { ItemsService } from "@/client"
 import { DataTable } from "@/components/Common/DataTable"
 import AddItem from "@/components/Items/AddItem"
 import { columns } from "@/components/Items/columns"
 import PendingItems from "@/components/Pending/PendingItems"
+import { usePageHeader } from "@/routes/_layout"
 
 function getItemsQueryOptions() {
   return {
@@ -54,16 +55,26 @@ function ItemsTable() {
 }
 
 function Items() {
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Items</h1>
-          <p className="text-muted-foreground">Create and manage your items</p>
+  const { setHeaderContent } = usePageHeader()
+
+  useEffect(() => {
+    setHeaderContent(
+      <>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold truncate">Items</h1>
+          <p className="text-xs text-muted-foreground">Create and manage your items</p>
         </div>
         <AddItem />
+      </>
+    )
+    return () => setHeaderContent(null)
+  }, [setHeaderContent])
+
+  return (
+    <div className="p-6 md:p-8 overflow-y-auto">
+      <div className="mx-auto max-w-7xl">
+        <ItemsTable />
       </div>
-      <ItemsTable />
     </div>
   )
 }

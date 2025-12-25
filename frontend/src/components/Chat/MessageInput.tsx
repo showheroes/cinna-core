@@ -32,8 +32,8 @@ export function MessageInput({
   }
 
   return (
-    <div className="border-t p-4 bg-background">
-      <div className="flex gap-2 items-end">
+    <div className="border-t p-4 bg-background shrink-0">
+      <div className="flex gap-2 items-end max-w-7xl mx-auto">
         <Textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -52,7 +52,7 @@ export function MessageInput({
           <Send className="h-5 w-5" />
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground mt-2">
+      <p className="text-xs text-muted-foreground mt-2 max-w-7xl mx-auto">
         Press Enter to send, Shift+Enter for new line
       </p>
     </div>

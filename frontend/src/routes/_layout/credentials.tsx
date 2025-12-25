@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Key } from "lucide-react"
+import { useEffect } from "react"
 
 import { CredentialsService } from "@/client"
 import AddCredential from "@/components/Credentials/AddCredential"
 import { CredentialCard } from "@/components/Credentials/CredentialCard"
 import PendingItems from "@/components/Pending/PendingItems"
+import { usePageHeader } from "@/routes/_layout"
 
 export const Route = createFileRoute("/_layout/credentials")({
   component: Credentials,
@@ -70,18 +72,26 @@ function CredentialsGrid() {
 }
 
 function Credentials() {
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Credentials</h1>
-          <p className="text-muted-foreground">
-            Securely store and manage your service credentials
-          </p>
+  const { setHeaderContent } = usePageHeader()
+
+  useEffect(() => {
+    setHeaderContent(
+      <>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold truncate">Credentials</h1>
+          <p className="text-xs text-muted-foreground">Securely store and manage credentials</p>
         </div>
         <AddCredential />
+      </>
+    )
+    return () => setHeaderContent(null)
+  }, [setHeaderContent])
+
+  return (
+    <div className="p-6 md:p-8 overflow-y-auto">
+      <div className="mx-auto max-w-7xl">
+        <CredentialsGrid />
       </div>
-      <CredentialsGrid />
     </div>
   )
 }

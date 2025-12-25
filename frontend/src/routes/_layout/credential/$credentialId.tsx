@@ -31,6 +31,7 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 import DeleteCredential from "@/components/Credentials/DeleteCredential"
+import { usePageHeader } from "@/routes/_layout"
 
 const formSchema = z.object({
   name: z.string().min(1, { message: "Name is required" }),
@@ -62,6 +63,7 @@ function CredentialDetail() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { setHeaderContent } = usePageHeader()
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
 
   const { data: credentialWithData, isLoading, error } = useQuery({
@@ -112,6 +114,45 @@ function CredentialDetail() {
     navigate({ to: "/credentials" })
   }
 
+  const handleBack = () => {
+    navigate({ to: "/credentials" })
+  }
+
+  // Update header when credential loads
+  useEffect(() => {
+    if (credentialWithData) {
+      setHeaderContent(
+        <>
+          <div className="flex items-center gap-3 min-w-0">
+            <Button variant="ghost" size="sm" onClick={handleBack} className="shrink-0">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div className="min-w-0">
+              <h1 className="text-base font-semibold truncate">
+                {credentialWithData.name}
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                {getCredentialTypeLabel(credentialWithData.type)}
+              </p>
+            </div>
+          </div>
+          <DeleteCredential
+            credential={credentialWithData}
+            onSuccess={handleDeleteSuccess}
+            isOpen={isDeleteOpen}
+            setIsOpen={setIsDeleteOpen}
+          >
+            <Button variant="destructive" size="sm" className="shrink-0">
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          </DeleteCredential>
+        </>
+      )
+    }
+    return () => setHeaderContent(null)
+  }, [credentialWithData, setHeaderContent, isDeleteOpen])
+
   if (isLoading) {
     return <PendingItems />
   }
@@ -125,39 +166,9 @@ function CredentialDetail() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate({ to: "/credentials" })}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              {credentialWithData.name}
-            </h1>
-            <p className="text-muted-foreground">
-              {getCredentialTypeLabel(credentialWithData.type)}
-            </p>
-          </div>
-        </div>
-        <DeleteCredential
-          credential={credentialWithData}
-          onSuccess={handleDeleteSuccess}
-          isOpen={isDeleteOpen}
-          setIsOpen={setIsDeleteOpen}
-        >
-          <Button variant="destructive" size="sm">
-            <Trash2 className="mr-2 h-4 w-4" />
-            Delete
-          </Button>
-        </DeleteCredential>
-      </div>
-
-      <Card>
+    <div className="p-6 md:p-8 overflow-y-auto">
+      <div className="mx-auto max-w-7xl">
+        <Card>
         <CardHeader>
           <CardTitle>Credential Details</CardTitle>
           <CardDescription>
@@ -422,7 +433,8 @@ function CredentialDetail() {
             </form>
           </Form>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </div>
   )
 }

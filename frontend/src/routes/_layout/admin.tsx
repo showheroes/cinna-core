@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Suspense } from "react"
+import { Suspense, useEffect } from "react"
 
 import { type UserPublic, UsersService } from "@/client"
 import AddUser from "@/components/Admin/AddUser"
@@ -8,6 +8,7 @@ import { columns, type UserTableData } from "@/components/Admin/columns"
 import { DataTable } from "@/components/Common/DataTable"
 import PendingUsers from "@/components/Pending/PendingUsers"
 import useAuth from "@/hooks/useAuth"
+import { usePageHeader } from "@/routes/_layout"
 
 function getUsersQueryOptions() {
   return {
@@ -48,18 +49,26 @@ function UsersTable() {
 }
 
 function Admin() {
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Users</h1>
-          <p className="text-muted-foreground">
-            Manage user accounts and permissions
-          </p>
+  const { setHeaderContent } = usePageHeader()
+
+  useEffect(() => {
+    setHeaderContent(
+      <>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold truncate">Users</h1>
+          <p className="text-xs text-muted-foreground">Manage user accounts and permissions</p>
         </div>
         <AddUser />
+      </>
+    )
+    return () => setHeaderContent(null)
+  }, [setHeaderContent])
+
+  return (
+    <div className="p-6 md:p-8 overflow-y-auto">
+      <div className="mx-auto max-w-7xl">
+        <UsersTable />
       </div>
-      <UsersTable />
     </div>
   )
 }

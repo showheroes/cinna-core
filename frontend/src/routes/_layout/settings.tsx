@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { useEffect } from "react"
 
 import { AICredentialsSettings } from "@/components/UserSettings/AICredentials"
 import ChangePassword from "@/components/UserSettings/ChangePassword"
@@ -8,6 +9,7 @@ import SetPassword from "@/components/UserSettings/SetPassword"
 import UserInformation from "@/components/UserSettings/UserInformation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useAuth from "@/hooks/useAuth"
+import { usePageHeader } from "@/routes/_layout"
 
 const tabsConfig = [
   { value: "my-profile", title: "My profile", component: UserInformation },
@@ -31,6 +33,17 @@ export const Route = createFileRoute("/_layout/settings")({
 
 function UserSettings() {
   const { user: currentUser } = useAuth()
+  const { setHeaderContent } = usePageHeader()
+
+  useEffect(() => {
+    setHeaderContent(
+      <div className="min-w-0">
+        <h1 className="text-lg font-semibold truncate">User Settings</h1>
+        <p className="text-xs text-muted-foreground">Manage your account settings</p>
+      </div>
+    )
+    return () => setHeaderContent(null)
+  }, [setHeaderContent])
 
   if (!currentUser) {
     return null
@@ -48,28 +61,23 @@ function UserSettings() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">User Settings</h1>
-        <p className="text-muted-foreground">
-          Manage your account settings and preferences
-        </p>
-      </div>
-
-      <Tabs defaultValue="my-profile">
-        <TabsList>
+    <div className="p-6 md:p-8 overflow-y-auto">
+      <div className="mx-auto max-w-7xl">
+        <Tabs defaultValue="my-profile">
+          <TabsList>
+            {finalTabs.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value}>
+                {tab.title}
+              </TabsTrigger>
+            ))}
+          </TabsList>
           {finalTabs.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>
-              {tab.title}
-            </TabsTrigger>
+            <TabsContent key={tab.value} value={tab.value}>
+              <tab.component />
+            </TabsContent>
           ))}
-        </TabsList>
-        {finalTabs.map((tab) => (
-          <TabsContent key={tab.value} value={tab.value}>
-            <tab.component />
-          </TabsContent>
-        ))}
-      </Tabs>
+        </Tabs>
+      </div>
     </div>
   )
 }

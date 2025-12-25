@@ -1,7 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
 import type { SessionPublic } from "@/client"
-import { ModeSwitchToggle } from "./ModeSwitchToggle"
 
 interface ChatHeaderProps {
   session: SessionPublic
@@ -13,27 +12,39 @@ export function ChatHeader({ session, onModeSwitch, onBack }: ChatHeaderProps) {
   const isBuilding = session.mode === "building"
 
   return (
-    <div
-      className={`border-b p-4 ${
-        isBuilding
-          ? "bg-gradient-to-r from-orange-50 to-orange-100 dark:from-orange-950/20 dark:to-orange-900/20"
-          : "bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950/20 dark:to-blue-900/20"
-      }`}
-    >
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="h-5 w-5" />
+    <div className="border-b px-6 py-3 bg-background shrink-0">
+      <div className="flex items-center justify-between gap-4 max-w-7xl mx-auto">
+        <div className="flex items-center gap-3 min-w-0">
+          <Button variant="ghost" size="sm" onClick={onBack} className="shrink-0">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div>
-            <h1 className="text-xl font-bold break-words">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-base font-semibold truncate">
               {session.title || "Untitled Session"}
             </h1>
-            <p className="text-sm text-muted-foreground">Session ID: {session.id.slice(0, 8)}...</p>
+            <p className="text-xs text-muted-foreground">
+              <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${
+                isBuilding ? "bg-orange-500" : "bg-blue-500"
+              }`} />
+              {isBuilding ? "Building Mode" : "Conversation Mode"}
+            </p>
           </div>
         </div>
 
-        <ModeSwitchToggle mode={session.mode} onToggle={onModeSwitch} />
+        <div className="shrink-0">
+          <Button
+            variant={isBuilding ? "outline" : "default"}
+            size="sm"
+            onClick={onModeSwitch}
+            className={`gap-2 ${
+              isBuilding
+                ? "border-orange-500 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/20"
+                : "bg-blue-500 hover:bg-blue-600 text-white"
+            }`}
+          >
+            Switch Mode
+          </Button>
+        </div>
       </div>
     </div>
   )
