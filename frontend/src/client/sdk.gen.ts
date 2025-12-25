@@ -983,7 +983,7 @@ export class PrivateService {
 export class SessionsService {
     /**
      * List Sessions
-     * List user's sessions with external session metadata.
+     * List user's sessions with external session metadata and agent names.
      * @returns SessionsPublicExtended Successful Response
      * @throws ApiError
      */
@@ -1016,7 +1016,7 @@ export class SessionsService {
     
     /**
      * Get Session
-     * Get session details with external session metadata.
+     * Get session details with external session metadata and agent name.
      * @param data The data for the request.
      * @param data.id
      * @returns SessionPublicExtended Successful Response

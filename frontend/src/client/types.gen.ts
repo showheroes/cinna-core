@@ -247,6 +247,7 @@ export type SessionPublicExtended = {
     last_message_at: (string | null);
     external_session_id?: (string | null);
     sdk_type?: (string | null);
+    agent_name?: (string | null);
 };
 
 export type SessionsPublicExtended = {

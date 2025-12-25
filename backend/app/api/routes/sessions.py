@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
@@ -14,6 +15,7 @@ from app.models import (
     SessionsPublicExtended,
     Message,
     Agent,
+    AgentEnvironment,
 )
 from app.services.session_service import SessionService
 
@@ -52,30 +54,49 @@ def create_session(
 @router.get("/", response_model=SessionsPublicExtended)
 def list_sessions(session: SessionDep, current_user: CurrentUser) -> Any:
     """
-    List user's sessions with external session metadata.
+    List user's sessions with external session metadata and agent names.
     """
-    sessions = SessionService.list_user_sessions(db_session=session, user_id=current_user.id)
+    # Join Session with AgentEnvironment and Agent to get agent name
+    statement = (
+        select(Session, Agent.name)
+        .join(AgentEnvironment, Session.environment_id == AgentEnvironment.id)
+        .join(Agent, AgentEnvironment.agent_id == Agent.id)
+        .where(Session.user_id == current_user.id)
+    )
+
+    results = session.exec(statement).all()
 
     data = [
         SessionPublicExtended(
             **s.model_dump(),
             external_session_id=SessionService.get_external_session_id(s),
             sdk_type=SessionService.get_sdk_type(s),
+            agent_name=agent_name,
         )
-        for s in sessions
+        for s, agent_name in results
     ]
 
-    return SessionsPublicExtended(data=data, count=len(sessions))
+    return SessionsPublicExtended(data=data, count=len(results))
 
 
 @router.get("/{id}", response_model=SessionPublicExtended)
 def get_session(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
     """
-    Get session details with external session metadata.
+    Get session details with external session metadata and agent name.
     """
-    chat_session = session.get(Session, id)
-    if not chat_session:
+    # Join with AgentEnvironment and Agent to get agent name
+    statement = (
+        select(Session, Agent.name)
+        .join(AgentEnvironment, Session.environment_id == AgentEnvironment.id)
+        .join(Agent, AgentEnvironment.agent_id == Agent.id)
+        .where(Session.id == id)
+    )
+
+    result = session.exec(statement).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    chat_session, agent_name = result
 
     # Verify ownership
     if not current_user.is_superuser and (chat_session.user_id != current_user.id):
@@ -85,6 +106,7 @@ def get_session(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -
         **chat_session.model_dump(),
         external_session_id=SessionService.get_external_session_id(chat_session),
         sdk_type=SessionService.get_sdk_type(chat_session),
+        agent_name=agent_name,
     )
 
 
@@ -148,10 +170,19 @@ def switch_session_mode(
         clear_external_session=clear_external_session
     )
 
+    # Get agent name
+    agent_statement = (
+        select(Agent.name)
+        .join(AgentEnvironment, AgentEnvironment.agent_id == Agent.id)
+        .where(AgentEnvironment.id == updated_session.environment_id)
+    )
+    agent_name = session.exec(agent_statement).first()
+
     return SessionPublicExtended(
         **updated_session.model_dump(),
         external_session_id=SessionService.get_external_session_id(updated_session),
         sdk_type=SessionService.get_sdk_type(updated_session),
+        agent_name=agent_name,
     )
 
 

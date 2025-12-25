@@ -61,6 +61,7 @@ class SessionPublicExtended(SessionPublic):
     """Session with external session metadata"""
     external_session_id: str | None = None
     sdk_type: str | None = None
+    agent_name: str | None = None
 
 
 class SessionsPublic(SQLModel):

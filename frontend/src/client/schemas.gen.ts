@@ -1140,6 +1140,17 @@ export const SessionPublicExtendedSchema = {
                 }
             ],
             title: 'Sdk Type'
+        },
+        agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Name'
         }
     },
     type: 'object',

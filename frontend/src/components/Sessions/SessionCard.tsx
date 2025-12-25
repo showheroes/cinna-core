@@ -56,7 +56,7 @@ export function SessionCard({ session, agentName }: SessionCardProps) {
             {session.last_message_at ? (
               <p>
                 Last message{" "}
-                {formatDistanceToNow(new Date(session.last_message_at), {
+                {formatDistanceToNow(new Date(session.last_message_at + 'Z'), {
                   addSuffix: true,
                 })}
               </p>
