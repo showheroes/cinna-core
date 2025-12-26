@@ -14,7 +14,7 @@ export const Route = createFileRoute("/_layout/credentials")({
   head: () => ({
     meta: [
       {
-        title: "Credentials - FastAPI Cloud",
+        title: "Credentials - Workflow Runner",
       },
     ],
   }),

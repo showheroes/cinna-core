@@ -22,7 +22,7 @@ export const Route = createFileRoute("/_layout/items")({
   head: () => ({
     meta: [
       {
-        title: "Items - FastAPI Cloud",
+        title: "Items - Workflow Runner",
       },
     ],
   }),

@@ -21,7 +21,7 @@ export const Route = createFileRoute("/_layout/")({
   head: () => ({
     meta: [
       {
-        title: "Dashboard - FastAPI Cloud",
+        title: "Dashboard - Workflow Runner",
       },
     ],
   }),
@@ -116,6 +116,28 @@ function Dashboard() {
       setMessage("")
     }
   }, [selectedAgentId, agentsWithActiveEnv, inputMode])
+
+  // Handle input text when switching between conversation and building modes
+  useEffect(() => {
+    // Only apply this logic in automatic mode with a regular agent selected
+    if (inputMode !== "automatic" || !selectedAgentId || selectedAgentId === NEW_AGENT_ID) {
+      return
+    }
+
+    const selectedAgent = agentsWithActiveEnv.find((a) => a.id === selectedAgentId)
+
+    if (mode === "building") {
+      // Clear input when switching to building mode (entrypoint prompt doesn't make sense)
+      setMessage("")
+    } else if (mode === "conversation") {
+      // Restore entrypoint prompt when switching back to conversation mode
+      if (selectedAgent?.entrypoint_prompt) {
+        setMessage(selectedAgent.entrypoint_prompt)
+      } else {
+        setMessage("")
+      }
+    }
+  }, [mode, inputMode, selectedAgentId, agentsWithActiveEnv])
 
   const handleSend = () => {
     const trimmedMessage = message.trim()

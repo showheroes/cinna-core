@@ -14,7 +14,7 @@ export const Route = createFileRoute("/_layout/agents")({
   head: () => ({
     meta: [
       {
-        title: "Agents - FastAPI Cloud",
+        title: "Agents - Workflow Runner",
       },
     ],
   }),
