@@ -106,9 +106,14 @@ class EnvironmentService:
                     # Start the environment
                     await lifecycle_manager.start_environment(session, environment, agent)
 
-                    # Set as active
+                    # Set as active environment
                     environment.is_active = True
                     session.add(environment)
+
+                    # Update agent's active_environment_id
+                    agent.active_environment_id = environment.id
+                    session.add(agent)
+
                     session.commit()
 
             except Exception as e:
@@ -167,6 +172,10 @@ class EnvironmentService:
                     env.is_active = (env.id == env_id)
                     env.updated_at = datetime.utcnow()
                     session.add(env)
+
+                # Update agent's active_environment_id
+                agent.active_environment_id = env_id
+                session.add(agent)
 
                 session.commit()
 
