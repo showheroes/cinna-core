@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus, Trash2 } from "lucide-react"
+import { Link } from "@tanstack/react-router"
+import { Plus, Trash2, ExternalLink } from "lucide-react"
 import { useState } from "react"
 
 import { AgentsService, CredentialsService } from "@/client"
@@ -242,7 +243,14 @@ export function AgentCredentialsTab({ agentId }: AgentCredentialsTabProps) {
               {agentCredentials.map((credential) => (
                 <TableRow key={credential.id}>
                   <TableCell className="font-medium">
-                    {credential.name}
+                    <Link
+                      to="/credential/$credentialId"
+                      params={{ credentialId: credential.id }}
+                      className="inline-flex items-center gap-1 hover:text-primary transition-colors"
+                    >
+                      {credential.name}
+                      <ExternalLink className="h-3 w-3" />
+                    </Link>
                   </TableCell>
                   <TableCell>{credential.type}</TableCell>
                   <TableCell>

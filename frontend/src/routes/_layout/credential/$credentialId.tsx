@@ -36,7 +36,7 @@ import { usePageHeader } from "@/routes/_layout"
 const formSchema = z.object({
   name: z.string().min(1, { message: "Name is required" }),
   notes: z.string().optional(),
-  credential_data: z.record(z.any()).optional(),
+  credential_data: z.object({}).passthrough().optional(),
 })
 
 type FormData = z.infer<typeof formSchema>
