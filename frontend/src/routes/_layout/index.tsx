@@ -14,6 +14,7 @@ import useCustomToast from "@/hooks/useCustomToast"
 import PendingItems from "@/components/Pending/PendingItems"
 import { getColorPreset } from "@/utils/colorPresets"
 import { RotatingHints } from "@/components/Common/RotatingHints"
+import { LatestSessions } from "@/components/Sessions/LatestSessions"
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
@@ -46,6 +47,19 @@ function Dashboard() {
   } = useQuery({
     queryKey: ["agents"],
     queryFn: () => AgentsService.readAgents({ skip: 0, limit: 100 }),
+  })
+
+  const {
+    data: sessionsData,
+  } = useQuery({
+    queryKey: ["sessions", "latest", 8],
+    queryFn: () =>
+      SessionsService.listSessions({
+        skip: 0,
+        limit: 8,
+        orderBy: "last_message_at",
+        orderDesc: true,
+      }),
   })
 
   const createMutation = useMutation({
@@ -230,8 +244,9 @@ function Dashboard() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex-1 flex items-center justify-center p-6">
+    <div className="flex flex-col h-full">
+      {/* Main centered content area */}
+      <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
         <div className="w-full max-w-3xl space-y-6">
           {/* Agent Selector Pills */}
           <div className="space-y-2">
@@ -343,6 +358,17 @@ function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Latest Sessions - Sticky at bottom, growing upward */}
+      {sessionsData && sessionsData.data.length > 0 && (
+        <div className="bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6 py-4">
+          <div className="max-h-[45vh] overflow-y-auto">
+            <div className="w-full max-w-3xl mx-auto">
+              <LatestSessions limit={5} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

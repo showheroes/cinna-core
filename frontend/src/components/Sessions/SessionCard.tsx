@@ -4,13 +4,15 @@ import { Badge } from "@/components/ui/badge"
 import type { SessionPublic } from "@/client"
 import { SessionModeBadge } from "./SessionModeBadge"
 import { formatDistanceToNow } from "date-fns"
+import { getColorPreset } from "@/utils/colorPresets"
 
 interface SessionCardProps {
   session: SessionPublic
   agentName?: string
+  agentColorPreset?: string | null
 }
 
-export function SessionCard({ session, agentName }: SessionCardProps) {
+export function SessionCard({ session, agentName, agentColorPreset }: SessionCardProps) {
   const getStatusVariant = (status: string) => {
     switch (status) {
       case "active":
@@ -25,6 +27,8 @@ export function SessionCard({ session, agentName }: SessionCardProps) {
         return "secondary"
     }
   }
+
+  const colorPreset = getColorPreset(agentColorPreset)
 
   return (
     <Link
@@ -43,9 +47,9 @@ export function SessionCard({ session, agentName }: SessionCardProps) {
 
           <div className="flex items-center gap-2 flex-wrap">
             {agentName && (
-              <Badge variant="outline" className="text-xs">
+              <span className={`text-xs px-2 py-1 rounded-md ${colorPreset.badgeBg} ${colorPreset.badgeText}`}>
                 {agentName}
-              </Badge>
+              </span>
             )}
             <Badge variant={getStatusVariant(session.status)} className="text-xs">
               {session.status}

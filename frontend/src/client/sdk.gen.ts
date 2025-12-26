@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { AgentsReadAgentsData, AgentsReadAgentsResponse, AgentsCreateAgentData, AgentsCreateAgentResponse, AgentsReadAgentData, AgentsReadAgentResponse, AgentsUpdateAgentData, AgentsUpdateAgentResponse, AgentsDeleteAgentData, AgentsDeleteAgentResponse, AgentsCreateAgentWithFlowData, AgentsCreateAgentWithFlowResponse, AgentsSyncAgentPromptsData, AgentsSyncAgentPromptsResponse, AgentsReadAgentCredentialsData, AgentsReadAgentCredentialsResponse, AgentsAddCredentialToAgentData, AgentsAddCredentialToAgentResponse, AgentsRemoveCredentialFromAgentData, AgentsRemoveCredentialFromAgentResponse, AgentsCreateAgentEnvironmentData, AgentsCreateAgentEnvironmentResponse, AgentsListAgentEnvironmentsData, AgentsListAgentEnvironmentsResponse, AgentsActivateEnvironmentData, AgentsActivateEnvironmentResponse, CredentialsReadCredentialsData, CredentialsReadCredentialsResponse, CredentialsCreateCredentialData, CredentialsCreateCredentialResponse, CredentialsReadCredentialData, CredentialsReadCredentialResponse, CredentialsUpdateCredentialData, CredentialsUpdateCredentialResponse, CredentialsDeleteCredentialData, CredentialsDeleteCredentialResponse, CredentialsReadCredentialWithDataData, CredentialsReadCredentialWithDataResponse, EnvironmentsGetEnvironmentData, EnvironmentsGetEnvironmentResponse, EnvironmentsUpdateEnvironmentData, EnvironmentsUpdateEnvironmentResponse, EnvironmentsDeleteEnvironmentData, EnvironmentsDeleteEnvironmentResponse, EnvironmentsStartEnvironmentData, EnvironmentsStartEnvironmentResponse, EnvironmentsStopEnvironmentData, EnvironmentsStopEnvironmentResponse, EnvironmentsRestartEnvironmentData, EnvironmentsRestartEnvironmentResponse, EnvironmentsRebuildEnvironmentData, EnvironmentsRebuildEnvironmentResponse, EnvironmentsGetEnvironmentStatusData, EnvironmentsGetEnvironmentStatusResponse, EnvironmentsCheckEnvironmentHealthData, EnvironmentsCheckEnvironmentHealthResponse, EnvironmentsGetEnvironmentLogsData, EnvironmentsGetEnvironmentLogsResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, MessagesGetMessagesData, MessagesGetMessagesResponse, MessagesSendMessageData, MessagesSendMessageResponse, MessagesSendMessageStreamData, MessagesSendMessageStreamResponse, OauthGetOauthConfigResponse, OauthGoogleAuthorizeResponse, OauthGoogleCallbackData, OauthGoogleCallbackResponse, OauthLinkGoogleAccountEndpointData, OauthLinkGoogleAccountEndpointResponse, OauthUnlinkGoogleAccountEndpointResponse, PrivateCreateUserData, PrivateCreateUserResponse, SessionsListSessionsResponse, SessionsCreateSessionData, SessionsCreateSessionResponse, SessionsGetSessionData, SessionsGetSessionResponse, SessionsUpdateSessionData, SessionsUpdateSessionResponse, SessionsDeleteSessionData, SessionsDeleteSessionResponse, SessionsSwitchSessionModeData, SessionsSwitchSessionModeResponse, SessionsResetSdkSessionData, SessionsResetSdkSessionResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersSetPasswordMeData, UsersSetPasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UsersGetAiCredentialsStatusResponse, UsersGetAiCredentialsResponse, UsersDeleteAiCredentialsResponse, UsersUpdateAiCredentialsData, UsersUpdateAiCredentialsResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+import type { AgentsReadAgentsData, AgentsReadAgentsResponse, AgentsCreateAgentData, AgentsCreateAgentResponse, AgentsReadAgentData, AgentsReadAgentResponse, AgentsUpdateAgentData, AgentsUpdateAgentResponse, AgentsDeleteAgentData, AgentsDeleteAgentResponse, AgentsCreateAgentWithFlowData, AgentsCreateAgentWithFlowResponse, AgentsSyncAgentPromptsData, AgentsSyncAgentPromptsResponse, AgentsReadAgentCredentialsData, AgentsReadAgentCredentialsResponse, AgentsAddCredentialToAgentData, AgentsAddCredentialToAgentResponse, AgentsRemoveCredentialFromAgentData, AgentsRemoveCredentialFromAgentResponse, AgentsCreateAgentEnvironmentData, AgentsCreateAgentEnvironmentResponse, AgentsListAgentEnvironmentsData, AgentsListAgentEnvironmentsResponse, AgentsActivateEnvironmentData, AgentsActivateEnvironmentResponse, CredentialsReadCredentialsData, CredentialsReadCredentialsResponse, CredentialsCreateCredentialData, CredentialsCreateCredentialResponse, CredentialsReadCredentialData, CredentialsReadCredentialResponse, CredentialsUpdateCredentialData, CredentialsUpdateCredentialResponse, CredentialsDeleteCredentialData, CredentialsDeleteCredentialResponse, CredentialsReadCredentialWithDataData, CredentialsReadCredentialWithDataResponse, EnvironmentsGetEnvironmentData, EnvironmentsGetEnvironmentResponse, EnvironmentsUpdateEnvironmentData, EnvironmentsUpdateEnvironmentResponse, EnvironmentsDeleteEnvironmentData, EnvironmentsDeleteEnvironmentResponse, EnvironmentsStartEnvironmentData, EnvironmentsStartEnvironmentResponse, EnvironmentsStopEnvironmentData, EnvironmentsStopEnvironmentResponse, EnvironmentsRestartEnvironmentData, EnvironmentsRestartEnvironmentResponse, EnvironmentsRebuildEnvironmentData, EnvironmentsRebuildEnvironmentResponse, EnvironmentsGetEnvironmentStatusData, EnvironmentsGetEnvironmentStatusResponse, EnvironmentsCheckEnvironmentHealthData, EnvironmentsCheckEnvironmentHealthResponse, EnvironmentsGetEnvironmentLogsData, EnvironmentsGetEnvironmentLogsResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, MessagesGetMessagesData, MessagesGetMessagesResponse, MessagesSendMessageData, MessagesSendMessageResponse, MessagesSendMessageStreamData, MessagesSendMessageStreamResponse, OauthGetOauthConfigResponse, OauthGoogleAuthorizeResponse, OauthGoogleCallbackData, OauthGoogleCallbackResponse, OauthLinkGoogleAccountEndpointData, OauthLinkGoogleAccountEndpointResponse, OauthUnlinkGoogleAccountEndpointResponse, PrivateCreateUserData, PrivateCreateUserResponse, SessionsCreateSessionData, SessionsCreateSessionResponse, SessionsListSessionsData, SessionsListSessionsResponse, SessionsGetSessionData, SessionsGetSessionResponse, SessionsUpdateSessionData, SessionsUpdateSessionResponse, SessionsDeleteSessionData, SessionsDeleteSessionResponse, SessionsSwitchSessionModeData, SessionsSwitchSessionModeResponse, SessionsResetSdkSessionData, SessionsResetSdkSessionResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersSetPasswordMeData, UsersSetPasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UsersGetAiCredentialsStatusResponse, UsersGetAiCredentialsResponse, UsersDeleteAiCredentialsResponse, UsersUpdateAiCredentialsData, UsersUpdateAiCredentialsResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
 
 export class AgentsService {
     /**
@@ -1056,19 +1056,6 @@ export class PrivateService {
 
 export class SessionsService {
     /**
-     * List Sessions
-     * List user's sessions with external session metadata and agent names.
-     * @returns SessionsPublicExtended Successful Response
-     * @throws ApiError
-     */
-    public static listSessions(): CancelablePromise<SessionsListSessionsResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/v1/sessions/'
-        });
-    }
-    
-    /**
      * Create Session
      * Create new session using agent's active environment.
      * @param data The data for the request.
@@ -1082,6 +1069,39 @@ export class SessionsService {
             url: '/api/v1/sessions/',
             body: data.requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Sessions
+     * List user's sessions with external session metadata and agent names.
+     *
+     * Args:
+     * skip: Number of records to skip
+     * limit: Number of records to return
+     * order_by: Field to order by (created_at, updated_at, last_message_at)
+     * order_desc: Order descending if True, ascending if False
+     * @param data The data for the request.
+     * @param data.skip
+     * @param data.limit
+     * @param data.orderBy
+     * @param data.orderDesc
+     * @returns SessionsPublicExtended Successful Response
+     * @throws ApiError
+     */
+    public static listSessions(data: SessionsListSessionsData = {}): CancelablePromise<SessionsListSessionsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/sessions/',
+            query: {
+                skip: data.skip,
+                limit: data.limit,
+                order_by: data.orderBy,
+                order_desc: data.orderDesc
+            },
             errors: {
                 422: 'Validation Error'
             }

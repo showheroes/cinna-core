@@ -67,6 +67,7 @@ function SessionsList() {
                 key={session.id}
                 session={session}
                 agentName={session.agent_name || "Unknown Agent"}
+                agentColorPreset={session.agent_ui_color_preset}
               />
             ))}
           </div>

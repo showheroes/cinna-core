@@ -52,17 +52,40 @@ def create_session(
 
 
 @router.get("/", response_model=SessionsPublicExtended)
-def list_sessions(session: SessionDep, current_user: CurrentUser) -> Any:
+def list_sessions(
+    session: SessionDep,
+    current_user: CurrentUser,
+    skip: int = 0,
+    limit: int = 100,
+    order_by: str = "created_at",  # "created_at" | "updated_at" | "last_message_at"
+    order_desc: bool = True
+) -> Any:
     """
     List user's sessions with external session metadata and agent names.
+
+    Args:
+        skip: Number of records to skip
+        limit: Number of records to return
+        order_by: Field to order by (created_at, updated_at, last_message_at)
+        order_desc: Order descending if True, ascending if False
     """
-    # Join Session with AgentEnvironment and Agent to get agent name
+    # Join Session with AgentEnvironment and Agent to get agent name and color
     statement = (
-        select(Session, Agent.name)
+        select(Session, Agent.name, Agent.ui_color_preset)
         .join(AgentEnvironment, Session.environment_id == AgentEnvironment.id)
         .join(Agent, AgentEnvironment.agent_id == Agent.id)
         .where(Session.user_id == current_user.id)
     )
+
+    # Add ordering
+    order_field = getattr(Session, order_by, Session.created_at)
+    if order_desc:
+        statement = statement.order_by(order_field.desc())
+    else:
+        statement = statement.order_by(order_field.asc())
+
+    # Add pagination
+    statement = statement.offset(skip).limit(limit)
 
     results = session.exec(statement).all()
 
@@ -72,8 +95,9 @@ def list_sessions(session: SessionDep, current_user: CurrentUser) -> Any:
             external_session_id=SessionService.get_external_session_id(s),
             sdk_type=SessionService.get_sdk_type(s),
             agent_name=agent_name,
+            agent_ui_color_preset=agent_ui_color_preset,
         )
-        for s, agent_name in results
+        for s, agent_name, agent_ui_color_preset in results
     ]
 
     return SessionsPublicExtended(data=data, count=len(results))
@@ -84,9 +108,9 @@ def get_session(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -
     """
     Get session details with external session metadata and agent name.
     """
-    # Join with AgentEnvironment and Agent to get agent name
+    # Join with AgentEnvironment and Agent to get agent name and color
     statement = (
-        select(Session, Agent.name)
+        select(Session, Agent.name, Agent.ui_color_preset)
         .join(AgentEnvironment, Session.environment_id == AgentEnvironment.id)
         .join(Agent, AgentEnvironment.agent_id == Agent.id)
         .where(Session.id == id)
@@ -96,7 +120,7 @@ def get_session(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -
     if not result:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    chat_session, agent_name = result
+    chat_session, agent_name, agent_ui_color_preset = result
 
     # Verify ownership
     if not current_user.is_superuser and (chat_session.user_id != current_user.id):
@@ -107,6 +131,7 @@ def get_session(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -
         external_session_id=SessionService.get_external_session_id(chat_session),
         sdk_type=SessionService.get_sdk_type(chat_session),
         agent_name=agent_name,
+        agent_ui_color_preset=agent_ui_color_preset,
     )
 
 

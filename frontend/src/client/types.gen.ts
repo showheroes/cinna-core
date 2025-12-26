@@ -265,6 +265,7 @@ export type SessionPublicExtended = {
     external_session_id?: (string | null);
     sdk_type?: (string | null);
     agent_name?: (string | null);
+    agent_ui_color_preset?: (string | null);
 };
 
 export type SessionsPublicExtended = {
@@ -653,13 +654,20 @@ export type PrivateCreateUserData = {
 
 export type PrivateCreateUserResponse = (UserPublic);
 
-export type SessionsListSessionsResponse = (SessionsPublicExtended);
-
 export type SessionsCreateSessionData = {
     requestBody: SessionCreate;
 };
 
 export type SessionsCreateSessionResponse = (SessionPublic);
+
+export type SessionsListSessionsData = {
+    limit?: number;
+    orderBy?: string;
+    orderDesc?: boolean;
+    skip?: number;
+};
+
+export type SessionsListSessionsResponse = (SessionsPublicExtended);
 
 export type SessionsGetSessionData = {
     id: string;

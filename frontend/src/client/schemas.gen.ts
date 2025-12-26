@@ -1244,6 +1244,17 @@ export const SessionPublicExtendedSchema = {
                 }
             ],
             title: 'Agent Name'
+        },
+        agent_ui_color_preset: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Ui Color Preset'
         }
     },
     type: 'object',
