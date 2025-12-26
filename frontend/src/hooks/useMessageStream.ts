@@ -86,6 +86,12 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
         throw new Error("No response body")
       }
 
+      // Fetch session immediately to get temporary title (set before streaming starts)
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["session", sessionId] })
+        queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      }, 200)
+
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
 
@@ -164,6 +170,46 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
         await new Promise(resolve => setTimeout(resolve, 300))
 
         await queryClient.invalidateQueries({ queryKey: ["messages", sessionId] })
+
+        // Invalidate session query to get updated title (generated on first message)
+        await queryClient.invalidateQueries({ queryKey: ["session", sessionId] })
+        // Also invalidate sessions list to update dashboard
+        await queryClient.invalidateQueries({ queryKey: ["sessions"] })
+
+        // Poll for AI-generated title (backend generates in background)
+        // Strategy: 3 quick attempts every 500ms, then slower checks every 2s until title appears
+        let pollAttempt = 0
+        const pollForTitle = async () => {
+          pollAttempt++
+
+          // Fetch session to check if title exists
+          const currentSession = queryClient.getQueryData(["session", sessionId]) as any
+
+          // If we have a title, stop polling
+          if (currentSession?.title) {
+            return
+          }
+
+          // Invalidate to fetch fresh data
+          await queryClient.invalidateQueries({ queryKey: ["session", sessionId] })
+          await queryClient.invalidateQueries({ queryKey: ["sessions"] })
+
+          // Determine next poll delay
+          let nextDelay: number
+          if (pollAttempt <= 3) {
+            // First 3 attempts: every 500ms (at 500ms, 1000ms, 1500ms)
+            nextDelay = 500
+          } else {
+            // After that: every 2 seconds until title appears
+            nextDelay = 2000
+          }
+
+          // Schedule next poll
+          setTimeout(pollForTitle, nextDelay)
+        }
+
+        // Start polling after 500ms
+        setTimeout(pollForTitle, 500)
 
         // Invalidate agent caches if building mode (prompts may have been updated)
         if (sessionMode === "building") {

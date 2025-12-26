@@ -18,6 +18,7 @@ import PendingItems from "@/components/Pending/PendingItems"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useMessageStream } from "@/hooks/useMessageStream"
 import { usePageHeader } from "@/routes/_layout"
+import { AnimatedPlaceholder } from "@/components/Common/AnimatedPlaceholder"
 
 export const Route = createFileRoute("/_layout/session/$sessionId")({
   component: ChatInterface,
@@ -130,7 +131,7 @@ function ChatInterface() {
             </Button>
             <div className="min-w-0">
               <h1 className="text-base font-semibold truncate">
-                {session.title || "Untitled Session"}
+                {session.title ? session.title : <AnimatedPlaceholder />}
               </h1>
               <p className="text-xs text-muted-foreground">
                 <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${

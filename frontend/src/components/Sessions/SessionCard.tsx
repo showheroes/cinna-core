@@ -5,6 +5,7 @@ import type { SessionPublic } from "@/client"
 import { SessionModeBadge } from "./SessionModeBadge"
 import { formatDistanceToNow } from "date-fns"
 import { getColorPreset } from "@/utils/colorPresets"
+import { AnimatedPlaceholder } from "@/components/Common/AnimatedPlaceholder"
 
 interface SessionCardProps {
   session: SessionPublic
@@ -40,7 +41,7 @@ export function SessionCard({ session, agentName, agentColorPreset }: SessionCar
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-semibold break-words flex-1">
-              {session.title || "Untitled Session"}
+              {session.title ? session.title : <AnimatedPlaceholder />}
             </h3>
             <SessionModeBadge mode={session.mode} />
           </div>

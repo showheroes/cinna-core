@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
 import type { SessionPublic } from "@/client"
+import { AnimatedPlaceholder } from "@/components/Common/AnimatedPlaceholder"
 
 interface ChatHeaderProps {
   session: SessionPublic
@@ -20,7 +21,7 @@ export function ChatHeader({ session, onModeSwitch, onBack }: ChatHeaderProps) {
           </Button>
           <div className="min-w-0 flex-1">
             <h1 className="text-base font-semibold truncate">
-              {session.title || "Untitled Session"}
+              {session.title ? session.title : <AnimatedPlaceholder />}
             </h1>
             <p className="text-xs text-muted-foreground">
               <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${

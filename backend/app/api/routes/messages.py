@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 import json
 import logging
+import asyncio
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -149,30 +150,54 @@ async def send_message_stream(
         content=message_in.content,
     )
 
-    # Auto-set session title from first message if no title exists
+    # Auto-generate session title from first message if no title exists
     if not chat_session.title or chat_session.title.strip() == "":
-        # Generate title using LLM if available, otherwise truncate message
+        # Generate title asynchronously (non-blocking) using LLM
         if AIFunctionsService.is_available():
-            try:
-                title = AIFunctionsService.generate_session_title(message_in.content)
-            except Exception as e:
-                logger.warning(f"Failed to generate session title with LLM: {e}")
-                # Fallback to simple truncation
-                title = message_in.content[:100]
-                if len(message_in.content) > 100:
-                    title += "..."
-        else:
-            # Truncate message content to reasonable length for title
-            title = message_in.content[:100]
-            if len(message_in.content) > 100:
-                title += "..."
+            async def generate_title_async():
+                """Background task to generate and update session title"""
+                try:
+                    # Generate title using LLM
+                    title = await asyncio.to_thread(
+                        AIFunctionsService.generate_session_title,
+                        message_in.content
+                    )
 
-        SessionService.update_session(
-            db_session=session,
-            session_id=session_id,
-            data=SessionUpdate(title=title)
-        )
-        logger.info(f"Auto-set session title from first message: {title}")
+                    # Update session with generated title
+                    with DBSession(engine) as db:
+                        SessionService.update_session(
+                            db_session=db,
+                            session_id=session_id,
+                            data=SessionUpdate(title=title)
+                        )
+                    logger.info(f"Generated session title asynchronously: {title}")
+                except Exception as e:
+                    logger.warning(f"Failed to generate session title asynchronously: {e}")
+                    # Fallback to truncated message if LLM fails
+                    fallback_title = message_in.content[:100]
+                    if len(message_in.content) > 100:
+                        fallback_title += "..."
+                    with DBSession(engine) as db:
+                        SessionService.update_session(
+                            db_session=db,
+                            session_id=session_id,
+                            data=SessionUpdate(title=fallback_title)
+                        )
+                    logger.info(f"Set fallback session title: {fallback_title}")
+
+            # Start background task (fire and forget)
+            asyncio.create_task(generate_title_async())
+        else:
+            # If no LLM available, set truncated message immediately
+            fallback_title = message_in.content[:100]
+            if len(message_in.content) > 100:
+                fallback_title += "..."
+            SessionService.update_session(
+                db_session=session,
+                session_id=session_id,
+                data=SessionUpdate(title=fallback_title)
+            )
+            logger.info(f"Set fallback session title (no LLM): {fallback_title}")
 
     # Set session status to "active" before streaming starts
     SessionService.update_session_status(

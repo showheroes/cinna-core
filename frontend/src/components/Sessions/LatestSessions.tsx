@@ -4,6 +4,7 @@ import { SessionsService } from "@/client"
 import type { SessionPublicExtended } from "@/client"
 import { MessageSquare, Clock, Wrench, MessageCircle } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
+import { AnimatedPlaceholder } from "@/components/Common/AnimatedPlaceholder"
 
 interface LatestSessionsProps {
   limit?: number
@@ -70,7 +71,7 @@ export function LatestSessions({ limit = 8 }: LatestSessionsProps) {
                     <MessageCircle className="h-3.5 w-3.5 text-blue-500 shrink-0" />
                   )}
                   <p className="text-sm text-foreground truncate">
-                    {session.title || "Untitled conversation"}
+                    {session.title ? session.title : <AnimatedPlaceholder className="text-xs" />}
                   </p>
                 </div>
               </div>
