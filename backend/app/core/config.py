@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     def google_oauth_enabled(self) -> bool:
         return bool(self.GOOGLE_CLIENT_ID and self.GOOGLE_CLIENT_SECRET)
 
+    # Google AI Configuration (for ADK agents)
+    GOOGLE_API_KEY: str | None = None
+
     # Environment Management
     # Paths for environment templates and instances
     # Default for local dev: "backend/app/env-templates" and "backend/app/agent-environments"

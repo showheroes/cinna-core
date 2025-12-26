@@ -55,8 +55,13 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
       - SENTRY_DSN=${SENTRY_DSN}
       - ENV_TEMPLATES_DIR=app/env-templates
-      - ENV_INSTANCES_DIR=agent-environments
-
+      - ENV_INSTANCES_DIR=/agent-environments
+      - HOST_AGENT_ENVIRONMENTS_DIR=${HOST_AGENT_ENVIRONMENTS_DIR:-./backend/agent-environments}
+    volumes:
+      # Mount Docker socket to allow Docker-from-Docker for agent environments
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount agent-environments directory
+      - ${HOST_AGENT_ENVIRONMENTS_DIR:-./backend/agent-environments}:/agent-environments
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/utils/health-check/"]
       interval: 10s

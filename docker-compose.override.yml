@@ -29,10 +29,6 @@ services:
       - ./backend/uv.lock:/app/uv.lock
       - ./backend/alembic.ini:/app/alembic.ini
       - ./backend/app:/app/app
-      # Mount agent-environments outside /app to avoid file watcher detection
-      - ./backend/agent-environments:/agent-environments
-      # Mount Docker socket to allow Docker-in-Docker for agent environments
-      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       SMTP_HOST: "mailcatcher"
       SMTP_PORT: "1025"

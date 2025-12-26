@@ -5,6 +5,7 @@ from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate
 from app.models.environment import AgentEnvironmentCreate
 from app.services.environment_service import EnvironmentService
 from app.services.session_service import SessionService
+from app.services.ai_functions_service import AIFunctionsService
 from app.core.config import settings
 
 
@@ -127,16 +128,32 @@ class AgentService:
                 "current_step": "create_agent"
             }
 
-            # Generate agent name and prompts from description
-            # For now, use simple logic - in future, can use LLM to generate these
-            agent_number = len(session.exec(select(Agent).where(Agent.owner_id == user.id)).all()) + 1
-            agent_name = f"Agent #{agent_number}"
+            # Generate agent name and entrypoint_prompt from description using LLM
+            # workflow_prompt uses a default template
+            if AIFunctionsService.is_available():
+                try:
+                    config = AIFunctionsService.generate_agent_configuration(description)
+                    agent_name = config.get("name", f"Agent: {description[:30]}...")
+                    entrypoint_prompt = config.get("entrypoint_prompt", description)
+                except Exception as e:
+                    # Fallback to simple logic if LLM fails
+                    agent_number = len(session.exec(select(Agent).where(Agent.owner_id == user.id)).all()) + 1
+                    agent_name = f"Agent #{agent_number}"
+                    entrypoint_prompt = description
+            else:
+                # Use simple logic when AI functions not available
+                agent_number = len(session.exec(select(Agent).where(Agent.owner_id == user.id)).all()) + 1
+                agent_name = f"Agent #{agent_number}"
+                entrypoint_prompt = description
+
+            # workflow_prompt uses default template
+            workflow_prompt = f"You are an AI agent designed to: {description}"
 
             agent_data = AgentCreate(
                 name=agent_name,
                 description=description,
-                workflow_prompt=f"You are an AI agent designed to: {description}",
-                entrypoint_prompt=description,
+                workflow_prompt=workflow_prompt,
+                entrypoint_prompt=entrypoint_prompt,
             )
 
             agent = Agent.model_validate(agent_data, update={"owner_id": user.id})

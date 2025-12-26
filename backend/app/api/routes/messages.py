@@ -20,6 +20,7 @@ from app.models import (
 )
 from app.services.message_service import MessageService
 from app.services.session_service import SessionService
+from app.services.ai_functions_service import AIFunctionsService
 
 logger = logging.getLogger(__name__)
 
@@ -150,10 +151,21 @@ async def send_message_stream(
 
     # Auto-set session title from first message if no title exists
     if not chat_session.title or chat_session.title.strip() == "":
-        # Truncate message content to reasonable length for title
-        title = message_in.content[:100]
-        if len(message_in.content) > 100:
-            title += "..."
+        # Generate title using LLM if available, otherwise truncate message
+        if AIFunctionsService.is_available():
+            try:
+                title = AIFunctionsService.generate_session_title(message_in.content)
+            except Exception as e:
+                logger.warning(f"Failed to generate session title with LLM: {e}")
+                # Fallback to simple truncation
+                title = message_in.content[:100]
+                if len(message_in.content) > 100:
+                    title += "..."
+        else:
+            # Truncate message content to reasonable length for title
+            title = message_in.content[:100]
+            if len(message_in.content) > 100:
+                title += "..."
 
         SessionService.update_session(
             db_session=session,
