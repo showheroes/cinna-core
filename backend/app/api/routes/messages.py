@@ -137,7 +137,7 @@ async def send_message_stream(
 
     logger.info(
         f"Streaming message to session {session_id} "
-        f"(mode={chat_session.mode}, external_session_id={external_session_id})"
+        f"(mode={chat_session.mode}, agent_sdk={chat_session.agent_sdk}, external_session_id={external_session_id})"
     )
 
     # Store user message
@@ -171,6 +171,7 @@ async def send_message_stream(
 
     # Extract data from ORM objects BEFORE async generator (to avoid detached instance errors)
     session_mode = chat_session.mode
+    agent_sdk = chat_session.agent_sdk
     user_message_content = message_in.content
     environment_id = environment.id
     base_url = MessageService.get_environment_url(environment)
@@ -186,6 +187,7 @@ async def send_message_stream(
             auth_headers=auth_headers,
             user_message_content=user_message_content,
             session_mode=session_mode,
+            agent_sdk=agent_sdk,
             external_session_id=external_session_id,
             get_fresh_db_session=lambda: DBSession(engine)
         ):

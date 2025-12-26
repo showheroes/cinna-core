@@ -1,7 +1,6 @@
 import os
 import logging
 import json
-from pathlib import Path
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 from datetime import datetime
@@ -9,6 +8,7 @@ from typing import Annotated
 
 from .models import HealthCheckResponse, ChatRequest, ChatResponse, AgentPromptsResponse, AgentPromptsUpdate
 from .sdk_manager import sdk_manager
+from .agent_env_service import AgentEnvService
 
 router = APIRouter(tags=["agent"])
 logger = logging.getLogger(__name__)
@@ -18,6 +18,10 @@ ENV_ID = os.getenv("ENV_ID", "unknown")
 AGENT_ID = os.getenv("AGENT_ID", "unknown")
 ENV_NAME = os.getenv("ENV_NAME", "unknown")
 AGENT_AUTH_TOKEN = os.getenv("AGENT_AUTH_TOKEN")
+WORKSPACE_DIR = os.getenv("CLAUDE_CODE_WORKSPACE", "/app/app")
+
+# Initialize agent environment service
+agent_env_service = AgentEnvService(WORKSPACE_DIR)
 
 
 async def verify_auth_token(authorization: Annotated[str | None, Header()] = None) -> None:
@@ -91,12 +95,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
     """
     Handle chat messages.
 
-    Routes to appropriate handler based on mode:
-    - building: Claude Code SDK
-    - conversation: Google ADK (to be implemented)
+    Routes to appropriate SDK based on agent_sdk parameter:
+    - claude: Claude SDK (supports both building and conversation modes)
     """
-    if request.mode == "building":
-        # Use Claude Code SDK with building mode (claude_code preset + BUILDING_AGENT.md)
+    if request.agent_sdk == "claude":
+        # Use Claude SDK for both building and conversation modes
         response_content = []
         new_session_id = request.session_id
 
@@ -104,7 +107,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
             message=request.message,
             session_id=request.session_id,
             system_prompt=request.system_prompt,  # Only use explicit override if provided
-            use_building_mode=True,
+            mode=request.mode,
+            agent_sdk=request.agent_sdk,
         ):
             # Capture session ID from session_created event
             if chunk["type"] == "session_created":
@@ -117,20 +121,12 @@ async def chat(request: ChatRequest) -> ChatResponse:
         return ChatResponse(
             response="\n".join(response_content),
             session_id=new_session_id,
-            metadata={"mode": "building", "sdk": "claude_code"}
+            metadata={"mode": request.mode, "sdk": request.agent_sdk}
         )
-
-    elif request.mode == "conversation":
-        # TODO: Implement Google ADK routing
-        raise HTTPException(
-            status_code=501,
-            detail="Conversation mode not yet implemented"
-        )
-
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid mode: {request.mode}"
+            detail=f"Unsupported agent_sdk: {request.agent_sdk}. Currently only 'claude' is supported."
         )
 
 
@@ -147,8 +143,8 @@ async def chat_stream(request: ChatRequest):
       ...
     }
     """
-    if request.mode == "building":
-        logger.info(f"Starting stream for mode=building, session_id={request.session_id}, message={request.message[:50]}...")
+    if request.agent_sdk == "claude":
+        logger.info(f"Starting stream for mode={request.mode}, sdk={request.agent_sdk}, session_id={request.session_id}, message={request.message[:50]}...")
 
         async def event_stream():
             """Generate SSE events from SDK stream"""
@@ -159,7 +155,8 @@ async def chat_stream(request: ChatRequest):
                     message=request.message,
                     session_id=request.session_id,
                     system_prompt=request.system_prompt,  # Only use explicit override if provided
-                    use_building_mode=True,
+                    mode=request.mode,
+                    agent_sdk=request.agent_sdk,
                 ):
                     event_count += 1
                     logger.info(f"[Stream event #{event_count}] Received chunk type={chunk.get('type')}, content_length={len(chunk.get('content', ''))}")
@@ -191,17 +188,10 @@ async def chat_stream(request: ChatRequest):
                 "X-Accel-Buffering": "no",  # Disable nginx buffering
             }
         )
-
-    elif request.mode == "conversation":
-        raise HTTPException(
-            status_code=501,
-            detail="Conversation mode streaming not yet implemented"
-        )
-
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid mode: {request.mode}"
+            detail=f"Unsupported agent_sdk: {request.agent_sdk}. Currently only 'claude' is supported."
         )
 
 
@@ -240,26 +230,7 @@ async def get_agent_prompts() -> AgentPromptsResponse:
     These files are maintained by the building agent and define how the
     workflow should operate in conversation mode.
     """
-    workspace_dir = os.getenv("CLAUDE_CODE_WORKSPACE", "/app/app")
-
-    workflow_prompt_path = Path(workspace_dir) / "docs" / "WORKFLOW_PROMPT.md"
-    entrypoint_prompt_path = Path(workspace_dir) / "docs" / "ENTRYPOINT_PROMPT.md"
-
-    workflow_prompt = None
-    if workflow_prompt_path.exists():
-        try:
-            with open(workflow_prompt_path, 'r', encoding='utf-8') as f:
-                workflow_prompt = f.read()
-        except Exception as e:
-            logger.error(f"Failed to read WORKFLOW_PROMPT.md: {e}")
-
-    entrypoint_prompt = None
-    if entrypoint_prompt_path.exists():
-        try:
-            with open(entrypoint_prompt_path, 'r', encoding='utf-8') as f:
-                entrypoint_prompt = f.read()
-        except Exception as e:
-            logger.error(f"Failed to read ENTRYPOINT_PROMPT.md: {e}")
+    workflow_prompt, entrypoint_prompt = agent_env_service.get_agent_prompts()
 
     return AgentPromptsResponse(
         workflow_prompt=workflow_prompt,
@@ -278,44 +249,20 @@ async def update_agent_prompts(prompts: AgentPromptsUpdate):
 
     This is used by the backend to sync manually edited prompts to the agent environment.
     """
-    workspace_dir = os.getenv("CLAUDE_CODE_WORKSPACE", "/app/app")
-    docs_dir = Path(workspace_dir) / "docs"
+    try:
+        updated_files = agent_env_service.update_agent_prompts(
+            workflow_prompt=prompts.workflow_prompt,
+            entrypoint_prompt=prompts.entrypoint_prompt
+        )
 
-    # Ensure docs directory exists
-    docs_dir.mkdir(parents=True, exist_ok=True)
-
-    updated_files = []
-
-    if prompts.workflow_prompt is not None:
-        workflow_prompt_path = docs_dir / "WORKFLOW_PROMPT.md"
-        try:
-            with open(workflow_prompt_path, 'w', encoding='utf-8') as f:
-                f.write(prompts.workflow_prompt)
-            updated_files.append("WORKFLOW_PROMPT.md")
-            logger.info(f"Updated WORKFLOW_PROMPT.md ({len(prompts.workflow_prompt)} chars)")
-        except Exception as e:
-            logger.error(f"Failed to write WORKFLOW_PROMPT.md: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to update WORKFLOW_PROMPT.md: {str(e)}"
-            )
-
-    if prompts.entrypoint_prompt is not None:
-        entrypoint_prompt_path = docs_dir / "ENTRYPOINT_PROMPT.md"
-        try:
-            with open(entrypoint_prompt_path, 'w', encoding='utf-8') as f:
-                f.write(prompts.entrypoint_prompt)
-            updated_files.append("ENTRYPOINT_PROMPT.md")
-            logger.info(f"Updated ENTRYPOINT_PROMPT.md ({len(prompts.entrypoint_prompt)} chars)")
-        except Exception as e:
-            logger.error(f"Failed to write ENTRYPOINT_PROMPT.md: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to update ENTRYPOINT_PROMPT.md: {str(e)}"
-            )
-
-    return {
-        "status": "ok",
-        "message": f"Updated {len(updated_files)} file(s)",
-        "updated_files": updated_files
-    }
+        return {
+            "status": "ok",
+            "message": f"Updated {len(updated_files)} file(s)",
+            "updated_files": updated_files
+        }
+    except IOError as e:
+        logger.error(f"Failed to update agent prompts: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update agent prompts: {str(e)}"
+        )

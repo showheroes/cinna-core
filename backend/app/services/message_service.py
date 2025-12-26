@@ -114,6 +114,7 @@ class MessageService:
         auth_headers: dict,
         user_message: str,
         mode: str,
+        agent_sdk: str = "claude",
         external_session_id: str | None = None
     ) -> AsyncIterator[dict]:
         """
@@ -132,6 +133,7 @@ class MessageService:
             auth_headers: Authentication headers
             user_message: User's message content
             mode: Session mode ("building" or "conversation")
+            agent_sdk: SDK to use ("claude" is currently the only option)
             external_session_id: Optional external SDK session ID for resumption
 
         Yields:
@@ -143,12 +145,13 @@ class MessageService:
         payload = {
             "message": user_message,
             "mode": mode,
+            "agent_sdk": agent_sdk,
             "session_id": external_session_id,
         }
 
         logger.info(
             f"Sending message to {base_url}/chat/stream "
-            f"(mode={mode}, external_session_id={external_session_id})"
+            f"(mode={mode}, agent_sdk={agent_sdk}, external_session_id={external_session_id})"
         )
 
         try:
@@ -298,6 +301,7 @@ class MessageService:
         auth_headers: dict,
         user_message_content: str,
         session_mode: str,
+        agent_sdk: str,
         external_session_id: str | None,
         get_fresh_db_session: callable
     ) -> AsyncIterator[dict]:
@@ -319,6 +323,7 @@ class MessageService:
             auth_headers: Environment auth headers
             user_message_content: User's message
             session_mode: "building" or "conversation"
+            agent_sdk: SDK to use ("claude" is currently the only option)
             external_session_id: External SDK session ID (None for new)
             get_fresh_db_session: Callable that returns a fresh DB session (context manager)
 
@@ -332,7 +337,8 @@ class MessageService:
         new_external_session_id = external_session_id
         response_metadata = {
             "external_session_id": external_session_id,
-            "mode": session_mode
+            "mode": session_mode,
+            "agent_sdk": agent_sdk
         }
 
         try:
@@ -342,6 +348,7 @@ class MessageService:
                 auth_headers=auth_headers,
                 user_message=user_message_content,
                 mode=session_mode,
+                agent_sdk=agent_sdk,
                 external_session_id=external_session_id
             ):
                 # Handle error events from message service
@@ -376,8 +383,8 @@ class MessageService:
                                     SessionService.set_external_session_id(
                                         db=db,
                                         session=chat_session_db,
-                                        external_session_id=new_external_session_id,
-                                        sdk_type="claude_code"
+                                        external_session_id=new_external_session_id
+                                        # sdk_type will default to chat_session_db.agent_sdk
                                     )
                         await asyncio.to_thread(_store_session_id)
 

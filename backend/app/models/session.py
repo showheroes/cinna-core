@@ -12,6 +12,7 @@ class Session(SQLModel, table=True):
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")
     title: str | None = None
     mode: str = "conversation"  # "building" | "conversation"
+    agent_sdk: str = "claude"  # SDK to use: "claude" (more options can be added later)
     status: str = "active"  # "active" | "paused" | "completed" | "error"
     session_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -37,12 +38,14 @@ class SessionCreate(SQLModel):
     agent_id: uuid.UUID  # Will use active environment
     title: str | None = None
     mode: str = "conversation"  # "building" | "conversation"
+    agent_sdk: str = "claude"  # SDK to use: "claude" (more options can be added later)
 
 
 class SessionUpdate(SQLModel):
     title: str | None = None
     status: str | None = None
     mode: str | None = None
+    agent_sdk: str | None = None
 
 
 class SessionPublic(SQLModel):
@@ -51,6 +54,7 @@ class SessionPublic(SQLModel):
     user_id: uuid.UUID
     title: str | None
     mode: str
+    agent_sdk: str
     status: str
     created_at: datetime
     updated_at: datetime

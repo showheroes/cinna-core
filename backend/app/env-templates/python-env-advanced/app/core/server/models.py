@@ -28,6 +28,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None  # External SDK session ID
     mode: str = "conversation"  # "building" | "conversation"
+    agent_sdk: str = "claude"  # SDK to use: "claude" (more options can be added later)
     system_prompt: Optional[str] = None
 
 

@@ -40,22 +40,27 @@ backend/app/env-templates/python-env-advanced/
 │   ├── core/                          # System code (baked into image)
 │   │   ├── __init__.py
 │   │   ├── main.py                    # FastAPI entry point
-│   │   └── server/                    # API server code
+│   │   └── server/                    # API server code (modular architecture)
 │   │       ├── routes.py              # HTTP endpoints
-│   │       ├── sdk_manager.py         # Claude Code SDK integration
-│   │       └── models.py              # Pydantic models
+│   │       ├── models.py              # Pydantic request/response models
+│   │       ├── sdk_manager.py         # SDK session orchestration
+│   │       ├── prompt_generator.py    # System prompt generation
+│   │       ├── agent_env_service.py   # Business logic (file operations)
+│   │       └── sdk_utils.py           # Logging, debugging, formatting
 │   │
 │   ├── workspace/                     # User data (volume mounted)
 │   │   ├── scripts/                   # Agent-created Python scripts
+│   │   │   └── README.md              # Scripts catalog (maintained by agent)
 │   │   ├── files/                     # Uploaded/generated files
-│   │   ├── docs/                      # WORKFLOW_PROMPT.md, ENTRYPOINT_PROMPT.md
+│   │   ├── docs/                      # Workflow documentation
+│   │   │   ├── WORKFLOW_PROMPT.md     # Conversation mode system prompt
+│   │   │   └── ENTRYPOINT_PROMPT.md   # Trigger message examples
 │   │   ├── credentials/               # API keys, tokens (encrypted)
 │   │   ├── databases/                 # SQLite/other local DBs
-│   │   └── logs/                      # Execution logs
+│   │   └── logs/                      # Execution logs, session dumps
 │   │
 │   ├── BUILDING_AGENT_EXAMPLE.md      # Template for building mode prompt
-│   ├── AGENT_EXAMPLE.md               # Template for conversation mode prompt
-│   └── ENTRYPOINT_EXAMPLE.md          # Template for trigger message
+│   └── ENTRYPOINT_EXAMPLE.md          # Template for trigger message (deprecated)
 │
 ├── Dockerfile                         # Image definition
 ├── docker-compose.template.yml        # Container configuration template
@@ -73,6 +78,48 @@ backend/data/environments/{env_id}/
 ├── docker-compose.yml                 # Generated from template
 └── .env                               # Docker compose variables
 ```
+
+## Core Server Architecture
+
+### Modular Design (Refactored)
+
+The core server follows a **modular architecture** with clear separation of concerns:
+
+**modules**:
+- **routes.py**: HTTP API endpoints, request validation, response formatting
+- **sdk_manager.py**: SDK session orchestration, streaming coordination (~ 220 lines, down from 600)
+- **prompt_generator.py**: System prompt generation for building/conversation modes
+- **agent_env_service.py**: Business logic for workspace file operations
+- **sdk_utils.py**: Logging, debugging, message formatting utilities
+- **models.py**: Pydantic request/response models
+
+**Benefits**:
+- **Testability**: Each module can be tested independently
+- **Maintainability**: Changes isolated to relevant modules
+- **Extensibility**: Easy to add new SDKs or prompt strategies
+- **Clarity**: Clear module boundaries and responsibilities
+
+**Key Changes from Previous Architecture**:
+- Prompt loading extracted to `PromptGenerator` (was in `sdk_manager.py`)
+- Business logic moved to `AgentEnvService` (was in `routes.py`)
+- Debugging utilities extracted to `sdk_utils.py` (was in `sdk_manager.py`)
+- SDK manager now focused on orchestration only
+
+### Session Modes
+
+**Building Mode**:
+- **Model**: Claude Sonnet (default) - better code generation
+- **System Prompt**: Claude Code preset + comprehensive docs
+- **Purpose**: Develop workflows, create scripts, configure integrations
+
+**Conversation Mode**:
+- **Model**: Claude Haiku - faster and cheaper
+- **System Prompt**: Workflow-specific instructions (no preset)
+- **Purpose**: Execute tasks using pre-built workflows
+
+**SDK Support**:
+- Current: `agent_sdk="claude"` (Claude SDK via ClaudeAgentOptions)
+- Future: Can add OpenAI, Google, etc.
 
 ## Operations
 
@@ -130,9 +177,12 @@ backend/data/environments/{env_id}/
 - Agent prompts
 
 **Updated**:
-- Core server code
-- API routes
-- SDK manager logic
+- Core server code (modular architecture)
+- API routes and request handling
+- SDK manager orchestration
+- Prompt generation logic
+- Business logic services
+- Utility functions
 - Docker image layers
 
 ## Docker Configuration

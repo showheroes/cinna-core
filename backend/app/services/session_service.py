@@ -21,6 +21,7 @@ class SessionService:
             user_id=user_id,
             title=data.title,
             mode=data.mode,
+            agent_sdk=data.agent_sdk,
         )
         db_session.add(session)
         db_session.commit()
@@ -134,14 +135,20 @@ class SessionService:
         db: DBSession,
         session: Session,
         external_session_id: str,
-        sdk_type: str = "claude_code"
+        sdk_type: str | None = None
     ) -> Session:
         """
         Set external SDK session ID in metadata.
         Called after first message to SDK to store the session ID for resumption.
+
+        Args:
+            db: Database session
+            session: Session to update
+            external_session_id: External SDK session ID
+            sdk_type: SDK type (if None, uses session.agent_sdk)
         """
         session.session_metadata["external_session_id"] = external_session_id
-        session.session_metadata["sdk_type"] = sdk_type
+        session.session_metadata["sdk_type"] = sdk_type or session.agent_sdk
 
         # Mark metadata as modified for SQLAlchemy
         flag_modified(session, "session_metadata")

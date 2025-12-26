@@ -1,12 +1,47 @@
-# Building Mode System Prompt
+# Agent Environment System Prompts
 
 ## Overview
 
-When an agent environment runs in **building mode**, it uses a specialized system prompt that instructs the agent to create reusable Python scripts and applications for workflow automation. This prompt combines Claude Code's preset system prompt with custom instructions specific to script development.
+Agent environments support two distinct modes, each with tailored system prompts and configurations:
 
-## Prompt Architecture
+1. **Building Mode**: Development-focused mode for creating workflows, scripts, and configurations
+2. **Conversation Mode**: Execution-focused mode for running pre-built workflows and tasks
 
-The building mode system prompt is composed of three layers:
+This document describes the prompt architecture, construction, and usage patterns for both modes.
+
+## Session Modes
+
+### Building Mode
+
+**Purpose**: Develop and configure workflow capabilities
+
+**Model**: Claude Sonnet (default) - Superior code generation and reasoning
+
+**System Prompt**: Claude Code preset + comprehensive documentation
+
+**Use Cases**:
+- Create Python scripts for automation
+- Configure integrations and credentials
+- Update workflow documentation
+- Define entry points for scheduled execution
+
+### Conversation Mode
+
+**Purpose**: Execute pre-built workflows and interact with users
+
+**Model**: Claude Haiku - Faster and more cost-effective
+
+**System Prompt**: Workflow-specific instructions (no Claude Code preset)
+
+**Use Cases**:
+- Execute tasks using existing scripts
+- Process user requests based on workflow capabilities
+- Generate reports and summaries
+- Interact with APIs and data sources
+
+## Building Mode Prompt Architecture
+
+The building mode system prompt is composed of multiple layers:
 
 1. **Claude Code Preset** (`preset: "claude_code"`)
    - Official Claude Code system prompt with all standard tools and capabilities
@@ -131,44 +166,82 @@ The building agent sees both prompts in its system prompt and is instructed to:
 - Copies `BUILDING_AGENT_EXAMPLE.md` → `BUILDING_AGENT.md` to instance directory
 - Ensures each environment has its own copy that can be customized
 
-### 2. SDK Manager Initialization
+### 2. Prompt Generator Initialization
 
-**File**: `backend/app/env-templates/python-env-advanced/app/server/sdk_manager.py`
+**File**: `backend/app/env-templates/python-env-advanced/app/core/server/prompt_generator.py`
 
-**Method**: `__init__()`
-- Calls `_load_building_agent_prompt()` to read `BUILDING_AGENT.md` into memory
-- Stores content in `self.building_agent_prompt` for reuse across requests
+**Class**: `PromptGenerator`
 
-### 3. Runtime Prompt Assembly
+**Initialization**:
+- Accepts `workspace_dir` path in constructor
+- Calls `_load_building_agent_prompt()` to read `/app/BUILDING_AGENT.md`
+- Stores content in `self.building_agent_prompt` (cached for reuse)
 
-**File**: `backend/app/env-templates/python-env-advanced/app/server/sdk_manager.py`
+**Purpose**: Centralized prompt loading and generation logic
 
-**Method**: `send_message_stream()` with `use_building_mode=True`
+### 3. SDK Manager Initialization
 
-**Prompt Construction Logic**:
-1. Start with base `building_prompt = self.building_agent_prompt`
-2. Call `_load_scripts_readme()` to append existing scripts catalog if available
-3. Call `_load_workflow_prompt()` to append current workflow system prompt if available
-4. Call `_load_entrypoint_prompt()` to append current trigger message if available
-5. Create `SystemPromptPreset`:
+**File**: `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py`
+
+**Class**: `ClaudeCodeSDKManager`
+
+**Initialization**:
+- Creates `PromptGenerator` instance with workspace path
+- Creates `SessionLogger` instance for debugging
+- No direct prompt loading (delegated to PromptGenerator)
+
+**Purpose**: Orchestrate SDK sessions, coordinate with services
+
+### 4. Runtime Prompt Assembly
+
+**Building Mode** (`PromptGenerator.generate_building_mode_prompt()`):
+1. Start with cached `self.building_agent_prompt`
+2. Call `_load_scripts_readme()` - append scripts catalog if exists
+3. Call `_load_workflow_prompt()` - append workflow docs if exists
+4. Call `_load_entrypoint_prompt()` - append entry point if exists
+5. Return `SystemPromptPreset` dict:
    ```python
    {
        "type": "preset",
        "preset": "claude_code",
-       "append": building_prompt  # BUILDING_AGENT.md + dynamic context
+       "append": building_prompt  # All docs combined
    }
    ```
 
-### 4. Request Routing
+**Conversation Mode** (`PromptGenerator.generate_conversation_mode_prompt()`):
+1. Call `_load_workflow_prompt()` - main system prompt
+2. Call `_load_scripts_readme()` - available scripts
+3. Combine into plain string (no preset)
+4. Return string prompt
 
-**File**: `backend/app/env-templates/python-env-advanced/app/server/routes.py`
+### 5. Request Routing
+
+**File**: `backend/app/env-templates/python-env-advanced/app/core/server/routes.py`
 
 **Endpoints**: `/chat` and `/chat/stream`
 
 **Logic**:
-- When `request.mode == "building"`, pass `use_building_mode=True` to SDK manager
-- Does NOT use `_workflow_prompt` (that's for conversation mode)
-- Only uses explicit `request.system_prompt` if provided (for overrides)
+- Validate `agent_sdk` parameter (currently only "claude" supported)
+- Extract `mode` and `agent_sdk` from request
+- Call `sdk_manager.send_message_stream()` with mode and SDK parameters
+- SDK Manager delegates prompt generation to PromptGenerator
+- Model selection happens in SDK Manager based on mode
+
+### 6. Model and Prompt Configuration
+
+**File**: `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py`
+
+**Method**: `send_message_stream()`
+
+**Steps**:
+1. Set model based on mode:
+   - Conversation: `options.model = "haiku"`
+   - Building: Don't set (defaults to Sonnet)
+2. Generate system prompt:
+   - Call `self.prompt_generator.generate_prompt(mode)`
+   - Assign to `options.system_prompt`
+3. Create SDK client with configured options
+4. Stream responses to frontend
 
 ## Key Features
 
@@ -227,19 +300,159 @@ The following is the current contents of `./scripts/README.md` which catalogs al
 **Important**: When you create, modify, or remove scripts, you MUST update this file to keep it accurate.
 ```
 
+## Conversation Mode Prompt Architecture
+
+The conversation mode system prompt is lightweight and execution-focused:
+
+### Prompt Components
+
+1. **WORKFLOW_PROMPT.md** (Main System Prompt)
+   - Describes workflow's purpose, capabilities, and responsibilities
+   - Execution flow and decision-making guidelines
+   - Database schemas, file formats, and data structures
+   - Error handling patterns and success criteria
+
+2. **scripts/README.md** (Available Tools)
+   - Catalog of existing scripts and their usage
+   - Appended to system prompt for script awareness
+   - Formatted as "Available Scripts" section
+
+### Differences from Building Mode
+
+**What's EXCLUDED**:
+- ❌ Claude Code preset (no development overhead)
+- ❌ BUILDING_AGENT.md (no development instructions)
+- ❌ ENTRYPOINT_PROMPT.md (not needed for execution)
+
+**What's INCLUDED**:
+- ✅ WORKFLOW_PROMPT.md (workflow-specific instructions)
+- ✅ scripts/README.md (available automation tools)
+
+**Prompt Format**:
+- **Building Mode**: SystemPromptPreset dict (Claude Code + appended docs)
+- **Conversation Mode**: Plain string (direct system prompt text)
+
+**Model Selection**:
+- **Building Mode**: Default (Sonnet) for code quality
+- **Conversation Mode**: Haiku for speed and cost efficiency
+
+### Example Conversation Prompt
+
+```
+# Mailbox Invoice Parser Workflow
+
+## Role and Responsibilities
+You are an automated invoice extraction and reporting agent...
+
+## Available Scripts
+- `scripts/fetch_emails.py`: Connect to email account and retrieve unread emails
+- `scripts/detect_invoices.py`: Identify emails containing invoices
+- `scripts/extract_invoice_data.py`: Parse invoice documents
+- `scripts/generate_summary.py`: Create summary reports
+```
+
+## Implementation
+
+### Module Responsibilities
+
+**PromptGenerator** (`prompt_generator.py`):
+- Loads prompt files from workspace and templates
+- Constructs mode-specific system prompts
+- Caches static prompts for performance
+
+**Key Methods**:
+- `generate_building_mode_prompt()`: Returns SystemPromptPreset dict
+- `generate_conversation_mode_prompt()`: Returns plain string
+- `generate_prompt(mode)`: Factory method routing by mode
+
+**SDK Manager** (`sdk_manager.py`):
+- Coordinates with PromptGenerator for system prompts
+- Sets model based on mode (Haiku vs Sonnet)
+- Creates SDK client with appropriate configuration
+
+**Agent Environment Service** (`agent_env_service.py`):
+- Reads/writes prompt files in workspace
+- Provides business logic for prompt management
+- Used by HTTP endpoints for prompt sync
+
+### Prompt Loading Flow
+
+**Building Mode**:
+1. SDK Manager receives request with `mode="building"`
+2. Calls `PromptGenerator.generate_building_mode_prompt()`
+3. PromptGenerator loads:
+   - `/app/BUILDING_AGENT.md` (cached at initialization)
+   - `/app/workspace/scripts/README.md` (fresh load)
+   - `/app/workspace/docs/WORKFLOW_PROMPT.md` (fresh load)
+   - `/app/workspace/docs/ENTRYPOINT_PROMPT.md` (fresh load)
+4. Constructs SystemPromptPreset dict with Claude Code preset
+5. SDK Manager passes to ClaudeAgentOptions
+
+**Conversation Mode**:
+1. SDK Manager receives request with `mode="conversation"`
+2. Calls `PromptGenerator.generate_conversation_mode_prompt()`
+3. PromptGenerator loads:
+   - `/app/workspace/docs/WORKFLOW_PROMPT.md` (fresh load)
+   - `/app/workspace/scripts/README.md` (fresh load)
+4. Constructs plain string prompt
+5. SDK Manager passes to ClaudeAgentOptions
+
+### Model Selection
+
+**Implementation** (`sdk_manager.py`):
+```python
+# Set model based on mode
+if mode == "conversation":
+    options.model = "haiku"
+    logger.info("Using Haiku model for conversation mode")
+# For building mode, don't set model parameter (uses default Sonnet)
+```
+
+**Rationale**:
+- Conversation mode prioritizes speed and cost (Haiku)
+- Building mode prioritizes code quality (Sonnet)
+- Model selection automatic based on session mode
+
+## SDK Support
+
+### Agent SDK Parameter
+
+**Purpose**: Support multiple AI SDKs in the future
+
+**Current**: `agent_sdk="claude"` (only option)
+
+**Future**: Can add `"openai"`, `"google-adk"`, etc.
+
+**Request Flow**:
+1. Backend creates session with `agent_sdk` parameter
+2. Request includes `agent_sdk` in payload to environment
+3. Routes.py validates SDK support
+4. SDK Manager handles SDK-specific configuration
+
+**Benefits**:
+- Extensible architecture for multi-SDK support
+- SDK preference stored at session level
+- Easy to add new AI providers
+
 ## Benefits
 
-1. **Consistency**: All script development follows the same patterns
-2. **Context Preservation**: Agent knows about existing work across sessions
-3. **Self-Documenting**: Scripts catalog provides built-in documentation
-4. **Reusability**: Scripts are designed for workflow automation from the start
-5. **Maintainability**: Clear structure and documentation requirements
+1. **Mode Separation**: Clear distinction between development and execution
+2. **Performance**: Haiku provides 2-5x faster responses in conversation mode
+3. **Cost Efficiency**: Haiku reduces costs by ~90% for execution tasks
+4. **Context Preservation**: Building mode agent knows about existing work
+5. **Consistency**: All script development follows the same patterns
+6. **Self-Documenting**: Scripts catalog provides built-in documentation
+7. **Reusability**: Scripts designed for workflow automation from the start
+8. **Maintainability**: Clear structure and documentation requirements
 
 ## Future Enhancements
 
-Potential improvements to the building prompt system:
+Potential improvements to the prompt system:
 
 - Load and include `requirements.txt` in prompt if it exists
 - Include recent error logs to help debug failing scripts
 - Add workspace statistics (file counts, script usage metrics)
 - Support for multi-language environments (not just Python)
+- Multi-SDK support (OpenAI, Google, etc.)
+- Prompt versioning and change tracking
+- A/B testing different prompt structures

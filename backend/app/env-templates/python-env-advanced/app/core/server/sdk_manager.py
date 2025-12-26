@@ -1,23 +1,25 @@
 import os
 import logging
 from typing import AsyncIterator, Optional
-import uuid
-import json
-from datetime import datetime
 from pathlib import Path
+
+from .prompt_generator import PromptGenerator
+from .sdk_utils import SessionLogger, format_message_for_debug, format_sdk_message
 
 logger = logging.getLogger(__name__)
 
 
 class ClaudeCodeSDKManager:
     """
-    Manages Claude Code SDK sessions for build mode.
+    Manages Claude Code SDK sessions for both building and conversation modes.
 
     Responsibilities:
     - Initialize SDK with workspace and API key
     - Create and resume SDK sessions using ClaudeSDKClient
     - Stream responses from SDK
     - Handle SDK errors
+    - Coordinate with PromptGenerator for system prompts
+    - Coordinate with SessionLogger for debugging
     """
 
     def __init__(self):
@@ -25,201 +27,37 @@ class ClaudeCodeSDKManager:
         self.api_key = os.getenv("ANTHROPIC_API_KEY")
         self.permission_mode = os.getenv("CLAUDE_CODE_PERMISSION_MODE", "acceptEdits")
 
-        # Session dump configuration
-        self.dump_llm_session = os.getenv("DUMP_LLM_SESSION", "false").lower() == "true"
-        self.logs_dir = Path(self.workspace_dir) / "logs"
-
-        # Create logs directory if dump is enabled
-        if self.dump_llm_session:
-            self.logs_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"LLM session dumping enabled. Logs will be saved to: {self.logs_dir}")
-
         # Validate configuration
         if not self.api_key:
             logger.warning("ANTHROPIC_API_KEY not set. SDK will not work.")
 
-        # Load building agent prompt if exists
-        self.building_agent_prompt = self._load_building_agent_prompt()
+        # Initialize prompt generator
+        self.prompt_generator = PromptGenerator(self.workspace_dir)
 
-    def _load_building_agent_prompt(self) -> Optional[str]:
-        """
-        Load BUILDING_AGENT.md file from app root (not workspace).
-
-        Returns:
-            Content of BUILDING_AGENT.md if exists, None otherwise
-        """
-        # BUILDING_AGENT.md is in /app root, not in workspace
-        building_agent_path = Path("/app/BUILDING_AGENT.md")
-
-        if building_agent_path.exists():
-            try:
-                with open(building_agent_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    logger.info(f"Loaded BUILDING_AGENT.md ({len(content)} chars)")
-                    return content
-            except Exception as e:
-                logger.error(f"Failed to load BUILDING_AGENT.md: {e}")
-                return None
-        else:
-            logger.debug(f"BUILDING_AGENT.md not found at {building_agent_path}")
-            return None
-
-    def _load_scripts_readme(self) -> Optional[str]:
-        """
-        Load scripts/README.md file from workspace if it exists and is not empty.
-
-        This file contains the catalog of existing scripts and will be included
-        in the system prompt so the agent knows about existing scripts.
-
-        Returns:
-            Content of scripts/README.md if exists and not empty, None otherwise
-        """
-        scripts_readme_path = Path(self.workspace_dir) / "scripts" / "README.md"
-
-        if scripts_readme_path.exists():
-            try:
-                with open(scripts_readme_path, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if content:
-                        logger.info(f"Loaded scripts/README.md ({len(content)} chars)")
-                        return content
-                    else:
-                        logger.debug("scripts/README.md is empty")
-                        return None
-            except Exception as e:
-                logger.error(f"Failed to load scripts/README.md: {e}")
-                return None
-        else:
-            logger.debug(f"scripts/README.md not found at {scripts_readme_path}")
-            return None
-
-    def _load_workflow_prompt(self) -> Optional[str]:
-        """
-        Load docs/WORKFLOW_PROMPT.md file from workspace if it exists and is not empty.
-
-        This file describes the workflow's purpose, capabilities, and execution guidelines.
-        The building agent should update this as it develops the workflow.
-
-        Returns:
-            Content of docs/WORKFLOW_PROMPT.md if exists and not empty, None otherwise
-        """
-        workflow_prompt_path = Path(self.workspace_dir) / "docs" / "WORKFLOW_PROMPT.md"
-
-        if workflow_prompt_path.exists():
-            try:
-                with open(workflow_prompt_path, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if content:
-                        logger.info(f"Loaded docs/WORKFLOW_PROMPT.md ({len(content)} chars)")
-                        return content
-                    else:
-                        logger.debug("docs/WORKFLOW_PROMPT.md is empty")
-                        return None
-            except Exception as e:
-                logger.error(f"Failed to load docs/WORKFLOW_PROMPT.md: {e}")
-                return None
-        else:
-            logger.debug(f"docs/WORKFLOW_PROMPT.md not found at {workflow_prompt_path}")
-            return None
-
-    def _load_entrypoint_prompt(self) -> Optional[str]:
-        """
-        Load docs/ENTRYPOINT_PROMPT.md file from workspace if it exists and is not empty.
-
-        This file defines how the workflow should be triggered (entry point for scheduled/interactive modes).
-        The building agent should update this as it defines the workflow's usage.
-
-        Returns:
-            Content of docs/ENTRYPOINT_PROMPT.md if exists and not empty, None otherwise
-        """
-        entrypoint_prompt_path = Path(self.workspace_dir) / "docs" / "ENTRYPOINT_PROMPT.md"
-
-        if entrypoint_prompt_path.exists():
-            try:
-                with open(entrypoint_prompt_path, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if content:
-                        logger.info(f"Loaded docs/ENTRYPOINT_PROMPT.md ({len(content)} chars)")
-                        return content
-                    else:
-                        logger.debug("docs/ENTRYPOINT_PROMPT.md is empty")
-                        return None
-            except Exception as e:
-                logger.error(f"Failed to load docs/ENTRYPOINT_PROMPT.md: {e}")
-                return None
-        else:
-            logger.debug(f"docs/ENTRYPOINT_PROMPT.md not found at {entrypoint_prompt_path}")
-            return None
-
-    def _init_session_log(self, message: str, session_id: Optional[str]) -> Optional[Path]:
-        """
-        Initialize a session log file for dumping raw LLM messages.
-
-        Args:
-            message: User message being sent
-            session_id: External session ID (None for new session)
-
-        Returns:
-            Path to the log file if dumping is enabled, None otherwise
-        """
-        if not self.dump_llm_session:
-            return None
-
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-        log_file = self.logs_dir / f"session_{timestamp}_run.log"
-
-        # Write header
-        with open(log_file, "w") as f:
-            f.write(f"# Claude Code SDK Session Log\n")
-            f.write(f"# Started at: {datetime.utcnow().isoformat()}\n")
-            f.write(f"# Session ID: {session_id or 'NEW SESSION'}\n")
-            f.write(f"# User Message: {message[:100]}{'...' if len(message) > 100 else ''}\n")
-            f.write(f"# ========================================\n\n")
-
-        logger.info(f"Session log initialized: {log_file}")
-        return log_file
-
-    def _dump_message_to_log(self, log_file: Optional[Path], message_obj, message_count: int):
-        """
-        Dump raw message object to session log file.
-
-        Args:
-            log_file: Path to log file (None to skip)
-            message_obj: SDK message object to dump
-            message_count: Message sequence number
-        """
-        if not log_file:
-            return
-
-        try:
-            with open(log_file, "a") as f:
-                f.write(f"\n{'='*80}\n")
-                f.write(f"MESSAGE #{message_count}\n")
-                f.write(f"Timestamp: {datetime.utcnow().isoformat()}\n")
-                f.write(f"Type: {type(message_obj).__name__}\n")
-                f.write(f"{'-'*80}\n")
-                f.write(self._format_message_for_debug(message_obj))
-                f.write(f"\n{'='*80}\n")
-        except Exception as e:
-            logger.error(f"Error writing to session log: {e}", exc_info=True)
+        # Initialize session logger
+        dump_llm_session = os.getenv("DUMP_LLM_SESSION", "false").lower() == "true"
+        logs_dir = Path(self.workspace_dir) / "logs"
+        self.session_logger = SessionLogger(logs_dir, dump_enabled=dump_llm_session)
 
     async def send_message_stream(
         self,
         message: str,
         session_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
-        use_building_mode: bool = False,
+        mode: str = "conversation",
+        agent_sdk: str = "claude",
     ) -> AsyncIterator[dict]:
         """
-        Send message to Claude Code SDK and stream responses.
+        Send message to SDK and stream responses.
 
         Uses ClaudeSDKClient with proper session resumption via ClaudeAgentOptions.
 
         Args:
             message: User message
             session_id: External SDK session ID to resume (None = create new)
-            system_prompt: Custom system prompt for this session (overrides building_mode)
-            use_building_mode: If True, uses claude_code preset with BUILDING_AGENT.md appended
+            system_prompt: Custom system prompt for this session (overrides mode-based prompt)
+            mode: "building" or "conversation" - determines system prompt structure
+            agent_sdk: SDK to use ("claude" is currently the only option)
 
         Yields:
             Dictionaries with message data:
@@ -231,8 +69,17 @@ class ClaudeCodeSDKManager:
                 "metadata": dict,
             }
         """
+        # Validate agent_sdk parameter
+        if agent_sdk != "claude":
+            yield {
+                "type": "error",
+                "content": f"Unsupported agent_sdk: {agent_sdk}. Only 'claude' is supported.",
+                "error_type": "ValueError",
+            }
+            return
+
         # Initialize session log file if dumping is enabled
-        session_log_file = self._init_session_log(message, session_id)
+        session_log_file = self.session_logger.init_session_log(message, session_id)
 
         try:
             # Import SDK here to avoid import errors if SDK not installed
@@ -245,45 +92,31 @@ class ClaudeCodeSDKManager:
                 cwd=self.workspace_dir,
             )
 
+            # Set model based on mode
+            # Conversation mode: use Haiku for faster, cheaper responses
+            # Building mode: use default model (Sonnet) for better code generation
+            if mode == "conversation":
+                options.model = "haiku"
+                logger.info("Using Haiku model for conversation mode")
+            # For building mode, don't set model parameter to use default (Sonnet)
+
             # Set system prompt based on mode
             if system_prompt:
                 # Explicit system_prompt overrides everything
                 options.system_prompt = system_prompt
-            elif use_building_mode and self.building_agent_prompt:
-                # Build the complete building mode prompt
-                building_prompt = self.building_agent_prompt
-
-                # Append scripts README if it exists
-                scripts_readme = self._load_scripts_readme()
-                if scripts_readme:
-                    building_prompt += f"\n\n---\n\n## Existing Scripts in Workspace\n\nThe following is the current contents of `./scripts/README.md` which catalogs all existing scripts in this workspace:\n\n```markdown\n{scripts_readme}\n```\n\n**Important**: When you create, modify, or remove scripts, you MUST update this file to keep it accurate."
-                    logger.info("Included scripts/README.md in building mode prompt")
-
-                # Append workflow documentation if it exists
-                workflow_prompt = self._load_workflow_prompt()
-                if workflow_prompt:
-                    building_prompt += f"\n\n---\n\n## Current Workflow Configuration\n\nThe following is the current contents of `./docs/WORKFLOW_PROMPT.md` which describes the workflow's purpose and capabilities:\n\n```markdown\n{workflow_prompt}\n```\n\n**Important**: As you develop scripts and define the workflow's capabilities, you MUST update this file to accurately reflect what the workflow can do."
-                    logger.info("Included docs/WORKFLOW_PROMPT.md in building mode prompt")
-
-                entrypoint_prompt = self._load_entrypoint_prompt()
-                if entrypoint_prompt:
-                    building_prompt += f"\n\n---\n\n## Current Entry Point Configuration\n\nThe following is the current contents of `./docs/ENTRYPOINT_PROMPT.md` which defines how this workflow should be invoked:\n\n```markdown\n{entrypoint_prompt}\n```\n\n**Important**: As you develop the workflow, you MUST update this file to define clear examples of how to trigger this workflow in conversation mode."
-                    logger.info("Included docs/ENTRYPOINT_PROMPT.md in building mode prompt")
-
-                # Use claude_code preset with complete building prompt appended
-                options.system_prompt = {
-                    "type": "preset",
-                    "preset": "claude_code",
-                    "append": building_prompt
-                }
-                logger.info("Using building mode with claude_code preset + BUILDING_AGENT.md + scripts catalog + workflow docs")
-            elif use_building_mode:
-                # Building mode requested but no BUILDING_AGENT.md available
-                logger.warning("Building mode requested but BUILDING_AGENT.md not loaded, using claude_code preset only")
-                options.system_prompt = {
-                    "type": "preset",
-                    "preset": "claude_code"
-                }
+                logger.info("Using explicit system_prompt override")
+            else:
+                # Generate prompt based on mode using PromptGenerator
+                try:
+                    options.system_prompt = self.prompt_generator.generate_prompt(mode)
+                    logger.info(f"Generated system prompt for mode: {mode}")
+                except ValueError as e:
+                    yield {
+                        "type": "error",
+                        "content": str(e),
+                        "error_type": "ValueError",
+                    }
+                    return
 
             # Set resume parameter if we have a session_id
             if session_id:
@@ -326,15 +159,15 @@ class ClaudeCodeSDKManager:
                     message_count += 1
 
                     # Dump raw message to log file if enabled
-                    self._dump_message_to_log(session_log_file, message_obj, message_count)
+                    self.session_logger.dump_message(session_log_file, message_obj, message_count)
 
                     # Debug: Log raw message from Claude SDK with full structure
                     logger.debug(f"[Claude SDK #{message_count}] ========== RAW MESSAGE ==========")
                     logger.debug(f"[Claude SDK #{message_count}] Type: {type(message_obj).__name__}")
-                    logger.debug(f"[Claude SDK #{message_count}] Full structure:\n{self._format_message_for_debug(message_obj)}")
+                    logger.debug(f"[Claude SDK #{message_count}] Full structure:\n{format_message_for_debug(message_obj)}")
                     logger.debug(f"[Claude SDK #{message_count}] ===================================")
 
-                    formatted = self._format_sdk_message(message_obj, current_session_id)
+                    formatted = format_sdk_message(message_obj, current_session_id)
 
                     # Debug: Log formatted message
                     if formatted is not None:
@@ -360,17 +193,8 @@ class ClaudeCodeSDKManager:
                 logger.info(f"Finished receiving responses. Total messages: {message_count}")
 
                 # Write session completion to log file
-                if session_log_file:
-                    try:
-                        with open(session_log_file, "a") as f:
-                            f.write(f"\n\n{'='*80}\n")
-                            f.write(f"SESSION COMPLETED\n")
-                            f.write(f"Total messages: {message_count}\n")
-                            f.write(f"Completed at: {datetime.utcnow().isoformat()}\n")
-                            f.write(f"{'='*80}\n")
-                        logger.info(f"Session log completed: {session_log_file}")
-                    except Exception as e:
-                        logger.error(f"Error writing session completion: {e}")
+                self.session_logger.complete_session_log(session_log_file, message_count)
+
             except Exception as e:
                 logger.error(f"Error during receive_messages iteration: {e}", exc_info=True)
                 raise
@@ -396,204 +220,6 @@ class ClaudeCodeSDKManager:
                 "content": f"SDK error: {str(e)}",
                 "error_type": type(e).__name__,
             }
-
-    def _format_message_for_debug(self, message_obj) -> str:
-        """
-        Format SDK message object for debug logging.
-
-        Args:
-            message_obj: SDK message object
-
-        Returns:
-            Formatted string representation with all fields
-        """
-        from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, UserMessage
-        import json
-
-        try:
-            msg_type = type(message_obj).__name__
-
-            if isinstance(message_obj, SystemMessage):
-                return json.dumps({
-                    "type": "SystemMessage",
-                    "subtype": message_obj.subtype,
-                    "data": message_obj.data
-                }, indent=2)
-
-            elif isinstance(message_obj, AssistantMessage):
-                # Format content blocks
-                content_blocks = []
-                for block in message_obj.content:
-                    block_type = type(block).__name__
-                    if hasattr(block, '__dict__'):
-                        content_blocks.append({
-                            "type": block_type,
-                            "data": block.__dict__
-                        })
-                    else:
-                        content_blocks.append({
-                            "type": block_type,
-                            "data": str(block)
-                        })
-
-                return json.dumps({
-                    "type": "AssistantMessage",
-                    "model": getattr(message_obj, "model", None),
-                    "content_blocks": content_blocks,
-                    "num_blocks": len(message_obj.content)
-                }, indent=2)
-
-            elif isinstance(message_obj, ResultMessage):
-                return json.dumps({
-                    "type": "ResultMessage",
-                    "subtype": message_obj.subtype,
-                    "session_id": message_obj.session_id,
-                    "duration_ms": message_obj.duration_ms,
-                    "duration_api_ms": message_obj.duration_api_ms,
-                    "is_error": message_obj.is_error,
-                    "num_turns": message_obj.num_turns,
-                    "total_cost_usd": message_obj.total_cost_usd,
-                    "usage": message_obj.usage,
-                    "result": message_obj.result
-                }, indent=2)
-
-            elif isinstance(message_obj, UserMessage):
-                return json.dumps({
-                    "type": "UserMessage",
-                    "content": str(message_obj.content)[:200] + "..." if len(str(message_obj.content)) > 200 else str(message_obj.content)
-                }, indent=2)
-
-            else:
-                # Fallback for unknown types
-                if hasattr(message_obj, '__dict__'):
-                    return json.dumps({
-                        "type": msg_type,
-                        "data": message_obj.__dict__
-                    }, indent=2, default=str)
-                else:
-                    return f"{msg_type}: {str(message_obj)}"
-
-        except Exception as e:
-            return f"Error formatting message: {e}, raw: {str(message_obj)[:500]}"
-
-    def _format_sdk_message(self, message_obj, session_id: str) -> dict:
-        """
-        Format SDK message object into standard dictionary.
-
-        Args:
-            message_obj: SDK message object (AssistantMessage, ResultMessage, SystemMessage, etc.)
-            session_id: Current session ID
-
-        Returns:
-            Formatted message dict, or None to skip this message
-        """
-        from claude_agent_sdk import AssistantMessage, TextBlock, ToolUseBlock, ToolResultBlock, ResultMessage, ThinkingBlock, SystemMessage
-
-        formatted = {
-            "session_id": session_id,
-            "content": "",
-            "metadata": {},
-        }
-
-        # Handle SystemMessage (metadata messages from SDK)
-        if isinstance(message_obj, SystemMessage):
-            # Extract useful metadata but don't show init messages to user
-            if message_obj.subtype == "init":
-                # Store metadata but return empty content (will be filtered out)
-                data = message_obj.data
-                formatted["type"] = "system"
-                formatted["content"] = ""  # Don't show init message to user
-                formatted["metadata"] = {
-                    "subtype": "init",
-                    "model": data.get("model"),
-                    "claude_code_version": data.get("claude_code_version"),
-                    "cwd": data.get("cwd"),
-                    "permission_mode": data.get("permissionMode"),
-                }
-                # Return None to skip this message (don't send to frontend)
-                return None
-            else:
-                # Other system messages - log subtype for debugging
-                formatted["type"] = "system"
-                formatted["content"] = f"System: {message_obj.subtype}"
-                formatted["metadata"]["subtype"] = message_obj.subtype
-                return formatted
-
-        # Handle AssistantMessage
-        elif isinstance(message_obj, AssistantMessage):
-            content_parts = []
-
-            for block in message_obj.content:
-                if isinstance(block, TextBlock):
-                    # Regular text content
-                    formatted["type"] = "assistant"
-                    content_parts.append(block.text)
-
-                elif isinstance(block, ThinkingBlock):
-                    # Thinking block (extended thinking models)
-                    formatted["type"] = "thinking"
-                    content_parts.append(f"[Thinking] {block.thinking}")
-
-                elif isinstance(block, ToolUseBlock):
-                    # Tool use request - send as separate event
-                    tool_input_str = ""
-                    if block.input:
-                        # Format tool input for display
-                        import json
-                        try:
-                            # Try to format as readable JSON, but limit size
-                            input_json = json.dumps(block.input, indent=2)
-                            if len(input_json) > 200:
-                                # Truncate long inputs
-                                input_json = input_json[:200] + "..."
-                            tool_input_str = f"\nInput: {input_json}"
-                        except:
-                            tool_input_str = f"\nInput: {str(block.input)[:200]}"
-
-                    formatted["type"] = "tool"
-                    formatted["tool_name"] = block.name
-                    formatted["content"] = f"🔧 Using tool: {block.name}{tool_input_str}"
-                    formatted["metadata"]["tool_id"] = block.id
-                    formatted["metadata"]["tool_input"] = block.input
-                    # Return immediately for tool use to preserve event granularity
-                    return formatted
-
-                elif isinstance(block, ToolResultBlock):
-                    # Tool result - don't show to user, just metadata
-                    # Skip tool results as they're internal
-                    continue
-
-            # Set default type if not set by blocks
-            if "type" not in formatted:
-                formatted["type"] = "assistant"
-
-            formatted["content"] = "\n".join(content_parts) if content_parts else ""
-
-            # Extract model metadata from AssistantMessage
-            if hasattr(message_obj, "model"):
-                formatted["metadata"]["model"] = message_obj.model
-
-        # Handle ResultMessage
-        elif isinstance(message_obj, ResultMessage):
-            formatted["type"] = "done"  # Signal completion
-            formatted["content"] = ""  # Don't show "Task completed" to user
-            formatted["metadata"] = {
-                "subtype": message_obj.subtype,
-                "duration_ms": message_obj.duration_ms,
-                "is_error": message_obj.is_error,
-                "num_turns": message_obj.num_turns,
-                "total_cost_usd": message_obj.total_cost_usd,
-                "session_id": message_obj.session_id,
-            }
-
-        # Handle other message types
-        else:
-            logger.warning(f"Unknown message type: {type(message_obj)}")
-            formatted["type"] = "unknown"
-            formatted["content"] = ""
-            return None
-
-        return formatted
 
 
 # Global SDK manager instance
