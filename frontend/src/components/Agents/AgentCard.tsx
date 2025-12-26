@@ -5,7 +5,6 @@ import type { AgentPublic } from "@/client"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -26,7 +25,7 @@ export function AgentCard({ agent }: AgentCardProps) {
         className="block"
       >
         <CardHeader className="pb-3">
-          <div className="flex items-start gap-3 mb-2">
+          <div className="flex items-start gap-3">
             <div className={`rounded-lg p-2 ${colorPreset.iconBg}`}>
               <Bot className={`h-5 w-5 ${colorPreset.iconText}`} />
             </div>
@@ -36,20 +35,15 @@ export function AgentCard({ agent }: AgentCardProps) {
               </CardTitle>
             </div>
           </div>
-          {agent.workflow_prompt && (
-            <CardDescription className="line-clamp-2 min-h-[2.5rem]">
-              {agent.workflow_prompt}
-            </CardDescription>
-          )}
         </CardHeader>
 
-        <CardContent>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            {agent.entrypoint_prompt && (
-              <span className="truncate">Has entrypoint</span>
-            )}
-          </div>
-        </CardContent>
+        {agent.entrypoint_prompt && (
+          <CardContent>
+            <pre className="text-xs bg-muted/50 rounded-md p-3 overflow-x-auto whitespace-pre-wrap break-words font-mono">
+              {agent.entrypoint_prompt}
+            </pre>
+          </CardContent>
+        )}
       </Link>
     </Card>
   )

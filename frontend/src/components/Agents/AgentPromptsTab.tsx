@@ -98,14 +98,14 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
               control={form.control}
-              name="workflow_prompt"
+              name="entrypoint_prompt"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Workflow Prompt</FormLabel>
+                  <FormLabel>Entrypoint Prompt</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="Enter workflow prompt..."
-                      className="min-h-[150px]"
+                      placeholder="Enter entrypoint prompt..."
+                      className="h-[72px] resize-none"
                       {...field}
                       value={field.value || ""}
                     />
@@ -117,14 +117,14 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
 
             <FormField
               control={form.control}
-              name="entrypoint_prompt"
+              name="workflow_prompt"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Entrypoint Prompt</FormLabel>
+                  <FormLabel>Workflow Prompt</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="Enter entrypoint prompt..."
-                      className="min-h-[150px]"
+                      placeholder="Enter workflow prompt..."
+                      className="min-h-[300px]"
                       {...field}
                       value={field.value || ""}
                     />

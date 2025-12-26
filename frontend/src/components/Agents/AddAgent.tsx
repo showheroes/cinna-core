@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
 import { useState } from "react"
 import { useForm } from "react-hook-form"
@@ -26,15 +27,12 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 
 const formSchema = z.object({
   name: z.string().min(1, { message: "Name is required" }),
-  workflow_prompt: z.string().optional(),
-  entrypoint_prompt: z.string().optional(),
 })
 
 type FormData = z.infer<typeof formSchema>
@@ -42,6 +40,7 @@ type FormData = z.infer<typeof formSchema>
 const AddAgent = () => {
   const [isOpen, setIsOpen] = useState(false)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
   const form = useForm<FormData>({
@@ -50,18 +49,17 @@ const AddAgent = () => {
     criteriaMode: "all",
     defaultValues: {
       name: "",
-      workflow_prompt: "",
-      entrypoint_prompt: "",
     },
   })
 
   const mutation = useMutation({
     mutationFn: (data: AgentCreate) =>
       AgentsService.createAgent({ requestBody: data }),
-    onSuccess: () => {
+    onSuccess: (agent) => {
       showSuccessToast("Agent created successfully")
       form.reset()
       setIsOpen(false)
+      navigate({ to: "/agent/$agentId", params: { agentId: agent.id } })
     },
     onError: handleError.bind(showErrorToast),
     onSettled: () => {
@@ -105,40 +103,6 @@ const AddAgent = () => {
                         type="text"
                         {...field}
                         required
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="workflow_prompt"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Workflow Prompt</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Enter workflow prompt..."
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="entrypoint_prompt"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Entrypoint Prompt</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Enter entrypoint prompt..."
-                        {...field}
                       />
                     </FormControl>
                     <FormMessage />
