@@ -187,33 +187,51 @@ This file defines the **system prompt** for the conversation mode agent. Update 
 
 This file defines the **trigger message** - a concise user instruction that starts workflow execution.
 
-**Key Points**:
-- This is NOT a system prompt - it's a short **user message**
-- Think of it as the first message a user would send to trigger the workflow
-- For scheduled workflows, this message is sent automatically
-- Keep it brief, clear, and actionable (1-2 sentences)
-- Can include parameters or configuration if needed
+**CRITICAL FORMATTING REQUIREMENTS**:
+- This file must contain ONLY plain text - NO markdown headers, NO formatting, NO explanations
+- Write ONLY the 1-2 sentence message that triggers the workflow
+- Do NOT include headers like "# Entrypoint Prompt" or "## Trigger Message"
+- Do NOT include any explanatory text or guidelines
+- Think of it as copying exactly what a user would type to start the workflow
 
-**Examples**:
+**What to Write**:
+- A clear, actionable command (1-2 sentences maximum)
+- Use command verbs (e.g., "Check", "Collect", "Generate", "Process")
+- Include key parameters if needed
+- This message will be sent as the first user message in automated/scheduled executions
 
-*Mailbox Invoice Parser*:
-```
-Collect from my mailbox unread emails, detect invoices, and give summary about them
-```
+**Correct Format Examples**:
 
-*Daily Report Generator*:
+*Mailbox Invoice Parser* - The file contains ONLY:
 ```
-Generate yesterday's sales report and send to the team
-```
-
-*Database Backup Workflow*:
-```
-Run database backup for all production databases and verify integrity
+Check my mailbox for unread emails, detect invoices, and provide a summary report of all invoices found.
 ```
 
-*Social Media Monitor*:
+*Daily Report Generator* - The file contains ONLY:
 ```
-Check mentions of our brand in the last 24 hours and summarize sentiment
+Generate yesterday's sales report and send it to the team.
+```
+
+*Database Backup Workflow* - The file contains ONLY:
+```
+Run database backup for all production databases and verify integrity.
+```
+
+*Social Media Monitor* - The file contains ONLY:
+```
+Check mentions of our brand in the last 24 hours and summarize sentiment analysis.
+```
+
+**WRONG Format** (Do NOT do this):
+```
+# Entrypoint Prompt
+
+The following is the trigger message for this workflow:
+
+Check my mailbox for unread emails...
+
+## Additional Notes
+...
 ```
 
 ### When to Update Documentation
