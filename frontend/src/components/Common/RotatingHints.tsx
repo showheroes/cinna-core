@@ -13,6 +13,9 @@ const defaultHints = [
   "Use Shift+Enter to add multiple lines to your message",
   "Building mode enables advanced code generation features",
   "Conversation mode is significantly cheaper, so use it for everyday communication",
+  "Agents with entrypoint prompts auto-fill the input field when selected",
+  "Click the selected agent badge to toggle between empty input and default prompt",
+  "Edit the input to switch to manual mode and keep your custom message",
 ]
 
 // Fisher-Yates shuffle algorithm

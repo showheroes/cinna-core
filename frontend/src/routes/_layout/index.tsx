@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState, KeyboardEvent } from "react"
+import { useEffect, useState, useMemo, KeyboardEvent } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
@@ -31,6 +31,7 @@ function Dashboard() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("")
   const [mode, setMode] = useState<"conversation" | "building">("conversation")
   const [message, setMessage] = useState("")
+  const [inputMode, setInputMode] = useState<"automatic" | "manual">("automatic")
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -65,8 +66,11 @@ function Dashboard() {
     },
   })
 
-  const agents = agentsData?.data || []
-  const agentsWithActiveEnv = agents.filter((a) => a.active_environment_id)
+  const agents = useMemo(() => agentsData?.data || [], [agentsData?.data])
+  const agentsWithActiveEnv = useMemo(
+    () => agents.filter((a) => a.active_environment_id),
+    [agents]
+  )
 
   useEffect(() => {
     setHeaderContent(
@@ -83,6 +87,18 @@ function Dashboard() {
       setSelectedAgentId(agentsWithActiveEnv[0].id)
     }
   }, [agentsWithActiveEnv, selectedAgentId])
+
+  // Auto-insert entrypoint prompt when agent changes (only in automatic mode)
+  useEffect(() => {
+    if (!selectedAgentId || inputMode !== "automatic") return
+
+    const selectedAgent = agentsWithActiveEnv.find((a) => a.id === selectedAgentId)
+    if (selectedAgent?.entrypoint_prompt) {
+      setMessage(selectedAgent.entrypoint_prompt)
+    } else {
+      setMessage("")
+    }
+  }, [selectedAgentId, agentsWithActiveEnv, inputMode])
 
   const handleSend = () => {
     const trimmedMessage = message.trim()
@@ -109,6 +125,35 @@ function Dashboard() {
       },
       initialMessage: trimmedMessage,
     })
+
+    // Reset to automatic mode after sending
+    setInputMode("automatic")
+  }
+
+  const handleMessageChange = (value: string) => {
+    setMessage(value)
+    // Switch to manual mode when user edits the input
+    if (inputMode === "automatic") {
+      setInputMode("manual")
+    }
+  }
+
+  const handleAgentClick = (agentId: string) => {
+    if (selectedAgentId === agentId && inputMode === "automatic") {
+      // Agent already selected, toggle between empty and entrypoint prompt
+      const agent = agentsWithActiveEnv.find((a) => a.id === agentId)
+      if (message.trim()) {
+        // Clear the input
+        setMessage("")
+      } else if (agent?.entrypoint_prompt) {
+        // Insert entrypoint prompt
+        setMessage(agent.entrypoint_prompt)
+      }
+    } else {
+      // Select the agent (which will trigger entrypoint insertion via useEffect)
+      setSelectedAgentId(agentId)
+      setInputMode("automatic")
+    }
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -175,7 +220,7 @@ function Dashboard() {
                       ${colorPreset.badgeHover}
                       ${isSelected ? colorPreset.badgeOutline : ""}
                     `}
-                    onClick={() => setSelectedAgentId(agent.id)}
+                    onClick={() => handleAgentClick(agent.id)}
                   >
                     {agent.name}
                   </button>
@@ -188,7 +233,7 @@ function Dashboard() {
           <div className="space-y-4">
             <Textarea
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => handleMessageChange(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
                 mode === "building"
