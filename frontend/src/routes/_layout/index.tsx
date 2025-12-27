@@ -318,7 +318,7 @@ function Dashboard() {
                 selectedAgentId === NEW_AGENT_ID
                   ? "Describe what you want the agent to do and what result you expect..."
                   : mode === "building"
-                    ? "Type your message to start building..."
+                    ? "Describe what you want the agent to do and what result you expect..."
                     : "Type your message to start a conversation..."
               }
               className={`min-h-[120px] max-h-[300px] resize-none text-base transition-colors ${

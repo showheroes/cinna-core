@@ -95,7 +95,7 @@ export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
           <div
             className={`rounded-lg px-4 py-3 ${
               isUser
-                ? "bg-primary text-primary-foreground"
+                ? "bg-gradient-to-br from-sky-50 to-blue-50 dark:from-sky-950/25 dark:to-blue-950/25 border border-sky-100/50 dark:border-sky-900/15 text-foreground shadow-sm"
                 : "bg-muted text-foreground"
             }`}
           >
@@ -108,7 +108,7 @@ export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
               <div className="flex items-center justify-between gap-2">
                 <p
                   className={`text-xs ${
-                    isUser ? "text-primary-foreground/70" : "text-muted-foreground"
+                    isUser ? "text-muted-foreground" : "text-muted-foreground"
                   }`}
                 >
                   {formattedTime}

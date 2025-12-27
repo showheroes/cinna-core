@@ -4,6 +4,7 @@ import { ReadToolBlock } from "./ReadToolBlock"
 import { TodoWriteToolBlock } from "./TodoWriteToolBlock"
 import { WriteToolBlock } from "./WriteToolBlock"
 import { AskUserQuestionToolBlock } from "./AskUserQuestionToolBlock"
+import { GlobToolBlock } from "./GlobToolBlock"
 
 interface ToolCallBlockProps {
   toolName: string
@@ -29,6 +30,11 @@ export function ToolCallBlock({ toolName, toolInput }: ToolCallBlockProps) {
   // Special rendering for AskUserQuestion tool
   if (toolName === "AskUserQuestion" && toolInput?.questions && Array.isArray(toolInput.questions)) {
     return <AskUserQuestionToolBlock questions={toolInput.questions} />
+  }
+
+  // Special rendering for Glob tool
+  if (toolName === "Glob" && toolInput?.pattern) {
+    return <GlobToolBlock pattern={toolInput.pattern} />
   }
 
   // Default rendering for other tools
