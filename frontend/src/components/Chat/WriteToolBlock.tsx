@@ -23,25 +23,25 @@ export function WriteToolBlock({ filePath, content }: WriteToolBlockProps) {
   }, [content, isExpanded])
 
   return (
-    <div className="flex items-start gap-2 text-sm bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded px-3 py-2">
-      <FileEdit className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+    <div className="flex items-start gap-2 text-sm bg-slate-100 dark:bg-slate-800 border border-border rounded px-3 py-2">
+      <FileEdit className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="text-blue-900 dark:text-blue-100 mb-2">
+        <div className="text-foreground/90 mb-2">
           Writing file{" "}
-          <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded text-xs">
+          <code className="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">
             {filePath}
           </code>
         </div>
 
-        <div className="bg-white dark:bg-gray-900 border border-blue-200 dark:border-blue-700 rounded p-2">
-          <pre className="text-xs text-gray-800 dark:text-gray-200 overflow-x-auto whitespace-pre-wrap break-words font-mono">
+        <div className="bg-background border border-border rounded p-2">
+          <pre className="text-xs text-foreground/80 overflow-x-auto whitespace-pre-wrap break-words font-mono">
             {previewContent}
           </pre>
 
           {hasMore && (
             <button
               onClick={() => setIsExpanded(!isExpanded)}
-              className="mt-2 flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 transition-colors"
+              className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               {isExpanded ? (
                 <>

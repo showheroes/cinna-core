@@ -20,6 +20,8 @@ class MessageService:
         role: str,
         content: str,
         message_metadata: dict | None = None,
+        answers_to_message_id: UUID | None = None,
+        tool_questions_status: str | None = None,
     ) -> SessionMessage:
         """Create message in session with auto-incremented sequence"""
         # Get the next sequence number for this session
@@ -35,8 +37,17 @@ class MessageService:
             content=content,
             sequence_number=next_sequence,
             message_metadata=message_metadata or {},
+            answers_to_message_id=answers_to_message_id,
+            tool_questions_status=tool_questions_status,
         )
         session.add(message)
+
+        # If this message is answering another message's questions, update that message's status
+        if answers_to_message_id:
+            referenced_message = session.get(SessionMessage, answers_to_message_id)
+            if referenced_message:
+                referenced_message.tool_questions_status = "answered"
+                session.add(referenced_message)
 
         # Update session's last_message_at
         chat_session = session.get(ChatSession, session_id)
@@ -76,6 +87,14 @@ class MessageService:
         messages = list(session.exec(statement).all())
         # Reverse to get chronological order
         return list(reversed(messages))
+
+    @staticmethod
+    def detect_ask_user_question_tool(streaming_events: list[dict]) -> bool:
+        """Check if AskUserQuestion tool was called in streaming events"""
+        for event in streaming_events:
+            if event.get("type") == "tool" and event.get("tool_name") == "AskUserQuestion":
+                return True
+        return False
 
     @staticmethod
     def get_environment_url(environment: AgentEnvironment) -> str:
@@ -434,6 +453,10 @@ class MessageService:
                 response_metadata["external_session_id"] = new_external_session_id
                 response_metadata["streaming_events"] = streaming_events
 
+                # Detect if AskUserQuestion tool was used
+                has_questions = MessageService.detect_ask_user_question_tool(streaming_events)
+                tool_questions_status = "unanswered" if has_questions else None
+
                 def _save_agent_message():
                     with get_fresh_db_session() as db:
                         MessageService.create_message(
@@ -441,10 +464,11 @@ class MessageService:
                             session_id=session_id,
                             role="agent",
                             content=agent_content,
-                            message_metadata=response_metadata
+                            message_metadata=response_metadata,
+                            tool_questions_status=tool_questions_status
                         )
                 await asyncio.to_thread(_save_agent_message)
-                logger.info(f"Agent response saved ({len(streaming_events)} events, model={response_metadata.get('model')})")
+                logger.info(f"Agent response saved ({len(streaming_events)} events, model={response_metadata.get('model')}, has_questions={has_questions})")
 
             # Update session status to "completed" after successful streaming (non-blocking)
             def _update_completed_status():

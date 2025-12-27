@@ -80,6 +80,7 @@ def send_message(
         session_id=session_id,
         role="user",
         content=message_in.content,
+        answers_to_message_id=message_in.answers_to_message_id,
     )
 
     # TODO: In future steps, actually send to agent and get real response
@@ -148,6 +149,7 @@ async def send_message_stream(
         session_id=session_id,
         role="user",
         content=message_in.content,
+        answers_to_message_id=message_in.answers_to_message_id,
     )
 
     # Auto-generate session title from first message if no title exists

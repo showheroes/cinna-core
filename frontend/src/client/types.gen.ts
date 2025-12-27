@@ -193,6 +193,7 @@ export type Message = {
 
 export type MessageCreate = {
     content: string;
+    answers_to_message_id?: (string | null);
 };
 
 export type MessagePublic = {
@@ -205,6 +206,8 @@ export type MessagePublic = {
     message_metadata: {
         [key: string]: unknown;
     };
+    tool_questions_status: (string | null);
+    answers_to_message_id: (string | null);
 };
 
 export type MessagesPublic = {

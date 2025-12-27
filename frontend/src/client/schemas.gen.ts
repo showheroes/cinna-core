@@ -927,6 +927,18 @@ export const MessageCreateSchema = {
         content: {
             type: 'string',
             title: 'Content'
+        },
+        answers_to_message_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Answers To Message Id'
         }
     },
     type: 'object',
@@ -967,10 +979,33 @@ export const MessagePublicSchema = {
             additionalProperties: true,
             type: 'object',
             title: 'Message Metadata'
+        },
+        tool_questions_status: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Tool Questions Status'
+        },
+        answers_to_message_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Answers To Message Id'
         }
     },
     type: 'object',
-    required: ['id', 'session_id', 'role', 'content', 'sequence_number', 'timestamp', 'message_metadata'],
+    required: ['id', 'session_id', 'role', 'content', 'sequence_number', 'timestamp', 'message_metadata', 'tool_questions_status', 'answers_to_message_id'],
     title: 'MessagePublic'
 } as const;
 

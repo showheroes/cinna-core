@@ -31,6 +31,8 @@ class SessionMessage(SQLModel, table=True):
     sequence_number: int
     message_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    tool_questions_status: str | None = None  # null | "unanswered" | "answered"
+    answers_to_message_id: uuid.UUID | None = Field(default=None, foreign_key="message.id")
 
 
 # Pydantic Schemas
@@ -81,6 +83,7 @@ class SessionsPublicExtended(SQLModel):
 
 class MessageCreate(SQLModel):
     content: str
+    answers_to_message_id: uuid.UUID | None = None
 
 
 class MessagePublic(SQLModel):
@@ -91,6 +94,8 @@ class MessagePublic(SQLModel):
     sequence_number: int
     timestamp: datetime
     message_metadata: dict
+    tool_questions_status: str | None
+    answers_to_message_id: uuid.UUID | None
 
 
 class MessagesPublic(SQLModel):

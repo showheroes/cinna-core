@@ -1,3 +1,7 @@
+Here you can find how we render tools in the UI
+frontend/src/components/Chat/TodoWriteToolBlock.tsx
+frontend/src/components/Chat/MessageList.tsx
+
 There is a special tool called AskUserQuestion
 In the UI it looks like this:
 
@@ -182,18 +186,54 @@ questions:
 
 -----
 
-It could  be multiple tool calls in a single stream one after another
-completely in the UI part we should be able to visually give nice way to answer these questions
-and send a message based on that
+It could  be multiple tool calls in a single stream message one after another
+In the UI part we should be able to visually give nice way to answer these questions
+and send a new user message based on that
 
 After that we should save also in DB that we answered to these questions
 so that page refresh would know that answers are given already and we don't need to render
 form for answering it
 
+Also for every question it should be always one more option for custom text input, meaning user can enter
+his own answer
 
 
-MORE FEATURES:
 
-- when we receive in the UI todolist tool call, maybe we can visually show that active todolist somewhere in the UI separately
-- when we receive questions asked, maybe we can show a form to answer those
+How to do that:
+lets add a flag to the message entitiy "tool_questions_status" which could be
+- 'null' (no tool AskUserQuestion was found in the message parts)
+- 'unanswered' (if we never send special reply to these messages)
+- 'answered' (if we replied to these messages)
 
+when we send message from UI, we can add one more property named 'answers_to_message_id',
+which on the backend would be saved in the message too, and update status (tool_questions_status) of the message it relates to
+
+frontend could also automatically mark this message in the UI with that flag (without waiting for the backend refresh)
+
+In the UI  tool_questions_status flag indicates how the UI should be rendered for questions tool and message itself
+For that, we should introduce 'message actions' block, it should be located below the message itself and contain nicely
+styled buttons depending on what actions we'd like to take regarding this message (in general this bar is invisible,
+it's just a block where buttons would appear if we have any actions to take)
+
+consider that it could be that llm generated double call for the tool, so when filtering questions to add to answer,
+consider that duplicated questions should filtered out (use only first question config appeared in the tools calls)
+duplicates are detected by comparing exactly the questions
+
+if main message has tool_questions_status = unanswered, then action "Answer Questions" button should appear
+on click it should open modal dialog with UI-efficient way to answer questions received from the LLM agent
+
+if message has tool_questions_status = answered no action button needed,
+
+in the body of the message we dont need to render full content of the tool call,
+
+Parameters we should consider to render these questions in the modal popup:
+- multiple questions (could easily be 10+)
+- some questions are "select one" and some are checkboxes list (multiselect)
+- each should have an option for a free text input as last one to select. Something like "My answer:" and text input appears
+- In the answer could be '(Recommended)', which we should slightly highlight with font color and icon at the end
+- blocks '"header": "Report Format"' in the tool call just add as tag badge after the question
+- all questions should be on single page scrollable inside
+- when answer is selected, it gets sightly highlighted and other answer a bit fades-out
+- at the header of that modal window should be set of icons: one icon - one question, like a progress bar of icons, by defailt they look like empty circle, and when answer is selected, it recives a checkobx inside
+- at the footer of that window button "Send Answers" that would generate structured text message (in a 'question': 'answer' format) and send it from the frontend as a regular user message (with a field answers_to_message_id)
+- in the body of the message, where we render tools, for the AskUserQuestion block , since we'll receive a special modal window to answer, we can show only a block with "3 questions received" with a button ' [Show]'; that would open another type of modal popup, just to render the details of the tool call, insde this modal it could look like it is right now for standart tool render, since it would serve only debug purpose (to understand internal details of the call)

@@ -33,7 +33,7 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
   const [streamingEvents, setStreamingEvents] = useState<StructuredStreamEvent[]>([])
   const queryClient = useQueryClient()
 
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, answersToMessageId?: string) => {
     setIsStreaming(true)
     setStreamingEvents([])
 
@@ -50,6 +50,7 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
         sequence_number: (old.data?.length || 0) + 1,
         timestamp: new Date().toISOString(),
         message_metadata: {},
+        answers_to_message_id: answersToMessageId || null,
       }
 
       return {
@@ -59,10 +60,31 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
       }
     })
 
+    // If answering questions, optimistically update the referenced message status
+    if (answersToMessageId) {
+      queryClient.setQueryData(["messages", sessionId], (old: any) => {
+        if (!old) return old
+
+        return {
+          ...old,
+          data: old.data.map((msg: any) =>
+            msg.id === answersToMessageId
+              ? { ...msg, tool_questions_status: "answered" }
+              : msg
+          ),
+        }
+      })
+    }
+
     try {
       const token = localStorage.getItem("access_token")
       if (!token) {
         throw new Error("Not authenticated")
+      }
+
+      const requestBody: any = { content }
+      if (answersToMessageId) {
+        requestBody.answers_to_message_id = answersToMessageId
       }
 
       const response = await fetch(
@@ -73,7 +95,7 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
             "Content-Type": "application/json",
             "Authorization": `Bearer ${token}`,
           },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify(requestBody),
         }
       )
 

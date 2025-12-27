@@ -77,6 +77,13 @@ function ChatInterface() {
     [sendMessage]
   )
 
+  const handleSendAnswer = useCallback(
+    async (content: string, answersToMessageId: string) => {
+      await sendMessage(content, answersToMessageId)
+    },
+    [sendMessage]
+  )
+
   // Send initial message if provided - wait for session and messages to load
   useEffect(() => {
     if (
@@ -201,6 +208,7 @@ function ChatInterface() {
         isLoading={messagesLoading}
         streamingEvents={streamingEvents}
         isStreaming={isStreaming}
+        onSendAnswer={handleSendAnswer}
       />
       <MessageInput
         onSend={handleSendMessage}

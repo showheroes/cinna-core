@@ -3,6 +3,7 @@ import { MarkdownRenderer } from "./MarkdownRenderer"
 import { ReadToolBlock } from "./ReadToolBlock"
 import { TodoWriteToolBlock } from "./TodoWriteToolBlock"
 import { WriteToolBlock } from "./WriteToolBlock"
+import { AskUserQuestionToolBlock } from "./AskUserQuestionToolBlock"
 
 interface ToolCallBlockProps {
   toolName: string
@@ -25,20 +26,25 @@ export function ToolCallBlock({ toolName, toolInput }: ToolCallBlockProps) {
     return <TodoWriteToolBlock todos={toolInput.todos} />
   }
 
+  // Special rendering for AskUserQuestion tool
+  if (toolName === "AskUserQuestion" && toolInput?.questions && Array.isArray(toolInput.questions)) {
+    return <AskUserQuestionToolBlock questions={toolInput.questions} />
+  }
+
   // Default rendering for other tools
   return (
-    <div className="flex items-start gap-2 text-sm bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded px-3 py-2">
-      <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+    <div className="flex items-start gap-2 text-sm bg-slate-100 dark:bg-slate-800 border border-border rounded px-3 py-2">
+      <Wrench className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="font-medium text-blue-900 dark:text-blue-100 mb-1">
-          Using tool: <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded text-xs">{toolName}</code>
+        <div className="font-medium text-foreground/90 mb-1">
+          Using tool: <code className="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">{toolName}</code>
         </div>
         {toolInput && Object.keys(toolInput).length > 0 && (
           <div className="space-y-1 text-xs">
             {Object.entries(toolInput).map(([key, value]) => (
               <div key={key} className="flex flex-col gap-0.5">
-                <span className="font-semibold text-blue-700 dark:text-blue-300">{key}:</span>
-                <div className="pl-3 text-blue-800 dark:text-blue-200">
+                <span className="font-semibold text-foreground/80">{key}:</span>
+                <div className="pl-3 text-foreground/70">
                   {typeof value === 'string' ? (
                     // Check if the value contains markdown-like content (code blocks, lists, etc.)
                     value.includes('\n') || value.includes('```') || value.includes('- ') ? (
