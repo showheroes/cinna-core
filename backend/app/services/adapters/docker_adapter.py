@@ -158,7 +158,7 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
 
     async def rebuild(self, template_core_dir: Path, was_running: bool) -> bool:
         """
-        Rebuild environment with updated core files.
+        Rebuild environment with updated core files and knowledge base.
 
         Args:
             template_core_dir: Path to template's core directory
@@ -170,8 +170,9 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
         Process:
         1. Container should already be stopped
         2. Update core files from template
-        3. Rebuild Docker image (includes new core files)
-        4. Start container if it was running before
+        3. Update knowledge files from template (add/update only, preserve user-created files)
+        4. Rebuild Docker image (includes new core files)
+        5. Start container if it was running before
         """
         logger.info(f"Rebuilding environment {self.env_id}")
 
@@ -199,6 +200,27 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
             dirs_exist_ok=True
         )
         logger.info(f"Core files updated from template")
+
+        # Update knowledge files from template (add/update only, don't delete)
+        template_knowledge_dir = template_core_dir.parent / "workspace" / "knowledge"
+        instance_knowledge_dir = self.env_dir / "app" / "workspace" / "knowledge"
+
+        if template_knowledge_dir.exists():
+            logger.info(f"Updating knowledge files from template: {template_knowledge_dir}")
+
+            # Ensure knowledge directory exists in instance
+            instance_knowledge_dir.mkdir(parents=True, exist_ok=True)
+
+            # Copy all knowledge files from template (add/update, preserve user-created files)
+            await asyncio.to_thread(
+                shutil.copytree,
+                template_knowledge_dir,
+                instance_knowledge_dir,
+                dirs_exist_ok=True
+            )
+            logger.info(f"Knowledge files updated from template")
+        else:
+            logger.debug(f"No knowledge directory in template: {template_knowledge_dir}")
 
         # Rebuild Docker image
         logger.info(f"Rebuilding Docker image for environment {self.env_id}")

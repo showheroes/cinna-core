@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,43 @@ class PromptGenerator:
             logger.debug(f"credentials/README.md not found at {credentials_readme_path}")
             return None
 
+    def _get_knowledge_topics(self) -> Optional[str]:
+        """
+        Get a minimal list of available knowledge topics (subdirectories).
+
+        Returns a comma-separated string of topic folder names. This allows the agent
+        to discover what knowledge is available without loading file contents.
+
+        Returns:
+            Comma-separated list of topics, or None if no knowledge directory
+        """
+        knowledge_dir = self.workspace_dir / "knowledge"
+
+        if not knowledge_dir.exists():
+            logger.debug(f"Knowledge directory not found at {knowledge_dir}")
+            return None
+
+        try:
+            # Collect unique topic names (subdirectories)
+            topics = set()
+
+            for item in knowledge_dir.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    topics.add(item.name)
+
+            if not topics:
+                logger.debug("No knowledge topics found")
+                return None
+
+            # Format as comma-separated list
+            result = ", ".join(sorted(topics))
+            logger.info(f"Knowledge topics: {result}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to scan knowledge directory: {e}")
+            return None
+
     def generate_building_mode_prompt(self) -> Optional[Dict[str, Any]]:
         """
         Generate system prompt for building mode.
@@ -247,6 +284,17 @@ class PromptGenerator:
             )
             logger.info("Included credentials/README.md in building mode prompt")
 
+        # Append knowledge base topics if they exist
+        knowledge_topics = self._get_knowledge_topics()
+        if knowledge_topics:
+            building_prompt += (
+                f"\n\n---\n\n## Integration Knowledge Base\n\n"
+                f"If you need specific integration knowledge (APIs, data schemas, best practices), "
+                f"check `./knowledge/` directory which contains following topics (folders): {knowledge_topics}\n\n"
+                f"Check these folders for documentation files if needed."
+            )
+            logger.info("Included knowledge topics in building mode prompt")
+
         # Return SystemPromptPreset dict
         logger.info("Generated building mode prompt with claude_code preset + BUILDING_AGENT.md + docs")
         return {
@@ -303,6 +351,17 @@ class PromptGenerator:
                 f"- Sensitive values (passwords, tokens) are shown as [REDACTED] above but are available to scripts"
             )
             logger.info("Included credentials/README.md in conversation mode prompt")
+
+        # Append knowledge base topics if they exist
+        knowledge_topics = self._get_knowledge_topics()
+        if knowledge_topics:
+            conversation_prompt_parts.append(
+                f"\n\n---\n\n## Integration Knowledge Base\n\n"
+                f"If you need specific integration knowledge (APIs, data schemas, best practices), "
+                f"check `./knowledge/` directory which contains following topics (folders): {knowledge_topics}\n\n"
+                f"Check these folders for documentation files if needed."
+            )
+            logger.info("Included knowledge topics in conversation mode prompt")
 
         # Combine all parts into a single system prompt string
         if conversation_prompt_parts:

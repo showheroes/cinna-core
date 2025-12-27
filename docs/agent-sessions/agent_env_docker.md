@@ -16,6 +16,7 @@ Agent environments run in isolated Docker containers with a dual-layer architect
 
 **Workspace Layer** (`/app/workspace/`)
 - User-generated content (scripts, files, docs, credentials, databases, logs)
+- Integration knowledge base (updated during rebuilds, user files preserved)
 - Mounted as Docker volume
 - Persists across rebuilds and restarts
 - Writable by agent at runtime
@@ -57,6 +58,11 @@ backend/app/env-templates/python-env-advanced/
 │   │   │   └── ENTRYPOINT_PROMPT.md   # Trigger message examples
 │   │   ├── credentials/               # API keys, tokens (encrypted)
 │   │   ├── databases/                 # SQLite/other local DBs
+│   │   ├── knowledge/                 # Integration knowledge base
+│   │   │   ├── odoo-erp/              # Example: Odoo integration docs
+│   │   │   │   ├── general_info.md    # API guides, best practices
+│   │   │   │   └── vendor_bills.md    # Data schemas, field definitions
+│   │   │   └── [other-topics]/        # Additional integration topics
 │   │   └── logs/                      # Execution logs, session dumps
 │   │
 │   ├── BUILDING_AGENT_EXAMPLE.md      # Template for building mode prompt
@@ -121,6 +127,40 @@ The core server follows a **modular architecture** with clear separation of conc
 - Current: `agent_sdk="claude"` (Claude SDK via ClaudeAgentOptions)
 - Future: Can add OpenAI, Google, etc.
 
+### Integration Knowledge Base
+
+**Purpose**: Provide agents with integration-specific documentation without bloating system prompts
+
+**Location**: `/app/workspace/knowledge/` (workspace, persists across rebuilds)
+
+**Organization**:
+- Topic-based subdirectories (e.g., `odoo-erp/`, `salesforce/`, `stripe/`)
+- Markdown files containing API guides, data schemas, best practices
+- Minimal footprint: Only topic folder names included in prompts
+
+**Prompt Integration**:
+- `PromptGenerator._get_knowledge_topics()` scans for topic folders
+- Returns comma-separated list (e.g., "odoo-erp, salesforce, stripe")
+- Added to both building and conversation mode prompts
+- Agent reads specific files on-demand when needed
+
+**Rebuild Behavior**:
+- Template knowledge files are synced to environment (add/update only)
+- User-created knowledge files are preserved
+- No deletions during rebuild
+- Enables distributing new integration docs to all environments
+
+**Example**:
+```
+workspace/knowledge/
+├── odoo-erp/
+│   ├── general_info.md      # Connection methods, architecture
+│   ├── vendor_bills.md       # Field schemas, workflows
+│   └── sales_orders.md       # Operations, best practices
+└── custom-integration/       # User-created, won't be deleted
+    └── api_notes.md
+```
+
 ## Operations
 
 ### Environment Creation
@@ -158,20 +198,25 @@ The core server follows a **modular architecture** with clear separation of conc
 
 **Entry Point**: `backend/app/services/environment_lifecycle.py::rebuild_environment()`
 
-**Purpose**: Update core system files from template while preserving workspace data
+**Purpose**: Update core system files and knowledge base from template while preserving workspace data
 
 **Process**:
 1. Check if environment is running → stop if needed
 2. Delete old core directory: `{instance_dir}/app/core`
 3. Copy fresh core from template: `{template_dir}/app/core` → `{instance_dir}/app/core`
-4. Rebuild Docker image via `DockerEnvironmentAdapter.rebuild()`
+4. Update knowledge files from template: `{template_dir}/app/workspace/knowledge` → `{instance_dir}/app/workspace/knowledge`
+   - **Add/Update only**: New and updated knowledge files from template are copied
+   - **Preserve user files**: User-created knowledge files not in template are kept
+   - **No deletions**: Existing knowledge files are never deleted
+5. Rebuild Docker image via `DockerEnvironmentAdapter.rebuild()`
    - Runs `docker-compose build` (uses cache for speed)
    - New core files baked into image
-5. Restart container if it was running before
-6. Update status to `running` or `stopped`
+6. Restart container if it was running before
+7. Update status to `running` or `stopped`
 
 **Preserved**:
 - All workspace data (scripts, files, docs, credentials, databases, logs)
+- User-created knowledge files (not in template)
 - Docker volumes
 - Environment configuration
 - Agent prompts
@@ -184,6 +229,7 @@ The core server follows a **modular architecture** with clear separation of conc
 - Business logic services
 - Utility functions
 - Docker image layers
+- Knowledge base files from template (add/update only, no deletions)
 
 ## Docker Configuration
 
@@ -262,3 +308,4 @@ The core server follows a **modular architecture** with clear separation of conc
 4. **Isolation**: Each environment has independent workspace
 5. **Flexibility**: Can rebuild multiple times without risk
 6. **Development**: Core updates tested without recreating environments
+7. **Knowledge Distribution**: Integration knowledge base updates distributed to all environments via rebuild, while preserving user customizations

@@ -74,6 +74,13 @@ The building mode system prompt is composed of multiple layers:
    - Loaded at runtime if file exists and is not empty
    - Provides agent with awareness of available credentials for script development
 
+7. **knowledge/** (Integration Knowledge Base)
+   - Directory containing integration-specific documentation organized by topic
+   - Only topic folder names are included in the prompt (minimal footprint)
+   - Agent reads specific files on-demand when building integrations
+   - Example topics: `odoo-erp`, `salesforce`, `stripe`
+   - Files contain API guides, data schemas, and best practices
+
 ## Workflow Documentation Prompts
 
 The building agent maintains two key documentation files that define how the completed workflow will be used:
@@ -328,6 +335,16 @@ The following is the current contents of `./credentials/README.md`:
 - **ONLY** access credentials programmatically in the scripts you create
 ```
 
+---
+
+## Integration Knowledge Base
+
+If you need specific integration knowledge (APIs, data schemas, best practices),
+check `./knowledge/` directory which contains following topics (folders): odoo-erp
+
+Check these folders for documentation files if needed.
+```
+
 ## Conversation Mode Prompt Architecture
 
 The conversation mode system prompt is lightweight and execution-focused:
@@ -351,6 +368,11 @@ The conversation mode system prompt is lightweight and execution-focused:
    - Appended to system prompt for credential awareness
    - Formatted as "Available Credentials" section
 
+4. **knowledge/** (Integration Knowledge Base)
+   - Topic folder names listed in prompt for awareness
+   - Agent reads specific knowledge files on-demand during execution
+   - Provides access to integration documentation when needed
+
 ### Differences from Building Mode
 
 **What's EXCLUDED**:
@@ -362,6 +384,7 @@ The conversation mode system prompt is lightweight and execution-focused:
 - ✅ WORKFLOW_PROMPT.md (workflow-specific instructions)
 - ✅ scripts/README.md (available automation tools)
 - ✅ credentials/README.md (available credentials with redacted sensitive data)
+- ✅ knowledge/ (topic folder names for integration documentation)
 
 **Prompt Format**:
 - **Building Mode**: SystemPromptPreset dict (Claude Code + appended docs)
@@ -396,6 +419,13 @@ You are an automated invoice extraction and reporting agent...
 - **DO NOT** read ./credentials/credentials.json directly - use the information above when discussing credentials with users
 - Scripts you execute can read ./credentials/credentials.json to access the actual credential data
 - Sensitive values (passwords, tokens) are shown as [REDACTED] above but are available to scripts
+
+## Integration Knowledge Base
+
+If you need specific integration knowledge (APIs, data schemas, best practices),
+check `./knowledge/` directory which contains following topics (folders): odoo-erp
+
+Check these folders for documentation files if needed.
 ```
 
 ## Implementation
@@ -411,6 +441,7 @@ You are an automated invoice extraction and reporting agent...
 - `generate_building_mode_prompt()`: Returns SystemPromptPreset dict
 - `generate_conversation_mode_prompt()`: Returns plain string
 - `generate_prompt(mode)`: Factory method routing by mode
+- `_get_knowledge_topics()`: Returns comma-separated list of knowledge topic folders
 
 **SDK Manager** (`sdk_manager.py`):
 - Coordinates with PromptGenerator for system prompts
@@ -433,6 +464,7 @@ You are an automated invoice extraction and reporting agent...
    - `/app/workspace/docs/WORKFLOW_PROMPT.md` (fresh load)
    - `/app/workspace/docs/ENTRYPOINT_PROMPT.md` (fresh load)
    - `/app/workspace/credentials/README.md` (fresh load)
+   - `/app/workspace/knowledge/` (scans for topic folder names only)
 4. Constructs SystemPromptPreset dict with Claude Code preset
 5. SDK Manager passes to ClaudeAgentOptions
 
@@ -443,6 +475,7 @@ You are an automated invoice extraction and reporting agent...
    - `/app/workspace/docs/WORKFLOW_PROMPT.md` (fresh load)
    - `/app/workspace/scripts/README.md` (fresh load)
    - `/app/workspace/credentials/README.md` (fresh load)
+   - `/app/workspace/knowledge/` (scans for topic folder names only)
 4. Constructs plain string prompt
 5. SDK Manager passes to ClaudeAgentOptions
 
@@ -483,6 +516,97 @@ if mode == "conversation":
 - SDK preference stored at session level
 - Easy to add new AI providers
 
+## Integration Knowledge Base
+
+### Purpose
+
+The knowledge base provides agents with access to integration-specific documentation, API guides, data schemas, and best practices. This enables agents to build high-quality integrations without requiring the full documentation in the system prompt.
+
+### Structure
+
+**Location**: `{instance_dir}/app/workspace/knowledge/`
+
+**Organization**:
+- Topic-based subdirectories (e.g., `odoo-erp/`, `salesforce/`, `stripe/`)
+- Markdown files containing integration documentation
+- Each topic folder can contain multiple documentation files
+
+**Example Structure**:
+```
+workspace/knowledge/
+├── odoo-erp/
+│   ├── general_info.md      # Connection methods, authentication, architecture
+│   ├── vendor_bills.md       # Vendor bill fields, workflows
+│   └── sales_orders.md       # Sales order operations
+├── salesforce/
+│   ├── api_guide.md          # API endpoints, authentication
+│   └── data_model.md         # Object schemas, relationships
+└── stripe/
+    └── webhooks.md           # Webhook handling, event types
+```
+
+### Minimal Footprint Design
+
+**Key Principle**: Only topic folder names are included in the prompt, not file contents.
+
+**Prompt Addition**:
+```
+## Integration Knowledge Base
+
+If you need specific integration knowledge (APIs, data schemas, best practices),
+check `./knowledge/` directory which contains following topics (folders): odoo-erp, salesforce, stripe
+
+Check these folders for documentation files if needed.
+```
+
+**Benefits**:
+- Minimal prompt size (3 lines + comma-separated topic names)
+- Agent-driven discovery (reads files only when needed)
+- Scalable (can add many topics without bloating prompt)
+- Fast context loading (no upfront file reading)
+
+### Usage Pattern
+
+**Building Mode**:
+1. Agent sees available topics in system prompt
+2. When building integration, agent reads relevant knowledge files
+3. Agent follows patterns and best practices from documentation
+4. Agent implements integration according to guidelines
+
+**Conversation Mode**:
+1. Agent aware of knowledge topics
+2. Can reference documentation during workflow execution
+3. Useful for troubleshooting or extending workflows
+
+### Implementation
+
+**Method**: `PromptGenerator._get_knowledge_topics()`
+- Scans `workspace/knowledge/` for subdirectories
+- Returns comma-separated list of folder names
+- Ignores hidden folders (starting with `.`)
+- Lightweight operation (no file reading)
+
+**Loading**: Called during both building and conversation mode prompt generation
+
+### Content Guidelines
+
+Knowledge base files should contain:
+- **API Documentation**: Endpoints, authentication, request/response formats
+- **Data Schemas**: Field definitions, validation rules, relationships
+- **Best Practices**: Architectural patterns, error handling, performance tips
+- **Code Examples**: Common operations, edge cases, integration patterns
+- **Domain Knowledge**: Business logic, workflows, terminology
+
+### Example Content
+
+**File**: `knowledge/odoo-erp/general_info.md`
+- Connection methods (XML-RPC)
+- Authentication patterns
+- Separation of concerns (OdooClient wrapper)
+- Batch processing best practices
+- Multi-company awareness
+- Error handling patterns
+
 ## Benefits
 
 1. **Mode Separation**: Clear distinction between development and execution
@@ -493,6 +617,7 @@ if mode == "conversation":
 6. **Self-Documenting**: Scripts catalog provides built-in documentation
 7. **Reusability**: Scripts designed for workflow automation from the start
 8. **Maintainability**: Clear structure and documentation requirements
+9. **Knowledge Discovery**: Minimal-footprint integration knowledge base enables high-quality integrations without bloating prompts
 
 ## Future Enhancements
 
