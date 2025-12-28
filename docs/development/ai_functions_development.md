@@ -19,8 +19,12 @@ AI Functions provide simple, fast LLM-powered utilities for text generation task
    - Used in: `backend/app/api/routes/messages.py:155-175`
 
 2. **Agent Config Generator** (`backend/app/agents/agent_generator.py`)
-   - Generates agent name and entrypoint_prompt from description
+   - Generates agent name, entrypoint_prompt, and workflow_prompt from description
+   - Uses prompt templates from `backend/app/agents/prompts/`:
+     - `entrypoint_generator_prompt.md` - Creates natural, conversational trigger messages
+     - `workflow_generator_prompt.md` - Creates simple draft workflow prompts (2-4 sentences)
    - Used in: `backend/app/services/agent_service.py:132-156`
+   - **Note**: Generated prompts are **initial drafts** that building agents will refine later
 
 ## Implementation Pattern
 
@@ -162,11 +166,57 @@ Network issues, API errors, and quota limits can occur. Always wrap calls and pr
 ### ❌ Don't Hardcode API Keys
 Always use `settings.GOOGLE_API_KEY` from config, never hardcode keys in code.
 
+## Prompt Template Files
+
+For complex generation tasks that require detailed instructions, use external prompt template files:
+
+### Agent Config Generator Pattern
+
+The agent generator uses prompt templates stored in markdown files:
+
+**Location**: `backend/app/agents/prompts/`
+
+**Files**:
+- `entrypoint_generator_prompt.md` - Instructions for generating human-like trigger messages
+- `workflow_generator_prompt.md` - Instructions for generating draft workflow prompts
+
+**Why use template files?**
+- Easy to update prompts without code changes
+- Better version control for prompt iterations
+- Clear separation of prompt engineering from code logic
+- Non-technical users can review and suggest improvements
+
+**Implementation Pattern**:
+```python
+from pathlib import Path
+
+PROMPTS_DIR = Path(__file__).parent / "prompts"
+ENTRYPOINT_PROMPT = PROMPTS_DIR / "entrypoint_generator_prompt.md"
+
+def _load_prompt_template(file_path: Path) -> str:
+    return file_path.read_text(encoding="utf-8")
+
+def generate_entrypoint(description: str, api_key: str) -> str:
+    template = _load_prompt_template(ENTRYPOINT_PROMPT)
+    prompt = f"{template}\n\n---\n\n## User's Description\n\n{description}"
+    # ... generate with LLM
+```
+
+**Key Principles for Prompt Templates**:
+1. **Clear instructions** - Explain the task and requirements
+2. **Good vs. bad examples** - Show what to do and what to avoid
+3. **Format guidance** - Specify exact output format expected
+4. **Constraints** - Define length limits, style requirements
+5. **Context** - Explain why the output will be used (e.g., "This is a draft that will be refined later")
+
+**Reference**: See `backend/app/agents/agent_generator.py` for full implementation
+
 ## Examples
 
 See existing implementations:
 - Simple text generation: `backend/app/agents/title_generator.py`
-- Structured output (JSON): `backend/app/agents/agent_generator.py`
+- Template-based generation: `backend/app/agents/agent_generator.py`
+- Prompt templates: `backend/app/agents/prompts/`
 - Service integration: `backend/app/services/ai_functions_service.py`
 - Usage in routes: `backend/app/api/routes/messages.py:155-175`
 - Usage in services: `backend/app/services/agent_service.py:132-156`

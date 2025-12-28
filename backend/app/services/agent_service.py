@@ -128,26 +128,25 @@ class AgentService:
                 "current_step": "create_agent"
             }
 
-            # Generate agent name and entrypoint_prompt from description using LLM
-            # workflow_prompt uses a default template
+            # Generate agent name, entrypoint_prompt, and workflow_prompt from description using LLM
             if AIFunctionsService.is_available():
                 try:
                     config = AIFunctionsService.generate_agent_configuration(description)
                     agent_name = config.get("name", f"Agent: {description[:30]}...")
                     entrypoint_prompt = config.get("entrypoint_prompt", description)
+                    workflow_prompt = config.get("workflow_prompt", f"You are an AI agent designed to: {description}")
                 except Exception as e:
                     # Fallback to simple logic if LLM fails
                     agent_number = len(session.exec(select(Agent).where(Agent.owner_id == user.id)).all()) + 1
                     agent_name = f"Agent #{agent_number}"
                     entrypoint_prompt = description
+                    workflow_prompt = f"You are an AI agent designed to: {description}"
             else:
                 # Use simple logic when AI functions not available
                 agent_number = len(session.exec(select(Agent).where(Agent.owner_id == user.id)).all()) + 1
                 agent_name = f"Agent #{agent_number}"
                 entrypoint_prompt = description
-
-            # workflow_prompt uses default template
-            workflow_prompt = f"You are an AI agent designed to: {description}"
+                workflow_prompt = f"You are an AI agent designed to: {description}"
 
             agent_data = AgentCreate(
                 name=agent_name,

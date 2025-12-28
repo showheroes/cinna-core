@@ -38,13 +38,19 @@ class AIFunctionsService:
         """
         Generate agent configuration from user description.
 
+        This generates:
+        1. Agent name (concise, descriptive)
+        2. Entrypoint prompt (human-like trigger message)
+        3. Workflow prompt (system prompt for conversation mode)
+
         Args:
             description: User's description of what the agent should do
 
         Returns:
             dict with keys:
                 - name: Agent name (str)
-                - entrypoint_prompt: Entry point description (str)
+                - entrypoint_prompt: Natural trigger message (str)
+                - workflow_prompt: Detailed system prompt (str)
 
         Raises:
             ValueError: If GOOGLE_API_KEY is not configured
@@ -53,7 +59,11 @@ class AIFunctionsService:
         try:
             api_key = AIFunctionsService._get_api_key()
             config = generate_agent_config(description, api_key)
-            logger.info(f"Generated agent config: {config.get('name', 'Unknown')}")
+            logger.info(
+                f"Generated agent config: {config.get('name', 'Unknown')} "
+                f"(entrypoint: {len(config.get('entrypoint_prompt', ''))} chars, "
+                f"workflow: {len(config.get('workflow_prompt', ''))} chars)"
+            )
             return config
         except ValueError:
             # Re-raise configuration errors
@@ -64,6 +74,7 @@ class AIFunctionsService:
             return {
                 "name": f"Agent: {description[:30]}...",
                 "entrypoint_prompt": description,
+                "workflow_prompt": f"You are an assistant that helps with: {description}",
             }
 
     @staticmethod
