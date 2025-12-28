@@ -30,13 +30,13 @@ class PromptGenerator:
 
     def _load_building_agent_prompt(self) -> Optional[str]:
         """
-        Load BUILDING_AGENT.md file from app root (not workspace).
+        Load BUILDING_AGENT.md file from core/prompts directory.
 
         Returns:
             Content of BUILDING_AGENT.md if exists, None otherwise
         """
-        # BUILDING_AGENT.md is in /app root, not in workspace
-        building_agent_path = Path("/app/BUILDING_AGENT.md")
+        # BUILDING_AGENT.md is in /app/core/prompts/ (part of core system files)
+        building_agent_path = Path("/app/core/prompts/BUILDING_AGENT.md")
 
         if building_agent_path.exists():
             try:

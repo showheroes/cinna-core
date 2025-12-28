@@ -9,6 +9,154 @@ Agent environments support two distinct modes, each with tailored system prompts
 
 This document describes the prompt architecture, construction, and usage patterns for both modes.
 
+## Prompt Design Principles
+
+These principles guide how we construct prompts for the building agent, based on real-world workflow development experience:
+
+### 1. Systematic Building Process
+
+The building agent should follow a clear, step-by-step process:
+1. **Analyze Requirements** - Understand the goal
+2. **Check Credentials** - Verify what's available, ask for missing ones
+3. **Plan Script Architecture** - Design single-purpose, composable scripts
+4. **Generate Scripts** - Create focused, simple scripts
+5. **Update Scripts README** - IMMEDIATELY document each script
+6. **Update Workflow Prompt** - Document orchestration and decision logic
+7. **Define Entrypoint** - Create human-like trigger message
+
+### 2. Single-Purpose Scripts Principle
+
+**Critical**: Each script should handle ONLY ONE operation.
+
+- ❌ **Wrong**: One script that fetches time-off data AND books vacation
+- ✅ **Correct**: `get_timeoff_details.py` (fetch) + `book_vacation.py` (book)
+
+**Why**:
+- Scripts become reusable building blocks
+- Conversation agent can orchestrate them step-by-step
+- Easier to debug and maintain
+- Agent can track workflow progress by executing standalone pieces
+
+**Data Passing Between Scripts**:
+
+For effective script composition, use appropriate data passing methods:
+
+**Small Data** (simple values, IDs, counts):
+- Use command-line arguments: `python script2.py --user-id=12345 --count=42`
+- Print to stdout and capture in conversation mode
+
+**Large Data** (lists, records, parsed results):
+- **Use CSV/JSON files in `workspace/files/` folder**
+- Script 1 (producer) outputs: `./files/parsed_data.csv`
+- Script 2 (consumer) reads: `./files/parsed_data.csv`
+
+**Example File-Based Workflow**:
+```
+1. parse_invoices.py → Saves results to ./files/invoices.csv
+2. process_invoices.py --input=./files/invoices.csv → Processes CSV
+3. generate_report.py --data=./files/invoices_processed.json → Final report
+```
+
+**Benefits of File-Based Data Passing**:
+- ✅ Handles large datasets efficiently
+- ✅ Agent can inspect intermediate results between steps
+- ✅ Scripts can run independently for debugging
+- ✅ Clear data flow and state tracking
+- ✅ Supports restart from any point in workflow
+- ✅ Human-readable intermediate data (CSV/JSON)
+
+### 3. Human-Like Entrypoint Prompts
+
+**Critical**: ENTRYPOINT_PROMPT.md must be conversational, not technical.
+
+- ❌ **Wrong**: "You are an Odoo assistant. Use this API: {jsonrpc...}"
+- ✅ **Correct**: "Query from Odoo my time-offs and show me the summary"
+
+**Guidelines**:
+- Write how users naturally communicate
+- Avoid API details, JSON structures, technical jargon
+- Focus on WHAT the user wants, not HOW it's implemented
+- Keep it simple - 1-2 sentences maximum
+- No markdown formatting, no headers, just plain text
+
+### 4. Mandatory Documentation Updates
+
+**Critical**: Scripts README must be updated IMMEDIATELY after each script creation/modification.
+
+**Why this matters**:
+- The README is auto-loaded into prompts for future sessions
+- If not updated, the agent (and users) won't know what scripts exist
+- Prevents duplicate script creation
+- Enables proper workflow orchestration
+
+**Enforcement in prompt**:
+- Use strong language: "CRITICAL", "IMMEDIATELY", "MUST"
+- Explain consequences of not updating
+- Provide clear DO/DON'T lists
+- Remind that this enables future session awareness
+
+### 5. Script Orchestration Documentation
+
+**Critical**: WORKFLOW_PROMPT.md must explain how scripts work together.
+
+**Include**:
+- Execution sequences (script A → script B → script C)
+- How to use output from one script as input to another
+- Decision points (when to use which script)
+- Error handling between steps
+
+**Example**:
+```
+First run `get_timeoff_details.py` to fetch available days.
+Then use its output to call `book_vacation.py --days=5 --type=annual`.
+If booking fails, run `check_conflicts.py` to diagnose issues.
+```
+
+### 6. Credentials Security Awareness
+
+**Always emphasize**:
+- NEVER read `credentials.json` during building mode conversations
+- Only access credentials programmatically within scripts
+- Review `credentials/README.md` to see available credentials
+- Ask users to share missing credentials before proceeding
+
+### 7. Conversation Agent as Bridge Between Scripts and Humans
+
+**Critical**: The conversation agent doesn't just run scripts and exit—it's a bridge.
+
+**The agent's role**:
+1. **Execute scripts** to fetch/process data
+2. **Parse outputs** (JSON, CSV, text)
+3. **Rephrase results** into natural, human-friendly language
+4. **Communicate** with the user conversationally
+
+**Implications for Documentation**:
+
+**ENTRYPOINT_PROMPT.md**:
+- Simple user question: "What is my time-off balance?"
+- NOT execution details: "Query Odoo API and return JSON"
+
+**WORKFLOW_PROMPT.md**:
+- Document script execution: "Run `get_timeoff_balance.py` → outputs JSON"
+- Document data presentation: "Parse JSON and rephrase: 'You have 15 days available...'"
+- Include example outputs: `{"annual_leave": 15, "sick_leave": 10}`
+- Explain how to handle results in user-friendly way
+
+**Three-Part Structure**:
+1. **Building Request** (User to building agent): "I want an agent that checks my time-off balance"
+2. **Entrypoint** (User trigger): "What is my time-off balance?"
+3. **Workflow** (Execution + Presentation): Run script → Parse JSON → Rephrase → Present
+
+**Example**:
+
+❌ **Wrong**:
+- Entrypoint: "Query from Odoo my time-offs and show me the summary" (too technical)
+- Workflow: "Run get_timeoff_balance.py" (missing presentation instructions)
+
+✅ **Correct**:
+- Entrypoint: "What is my time-off balance?" (simple, natural)
+- Workflow: "Run script → Parse `{"annual_leave": 15}` → Rephrase as 'You have 15 days of annual leave available'" (complete instructions)
+
 ## Session Modes
 
 ### Building Mode
@@ -57,6 +205,8 @@ The building mode system prompt is composed of multiple layers:
    - Catalog of existing scripts in the workspace
    - Loaded at runtime if file exists and is not empty
    - Provides agent with awareness of what scripts already exist
+   - **CRITICAL**: Building agent MUST update this IMMEDIATELY after creating/modifying any script
+   - If not updated, future sessions won't know what scripts exist, leading to duplicates and confusion
 
 4. **docs/WORKFLOW_PROMPT.md** (Dynamic Context)
    - System prompt for conversation mode agent
@@ -95,10 +245,29 @@ The building agent maintains two key documentation files that define how the com
 
 **Content**:
 - Agent's role and responsibilities
-- Available scripts, APIs, and data sources
-- Execution flow and decision-making guidelines
-- Database schemas and file formats
-- Error handling patterns
+- **Workflow execution steps**: How to run scripts and handle outputs
+- **Data presentation**: How to rephrase script results for users in natural language
+- Available scripts and what they output (JSON, CSV, etc.)
+- Decision-making guidelines and error handling
+- Example outputs from scripts (JSON structure, CSV columns)
+
+**Critical Understanding**:
+The conversation agent's job is to:
+1. **Execute scripts** to fetch/process data
+2. **Parse script outputs** (JSON, CSV, etc.)
+3. **Rephrase results** into human-friendly responses
+4. **Communicate with user** in natural language
+
+The agent is a **bridge between scripts and humans**, not just a script runner.
+
+**Example**: Odoo Time-Off Balance workflow
+```markdown
+## Workflow Steps
+1. Run: `python scripts/get_timeoff_balance.py`
+   - Outputs JSON: `{"annual_leave": 15, "sick_leave": 10, "unpaid": 5}`
+2. Parse the JSON and rephrase for user:
+   - "You have 15 days of annual leave, 10 days of sick leave, and 5 days of unpaid leave available."
+```
 
 **Loading**: `sdk_manager.py::_load_workflow_prompt()` - included in building mode system prompt
 
@@ -106,21 +275,50 @@ The building agent maintains two key documentation files that define how the com
 
 ### 2. ENTRYPOINT_PROMPT.md (Trigger Message)
 
-**Purpose**: Concise user message (1-2 sentences) that triggers workflow execution.
+**Purpose**: Concise, human-like user message (1-2 sentences) that triggers workflow execution.
 
 **Location**: `{instance_dir}/app/docs/ENTRYPOINT_PROMPT.md`
 
 **Template**: `backend/app/env-templates/python-env-advanced/app/docs/ENTRYPOINT_PROMPT.md`
 
-**Content**:
-- Short, actionable command (e.g., "Collect from my mailbox unread emails, detect invoices, and give summary")
-- NOT a system prompt - this is a user message
-- Used for scheduled workflow execution
-- Can include parameters or configuration
+**Content Requirements**:
+- **Human-like, conversational language** - as if user is starting a conversation on a daily basis
+- **NO technical details** - no API references, JSON structures, or system prompt language
+- **NO markdown formatting** - plain text only, no headers or explanations
+- **Short and actionable** - 1-2 sentences maximum
+- **Focus on WHAT, not HOW** - user intent, not implementation details
+- **Used for scheduled/automated execution** - sent as first user message
+
+**Good Examples** (Natural, conversational):
+
+*Odoo Time-Off Balance*:
+- User's building request: "I want an agent that provides info about my time-off balances in Odoo ERP"
+- **Entrypoint**: "What is my time-off balance?"
+- Workflow: Run script → Get JSON → Rephrase for user
+
+*Invoice Parser*:
+- User's building request: "Build an agent that checks my email for invoices"
+- **Entrypoint**: "Check my email for new invoices"
+- Workflow: Fetch emails → Detect invoices → Summarize findings
+
+*Sales Report*:
+- User's building request: "Create an agent that generates daily sales reports"
+- **Entrypoint**: "Generate yesterday's sales report"
+- Workflow: Query database → Process data → Format report
+
+**Bad Examples** (Too technical, system-prompt-like):
+- ❌ "You are an Odoo assistant. Use this API: {jsonrpc...}" (This is system prompt language, not a user message)
+- ❌ "Query from Odoo my time-offs and show me the summary" (Too detailed/technical for a simple balance check)
+- ❌ Headers like "# Entrypoint Prompt" or explanatory text
+- ❌ Technical implementation details or system instructions
+
+**Remember**: Entrypoint is what the USER asks, not how the agent executes. Keep it simple and natural.
 
 **Loading**: `sdk_manager.py::_load_entrypoint_prompt()` - included in building mode system prompt
 
 **Sync**: `MessageService.sync_agent_prompts_from_environment()` - synced to backend Agent model after building sessions
+
+**Critical for Building Agent**: The building agent must understand that this is NOT a system prompt, but rather how a real user would naturally ask for the workflow to run.
 
 ### Bidirectional Sync
 
@@ -619,6 +817,314 @@ Knowledge base files should contain:
 8. **Maintainability**: Clear structure and documentation requirements
 9. **Knowledge Discovery**: Minimal-footprint integration knowledge base enables high-quality integrations without bloating prompts
 
+## Lessons Learned from Real Workflows
+
+### Odoo Integration Experience
+
+When building an Odoo time-off tracking workflow, we discovered several critical improvements needed:
+
+#### Problem 1: Technical Entrypoint Prompts
+
+**What happened**: Building agent created ENTRYPOINT_PROMPT.md with technical details:
+```
+You are an Odoo time-off assistant. Your primary function is to inform users
+about their available leave days. You will use the provided Odoo API query:
+{"jsonrpc": "2.0", "method": "call", "params": {...}}
+```
+
+**Issue**: This is system prompt language, not a user message. Too technical, includes API details.
+
+**Solution**: Rewrote as human-like trigger message:
+```
+Query from Odoo my time-offs and show me the summary
+```
+
+**Learning**: Emphasize in building agent prompt that entrypoint should be conversational, like "how user would start communication on a daily basis."
+
+#### Problem 2: Scripts README Not Updated
+
+**What happened**: Building agent created multiple scripts but didn't update `scripts/README.md`.
+
+**Issue**:
+- Conversation mode agent didn't know what scripts existed
+- User couldn't see available capabilities
+- Future building sessions couldn't see existing scripts
+
+**Solution**:
+- Added **CRITICAL** warnings in building agent prompt
+- Emphasized **IMMEDIATE** updates, not "later"
+- Explained consequences: "If you don't update it, you (and the conversation mode agent) won't know what scripts exist!"
+
+**Learning**: Use strong, direct language about mandatory documentation. Explain the "why" not just the "what."
+
+#### Problem 3: Finding Entrypoint Prompt Location
+
+**What happened**: Agent didn't know where ENTRYPOINT_PROMPT.md was located or when to update it.
+
+**Issue**: Location unclear, update triggers undefined.
+
+**Solution**:
+- Clearly state location: `workspace/docs/ENTRYPOINT_PROMPT.md`
+- Add instruction: "Update ENTRYPOINT_PROMPT.md whenever entrypoint logic changes"
+- Include in building mode prompt so agent always sees it
+
+**Learning**: Make file locations and update responsibilities crystal clear in the prompt.
+
+#### Problem 4: Complex, Multi-Purpose Scripts
+
+**What happened**: Initial tendency to create one large script that does everything.
+
+**Issue**: Hard to debug, not reusable, conversation agent can't track progress.
+
+**Solution**:
+- Added "Single-Purpose Scripts Principle" to building process
+- Provided clear example: time-off workflow = 2 scripts (get details + book vacation)
+- Explained benefits: composability, progress tracking, reusability
+
+**Learning**: Script architecture must be explicitly guided. Provide concrete examples of good vs. bad structure.
+
+#### Problem 5: Passing Large Data Between Scripts
+
+**What happened**: Need to pass large datasets (e.g., parsed lists, bulk records) between scripts.
+
+**Issue**:
+- Command-line arguments not suitable for large data
+- stdout/print output gets mixed with logs
+- No way to inspect intermediate results
+- Conversation agent can't verify each step succeeded
+
+**Solution**:
+- Use CSV/JSON files in `workspace/files/` folder as intermediate storage
+- Script 1 outputs to file: `./files/invoices_parsed.csv`
+- Script 2 reads from file: `./files/invoices_parsed.csv`
+- Document file formats in scripts README (columns, fields, structure)
+
+**Example**:
+```
+1. parse_invoices.py → ./files/invoices_parsed.csv (vendor, amount, date, invoice_id)
+2. process_invoices.py --input=./files/invoices_parsed.csv → ./files/invoices_processed.json
+3. generate_report.py --data=./files/invoices_processed.json → Display report
+```
+
+**Benefits**:
+- ✅ Agent can inspect intermediate files between steps
+- ✅ Clear data flow and state tracking
+- ✅ Scripts can run independently
+- ✅ Supports restart from any point
+- ✅ Human-readable data formats (CSV/JSON)
+
+**Learning**:
+- File-based data passing is crucial for multi-step workflows with large data
+- Document expected file formats in both scripts README and WORKFLOW_PROMPT.md
+- Scripts should print what files they created and what's in them
+
+#### Problem 6: Confusion Between Entrypoint and Workflow Prompts
+
+**What happened**: Building agent created entrypoint prompts that were too detailed or technical, sometimes mixing them with workflow instructions.
+
+**Issue**:
+- Entrypoint prompts contained execution details: "Query from Odoo my time-offs and show me the summary"
+- Confusion about what goes in entrypoint vs. what goes in workflow prompt
+- Missing the relationship between user's building request, entrypoint, and workflow execution
+
+**Solution - Clear Three-Part Structure**:
+
+1. **User's Building Request** (What user tells building agent):
+   - "I want an agent that provides info about my time-off balances in Odoo ERP"
+
+2. **ENTRYPOINT_PROMPT.md** (Simple user question to trigger):
+   - "What is my time-off balance?"
+   - Keep it SHORT and NATURAL - how user would normally ask
+   - No technical details, no execution steps
+
+3. **WORKFLOW_PROMPT.md** (System prompt with execution details):
+   - Run: `python scripts/get_timeoff_balance.py`
+   - Parse JSON output: `{"annual_leave": 15, "sick_leave": 10, ...}`
+   - Rephrase for user: "You have 15 days of annual leave..."
+
+**Key Insight**:
+- **Entrypoint** = What USER asks (short, natural)
+- **Workflow** = How AGENT executes (detailed, technical)
+- Conversation agent is a **bridge between scripts and humans**:
+  1. Execute scripts
+  2. Parse outputs (JSON, CSV)
+  3. Rephrase in natural language
+  4. Communicate with user
+
+**Example Comparison**:
+
+❌ **Wrong Entrypoint** (too technical):
+```
+Query from Odoo my time-offs and show me the summary
+```
+
+✅ **Correct Entrypoint** (simple, natural):
+```
+What is my time-off balance?
+```
+
+✅ **Workflow Prompt explains the details**:
+```markdown
+## Workflow Steps
+1. Run: `python scripts/get_timeoff_balance.py`
+2. Parse JSON output
+3. Rephrase for user in conversational language
+```
+
+**Learning**:
+- Building agent must understand entrypoint vs. workflow distinction
+- Entrypoint is USER-facing (simple question/command)
+- Workflow prompt is AGENT-facing (execution instructions + presentation guidelines)
+- Emphasize that conversation agent processes script outputs and communicates results, doesn't just run and exit
+
+### Key Takeaways for Future Prompt Development
+
+1. **Be Explicit About File Locations**
+   - Always state full paths: `workspace/docs/ENTRYPOINT_PROMPT.md`
+   - Don't assume agent knows where files live
+   - Reference paths in building agent prompt
+
+2. **Use Strong, Direct Language for Critical Requirements**
+   - "CRITICAL", "IMMEDIATELY", "MUST" for non-negotiable items
+   - Explain consequences of not following requirements
+   - Use DO/DON'T lists with visual markers (✅ ❌)
+
+3. **Provide Good vs. Bad Examples**
+   - Show what to do AND what not to do
+   - Explain WHY each example is good or bad
+   - Use real examples from workflow development
+
+4. **Emphasize User Perspective**
+   - Entrypoints: "How would a user naturally ask for this?"
+   - Scripts: "What does the user need to know to use this?"
+   - Documentation: "What will make this clear in conversation mode?"
+
+5. **Make Architecture Principles Explicit**
+   - Don't assume agent knows best practices
+   - State principles clearly (single-purpose scripts, composability, etc.)
+   - Provide reasoning, not just rules
+
+6. **Explain the "Why" Behind Requirements**
+   - "Update README because it auto-loads in future sessions"
+   - "Single-purpose scripts enable progress tracking"
+   - "Human-like entrypoints for natural user interaction"
+
+7. **Test Prompts with Real Integrations**
+   - Theoretical prompts miss practical issues
+   - Real workflow development reveals gaps
+   - Iterate based on actual agent behavior
+
+8. **Provide Data Passing Patterns**
+   - Specify when to use command-line args vs. file-based passing
+   - Document file naming conventions and formats
+   - Show concrete examples of producer/consumer scripts
+   - Emphasize documenting file structure (columns, fields)
+   - Explain benefits so agent understands the pattern
+
+9. **Clarify Entrypoint vs. Workflow Prompt Distinction**
+   - Entrypoint = SHORT, NATURAL user question ("What is my time-off balance?")
+   - Workflow = DETAILED execution + presentation instructions
+   - Show three-part structure: Building request → Entrypoint → Workflow
+   - Emphasize conversation agent is a "bridge": Execute → Parse → Rephrase → Communicate
+   - Workflow prompt must include BOTH script execution AND result presentation
+   - Provide side-by-side examples of good vs. bad entrypoints
+
+## Quick Reference: Modifying Building Agent Prompts
+
+When you need to update the building agent prompt (`BUILDING_AGENT_EXAMPLE.md`), use this checklist:
+
+### ✅ Before Making Changes
+
+1. **Read this document** - Review "Prompt Design Principles" and "Lessons Learned"
+2. **Identify the issue** - What specific problem are you solving?
+3. **Check existing structure** - Does a section already address this?
+4. **Test with real workflow** - Has this been validated with actual agent behavior?
+
+### ✅ Writing Effective Instructions
+
+1. **Use strong language for critical items**
+   - "CRITICAL", "IMMEDIATELY", "MUST" for non-negotiable requirements
+   - "IMPORTANT", "SHOULD", "RECOMMENDED" for strong suggestions
+   - Plain language for general guidance
+
+2. **Explain the "why"**
+   - Don't just say what to do, explain why it matters
+   - Example: "Update README because it auto-loads in future sessions"
+
+3. **Provide examples**
+   - Good examples (✅) and bad examples (❌)
+   - Explain why each example is good or bad
+   - Use real scenarios from workflow development
+
+4. **Make locations explicit**
+   - Always use full paths: `workspace/docs/ENTRYPOINT_PROMPT.md`
+   - Don't assume agent knows file structure
+   - State where files are created/updated
+
+5. **Use visual markers**
+   - ✅ ❌ for do/don't
+   - Bullet points for lists
+   - Code blocks for examples
+   - Bold for emphasis
+
+### ✅ Testing Changes
+
+1. **Create a test workflow** - Build a real integration (API, database, etc.)
+2. **Verify behavior** - Does agent follow new instructions?
+3. **Check outputs** - Are files created/updated as expected?
+4. **Review quality** - Are entrypoints human-like? Scripts single-purpose?
+5. **Iterate** - Refine based on actual agent behavior
+
+### ✅ Common Additions
+
+**Adding new script types or patterns:**
+- Update "Common Tasks" section
+- Provide example script structure
+- Explain when to use this pattern
+
+**Adding new documentation requirements:**
+- State location of file
+- Explain when to create/update
+- Provide format/template
+- Show good vs. bad examples
+
+**Adding new security rules:**
+- Use "CRITICAL" or "NEVER" language
+- Explain consequences of violation
+- Provide safe alternative approach
+- Add to credentials section
+
+**Adding new workflow patterns:**
+- Update "Building Workflow Development Process"
+- Provide concrete examples
+- Explain benefits of the pattern
+
+**Adding data passing patterns:**
+- Specify when to use the pattern (small vs. large data)
+- Provide producer script example (outputs to file)
+- Provide consumer script example (reads from file)
+- Document file formats and naming conventions
+- Show how to document in scripts README
+- Explain benefits: inspectable, debuggable, restartable
+
+### ✅ After Making Changes
+
+1. **Update this documentation** - Add to "Lessons Learned" if based on real experience
+2. **Rebuild test environment** - New environments will get updated prompt
+3. **Monitor behavior** - Watch how agents use new instructions
+4. **Document edge cases** - Note any issues discovered
+
+### 📝 File to Modify
+
+**Primary file**: `backend/app/env-templates/python-env-advanced/app/BUILDING_AGENT_EXAMPLE.md`
+
+This file is copied to each new environment as `BUILDING_AGENT.md` during initialization.
+
+**Related files**:
+- `docs/agent-sessions/agent_env_building_prompt.md` (this file) - Architecture documentation
+- `docs/agent-sessions/agent_env_credentials_management.md` - Credentials documentation
+- Template files in `backend/app/env-templates/python-env-advanced/app/`
+
 ## Future Enhancements
 
 Potential improvements to the prompt system:
@@ -630,3 +1136,4 @@ Potential improvements to the prompt system:
 - Multi-SDK support (OpenAI, Google, etc.)
 - Prompt versioning and change tracking
 - A/B testing different prompt structures
+- Auto-generate script catalog format examples from existing workflows
