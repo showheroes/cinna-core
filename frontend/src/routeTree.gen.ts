@@ -25,6 +25,7 @@ import { Route as LayoutSessionSessionIdRouteImport } from './routes/_layout/ses
 import { Route as LayoutCredentialCredentialIdRouteImport } from './routes/_layout/credential/$credentialId'
 import { Route as LayoutAgentCreatingRouteImport } from './routes/_layout/agent/creating'
 import { Route as LayoutAgentAgentIdRouteImport } from './routes/_layout/agent/$agentId'
+import { Route as LayoutAgentAgentIdConversationsRouteImport } from './routes/_layout/agent/$agentId/conversations'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -106,6 +107,12 @@ const LayoutAgentAgentIdRoute = LayoutAgentAgentIdRouteImport.update({
   path: '/agent/$agentId',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutAgentAgentIdConversationsRoute =
+  LayoutAgentAgentIdConversationsRouteImport.update({
+    id: '/conversations',
+    path: '/conversations',
+    getParentRoute: () => LayoutAgentAgentIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
@@ -119,10 +126,11 @@ export interface FileRoutesByFullPath {
   '/sessions': typeof LayoutSessionsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
-  '/agent/$agentId': typeof LayoutAgentAgentIdRoute
+  '/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/agent/creating': typeof LayoutAgentCreatingRoute
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -136,10 +144,11 @@ export interface FileRoutesByTo {
   '/sessions': typeof LayoutSessionsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
-  '/agent/$agentId': typeof LayoutAgentAgentIdRoute
+  '/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/agent/creating': typeof LayoutAgentCreatingRoute
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -155,10 +164,11 @@ export interface FileRoutesById {
   '/_layout/sessions': typeof LayoutSessionsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
-  '/_layout/agent/$agentId': typeof LayoutAgentAgentIdRoute
+  '/_layout/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/_layout/agent/creating': typeof LayoutAgentCreatingRoute
   '/_layout/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/_layout/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/_layout/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -178,6 +188,7 @@ export interface FileRouteTypes {
     | '/agent/creating'
     | '/credential/$credentialId'
     | '/session/$sessionId'
+    | '/agent/$agentId/conversations'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -195,6 +206,7 @@ export interface FileRouteTypes {
     | '/agent/creating'
     | '/credential/$credentialId'
     | '/session/$sessionId'
+    | '/agent/$agentId/conversations'
   id:
     | '__root__'
     | '/_layout'
@@ -213,6 +225,7 @@ export interface FileRouteTypes {
     | '/_layout/agent/creating'
     | '/_layout/credential/$credentialId'
     | '/_layout/session/$sessionId'
+    | '/_layout/agent/$agentId/conversations'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -337,8 +350,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAgentAgentIdRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/agent/$agentId/conversations': {
+      id: '/_layout/agent/$agentId/conversations'
+      path: '/conversations'
+      fullPath: '/agent/$agentId/conversations'
+      preLoaderRoute: typeof LayoutAgentAgentIdConversationsRouteImport
+      parentRoute: typeof LayoutAgentAgentIdRoute
+    }
   }
 }
+
+interface LayoutAgentAgentIdRouteChildren {
+  LayoutAgentAgentIdConversationsRoute: typeof LayoutAgentAgentIdConversationsRoute
+}
+
+const LayoutAgentAgentIdRouteChildren: LayoutAgentAgentIdRouteChildren = {
+  LayoutAgentAgentIdConversationsRoute: LayoutAgentAgentIdConversationsRoute,
+}
+
+const LayoutAgentAgentIdRouteWithChildren =
+  LayoutAgentAgentIdRoute._addFileChildren(LayoutAgentAgentIdRouteChildren)
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
@@ -348,7 +379,7 @@ interface LayoutRouteChildren {
   LayoutSessionsRoute: typeof LayoutSessionsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
-  LayoutAgentAgentIdRoute: typeof LayoutAgentAgentIdRoute
+  LayoutAgentAgentIdRoute: typeof LayoutAgentAgentIdRouteWithChildren
   LayoutAgentCreatingRoute: typeof LayoutAgentCreatingRoute
   LayoutCredentialCredentialIdRoute: typeof LayoutCredentialCredentialIdRoute
   LayoutSessionSessionIdRoute: typeof LayoutSessionSessionIdRoute
@@ -362,7 +393,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutSessionsRoute: LayoutSessionsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
-  LayoutAgentAgentIdRoute: LayoutAgentAgentIdRoute,
+  LayoutAgentAgentIdRoute: LayoutAgentAgentIdRouteWithChildren,
   LayoutAgentCreatingRoute: LayoutAgentCreatingRoute,
   LayoutCredentialCredentialIdRoute: LayoutCredentialCredentialIdRoute,
   LayoutSessionSessionIdRoute: LayoutSessionSessionIdRoute,

@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 
 import { SessionsService } from "@/client"
-import { SessionCard } from "@/components/Sessions/SessionCard"
+import type { SessionPublicExtended } from "@/client"
+import { AgentSessionsGroup } from "@/components/Sessions/AgentSessionsGroup"
 import { CreateSession } from "@/components/Sessions/CreateSession"
 import PendingItems from "@/components/Pending/PendingItems"
 import { usePageHeader } from "@/routes/_layout"
@@ -37,6 +38,35 @@ function SessionsList() {
     return () => setHeaderContent(null)
   }, [setHeaderContent])
 
+  // Group sessions by agent
+  const agentGroups = useMemo(() => {
+    const sessions = sessionsData?.data || []
+    const groups = new Map<string, {
+      agentId: string
+      agentName: string
+      agentColorPreset: string | null
+      sessions: SessionPublicExtended[]
+    }>()
+
+    sessions.forEach((session) => {
+      const agentId = session.agent_id || "unknown"
+      const agentName = session.agent_name || "Unknown Agent"
+
+      if (!groups.has(agentId)) {
+        groups.set(agentId, {
+          agentId,
+          agentName,
+          agentColorPreset: session.agent_ui_color_preset,
+          sessions: [],
+        })
+      }
+
+      groups.get(agentId)!.sessions.push(session)
+    })
+
+    return Array.from(groups.values())
+  }, [sessionsData])
+
   if (sessionsLoading) {
     return <PendingItems />
   }
@@ -54,20 +84,22 @@ function SessionsList() {
   return (
     <div className="p-6 md:p-8 overflow-y-auto">
       <div className="mx-auto max-w-7xl space-y-6">
-        {/* Sessions Grid */}
+        {/* Agent Sessions Grid */}
         {sessions.length === 0 ? (
           <div className="text-center py-12 border-2 border-dashed rounded-lg">
             <p className="text-muted-foreground mb-4">No sessions yet</p>
             <CreateSession />
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {sessions.map((session) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                agentName={session.agent_name || "Unknown Agent"}
-                agentColorPreset={session.agent_ui_color_preset}
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {agentGroups.map((group) => (
+              <AgentSessionsGroup
+                key={group.agentId}
+                agentId={group.agentId}
+                agentName={group.agentName}
+                agentColorPreset={group.agentColorPreset}
+                sessions={group.sessions}
+                maxSessions={10}
               />
             ))}
           </div>

@@ -69,6 +69,7 @@ class SessionPublicExtended(SessionPublic):
     """Session with external session metadata"""
     external_session_id: str | None = None
     sdk_type: str | None = None
+    agent_id: uuid.UUID | None = None
     agent_name: str | None = None
     agent_ui_color_preset: str | None = None
 

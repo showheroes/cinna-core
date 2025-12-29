@@ -1289,6 +1289,18 @@ export const SessionPublicExtendedSchema = {
             ],
             title: 'Sdk Type'
         },
+        agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Id'
+        },
         agent_name: {
             anyOf: [
                 {

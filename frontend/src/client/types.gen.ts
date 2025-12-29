@@ -270,6 +270,7 @@ export type SessionPublicExtended = {
     last_message_at: (string | null);
     external_session_id?: (string | null);
     sdk_type?: (string | null);
+    agent_id?: (string | null);
     agent_name?: (string | null);
     agent_ui_color_preset?: (string | null);
 };
