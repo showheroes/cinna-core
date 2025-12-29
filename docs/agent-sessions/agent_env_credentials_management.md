@@ -30,8 +30,9 @@ workspace/
 
 **`CredentialsService`** (`backend/app/services/credentials_service.py`)
 - `prepare_credentials_for_environment()` - Prepares both JSON and README data
-- `generate_credentials_readme()` - Creates redacted documentation
+- `generate_credentials_readme()` - Creates redacted documentation with ID-based lookup examples
 - `redact_credential_data()` - Redacts sensitive fields only if they have values
+- `_process_api_token_credential()` - Processes API Token credentials to generate ready-to-use HTTP headers
 - `sync_credentials_to_agent_environments()` - Syncs to all running environments
 - Event handlers: `event_credential_updated()`, `event_credential_deleted()`, `event_credential_shared()`, `event_credential_unshared()`
 
@@ -73,6 +74,38 @@ workspace/
 3. **`gmail_oauth`** - Gmail OAuth
    - Fields: `access_token`, `refresh_token`, `token_type`, `expires_at`, `scope`
    - Sensitive: `access_token`, `refresh_token`
+
+4. **`api_token`** - API Token (Bearer or Custom)
+   - Input fields: `api_token_type` ("bearer" or "custom"), `api_token_template`, `api_token`
+   - Processed to: `http_header_name`, `http_header_value` (ready-to-use HTTP headers)
+   - Sensitive: `http_header_value`
+   - **Processing Logic**:
+     - **Bearer type**: Generates `{"http_header_name": "Authorization", "http_header_value": "Bearer {token}"}`
+     - **Custom type**: Parses template (e.g., `"X-API-Key: {TOKEN}"`) to generate appropriate header fields
+   - This eliminates the need for agents to parse templates - they just use the pre-processed headers
+
+   **Example**:
+   ```python
+   # User input (UI):
+   {
+     "api_token_type": "custom",
+     "api_token_template": "X-API-Key: {TOKEN}",
+     "api_token": "abc123xyz"
+   }
+
+   # Processed output (credentials.json):
+   {
+     "http_header_name": "X-API-Key",
+     "http_header_value": "abc123xyz"
+   }
+
+   # Agent usage:
+   import requests
+   headers = {
+     config['http_header_name']: config['http_header_value']
+   }
+   response = requests.get('https://api.example.com', headers=headers)
+   ```
 
 ## Security Model
 
@@ -120,8 +153,10 @@ The building agent's prompt includes `credentials/README.md` content via:
 
 Building agent receives:
 - Full credential structure (with redacted sensitive values)
+- Credential IDs for stable lookup (IDs never change, unlike names)
 - Security rules (never read credentials.json directly)
-- Usage examples (only for credentials with data)
+- ID-based usage examples (recommended approach)
+- Type-based lookup as alternative (for single-credential cases)
 - Clear indication when credentials are empty/need configuration
 
 ## Best Practices
@@ -130,8 +165,17 @@ Building agent receives:
 - Update credentials through UI (triggers auto-sync)
 - Share credentials before starting environment (or they'll be empty)
 - Credentials persist in workspace (survive rebuilds)
+- Use credential IDs in agent scripts (more stable than names)
 
 ### For Development
 - Always use `CredentialsService` methods (never direct crud calls)
 - Event handlers ensure consistency across running environments
 - Redaction logic keeps sensitive data out of prompts while showing structure
+- API Token credentials are pre-processed to generate ready-to-use HTTP headers
+
+### For Agents (in README.md)
+- **Use credential IDs for lookup** - IDs never change, unlike names
+- Load credentials at script start and reuse connections
+- Handle errors gracefully - credentials might be invalid or expired
+- Close connections properly when done
+- Never hardcode credentials - always read from the credentials file

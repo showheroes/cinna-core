@@ -116,14 +116,47 @@ Your workspace is organized as follows:
 
 You MUST use the `uv` utility for all Python package management:
 
-**Installing packages:**
+#### Two-Layer Dependency System
+
+**Template Dependencies** (pre-installed, system-level):
+- Base packages like `fastapi`, `uvicorn`, `pydantic`, `httpx`, `requests`, `claude-agent-sdk`
+- These are baked into the Docker image and available immediately
+- Updated when the environment is rebuilt by administrators
+
+**Workspace Dependencies** (integration-specific, persists across rebuilds):
+- Integration packages like `odoo-rpc-client`, `salesforce-api`, `stripe`, etc.
+- Stored in `./workspace_requirements.txt`
+- Automatically installed when container starts
+- **CRITICAL**: Add packages here to make them persist across environment rebuilds
+
+#### Installing Packages
+
+**For immediate use in current session:**
 ```bash
 uv pip install <package-name>
 ```
 
-**Installing from requirements.txt:**
+**For persistent installation (RECOMMENDED):**
 ```bash
-uv pip install -r requirements.txt
+# 1. Install the package immediately
+uv pip install <package-name>
+
+# 2. Add to workspace_requirements.txt for persistence across rebuilds
+echo "<package-name>>=<version>" >> ./workspace_requirements.txt
+```
+
+**Example workflow for integration-specific packages:**
+```bash
+# Install odoo-rpc-client for Odoo integration
+uv pip install odoo-rpc-client
+
+# Make it persist across rebuilds
+echo "odoo-rpc-client>=0.8.0" >> ./workspace_requirements.txt
+```
+
+**Installing from workspace_requirements.txt:**
+```bash
+uv pip install -r ./workspace_requirements.txt
 ```
 
 **Running scripts with uv:**
@@ -131,11 +164,11 @@ uv pip install -r requirements.txt
 uv run python scripts/your_script.py
 ```
 
-**Creating virtual environments (if needed):**
-```bash
-uv venv
-source .venv/bin/activate  # On Unix/macOS
-```
+**IMPORTANT**:
+- Always use `workspace_requirements.txt` for integration-specific dependencies
+- Template dependencies (fastapi, httpx, requests, etc.) are already installed
+- Workspace dependencies will be reinstalled automatically when environment restarts
+- This ensures your custom packages survive environment rebuilds
 
 ### Script Development Best Practices
 

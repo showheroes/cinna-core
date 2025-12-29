@@ -104,6 +104,10 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
 
                 if health.status == "healthy":
                     logger.info(f"Container {self.container_name} is healthy after {waited}s")
+
+                    # Install custom packages after container is healthy
+                    await self.install_custom_packages()
+
                     return True
                 else:
                     logger.debug(f"Container {self.container_name} not yet healthy: {health.message}")
@@ -536,6 +540,56 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
                 stdout="",
                 stderr=str(e)
             )
+
+    async def install_custom_packages(self) -> bool:
+        """
+        Install custom Python packages from workspace/workspace_requirements.txt.
+
+        This allows agents to install integration-specific packages (odoo-rpc, salesforce-api, etc.)
+        that persist across environment rebuilds.
+
+        Returns:
+            True if successful or no packages to install, raises exception on failure
+        """
+        custom_requirements_path = "/app/workspace/workspace_requirements.txt"
+
+        try:
+            # Check if custom requirements file exists
+            check_result = await self.execute_command(
+                f"test -f {custom_requirements_path} && echo 'exists' || echo 'missing'"
+            )
+
+            if "missing" in check_result.stdout:
+                logger.debug(f"No custom requirements file found in {self.container_name}")
+                return True
+
+            # Count non-empty, non-comment lines
+            count_result = await self.execute_command(
+                f"grep -v '^#' {custom_requirements_path} | grep -v '^[[:space:]]*$' | wc -l"
+            )
+
+            package_count = int(count_result.stdout.strip()) if count_result.stdout.strip().isdigit() else 0
+
+            if package_count == 0:
+                logger.debug(f"No custom packages to install in {self.container_name}")
+                return True
+
+            # Install packages
+            logger.info(f"Installing {package_count} custom package(s) in {self.container_name}")
+            install_result = await self.execute_command(
+                f"uv pip install -r {custom_requirements_path}"
+            )
+
+            if install_result.exit_code != 0:
+                logger.error(f"Failed to install custom packages: {install_result.stdout}")
+                raise Exception(f"Failed to install custom packages: {install_result.stdout}")
+
+            logger.info(f"Custom packages installed successfully in {self.container_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error installing custom packages in {self.container_name}: {e}")
+            raise
 
     async def get_logs(self, lines: int = 100, follow: bool = False) -> list[str] | AsyncIterator[str]:
         """Get container logs."""

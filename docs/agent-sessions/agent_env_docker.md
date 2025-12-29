@@ -63,7 +63,8 @@ backend/app/env-templates/python-env-advanced/
 │   │   │   │   ├── general_info.md    # API guides, best practices
 │   │   │   │   └── vendor_bills.md    # Data schemas, field definitions
 │   │   │   └── [other-topics]/        # Additional integration topics
-│   │   └── logs/                      # Execution logs, session dumps
+│   │   ├── logs/                      # Execution logs, session dumps
+│   │   └── workspace_requirements.txt # Agent-installed Python packages (persists across rebuilds)
 │   │
 │   ├── BUILDING_AGENT_EXAMPLE.md      # Template for building mode prompt
 │   └── ENTRYPOINT_EXAMPLE.md          # Template for trigger message (deprecated)
@@ -161,6 +162,29 @@ workspace/knowledge/
     └── api_notes.md
 ```
 
+### Python Dependencies
+
+**Two-Layer System**: Template dependencies (system-level) + Workspace dependencies (integration-specific)
+
+**Template Dependencies** (`pyproject.toml`):
+- Pre-installed packages: `fastapi`, `uvicorn`, `pydantic`, `httpx`, `requests`, `claude-agent-sdk`
+- Baked into Docker image during build
+- Updated via environment rebuild
+
+**Workspace Dependencies** (`workspace/workspace_requirements.txt`):
+- Integration-specific packages: `odoo-rpc-client`, `salesforce-api`, `stripe`, etc.
+- Installed by agent using `uv pip install <package>`
+- Added to `workspace_requirements.txt` for persistence
+- Auto-installed on container startup (after health check)
+- **Persists across rebuilds**
+
+**Installation Flow**:
+1. Agent runs: `uv pip install <package>` (immediate use)
+2. Agent adds to: `workspace_requirements.txt` (persistence)
+3. On next start/rebuild: Auto-installed via `DockerEnvironmentAdapter.install_custom_packages()`
+
+**Implementation**: `backend/app/services/adapters/docker_adapter.py::install_custom_packages()`
+
 ## Operations
 
 ### Environment Creation
@@ -189,8 +213,9 @@ workspace/knowledge/
    - `{instance_dir}/app/core:/app/core` (read-only in practice)
    - `{instance_dir}/app/workspace:/app/workspace` (read-write)
 3. Wait for health check at `/health` endpoint
-4. Sync prompts to `workspace/docs/` via `DockerEnvironmentAdapter.set_agent_prompts()`
-5. Update database status to `running`
+4. **Install workspace dependencies** from `workspace_requirements.txt` (if exists)
+5. Sync prompts to `workspace/docs/` via `DockerEnvironmentAdapter.set_agent_prompts()`
+6. Update database status to `running`
 
 **Note**: Core files are both baked into image AND volume-mounted for easier development. Production could use image-only.
 
@@ -217,6 +242,7 @@ workspace/knowledge/
 **Preserved**:
 - All workspace data (scripts, files, docs, credentials, databases, logs)
 - User-created knowledge files (not in template)
+- **Workspace dependencies** (`workspace_requirements.txt`)
 - Docker volumes
 - Environment configuration
 - Agent prompts
@@ -229,6 +255,7 @@ workspace/knowledge/
 - Business logic services
 - Utility functions
 - Docker image layers
+- **Template dependencies** (pyproject.toml packages)
 - Knowledge base files from template (add/update only, no deletions)
 
 ## Docker Configuration
@@ -241,9 +268,11 @@ workspace/knowledge/
 - Install system dependencies (curl, git, Node.js for Claude Code)
 - Install uv package manager
 - Install Claude Code CLI globally
-- Copy `pyproject.toml` and install Python dependencies
+- Copy `pyproject.toml` and install **template dependencies** (system-level packages)
 - **Copy `app/core` into image** (line 50)
 - Set CMD to run `fastapi run core/main.py`
+
+**Note**: Workspace dependencies (`workspace_requirements.txt`) are installed after container startup, not during image build.
 
 **Environment Variables**:
 - `PYTHONPATH=/app` (enables `import core.server.routes`)
@@ -309,3 +338,4 @@ workspace/knowledge/
 5. **Flexibility**: Can rebuild multiple times without risk
 6. **Development**: Core updates tested without recreating environments
 7. **Knowledge Distribution**: Integration knowledge base updates distributed to all environments via rebuild, while preserving user customizations
+8. **Dependency Management**: Two-layer system allows template dependency updates via rebuild while preserving agent-installed workspace dependencies
