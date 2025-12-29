@@ -134,19 +134,119 @@ Returns: `{is_streaming: bool, stream_info: {...}}`
 
 **New Behavior**: Frontend disconnect → Backend continues → Agent env completes normally → All data saved, session intact
 
-### Implementation
+### Implementation Challenge: Python Generator Chain Closure
 
-**Backend Independence** (`message_service.py:stream_message_with_events`):
+**The Issue Encountered**:
+
+When the frontend disconnected (browser closed), Python's async generator chain automatically closed all generators in the chain, causing the backend-to-agent-env stream to terminate prematurely. This happened because:
+
+1. FastAPI's `StreamingResponse` detected client disconnect and raised `asyncio.CancelledError`
+2. Python's async generator protocol automatically called `.aclose()` on the generator being consumed
+3. This closure propagated up the entire chain: `event_stream()` → `stream_message_with_events()` → `send_message_to_environment_stream()`
+4. The `finally` block in `stream_message_with_events()` executed immediately, unregistering the stream
+5. Result: Agent response never saved, session left in inconsistent state, external session ID lost
+
+**Symptoms**:
+- Stream duration very short (0.9-6.6 seconds) when frontend disconnected
+- Log: "Unregistered stream" appeared BEFORE frontend disconnect warning
+- No "Agent response saved" message in logs
+- Zero events consumed after disconnect attempt
+- No communication with agent environment completed
+
+**Root Cause**: Attempting to continue consuming from an already-closed generator in a background task is impossible. The generator chain is tightly coupled by Python's async iteration protocol.
+
+### Queue-Based Decoupling Solution
+
+**Architecture** (`messages.py:send_message_stream`):
+
+The solution uses an `asyncio.Queue` to break the generator chain coupling:
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Background Task (independent lifecycle)             │
+│  - Consumes from stream_message_with_events()       │
+│  - Pushes all events to asyncio.Queue               │
+│  - Runs to completion even if frontend disconnects  │
+└──────────────┬──────────────────────────────────────┘
+               │ asyncio.Queue (unbounded)
+               ↓
+┌──────────────────────────────────────────────────────┐
+│ Frontend Generator (can disconnect anytime)          │
+│  - Reads events from queue                           │
+│  - Yields as SSE to client                           │
+│  - On disconnect: raises exception, queue remains    │
+└──────────────────────────────────────────────────────┘
+```
+
+**Implementation** (`messages.py:event_stream` method in `send_message_stream` endpoint):
+
+1. **Create Queue First**: Unbounded `asyncio.Queue` for event passing
+2. **Start Background Task**: `stream_consumer_task()` is launched BEFORE yielding to frontend
+3. **Consumer Task**:
+   - Independently consumes from `MessageService.stream_message_with_events()`
+   - Puts all events into queue (even after frontend disconnects)
+   - Signals completion by putting `None` in queue
+   - Logs whether frontend was still connected at completion
+4. **Frontend Loop**: Simple `while True` loop reading from queue and yielding SSE events
+5. **On Disconnect**: Exception caught, `frontend_connected` flag set to `False`, but consumer task **not cancelled**
+6. **Key Property**: Background task lifecycle is independent - not tied to generator chain
+
+**Critical Implementation Details**:
+
+- Task is created with `asyncio.create_task()` BEFORE any `yield` statements
+- Task reference (`consumer_task`) intentionally not stored for later cancellation
+- Queue is unbounded to prevent blocking if frontend stops consuming
+- `frontend_connected` flag tracks state for logging purposes only
+- Exception handling in consumer task ensures errors are logged but don't crash the task
+- Consumer task completion logged differently based on `frontend_connected` state
+
+**Backend Service Independence** (`message_service.py:stream_message_with_events`):
 - Runs to completion regardless of frontend state
 - Streams to agent env via `httpx.AsyncClient.stream()`
-- Saves messages to database
+- Saves messages to database after consuming all events
 - Tracked by `ActiveStreamingManager`
+- All database operations use fresh sessions via `get_fresh_db_session()` callback
 
 **Frontend Resilience** (`useMessageStream.ts`):
 - On mount: checks `/streaming-status`
 - If streaming: shows UI, polls for completion
 - On disconnect: messages still saved in database
 - On reconnect: refresh to show results
+
+### Critical Considerations for Future Development
+
+**When Modifying Streaming Code**:
+
+1. **Never Chain Generators for Decoupling**: Don't rely on generator chains for independence. Python's async generator protocol couples them tightly via `.aclose()` calls.
+
+2. **Queue-Based Architecture is Essential**: The `asyncio.Queue` pattern is not just an optimization - it's required for true decoupling. Any change that removes the queue will break decoupling.
+
+3. **Background Task Must Start First**: The consumer task MUST be created before any `yield` to the frontend. If you yield first, the task becomes part of the generator chain.
+
+4. **Never Cancel the Consumer Task**: The whole point is to let it run to completion. Don't add cleanup code that cancels the task on errors.
+
+5. **Unbounded Queue is Intentional**: Bounded queues can block the consumer task if frontend stops reading. This defeats the purpose of decoupling.
+
+6. **Database Operations in Service Layer**: All DB writes happen in `stream_message_with_events()` after consuming events. Don't move these to the API layer where they could be tied to frontend state.
+
+7. **Testing Decoupling**: To verify decoupling works:
+   - Send a message to a session
+   - Close browser window within 2 seconds (before first response)
+   - Wait 30-60 seconds for agent to complete
+   - Check logs for "Stream consumer completed... frontend disconnected earlier"
+   - Reopen session - agent response should be present
+   - Verify full stream duration (15-45+ seconds, not 0.9-6 seconds)
+
+8. **Error Handling in Consumer Task**: Errors in consumer task should be logged but not propagated. Put error events in queue if needed, but always signal completion with `None`.
+
+9. **Fresh DB Sessions**: Always use `get_fresh_db_session()` callback for DB operations in the background task context. Don't reuse the request's DB session.
+
+10. **ActiveStreamingManager Semantics**: The stream should remain registered in `ActiveStreamingManager` until `stream_message_with_events()` completes, regardless of frontend state. This allows `/streaming-status` endpoint to correctly report ongoing streams.
+
+**Files Modified for Decoupling**:
+- `backend/app/api/routes/messages.py` - Queue-based architecture in `send_message_stream` endpoint
+- `backend/app/services/message_service.py` - Independent execution of `stream_message_with_events()`
+- `backend/app/services/active_streaming_manager.py` - Stream lifecycle tracking independent of client connections
 
 ## Interruption Handling
 

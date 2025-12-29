@@ -218,22 +218,105 @@ async def send_message_stream(
     auth_headers = MessageService.get_auth_headers(environment)
 
     async def event_stream():
-        """Generate SSE events for frontend"""
-        # Stream events from MessageService (all business logic is in the service)
-        async for event in MessageService.stream_message_with_events(
-            session_id=session_id,
-            environment_id=environment_id,
-            base_url=base_url,
-            auth_headers=auth_headers,
-            user_message_content=user_message_content,
-            session_mode=session_mode,
-            agent_sdk=agent_sdk,
-            external_session_id=external_session_id,
-            get_fresh_db_session=lambda: DBSession(engine)
-        ):
-            # Format event as SSE and forward to frontend
-            event_json = json.dumps(event)
-            yield f"data: {event_json}\n\n"
+        """
+        Generate SSE events for frontend with true decoupling.
+
+        ARCHITECTURE: Uses a queue-based approach to decouple frontend streaming
+        from backend-to-agent-env streaming:
+
+        1. Background task consumes from MessageService.stream_message_with_events()
+        2. Events are pushed to an asyncio.Queue
+        3. Frontend-facing generator reads from queue
+        4. If frontend disconnects, background task continues independently
+
+        This ensures data integrity even when the client closes the connection.
+        """
+        # Create queue for event passing (unbounded to avoid blocking)
+        event_queue = asyncio.Queue()
+
+        # Flag to track if frontend is still connected
+        frontend_connected = True
+
+        async def stream_consumer_task():
+            """
+            Background task that consumes events from agent env.
+            Runs independently of frontend connection state.
+            """
+            try:
+                event_count = 0
+                async for event in MessageService.stream_message_with_events(
+                    session_id=session_id,
+                    environment_id=environment_id,
+                    base_url=base_url,
+                    auth_headers=auth_headers,
+                    user_message_content=user_message_content,
+                    session_mode=session_mode,
+                    agent_sdk=agent_sdk,
+                    external_session_id=external_session_id,
+                    get_fresh_db_session=lambda: DBSession(engine)
+                ):
+                    event_count += 1
+                    # Always put event in queue (even if frontend disconnected)
+                    await event_queue.put(event)
+
+                # Signal completion
+                await event_queue.put(None)
+
+                if frontend_connected:
+                    logger.info(
+                        f"Stream consumer completed for session {session_id} "
+                        f"({event_count} events, frontend still connected)"
+                    )
+                else:
+                    logger.info(
+                        f"Stream consumer completed for session {session_id} "
+                        f"({event_count} events, frontend disconnected earlier)"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Error in stream consumer for session {session_id}: {e}",
+                    exc_info=True
+                )
+                # Put error marker in queue
+                await event_queue.put({"type": "error", "content": str(e)})
+                await event_queue.put(None)
+
+        # Start background consumer task BEFORE we start yielding to frontend
+        # This is the key to decoupling - the task is independent
+        consumer_task = asyncio.create_task(stream_consumer_task())
+
+        try:
+            # Yield events to frontend from queue
+            while True:
+                event = await event_queue.get()
+
+                # None signals completion
+                if event is None:
+                    break
+
+                # Format event as SSE and forward to frontend
+                event_json = json.dumps(event)
+                yield f"data: {event_json}\n\n"
+
+        except (asyncio.CancelledError, GeneratorExit) as e:
+            # Frontend disconnected
+            frontend_connected = False
+            logger.warning(
+                f"Frontend disconnected from session {session_id} (error: {type(e).__name__}). "
+                f"Backend-to-agent-env stream continues independently."
+            )
+            # Don't cancel consumer_task - let it continue!
+            # The background task will keep consuming and saving data
+            raise
+        except Exception as e:
+            # Unexpected error
+            frontend_connected = False
+            logger.error(
+                f"Unexpected error while streaming to frontend for session {session_id}: {e}",
+                exc_info=True
+            )
+            # Don't cancel consumer_task in case it can still save data
+            raise
 
     return StreamingResponse(
         event_stream(),
