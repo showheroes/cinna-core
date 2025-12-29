@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState, useRef, useCallback } from "react"
-import { ArrowLeft, EllipsisVertical } from "lucide-react"
+import { ArrowLeft, EllipsisVertical, Package } from "lucide-react"
 
 import { SessionsService, MessagesService } from "@/client"
 import { MessageList } from "@/components/Chat/MessageList"
@@ -19,6 +19,7 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { useMessageStream } from "@/hooks/useMessageStream"
 import { usePageHeader } from "@/routes/_layout"
 import { AnimatedPlaceholder } from "@/components/Common/AnimatedPlaceholder"
+import { EnvironmentPanel } from "@/components/Environment/EnvironmentPanel"
 
 export const Route = createFileRoute("/_layout/session/$sessionId")({
   component: ChatInterface,
@@ -36,6 +37,7 @@ function ChatInterface() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { setHeaderContent } = usePageHeader()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [envPanelOpen, setEnvPanelOpen] = useState(false)
   const initialMessageSent = useRef(false)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -156,25 +158,36 @@ function ChatInterface() {
               </p>
             </div>
           </div>
-          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="shrink-0">
-                <EllipsisVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <EditSession session={session} onSuccess={() => setMenuOpen(false)} />
-              <DeleteSession
-                id={session.id}
-                onSuccess={handleDeleteSuccess}
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={envPanelOpen ? "secondary" : "ghost"}
+              size="sm"
+              className="shrink-0"
+              onClick={() => setEnvPanelOpen(!envPanelOpen)}
+            >
+              <Package className="h-4 w-4 mr-1.5" />
+              App
+            </Button>
+            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="shrink-0">
+                  <EllipsisVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <EditSession session={session} onSuccess={() => setMenuOpen(false)} />
+                <DeleteSession
+                  id={session.id}
+                  onSuccess={handleDeleteSuccess}
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </>
       )
     }
     return () => setHeaderContent(null)
-  }, [session, setHeaderContent, menuOpen, handleBack, handleDeleteSuccess])
+  }, [session, setHeaderContent, menuOpen, envPanelOpen, handleBack, handleDeleteSuccess])
 
   if (sessionLoading || messagesLoading) {
     return <PendingItems />
@@ -198,13 +211,16 @@ function ChatInterface() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <MessageList
-        messages={messages}
-        isLoading={messagesLoading}
-        streamingEvents={streamingEvents}
-        isStreaming={isStreaming}
-        onSendAnswer={handleSendAnswer}
-      />
+      <div className="flex flex-col flex-1 min-h-0 relative">
+        <MessageList
+          messages={messages}
+          isLoading={messagesLoading}
+          streamingEvents={streamingEvents}
+          isStreaming={isStreaming}
+          onSendAnswer={handleSendAnswer}
+        />
+        <EnvironmentPanel isOpen={envPanelOpen} />
+      </div>
       <MessageInput
         ref={messageInputRef}
         onSend={handleSendMessage}
