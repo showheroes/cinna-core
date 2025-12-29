@@ -5,6 +5,7 @@ import type { SessionPublicExtended } from "@/client"
 import { MessageSquare, Clock, Wrench, MessageCircle } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { AnimatedPlaceholder } from "@/components/Common/AnimatedPlaceholder"
+import { getColorPreset } from "@/utils/colorPresets"
 
 interface LatestSessionsProps {
   limit?: number
@@ -46,35 +47,32 @@ export function LatestSessions({ limit = 8 }: LatestSessionsProps) {
       </div>
 
       <div className="space-y-0.5">
-        {sessions.map((session: SessionPublicExtended) => (
-          <button
-            key={session.id}
-            onClick={() => handleSessionClick(session.id)}
-            className="w-full text-left px-3 py-2 rounded-md hover:bg-accent transition-colors group"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {session.agent_name}
-                  </span>
-                  {session.mode === "building" && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300">
-                      Building
-                    </span>
-                  )}
+        {sessions.map((session: SessionPublicExtended) => {
+          const colorPreset = getColorPreset(session.agent_ui_color_preset)
+          return (
+            <button
+              key={session.id}
+              onClick={() => handleSessionClick(session.id)}
+              className="w-full text-left px-3 py-2 rounded-md hover:bg-accent transition-colors group"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {session.mode === "building" ? (
+                      <Wrench className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                    ) : (
+                      <MessageCircle className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                    )}
+                    <p className="text-sm text-foreground truncate">
+                      {session.title ? session.title : <AnimatedPlaceholder className="text-xs" />}
+                    </p>
+                    {session.agent_name && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${colorPreset.badgeBg} ${colorPreset.badgeText} shrink-0`}>
+                        {session.agent_name}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {session.mode === "building" ? (
-                    <Wrench className="h-3.5 w-3.5 text-orange-500 shrink-0" />
-                  ) : (
-                    <MessageCircle className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                  )}
-                  <p className="text-sm text-foreground truncate">
-                    {session.title ? session.title : <AnimatedPlaceholder className="text-xs" />}
-                  </p>
-                </div>
-              </div>
 
               <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
                 <Clock className="h-3 w-3" />
@@ -98,7 +96,8 @@ export function LatestSessions({ limit = 8 }: LatestSessionsProps) {
               </div>
             </div>
           </button>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

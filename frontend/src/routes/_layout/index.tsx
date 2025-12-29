@@ -385,7 +385,7 @@ function Dashboard() {
         <div className="bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6 py-4">
           <div className="max-h-[45vh] overflow-y-auto">
             <div className="w-full max-w-3xl mx-auto">
-              <LatestSessions limit={5} />
+              <LatestSessions limit={8} />
             </div>
           </div>
         </div>
