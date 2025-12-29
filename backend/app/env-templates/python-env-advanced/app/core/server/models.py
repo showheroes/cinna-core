@@ -43,3 +43,28 @@ class CredentialsUpdate(BaseModel):
     """Update credentials in workspace"""
     credentials_json: list[dict]  # Full credentials data
     credentials_readme: str  # Redacted README for agent prompt
+
+
+class FileNode(BaseModel):
+    """Single file or folder node in workspace tree"""
+    name: str
+    type: str  # "file" | "folder"
+    path: str  # Relative path from workspace root
+    size: int | None = None  # Bytes (None for folders until summarized)
+    modified: datetime | None = None
+    children: list['FileNode'] | None = None  # Only for folders
+
+
+class FolderSummary(BaseModel):
+    """Summary statistics for a folder"""
+    fileCount: int
+    totalSize: int  # Bytes
+
+
+class WorkspaceTreeResponse(BaseModel):
+    """Complete workspace tree with 4 main folders"""
+    files: FileNode
+    logs: FileNode
+    scripts: FileNode
+    docs: FileNode
+    summaries: dict[str, FolderSummary]

@@ -12,6 +12,7 @@ from app.api.routes import (
     sessions,
     users,
     utils,
+    workspace,
 )
 from app.core.config import settings
 
@@ -26,6 +27,7 @@ api_router.include_router(credentials.router)
 api_router.include_router(environments.router)
 api_router.include_router(sessions.router)
 api_router.include_router(messages.router)
+api_router.include_router(workspace.router)
 
 
 if settings.ENVIRONMENT == "local":

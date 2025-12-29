@@ -162,6 +162,47 @@ workspace/knowledge/
     └── api_notes.md
 ```
 
+### Workspace Data Access
+
+**Purpose**: Expose workspace file structure to external systems (backend, frontend) for browsing and downloading agent-generated artifacts
+
+**API Endpoints** (Agent-Env Core):
+- `GET /workspace/tree` - Returns complete file tree for files, logs, scripts, docs folders
+- `GET /workspace/download/{path}` - Downloads individual files or folders (as ZIP)
+
+**Implementation**: `backend/app/env-templates/python-env-advanced/app/core/server/`
+- **routes.py**: HTTP endpoints with auth validation, streaming responses
+- **agent_env_service.py**: Business logic with security-critical path validation
+- **models.py**: Pydantic schemas (`FileNode`, `FolderSummary`, `WorkspaceTreeResponse`)
+
+**Security** (`AgentEnvService.validate_workspace_path()`):
+- Rejects absolute paths and parent directory references (`..`)
+- Resolves to absolute path and validates workspace boundary
+- Validates symlinks don't point outside workspace
+- Prevents directory traversal attacks
+
+**Backend Proxy Layer** (`backend/app/api/routes/workspace.py`):
+- `GET /api/v1/environments/{env_id}/workspace/tree` - Proxies tree request to agent-env
+- `GET /api/v1/environments/{env_id}/workspace/download/{path}` - Streams downloads directly to browser
+- Permission checks: User must own agent, environment must be running
+- Streaming: No buffering, 64KB chunks, direct proxy from agent-env to client
+
+**Adapter Pattern** (`backend/app/services/adapters/`):
+- **base.py**: Abstract methods `get_workspace_tree()`, `download_workspace_item()`
+- **docker_adapter.py**: HTTP proxy implementation with auth headers, streaming support
+- Universal interface works for Docker, future SSH/K8s/HTTP adapters
+
+**File Operations**:
+- Tree building: Recursive traversal with unlimited depth, metadata extraction (size, modified date)
+- Downloads: Single files streamed directly, folders zipped on-the-fly in `/tmp`, auto-cleanup
+- Folder summaries: Calculated fileCount and totalSize for each workspace section
+
+**Frontend Integration** (`frontend/src/components/Environment/EnvironmentPanel.tsx`):
+- React Query: Fetches tree data when panel opens, 30-second cache
+- Loading states: Spinner, error with retry, empty state, no environment state
+- Downloads: Authenticated fetch with Bearer token, blob creation, browser download trigger
+- Real-time: Queries only when panel open and environment ID available
+
 ### Python Dependencies
 
 **Two-Layer System**: Template dependencies (system-level) + Workspace dependencies (integration-specific)

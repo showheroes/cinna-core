@@ -800,3 +800,16 @@ export type UtilsTestEmailData = {
 export type UtilsTestEmailResponse = (Message);
 
 export type UtilsHealthCheckResponse = (boolean);
+
+export type WorkspaceGetWorkspaceTreeData = {
+    envId: string;
+};
+
+export type WorkspaceGetWorkspaceTreeResponse = (unknown);
+
+export type WorkspaceDownloadWorkspaceItemData = {
+    envId: string;
+    path: string;
+};
+
+export type WorkspaceDownloadWorkspaceItemResponse = (unknown);

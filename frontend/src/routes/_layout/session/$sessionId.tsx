@@ -219,7 +219,7 @@ function ChatInterface() {
           isStreaming={isStreaming}
           onSendAnswer={handleSendAnswer}
         />
-        <EnvironmentPanel isOpen={envPanelOpen} />
+        <EnvironmentPanel isOpen={envPanelOpen} environmentId={session?.environment_id} />
       </div>
       <MessageInput
         ref={messageInputRef}

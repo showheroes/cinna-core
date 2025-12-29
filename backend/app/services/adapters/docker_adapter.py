@@ -541,6 +541,68 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
                 stderr=str(e)
             )
 
+    async def get_workspace_tree(self) -> dict:
+        """
+        Get workspace tree via HTTP proxy to agent-env.
+
+        Returns:
+            Dictionary with full workspace tree structure
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.base_url}/workspace/tree",
+                    headers=self._get_headers(),
+                    timeout=30.0  # Tree building can take time for large workspaces
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to get workspace tree: {e}")
+            raise Exception(f"Failed to get workspace tree: {e}")
+
+    async def download_workspace_item(self, path: str) -> AsyncIterator[bytes]:
+        """
+        Download file or folder via HTTP proxy to agent-env.
+
+        Streams response to avoid loading entire file/zip into memory.
+
+        Args:
+            path: Relative path from workspace root
+
+        Yields:
+            Bytes chunks
+        """
+        # URL-encode path to handle special characters
+        import urllib.parse
+        encoded_path = urllib.parse.quote(path, safe='/')
+
+        try:
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "GET",
+                    f"{self.base_url}/workspace/download/{encoded_path}",
+                    headers=self._get_headers(),
+                    timeout=120.0  # Allow time for large zips
+                ) as response:
+                    response.raise_for_status()
+
+                    # Stream response chunks
+                    async for chunk in response.aiter_bytes(chunk_size=65536):
+                        yield chunk
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise FileNotFoundError(f"Path not found: {path}")
+            elif e.response.status_code == 400:
+                raise ValueError(f"Invalid path: {path}")
+            else:
+                logger.error(f"Failed to download workspace item: {e}")
+                raise Exception(f"Failed to download workspace item: {e}")
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to download workspace item: {e}")
+            raise Exception(f"Failed to download workspace item: {e}")
+
     async def install_custom_packages(self) -> bool:
         """
         Install custom Python packages from workspace/workspace_requirements.txt.

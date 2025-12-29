@@ -1,5 +1,6 @@
-import { FileText, FileJson, FileCode, ScrollText, Download, FileSpreadsheet, ChevronDown, ChevronRight, BookOpen, Folder, FolderOpen, Maximize2, Minimize2 } from "lucide-react"
-import { useState } from "react"
+import { FileText, FileJson, FileCode, ScrollText, Download, FileSpreadsheet, ChevronDown, ChevronRight, BookOpen, Folder, FolderOpen, Maximize2, Minimize2, Loader2, AlertCircle } from "lucide-react"
+import { useState, useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
@@ -8,6 +9,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { WorkspaceService, OpenAPI } from "@/client"
+import type { FileNode } from "@/client"
+import type { AxiosRequestConfig } from "axios"
 
 // Tree item types
 interface FileItem {
@@ -112,6 +116,7 @@ const STUB_DOCS: TreeItem[] = [
 
 interface EnvironmentPanelProps {
   isOpen: boolean
+  environmentId?: string
 }
 
 const getFileIcon = (fileType: string) => {
@@ -175,7 +180,7 @@ function TreeItemRenderer({ item, level, expandedFolders, onToggleFolder, onDown
             className="opacity-0 group-hover:opacity-100 shrink-0 p-0 hover:text-foreground text-muted-foreground transition-colors ml-1"
             onClick={(e) => {
               e.stopPropagation()
-              onDownload(item.name)
+              onDownload(currentPath)
             }}
             title="Download folder"
           >
@@ -219,7 +224,7 @@ function TreeItemRenderer({ item, level, expandedFolders, onToggleFolder, onDown
         </span>
         <button
           className="opacity-0 group-hover:opacity-100 shrink-0 p-0 hover:text-foreground text-muted-foreground transition-colors"
-          onClick={() => onDownload(item.name)}
+          onClick={() => onDownload(currentPath)}
           title="Download"
         >
           <Download className="h-4 w-4" />
@@ -229,17 +234,120 @@ function TreeItemRenderer({ item, level, expandedFolders, onToggleFolder, onDown
   )
 }
 
-export function EnvironmentPanel({ isOpen }: EnvironmentPanelProps) {
+// Helper function to format file size
+const formatFileSize = (bytes: number | null | undefined): string => {
+  if (!bytes) return "0 B"
+  const sizes = ["B", "KB", "MB", "GB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`
+}
+
+// Helper function to format date
+const formatDate = (dateString: string | null | undefined): string => {
+  if (!dateString) return ""
+  const date = new Date(dateString)
+  return date.toLocaleString("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  })
+}
+
+// Helper function to get file extension from name
+const getFileExtension = (name: string): string => {
+  const lastDot = name.lastIndexOf('.')
+  return lastDot > 0 ? name.substring(lastDot + 1).toLowerCase() : 'txt'
+}
+
+// Convert API FileNode to UI TreeItem
+const convertFileNodeToTreeItem = (node: FileNode): TreeItem => {
+  if (node.type === "folder") {
+    return {
+      type: "folder",
+      name: node.name,
+      size: node.size ? formatFileSize(node.size) : "0 B",
+      modified: formatDate(node.modified),
+      children: node.children ? node.children.map(convertFileNodeToTreeItem) : []
+    }
+  } else {
+    return {
+      type: "file",
+      name: node.name,
+      fileType: getFileExtension(node.name),
+      size: formatFileSize(node.size),
+      modified: formatDate(node.modified)
+    }
+  }
+}
+
+export function EnvironmentPanel({ isOpen, environmentId }: EnvironmentPanelProps) {
   const [activeTab, setActiveTab] = useState("files")
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [isWidePanelMode, setIsWidePanelMode] = useState(false)
 
+  // Set up request interceptor for blob downloads (only once)
+  useEffect(() => {
+    const interceptor = (config: AxiosRequestConfig) => {
+      // If this is a download request, set responseType to blob
+      if (config.url?.includes('/workspace/download/')) {
+        config.responseType = 'blob'
+      }
+      return config
+    }
+
+    // Register interceptor
+    OpenAPI.interceptors.request.use(interceptor)
+
+    // Cleanup: remove interceptor when component unmounts
+    return () => {
+      OpenAPI.interceptors.request.eject(interceptor)
+    }
+  }, [])
+
+  // Fetch workspace tree when panel is open and environmentId is available
+  const {
+    data: workspaceData,
+    isLoading,
+    error,
+    refetch
+  } = useQuery({
+    queryKey: ["workspace-tree", environmentId],
+    queryFn: () => WorkspaceService.getWorkspaceTree({ envId: environmentId! }),
+    enabled: isOpen && !!environmentId,
+    staleTime: 30000, // Cache for 30 seconds
+  })
+
   if (!isOpen) return null
 
-  const handleDownload = (fileName: string) => {
-    // TODO: Implement actual download functionality
-    console.log("Downloading:", fileName)
+  const handleDownload = async (filePath: string) => {
+    if (!environmentId) return
+
+    try {
+      // Use generated WorkspaceService client
+      // The interceptor will set responseType: 'blob' for this request
+      const blob = await WorkspaceService.downloadWorkspaceItem({
+        envId: environmentId,
+        path: filePath
+      }) as unknown as Blob
+
+      // Extract filename from path
+      const filename = filePath.split('/').pop() || 'download'
+
+      // Create blob URL and trigger download
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Download error:', error)
+    }
   }
 
   const handleToggleFolder = (path: string) => {
@@ -266,6 +374,50 @@ export function EnvironmentPanel({ isOpen }: EnvironmentPanelProps) {
     setActiveTab(value)
     setMoreMenuOpen(false)
   }
+
+  // Convert API data to TreeItem[] for each section
+  const filesData: TreeItem[] = workspaceData?.files ? [convertFileNodeToTreeItem(workspaceData.files)] : []
+  const scriptsData: TreeItem[] = workspaceData?.scripts ? [convertFileNodeToTreeItem(workspaceData.scripts)] : []
+  const logsData: TreeItem[] = workspaceData?.logs ? [convertFileNodeToTreeItem(workspaceData.logs)] : []
+  const docsData: TreeItem[] = workspaceData?.docs ? [convertFileNodeToTreeItem(workspaceData.docs)] : []
+
+  // Render loading state
+  const renderLoading = () => (
+    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+      <Loader2 className="h-8 w-8 animate-spin" />
+      <p className="text-sm">Loading workspace...</p>
+    </div>
+  )
+
+  // Render error state
+  const renderError = () => (
+    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground px-4">
+      <AlertCircle className="h-8 w-8 text-destructive" />
+      <div className="text-center">
+        <p className="text-sm font-medium mb-1">Failed to load workspace</p>
+        <p className="text-xs">{error instanceof Error ? error.message : "Unknown error"}</p>
+      </div>
+      <Button size="sm" variant="outline" onClick={() => refetch()}>
+        Retry
+      </Button>
+    </div>
+  )
+
+  // Render empty state
+  const renderEmpty = () => (
+    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground px-4">
+      <FileText className="h-8 w-8" />
+      <p className="text-sm text-center">No files found in this section</p>
+    </div>
+  )
+
+  // Render no environment state
+  const renderNoEnvironment = () => (
+    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground px-4">
+      <AlertCircle className="h-8 w-8" />
+      <p className="text-sm text-center">No environment available for this session</p>
+    </div>
+  )
 
   return (
     <div className={`absolute top-0 right-0 h-full bg-background border-l border-border shadow-lg z-10 flex flex-col transition-all duration-200 ${isWidePanelMode ? 'w-[768px]' : 'w-96'}`}>
@@ -315,69 +467,92 @@ export function EnvironmentPanel({ isOpen }: EnvironmentPanelProps) {
           </Button>
         </div>
 
-        {/* Files Tab */}
-        <TabsContent value="files" className="flex-1 overflow-auto px-4 pb-4">
-          <div className="space-y-1">
-            {STUB_FILES.map((item, index) => (
-              <TreeItemRenderer
-                key={index}
-                item={item}
-                level={0}
-                expandedFolders={expandedFolders}
-                onToggleFolder={handleToggleFolder}
-                onDownload={handleDownload}
-              />
-            ))}
-          </div>
-        </TabsContent>
+        {/* Show loading/error/no-env state for all tabs */}
+        {!environmentId ? (
+          <div className="flex-1">{renderNoEnvironment()}</div>
+        ) : isLoading ? (
+          <div className="flex-1">{renderLoading()}</div>
+        ) : error ? (
+          <div className="flex-1">{renderError()}</div>
+        ) : (
+          <>
+            {/* Files Tab */}
+            <TabsContent value="files" className="flex-1 overflow-auto px-4 pb-4">
+              {filesData[0]?.children && filesData[0].children.length > 0 ? (
+                <div className="space-y-1">
+                  {filesData[0].children.map((item, index) => (
+                    <TreeItemRenderer
+                      key={index}
+                      item={item}
+                      level={0}
+                      expandedFolders={expandedFolders}
+                      onToggleFolder={handleToggleFolder}
+                      onDownload={handleDownload}
+                      path="files"
+                    />
+                  ))}
+                </div>
+              ) : renderEmpty()}
+            </TabsContent>
 
-        {/* Scripts Tab */}
-        <TabsContent value="scripts" className="flex-1 overflow-auto px-4 pb-4">
-          <div className="space-y-1">
-            {STUB_SCRIPTS.map((item, index) => (
-              <TreeItemRenderer
-                key={index}
-                item={item}
-                level={0}
-                expandedFolders={expandedFolders}
-                onToggleFolder={handleToggleFolder}
-                onDownload={handleDownload}
-              />
-            ))}
-          </div>
-        </TabsContent>
+            {/* Scripts Tab */}
+            <TabsContent value="scripts" className="flex-1 overflow-auto px-4 pb-4">
+              {scriptsData[0]?.children && scriptsData[0].children.length > 0 ? (
+                <div className="space-y-1">
+                  {scriptsData[0].children.map((item, index) => (
+                    <TreeItemRenderer
+                      key={index}
+                      item={item}
+                      level={0}
+                      expandedFolders={expandedFolders}
+                      onToggleFolder={handleToggleFolder}
+                      onDownload={handleDownload}
+                      path="scripts"
+                    />
+                  ))}
+                </div>
+              ) : renderEmpty()}
+            </TabsContent>
 
-        {/* Logs Tab */}
-        <TabsContent value="logs" className="flex-1 overflow-auto px-4 pb-4">
-          <div className="space-y-1">
-            {STUB_LOGS.map((item, index) => (
-              <TreeItemRenderer
-                key={index}
-                item={item}
-                level={0}
-                expandedFolders={expandedFolders}
-                onToggleFolder={handleToggleFolder}
-                onDownload={handleDownload}
-              />
-            ))}
-          </div>
-        </TabsContent>
+            {/* Logs Tab */}
+            <TabsContent value="logs" className="flex-1 overflow-auto px-4 pb-4">
+              {logsData[0]?.children && logsData[0].children.length > 0 ? (
+                <div className="space-y-1">
+                  {logsData[0].children.map((item, index) => (
+                    <TreeItemRenderer
+                      key={index}
+                      item={item}
+                      level={0}
+                      expandedFolders={expandedFolders}
+                      onToggleFolder={handleToggleFolder}
+                      onDownload={handleDownload}
+                      path="logs"
+                    />
+                  ))}
+                </div>
+              ) : renderEmpty()}
+            </TabsContent>
 
-        {/* Docs Tab */}
-        <TabsContent value="docs" className="flex-1 overflow-auto px-4 pb-4">
-          <div className="space-y-1">
-            {STUB_DOCS.map((item, index) => (
-              <TreeItemRenderer
-                key={index}
-                item={item}
-                level={0}
-                expandedFolders={expandedFolders}
-                onToggleFolder={handleToggleFolder}
-                onDownload={handleDownload}
-              />
-            ))}
-          </div>
-        </TabsContent>
+            {/* Docs Tab */}
+            <TabsContent value="docs" className="flex-1 overflow-auto px-4 pb-4">
+              {docsData[0]?.children && docsData[0].children.length > 0 ? (
+                <div className="space-y-1">
+                  {docsData[0].children.map((item, index) => (
+                    <TreeItemRenderer
+                      key={index}
+                      item={item}
+                      level={0}
+                      expandedFolders={expandedFolders}
+                      onToggleFolder={handleToggleFolder}
+                      onDownload={handleDownload}
+                      path="docs"
+                    />
+                  ))}
+                </div>
+              ) : renderEmpty()}
+            </TabsContent>
+          </>
+        )}
       </Tabs>
     </div>
   )

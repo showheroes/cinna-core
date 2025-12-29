@@ -273,6 +273,35 @@ class EnvironmentAdapter(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_workspace_tree(self) -> dict:
+        """
+        Get complete workspace directory tree structure.
+
+        Returns:
+            Dictionary with workspace tree (files, logs, scripts, docs) and summaries
+            Format matches WorkspaceTreeResponse from agent-env
+        """
+        pass
+
+    @abstractmethod
+    async def download_workspace_item(self, path: str) -> AsyncIterator[bytes]:
+        """
+        Download a file or folder from workspace (as zip if folder).
+
+        Args:
+            path: Relative path from workspace root (e.g., "files/data.csv")
+
+        Yields:
+            Bytes chunks for streaming download
+
+        Raises:
+            FileNotFoundError: Path doesn't exist
+            ValueError: Invalid path (directory traversal attempt)
+            Exception: Download failed
+        """
+        pass
+
     # === Message Communication ===
 
     @abstractmethod

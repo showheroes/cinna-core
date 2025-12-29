@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from datetime import datetime
 from typing import Annotated
 
-from .models import HealthCheckResponse, ChatRequest, ChatResponse, AgentPromptsResponse, AgentPromptsUpdate, CredentialsUpdate
+from .models import HealthCheckResponse, ChatRequest, ChatResponse, AgentPromptsResponse, AgentPromptsUpdate, CredentialsUpdate, WorkspaceTreeResponse
 from .sdk_manager import sdk_manager
 from .agent_env_service import AgentEnvService
 from .active_session_manager import active_session_manager
@@ -350,3 +350,125 @@ async def update_credentials(credentials: CredentialsUpdate):
             status_code=500,
             detail=f"Failed to update credentials: {str(e)}"
         )
+
+
+@router.get("/workspace/tree", dependencies=[Depends(verify_auth_token)])
+async def get_workspace_tree() -> WorkspaceTreeResponse:
+    """
+    Get complete workspace tree structure for files, logs, scripts, docs.
+
+    Returns:
+        JSON tree with all folders/files and folder summaries
+
+    Response Example:
+    {
+      "files": {
+        "name": "files",
+        "type": "folder",
+        "path": "files",
+        "children": [...]
+      },
+      "logs": {...},
+      "scripts": {...},
+      "docs": {...},
+      "summaries": {
+        "files": {"fileCount": 42, "totalSize": 1048576},
+        "logs": {"fileCount": 10, "totalSize": 204800},
+        ...
+      }
+    }
+
+    Error Handling:
+    - 500: Workspace directory doesn't exist or not accessible
+    """
+    try:
+        tree_data = agent_env_service.get_workspace_tree()
+        return tree_data
+    except IOError as e:
+        logger.error(f"Failed to build workspace tree: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to build workspace tree: {str(e)}"
+        )
+
+
+@router.get("/workspace/download/{path:path}", dependencies=[Depends(verify_auth_token)])
+async def download_workspace_item(path: str):
+    """
+    Download a file or folder from workspace.
+
+    Args:
+        path: Relative path from workspace root (e.g., "files/data.csv" or "logs")
+
+    Returns:
+        - For files: StreamingResponse with file content
+        - For folders: StreamingResponse with zip archive
+
+    Headers:
+    - Content-Disposition: attachment; filename="..."
+    - Content-Type: application/octet-stream (file) or application/zip (folder)
+
+    Security:
+    - Path validation via validate_workspace_path()
+    - Prevents directory traversal attacks
+    - Rejects paths outside workspace
+
+    Error Handling:
+    - 400: Invalid path (contains .., absolute, etc.)
+    - 404: Path doesn't exist
+    - 500: I/O error during zip creation or file read
+    """
+    try:
+        # Validate path
+        absolute_path = agent_env_service.validate_workspace_path(path)
+
+        if not absolute_path.exists():
+            raise HTTPException(status_code=404, detail=f"Path not found: {path}")
+
+        if absolute_path.is_file():
+            # Stream file directly
+            filename = absolute_path.name
+
+            async def file_stream():
+                with open(absolute_path, 'rb') as f:
+                    while chunk := f.read(65536):  # 64KB chunks
+                        yield chunk
+
+            return StreamingResponse(
+                file_stream(),
+                media_type="application/octet-stream",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(absolute_path.stat().st_size)
+                }
+            )
+        else:
+            # Create zip and stream
+            zip_path = agent_env_service.create_workspace_zip(path)
+            folder_name = absolute_path.name or "workspace"
+
+            async def zip_stream():
+                try:
+                    with open(zip_path, 'rb') as f:
+                        while chunk := f.read(65536):  # 64KB chunks
+                            yield chunk
+                finally:
+                    # Clean up temp zip file
+                    if zip_path.exists():
+                        zip_path.unlink()
+
+            return StreamingResponse(
+                zip_stream(),
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{folder_name}.zip"',
+                    "Content-Length": str(zip_path.stat().st_size)
+                }
+            )
+
+    except ValueError as e:
+        # Path validation error
+        raise HTTPException(status_code=400, detail=f"Invalid path: {str(e)}")
+    except IOError as e:
+        logger.error(f"Failed to download {path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
