@@ -5,7 +5,6 @@ import { useEffect, useMemo } from "react"
 import { SessionsService } from "@/client"
 import type { SessionPublicExtended } from "@/client"
 import { AgentSessionsGroup } from "@/components/Sessions/AgentSessionsGroup"
-import { CreateSession } from "@/components/Sessions/CreateSession"
 import PendingItems from "@/components/Pending/PendingItems"
 import { usePageHeader } from "@/routes/_layout"
 
@@ -27,13 +26,10 @@ function SessionsList() {
 
   useEffect(() => {
     setHeaderContent(
-      <>
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold truncate">Sessions</h1>
-          <p className="text-xs text-muted-foreground">Manage your conversation sessions</p>
-        </div>
-        <CreateSession />
-      </>
+      <div className="min-w-0">
+        <h1 className="text-lg font-semibold truncate">Sessions</h1>
+        <p className="text-xs text-muted-foreground">Manage your conversation sessions</p>
+      </div>
     )
     return () => setHeaderContent(null)
   }, [setHeaderContent])
@@ -87,8 +83,7 @@ function SessionsList() {
         {/* Agent Sessions Grid */}
         {sessions.length === 0 ? (
           <div className="text-center py-12 border-2 border-dashed rounded-lg">
-            <p className="text-muted-foreground mb-4">No sessions yet</p>
-            <CreateSession />
+            <p className="text-muted-foreground">No sessions yet</p>
           </div>
         ) : (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
