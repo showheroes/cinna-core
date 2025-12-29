@@ -19,6 +19,17 @@ A user runs an agent that generates a data report. The agent processes data and 
 - Toggle expand/shrink button for switching panel width
 - Controlled visibility via `isOpen` prop
 
+**Subcomponents**:
+- `TabHeader.tsx` - Dropdown navigation menu with panel width toggle
+- `WorkspaceTabContent.tsx` - Reusable tab content wrapper (eliminates duplication)
+- `TreeItemRenderer.tsx` - Recursive tree rendering for files and folders
+- `StateComponents.tsx` - Loading, error, empty, and no-environment states
+- `FileIcon.tsx` - Type-specific file icons
+
+**Utilities**:
+- `types.ts` - TypeScript interfaces (FileItem, FolderItem, TreeItem)
+- `utils.ts` - Formatting and conversion functions
+
 **Integration Point**: `frontend/src/routes/_layout/session/$sessionId.tsx`
 - "App" button in session header (line 162-170)
 - Button toggles panel visibility state (`envPanelOpen`)
@@ -50,53 +61,31 @@ All sections (Files, Scripts, Logs, Docs) are accessed through a single dropdown
 
 ### Data Flow
 
-**Current Implementation** (stub data):
-Each section uses hardcoded stub arrays (STUB_FILES, STUB_SCRIPTS, STUB_LOGS, STUB_DOCS) to demonstrate UI patterns. Data follows a tree structure supporting nested folders:
+**API Integration**:
+Panel fetches workspace data from backend proxy endpoints that communicate with agent environment containers:
+- Single endpoint: `GET /api/v1/environments/{env_id}/workspace/tree`
+- Returns: `WorkspaceTreeResponse` with four root nodes (files, scripts, logs, docs)
+- Cache: 5 seconds (React Query `staleTime`)
+- Loading states: Managed via `useQuery` hook (loading, error, success)
 
-**Tree Item Structure:**
-```typescript
-interface FileItem {
-  type: "file"
-  name: string
-  fileType: string  // csv, json, txt, py, log, md, etc.
-  size: string
-  modified: string
-}
+**Tree Structure** (`types.ts`):
+- `FileItem` - Represents individual files with name, type, size, modified date
+- `FolderItem` - Represents folders with children array
+- `TreeItem` - Union type of FileItem or FolderItem
 
-interface FolderItem {
-  type: "folder"
-  name: string
-  size: string
-  modified: string
-  children: TreeItem[]  // Array of files or folders
-}
+**Data Conversion** (`utils.ts`):
+- `convertFileNodeToTreeItem()` - Transforms API response (`FileNode`) to UI tree structure
+- `formatFileSize()` - Converts bytes to human-readable format (B, KB, MB, GB)
+- `formatDate()` - Formats ISO timestamps to localized date strings
+- `getFileExtension()` - Extracts file extension for icon selection
 
-type TreeItem = FileItem | FolderItem
-```
-
-**Example Tree:**
-```
-Files
-├── employee_report_2025.csv (file, 2.3 MB)
-├── data/ (folder, 2.8 MB)
-│   ├── customer_transactions_q4.json (file, 456 KB)
-│   ├── sales_data_processed_dec.csv (file, 1.2 MB)
-│   └── archive/ (nested folder, 1.1 MB)
-│       ├── legacy_customer_data_2024.json (file, 234 KB)
-│       └── vendor_bills_backup_nov_2024.csv (file, 890 KB)
-├── processing_output_log.txt (file, 12 KB)
-└── reports/ (folder, 1.8 MB)
-    ├── quarterly_summary_metadata.json (file, 8 KB)
-    └── vendor_bills_report_company_jan_2025.csv (file, 1.8 MB)
-```
-
-**Future Implementation** (API-driven):
-- Files section: `GET /api/v1/sessions/{session_id}/environment/files`
-- Scripts section: `GET /api/v1/sessions/{session_id}/environment/scripts`
-- Logs section: `GET /api/v1/sessions/{session_id}/environment/logs`
-- Docs section: `GET /api/v1/sessions/{session_id}/environment/docs`
-
-Each endpoint will return a tree structure representing the full hierarchy of session-specific environment artifacts generated during agent execution. The entire tree is loaded initially, and folder expansion/collapse is handled client-side.
+**Download Flow**:
+- User clicks download button → `handleDownload(filePath)` triggered
+- Axios interceptor sets `responseType: 'blob'` for download requests
+- Backend endpoint: `GET /api/v1/environments/{env_id}/workspace/download/{path}`
+- Files: Streamed directly with original filename
+- Folders: Streamed as ZIP archive
+- Browser download triggered via blob URL creation
 
 ### Folder Navigation
 
@@ -124,11 +113,11 @@ Each endpoint will return a tree structure representing the full hierarchy of se
 ### Download Functionality
 
 Both files and folders display download button on hover (opacity-0 → group-hover:opacity-100):
-- **Files**: Download individual file
-- **Folders**: Download entire folder (compressed archive)
+- **Files**: Download individual file directly
+- **Folders**: Download entire folder as ZIP archive
 - Button uses `e.stopPropagation()` to prevent folder expansion on click
-
-Future API: `GET /api/v1/sessions/{session_id}/environment/download/{item_id}`
+- Implementation: `handleDownload()` in `EnvironmentPanel.tsx`
+- API: `GET /api/v1/environments/{env_id}/workspace/download/{path}`
 
 ## Icons
 
@@ -149,8 +138,8 @@ Items are visually distinguished by type-specific icons:
 - MD (Markdown): BookOpen (indigo)
 - Default: FileText (gray)
 
-Method: `getFileIcon(fileType)` in EnvironmentPanel component
-Component: `TreeItemRenderer` handles recursive rendering of tree structure
+Component: `FileIcon.tsx` - Type-specific icon rendering with color coding
+Component: `TreeItemRenderer.tsx` - Recursive tree rendering with folder/file distinction
 
 ## Sticky Behavior
 
@@ -207,18 +196,29 @@ The panel is session-scoped. Each session has its own isolated environment, so a
 ## Implementation Details
 
 **Component Architecture:**
-- Main component: `EnvironmentPanel` - Manages panel state, section selection, and width mode
-- Sub-component: `TreeItemRenderer` - Recursive component for rendering tree structure
-- State: `activeTab`, `expandedFolders`, `isWidePanelMode`, `moreMenuOpen`
-- Rendering: Conditional rendering based on item type (file vs folder)
+- `EnvironmentPanel.tsx` (main) - Panel state, data fetching, download handling
+- `TabHeader.tsx` - Dropdown navigation with width toggle
+- `WorkspaceTabContent.tsx` - Reusable tab wrapper component
+- `TreeItemRenderer.tsx` - Recursive tree item rendering
+- `StateComponents.tsx` - Loading, error, empty, no-environment states
+- `FileIcon.tsx` - File type icon component
+- `types.ts` - TypeScript interfaces (FileItem, FolderItem, TreeItem)
+- `utils.ts` - Formatting utilities and API response conversion
+
+**State Management:**
+- `activeTab` - Current selected section (files/scripts/logs/docs)
+- `expandedFolders` - Set of expanded folder paths
+- `isWidePanelMode` - Panel width toggle (384px/768px)
+- `useQuery` - React Query for data fetching with 5-second cache
 
 **Key Features:**
-1. **Expandable panel**: Toggle between 384px and 768px width with smooth transition
-2. **Progressive disclosure**: Extensions, sizes, download buttons appear on hover
-3. **Compact layout**: py-1 px-2 padding, single-line items
-4. **Tooltips**: Full filename and modified date on hover
-5. **Path-based folder keys**: Prevents duplicate name conflicts (`data/archive`)
-6. **Event isolation**: `e.stopPropagation()` for download buttons on folders
+1. **Modular architecture**: Separated concerns into focused components
+2. **API integration**: Real workspace data from environment containers
+3. **Progressive disclosure**: Extensions, sizes, download buttons on hover
+4. **Compact layout**: Single-line items with py-1 px-2 padding
+5. **Path-based folder keys**: Prevents conflicts (`files/data/archive`)
+6. **Event isolation**: `e.stopPropagation()` for download buttons
+7. **Error handling**: Loading, error, empty, and no-environment states
 
 **Visual Design:**
 - Meta info dimming: `text-muted-foreground/60`

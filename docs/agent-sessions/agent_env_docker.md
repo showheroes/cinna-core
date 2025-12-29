@@ -197,11 +197,14 @@ workspace/knowledge/
 - Downloads: Single files streamed directly, folders zipped on-the-fly in `/tmp`, auto-cleanup
 - Folder summaries: Calculated fileCount and totalSize for each workspace section
 
-**Frontend Integration** (`frontend/src/components/Environment/EnvironmentPanel.tsx`):
-- React Query: Fetches tree data when panel opens, 30-second cache
-- Loading states: Spinner, error with retry, empty state, no environment state
-- Downloads: Authenticated fetch with Bearer token, blob creation, browser download trigger
-- Real-time: Queries only when panel open and environment ID available
+**Frontend Integration**:
+- Main component: `frontend/src/components/Environment/EnvironmentPanel.tsx`
+- Subcomponents: `TabHeader.tsx`, `WorkspaceTabContent.tsx`, `TreeItemRenderer.tsx`, `StateComponents.tsx`, `FileIcon.tsx`
+- Utilities: `types.ts`, `utils.ts` (formatting, conversion, interfaces)
+- React Query: Fetches tree data when panel opens, 5-second cache
+- State management: Loading, error, empty, no-environment states via dedicated components
+- Downloads: Axios interceptor for blob handling, authenticated requests, browser download trigger
+- Conditional fetching: Queries only when panel open and environment ID available
 
 ### Python Dependencies
 
