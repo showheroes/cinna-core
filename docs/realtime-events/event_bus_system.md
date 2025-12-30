@@ -2,505 +2,237 @@
 
 ## Overview
 
-The Event Bus system provides real-time, bidirectional communication between the backend and frontend using WebSockets (Socket.IO). This allows different parts of the application to react immediately to changes without polling.
+WebSocket-based event bus using Socket.IO for real-time communication between backend (FastAPI) and frontend (React). Events are emitted from backend on data changes, and frontend components subscribe to specific event types to update in real-time.
 
 ## Architecture
 
 ```
-┌─────────────────┐         WebSocket          ┌──────────────────┐
-│   Frontend      │ ◄────────────────────────► │    Backend       │
-│                 │    (Socket.IO/ws://...)     │                  │
-│  - Components   │                             │  - EventService  │
-│  - Hooks        │                             │  - Event Routes  │
-│  - eventService │                             │  - Event Models  │
-└─────────────────┘                             └──────────────────┘
+Frontend Components          Backend Services
+       |                            |
+   useEventBus hooks          EventService
+       |                            |
+   eventService.ts      ←WebSocket→ Socket.IO Server
+       |                            |
+   socket.io-client               /ws endpoint
 ```
 
-## Features
-
-- **Event-Driven Architecture**: Components subscribe to specific event types
-- **User-Specific Rooms**: Events can be broadcast to specific users
-- **Custom Rooms**: Support for topic-based subscriptions (e.g., `session_123`)
-- **Auto-Reconnection**: Automatic reconnection with exponential backoff
-- **Type-Safe Events**: Predefined event types with metadata support
-- **React Integration**: Easy-to-use React hooks for component subscriptions
+**WebSocket URL**: `ws://localhost:8000/ws` (dev) | `wss://api.domain.com/ws` (prod)
 
 ## Event Structure
 
-Each event has the following structure:
-
 ```typescript
-interface EventData {
+{
   type: string              // Event type (e.g., 'session_updated')
-  model_id?: string         // ID of the related model (session_id, message_id, etc.)
-  text_content?: string     // Optional notification text for the user
+  model_id?: string         // Related model UUID
+  text_content?: string     // Optional user notification
   meta?: Record<string, any> // Additional metadata
-  user_id?: string          // User ID for targeted events
-  timestamp: string         // When the event was created
+  user_id?: string          // Target user UUID
+  timestamp: string         // ISO timestamp
 }
 ```
 
-## Available Event Types
+## Event Types
 
-### Session Events
-- `session_created` - New session created
-- `session_updated` - Session updated
-- `session_deleted` - Session deleted
+**Sessions**: `session_created`, `session_updated`, `session_deleted`
+**Messages**: `message_created`, `message_updated`, `message_deleted`
+**Activities**: `activity_created`, `activity_updated`, `activity_deleted`
+**Agents**: `agent_created`, `agent_updated`, `agent_deleted`
+**Streaming**: `stream_started`, `stream_completed`, `stream_error`
+**Generic**: `notification`
 
-### Message Events
-- `message_created` - New message created
-- `message_updated` - Message updated
-- `message_deleted` - Message deleted
+## Key Files
 
-### Activity Events
-- `activity_created` - New activity created
-- `activity_updated` - Activity updated
-- `activity_deleted` - Activity deleted
+### Backend
+- **`backend/app/models/event.py`** - Event models (`EventType`, `EventBase`, `EventPublic`, `EventBroadcast`)
+- **`backend/app/services/event_service.py`** - `EventService` class (connection management, event emission)
+- **`backend/app/api/routes/events.py`** - Event API routes (`/broadcast`, `/stats`, `/test`)
+- **`backend/app/main.py`** - Socket.IO mount at `/ws` path
 
-### Agent Events
-- `agent_created` - New agent created
-- `agent_updated` - Agent updated
-- `agent_deleted` - Agent deleted
+### Frontend
+- **`frontend/src/services/eventService.ts`** - Socket.IO client wrapper
+- **`frontend/src/hooks/useEventBus.ts`** - React hooks for subscriptions
 
-### Streaming Events
-- `stream_started` - Stream started
-- `stream_completed` - Stream completed
-- `stream_error` - Stream error occurred
+## Usage
 
-### Generic Events
-- `notification` - Generic notification
-
-## Backend Usage
-
-### 1. Emitting Events from Backend Code
+### Backend: Emit Events
 
 ```python
+# backend/app/api/routes/sessions.py
 from app.services.event_service import event_service
 from app.models.event import EventType
-from uuid import UUID
 
-# Example: Emit a session_updated event
-async def update_session(session_id: UUID, user_id: UUID):
-    # ... update session logic ...
-
-    # Emit event to the specific user
-    await event_service.emit_event(
-        event_type=EventType.SESSION_UPDATED,
-        model_id=session_id,
-        text_content="Your session has been updated",
-        meta={
-            "session_id": str(session_id),
-            "updated_fields": ["title", "status"]
-        },
-        user_id=user_id
-    )
+await event_service.emit_event(
+    event_type=EventType.SESSION_UPDATED,
+    model_id=session_id,
+    user_id=current_user.id,
+    meta={"field": "value"}  # optional
+)
 ```
 
-### 2. Broadcasting Events via API Endpoint
+**Key Methods** (`EventService` in `event_service.py`):
+- `emit_event()` - Broadcast to user room (`user_{user_id}`)
+- `broadcast_to_room()` - Broadcast to custom room
+- `get_connection_stats()` - Get active connections
 
-```python
-# POST /api/v1/events/broadcast
-{
-  "type": "session_updated",
-  "model_id": "session-uuid-here",
-  "text_content": "Session updated successfully",
-  "meta": {
-    "session_id": "session-uuid-here",
-    "agent_id": "agent-uuid-here"
-  },
-  "user_id": "user-uuid-here"  # Optional: target specific user
-}
-```
+### Frontend: Subscribe to Events
 
-### 3. Getting Connection Stats
-
-```python
-# GET /api/v1/events/stats
-# Returns:
-{
-  "connection_count": 5,
-  "connected_users": ["user-id-1", "user-id-2"],
-  "is_current_user_connected": true
-}
-```
-
-### 4. Testing WebSocket Connection
-
-```python
-# POST /api/v1/events/test
-# Sends a test event to the current user
-```
-
-## Frontend Usage
-
-### 1. Initialize Event Bus Connection
-
-Add the event bus connection to your root layout or app component:
-
+**1. Initialize Connection** (in root layout):
 ```tsx
-// In your root layout (e.g., __root.tsx or main App component)
+// frontend/src/routes/__root.tsx
 import { useEventBusConnection } from "@/hooks/useEventBus"
 
-function RootLayout() {
-  // This automatically connects when user is authenticated
-  const { isConnected, socketId } = useEventBusConnection()
-
-  console.log("WebSocket connected:", isConnected, "Socket ID:", socketId)
-
-  return (
-    <div>
-      {/* Your app content */}
-    </div>
-  )
+function RootComponent() {
+  useEventBusConnection() // Auto-connects when authenticated
+  return <Outlet />
 }
 ```
 
-### 2. Subscribe to Specific Event Types
-
+**2. Subscribe in Components**:
 ```tsx
 import { useEventSubscription, EventTypes } from "@/hooks/useEventBus"
-import { useQueryClient } from "@tanstack/react-query"
 
 function LatestSessions() {
   const queryClient = useQueryClient()
 
-  // Subscribe to session_updated events
   useEventSubscription(EventTypes.SESSION_UPDATED, (event) => {
-    console.log("Session updated:", event.model_id, event.meta)
-
-    // Refresh the sessions list
-    queryClient.invalidateQueries({ queryKey: ["sessions"] })
-
-    // Optionally show a toast notification
-    if (event.text_content) {
-      toast.info(event.text_content)
-    }
-  })
-
-  return <div>{/* Your component */}</div>
-}
-```
-
-### 3. Subscribe to Multiple Event Types
-
-```tsx
-import { useMultiEventSubscription } from "@/hooks/useEventBus"
-
-function SessionsDashboard() {
-  const queryClient = useQueryClient()
-
-  // Subscribe to multiple session events
-  useMultiEventSubscription(
-    ['session_created', 'session_updated', 'session_deleted'],
-    (event) => {
-      console.log("Session event:", event.type, event.model_id)
-      queryClient.invalidateQueries({ queryKey: ["sessions"] })
-    }
-  )
-
-  return <div>{/* Your component */}</div>
-}
-```
-
-### 4. Subscribe to All Events
-
-```tsx
-import { useEventSubscription } from "@/hooks/useEventBus"
-
-function GlobalEventLogger() {
-  // Subscribe to all events (use "*" as event type)
-  useEventSubscription("*", (event) => {
-    console.log("Event received:", event.type, event)
-  })
-
-  return null // This component just logs events
-}
-```
-
-### 5. Conditional Subscriptions
-
-```tsx
-function SessionDetail({ sessionId }: { sessionId: string }) {
-  const [autoUpdate, setAutoUpdate] = useState(true)
-
-  // Only subscribe when autoUpdate is enabled
-  useEventSubscription(
-    EventTypes.SESSION_UPDATED,
-    (event) => {
-      if (event.model_id === sessionId) {
-        console.log("This session was updated!")
-        // Refresh session data
-      }
-    },
-    autoUpdate // enabled parameter
-  )
-
-  return (
-    <div>
-      <button onClick={() => setAutoUpdate(!autoUpdate)}>
-        {autoUpdate ? "Disable" : "Enable"} Auto-Update
-      </button>
-    </div>
-  )
-}
-```
-
-### 6. Room-Based Subscriptions
-
-```tsx
-import { useRoomSubscription, useEventSubscription } from "@/hooks/useEventBus"
-
-function SessionChat({ sessionId }: { sessionId: string }) {
-  // Subscribe to a specific session room
-  useRoomSubscription(`session_${sessionId}`)
-
-  // Listen for message events in this session
-  useEventSubscription(EventTypes.MESSAGE_CREATED, (event) => {
-    if (event.meta?.session_id === sessionId) {
-      console.log("New message in this session!")
-      // Update messages list
-    }
-  })
-
-  return <div>{/* Chat UI */}</div>
-}
-```
-
-## Integration Example: LatestSessions Component
-
-Here's a complete example of how the `LatestSessions` component could use the event bus:
-
-```tsx
-// frontend/src/components/Sessions/LatestSessions.tsx
-import { useEventSubscription, EventTypes } from "@/hooks/useEventBus"
-import { useQueryClient } from "@tanstack/react-query"
-import { useCustomToast } from "@/hooks/useCustomToast"
-
-export function LatestSessions() {
-  const queryClient = useQueryClient()
-  const { showInfoToast } = useCustomToast()
-
-  // Subscribe to session events
-  useEventSubscription(EventTypes.SESSION_UPDATED, (event) => {
-    console.log("Session updated:", event.model_id)
-
-    // Invalidate sessions query to trigger refetch
-    queryClient.invalidateQueries({ queryKey: ["sessions"] })
-
-    // Show notification if there's text content
-    if (event.text_content) {
-      showInfoToast(event.text_content)
-    }
-  })
-
-  useEventSubscription(EventTypes.SESSION_CREATED, (event) => {
-    console.log("New session created:", event.model_id)
     queryClient.invalidateQueries({ queryKey: ["sessions"] })
   })
 
-  useEventSubscription(EventTypes.SESSION_DELETED, (event) => {
-    console.log("Session deleted:", event.model_id)
-    queryClient.invalidateQueries({ queryKey: ["sessions"] })
-  })
-
-  // ... rest of component
+  // ... component code
 }
 ```
 
-## Backend Integration Example: Emitting Events
+**Key Hooks** (`useEventBus.ts`):
+- `useEventBusConnection()` - Manages connection lifecycle
+- `useEventSubscription(type, handler)` - Subscribe to single event type
+- `useMultiEventSubscription(types, handler)` - Subscribe to multiple types
+- `useRoomSubscription(room)` - Subscribe to custom room
 
-Here's how to integrate event emission into existing backend services:
+## API Endpoints
 
-```python
-# In backend/app/services/session_service.py
-
-from app.services.event_service import event_service
-from app.models.event import EventType
-
-class SessionService:
-    @staticmethod
-    async def update_session(
-        db_session: Session,
-        session_id: UUID,
-        user_id: UUID,
-        update_data: SessionUpdate
-    ) -> Session:
-        # Update the session
-        session = db_session.get(Session, session_id)
-        # ... update logic ...
-        db_session.commit()
-
-        # Emit event to notify connected clients
-        await event_service.emit_event(
-            event_type=EventType.SESSION_UPDATED,
-            model_id=session_id,
-            text_content=f"Session '{session.title}' has been updated",
-            meta={
-                "session_id": str(session_id),
-                "title": session.title,
-                "updated_at": session.updated_at.isoformat()
-            },
-            user_id=user_id
-        )
-
-        return session
+```
+POST /api/v1/events/broadcast - Broadcast event (admin or to self)
+GET  /api/v1/events/stats     - Connection statistics
+POST /api/v1/events/test      - Send test event to current user
 ```
 
-## Connection Management
+## Production Setup
 
-### Auto-Connection
-The `useEventBusConnection` hook automatically:
-- Connects when a user is authenticated
-- Joins a user-specific room (`user_{user_id}`)
-- Handles reconnection with exponential backoff
-- Disconnects on unmount
+### Environment Variables
 
-### Manual Connection Control
-If you need manual control:
-
-```typescript
-import { eventService } from "@/services/eventService"
-
-// Connect manually
-eventService.connect(userId)
-
-// Check connection status
-const isConnected = eventService.isConnected()
-
-// Get socket ID
-const socketId = eventService.getSocketId()
-
-// Disconnect
-eventService.disconnect()
-
-// Ping server
-eventService.ping()
-```
-
-## Best Practices
-
-### 1. Use Specific Event Types
-```tsx
-// ✅ Good - specific event type
-useEventSubscription(EventTypes.SESSION_UPDATED, handler)
-
-// ❌ Avoid - subscribing to all events unless necessary
-useEventSubscription("*", handler)
-```
-
-### 2. Invalidate Queries, Don't Directly Update Cache
-```tsx
-// ✅ Good - let React Query refetch
-useEventSubscription(EventTypes.SESSION_UPDATED, (event) => {
-  queryClient.invalidateQueries({ queryKey: ["sessions"] })
-})
-
-// ❌ Avoid - manually updating cache can lead to inconsistencies
-useEventSubscription(EventTypes.SESSION_UPDATED, (event) => {
-  queryClient.setQueryData(["sessions"], (old) => {
-    // Manual update logic...
-  })
-})
-```
-
-### 3. Filter Events in Handler
-```tsx
-useEventSubscription(EventTypes.SESSION_UPDATED, (event) => {
-  // Only handle events for the current session
-  if (event.model_id === currentSessionId) {
-    // Update UI
-  }
-})
-```
-
-### 4. Provide Meaningful Metadata
-```python
-# Backend - include useful context in meta
-await event_service.emit_event(
-    event_type=EventType.MESSAGE_CREATED,
-    model_id=message_id,
-    meta={
-        "session_id": str(session_id),
-        "agent_id": str(agent_id),
-        "message_role": "agent",
-        "has_questions": True
-    },
-    user_id=user_id
-)
-```
-
-## Troubleshooting
-
-### WebSocket Connection Issues
-
-1. **Check backend logs** for connection attempts:
+**Backend (`.env`)**:
 ```bash
-docker-compose logs -f backend | grep EventService
+DOMAIN=project.com
+FRONTEND_HOST=https://project.com
+BACKEND_CORS_ORIGINS="https://project.com,https://api.project.com"
 ```
 
-2. **Check frontend console** for connection status:
-```javascript
-console.log("Connected:", eventService.isConnected())
-console.log("Socket ID:", eventService.getSocketId())
+**Frontend (build args in `docker-compose.yml`)**:
+```yaml
+args:
+  - VITE_API_URL=https://api.${DOMAIN}
 ```
 
-3. **Test connection** via API:
+### Docker Configuration
+
+WebSocket uses **same port** as HTTP API (8000). Socket.IO upgrades HTTP → WebSocket.
+
+```yaml
+# docker-compose.yml
+backend:
+  ports:
+    - "8000:8000"  # API + WebSocket
+frontend:
+  ports:
+    - "80:80"      # Static files
+```
+
+### Reverse Proxy (Nginx)
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.project.com;
+
+    location / {
+        proxy_pass http://backend:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;  # 24h keepalive
+    }
+}
+```
+
+**Production URLs**:
+- Frontend: `https://project.com`
+- Backend API: `https://api.project.com`
+- WebSocket: `wss://api.project.com/ws` (auto-upgrade from HTTPS)
+
+## Testing
+
 ```bash
 # Send test event
 curl -X POST http://localhost:8000/api/v1/events/test \
-  -H "Authorization: Bearer YOUR_TOKEN"
+  -H "Authorization: Bearer TOKEN"
 
 # Check connection stats
 curl http://localhost:8000/api/v1/events/stats \
-  -H "Authorization: Bearer YOUR_TOKEN"
+  -H "Authorization: Bearer TOKEN"
 ```
 
-### Events Not Received
+## Dependencies
 
-1. **Verify subscription**:
-```tsx
-useEventSubscription(EventTypes.SESSION_UPDATED, (event) => {
-  console.log("Event received:", event)
-})
-```
+**Backend**: `python-socketio==5.16.0`, `python-engineio==4.13.0`
+**Frontend**: `socket.io-client`
 
-2. **Check event type matches** between backend and frontend
+## Best Practices
 
-3. **Verify user_id** is set correctly when emitting targeted events
+1. **Invalidate queries, don't manually update cache**:
+   ```tsx
+   queryClient.invalidateQueries({ queryKey: ["sessions"] })
+   ```
 
-4. **Check browser network tab** for WebSocket connection (ws:// protocol)
+2. **Use specific event types** (avoid wildcard `"*"` subscriptions)
 
-## Performance Considerations
+3. **Include metadata for context**:
+   ```python
+   meta={"session_id": str(session_id), "agent_id": str(agent_id)}
+   ```
 
-1. **Use Targeted Events**: Send events to specific users instead of broadcasting when possible
-2. **Debounce Rapid Events**: If events fire rapidly, consider debouncing the handler
-3. **Unsubscribe When Not Needed**: Use the `enabled` parameter to disable subscriptions
-4. **Use Rooms**: For topic-based filtering, use rooms instead of filtering in handlers
+4. **Filter events in handlers when needed**:
+   ```tsx
+   if (event.model_id === currentSessionId) { /* handle */ }
+   ```
+
+## Troubleshooting
+
+**Connection Issues**:
+- Check browser console: `[EventService] Connected, socket ID: ...`
+- Backend logs: `docker-compose logs -f backend | grep EventService`
+- Verify CORS: `BACKEND_CORS_ORIGINS` includes frontend URL
+
+**Events Not Received**:
+- Event type matches between backend/frontend
+- `user_id` set correctly when emitting
+- Browser Network tab shows WebSocket connection (ws:// protocol)
+
+## Extension Points
+
+To extend this system:
+
+1. **Add new event types**: Update `EventType` enum in `backend/app/models/event.py`
+2. **Custom rooms**: Use `event_service.broadcast_to_room(room_name, event_data)`
+3. **Multi-instance scaling** (potential future implementation): Configure Redis adapter in `event_service.py`:
+   ```python
+   from socketio import AsyncRedisManager
+   redis_manager = AsyncRedisManager('redis://redis:6379')
+   sio = socketio.AsyncServer(client_manager=redis_manager)
+   ```
 
 ## Security
 
-- WebSocket connections require authentication (user_id in auth data)
+- Connections require authentication (user_id in auth data)
 - Users can only broadcast to themselves (unless superuser)
-- Connection attempts without user_id are rejected
-- Each user automatically joins their own room (`user_{user_id}`)
-
-## File Reference
-
-### Backend
-- Models: `backend/app/models/event.py`
-- Service: `backend/app/services/event_service.py`
-- Routes: `backend/app/api/routes/events.py`
-- Main app: `backend/app/main.py` (Socket.IO mount)
-
-### Frontend
-- Service: `frontend/src/services/eventService.ts`
-- Hooks: `frontend/src/hooks/useEventBus.ts`
-
-## Future Enhancements
-
-1. **Event History**: Store recent events for late-joining clients
-2. **Event Acknowledgment**: Confirm event receipt from clients
-3. **Binary Events**: Support for binary data (file uploads, images)
-4. **Event Filtering**: Server-side event filtering by criteria
-5. **Rate Limiting**: Prevent event spam from misbehaving clients
-6. **Persistent Subscriptions**: Remember subscriptions across reconnections
+- Each user auto-joins room `user_{user_id}`
+- CORS restricted to configured origins
