@@ -26,6 +26,8 @@ from app.services.session_service import SessionService
 from app.services.ai_functions_service import AIFunctionsService
 from app.services.active_streaming_manager import active_streaming_manager
 from app.services.activity_service import ActivityService
+from app.services.event_service import event_service
+from app.models.event import EventType
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +275,7 @@ async def send_message_stream(
                                 activity_text = f"Error: {error_message}"
 
                         # Create "error_occurred" activity
-                        ActivityService.create_activity(
+                        activity = ActivityService.create_activity(
                             db_session=db,
                             user_id=user_id,
                             data=ActivityCreate(
@@ -286,6 +288,21 @@ async def send_message_stream(
                             )
                         )
                         logger.info(f"Created 'error_occurred' activity for session {session_id}: {activity_text}")
+
+                        # Emit WebSocket event for activity creation
+                        import asyncio
+                        asyncio.create_task(
+                            event_service.emit_event(
+                                event_type=EventType.ACTIVITY_CREATED,
+                                model_id=activity.id,
+                                user_id=user_id,
+                                meta={
+                                    "activity_type": "error_occurred",
+                                    "session_id": str(session_id),
+                                    "agent_id": str(agent_id)
+                                }
+                            )
+                        )
 
                 await asyncio.to_thread(_create_activity)
             except Exception as e:
@@ -332,7 +349,7 @@ async def send_message_stream(
                         latest_message = db.exec(latest_message_stmt).first()
 
                         # Create "session_completed" activity
-                        ActivityService.create_activity(
+                        completed_activity = ActivityService.create_activity(
                             db_session=db,
                             user_id=user_id,
                             data=ActivityCreate(
@@ -346,9 +363,24 @@ async def send_message_stream(
                         )
                         logger.info(f"Created 'session_completed' activity for session {session_id}")
 
+                        # Emit WebSocket event for session_completed activity
+                        import asyncio
+                        asyncio.create_task(
+                            event_service.emit_event(
+                                event_type=EventType.ACTIVITY_CREATED,
+                                model_id=completed_activity.id,
+                                user_id=user_id,
+                                meta={
+                                    "activity_type": "session_completed",
+                                    "session_id": str(session_id),
+                                    "agent_id": str(agent_id)
+                                }
+                            )
+                        )
+
                         # If the latest message has unanswered questions, create additional activity
                         if latest_message and latest_message.tool_questions_status == "unanswered":
-                            ActivityService.create_activity(
+                            questions_activity = ActivityService.create_activity(
                                 db_session=db,
                                 user_id=user_id,
                                 data=ActivityCreate(
@@ -361,6 +393,20 @@ async def send_message_stream(
                                 )
                             )
                             logger.info(f"Created 'questions_asked' activity for session {session_id}")
+
+                            # Emit WebSocket event for questions_asked activity
+                            asyncio.create_task(
+                                event_service.emit_event(
+                                    event_type=EventType.ACTIVITY_CREATED,
+                                    model_id=questions_activity.id,
+                                    user_id=user_id,
+                                    meta={
+                                        "activity_type": "questions_asked",
+                                        "session_id": str(session_id),
+                                        "agent_id": str(agent_id)
+                                    }
+                                )
+                            )
 
                 await asyncio.to_thread(_create_activities)
             except Exception as e:
@@ -390,7 +436,7 @@ async def send_message_stream(
                         user_id = chat_session.user_id
 
                         # Create "session_running" activity (unread by default)
-                        ActivityService.create_activity(
+                        running_activity = ActivityService.create_activity(
                             db_session=db,
                             user_id=user_id,
                             data=ActivityCreate(
@@ -404,6 +450,21 @@ async def send_message_stream(
                         )
                         logger.info(f"Created 'session_running' activity for session {session_id}")
 
+                        # Emit WebSocket event for session_running activity
+                        import asyncio
+                        asyncio.create_task(
+                            event_service.emit_event(
+                                event_type=EventType.ACTIVITY_CREATED,
+                                model_id=running_activity.id,
+                                user_id=user_id,
+                                meta={
+                                    "activity_type": "session_running",
+                                    "session_id": str(session_id),
+                                    "agent_id": str(agent_id)
+                                }
+                            )
+                        )
+
                 await asyncio.to_thread(_create_activity)
             except Exception as e:
                 logger.error(f"Failed to create session_running activity for session {session_id}: {e}", exc_info=True)
@@ -415,12 +476,37 @@ async def send_message_stream(
             try:
                 def _delete_activity():
                     with DBSession(engine) as db:
-                        ActivityService.delete_activity_by_session_and_type(
+                        # Find the activity before deleting to get user_id for event
+                        running_activity = ActivityService.find_activity_by_session_and_type(
                             db_session=db,
                             session_id=session_id,
                             activity_type="session_running"
                         )
-                        logger.info(f"Deleted 'session_running' activity for session {session_id} (frontend was watching)")
+
+                        if running_activity:
+                            activity_id = running_activity.id
+                            user_id = running_activity.user_id
+
+                            ActivityService.delete_activity_by_session_and_type(
+                                db_session=db,
+                                session_id=session_id,
+                                activity_type="session_running"
+                            )
+                            logger.info(f"Deleted 'session_running' activity for session {session_id} (frontend was watching)")
+
+                            # Emit WebSocket event for activity deletion
+                            import asyncio
+                            asyncio.create_task(
+                                event_service.emit_event(
+                                    event_type=EventType.ACTIVITY_DELETED,
+                                    model_id=activity_id,
+                                    user_id=user_id,
+                                    meta={
+                                        "activity_type": "session_running",
+                                        "session_id": str(session_id)
+                                    }
+                                )
+                            )
 
                 await asyncio.to_thread(_delete_activity)
             except Exception as e:
@@ -442,10 +528,27 @@ async def send_message_stream(
                         )
 
                         if running_activity:
+                            activity_id = running_activity.id
+                            user_id = running_activity.user_id
+
                             # Delete the running activity
                             db.delete(running_activity)
                             db.commit()
                             logger.info(f"Deleted 'session_running' activity for session {session_id}")
+
+                            # Emit WebSocket event for activity deletion
+                            import asyncio
+                            asyncio.create_task(
+                                event_service.emit_event(
+                                    event_type=EventType.ACTIVITY_DELETED,
+                                    model_id=activity_id,
+                                    user_id=user_id,
+                                    meta={
+                                        "activity_type": "session_running",
+                                        "session_id": str(session_id)
+                                    }
+                                )
+                            )
 
                         # Create completion activities (existing logic)
                         _create_unread_completion_activities_sync(db)
@@ -484,7 +587,7 @@ async def send_message_stream(
                     latest_message = db.exec(latest_message_stmt).first()
 
                     # Create "session_completed" activity
-                    ActivityService.create_activity(
+                    completed_activity = ActivityService.create_activity(
                         db_session=db,
                         user_id=user_id,
                         data=ActivityCreate(
@@ -498,9 +601,24 @@ async def send_message_stream(
                     )
                     logger.info(f"Created 'session_completed' activity for session {session_id}")
 
+                    # Emit WebSocket event for session_completed activity
+                    import asyncio
+                    asyncio.create_task(
+                        event_service.emit_event(
+                            event_type=EventType.ACTIVITY_CREATED,
+                            model_id=completed_activity.id,
+                            user_id=user_id,
+                            meta={
+                                "activity_type": "session_completed",
+                                "session_id": str(session_id),
+                                "agent_id": str(agent_id)
+                            }
+                        )
+                    )
+
                     # If the latest message has unanswered questions, create additional activity
                     if latest_message and latest_message.tool_questions_status == "unanswered":
-                        ActivityService.create_activity(
+                        questions_activity = ActivityService.create_activity(
                             db_session=db,
                             user_id=user_id,
                             data=ActivityCreate(
@@ -513,6 +631,20 @@ async def send_message_stream(
                             )
                         )
                         logger.info(f"Created 'questions_asked' activity for session {session_id}")
+
+                        # Emit WebSocket event for questions_asked activity
+                        asyncio.create_task(
+                            event_service.emit_event(
+                                event_type=EventType.ACTIVITY_CREATED,
+                                model_id=questions_activity.id,
+                                user_id=user_id,
+                                meta={
+                                    "activity_type": "questions_asked",
+                                    "session_id": str(session_id),
+                                    "agent_id": str(agent_id)
+                                }
+                            )
+                        )
 
                 await asyncio.to_thread(_update_or_replace)
             except Exception as e:
@@ -534,10 +666,27 @@ async def send_message_stream(
                         )
 
                         if running_activity:
+                            activity_id = running_activity.id
+                            user_id = running_activity.user_id
+
                             # Delete the running activity
                             db.delete(running_activity)
                             db.commit()
                             logger.info(f"Deleted 'session_running' activity for session {session_id}")
+
+                            # Emit WebSocket event for activity deletion
+                            import asyncio
+                            asyncio.create_task(
+                                event_service.emit_event(
+                                    event_type=EventType.ACTIVITY_DELETED,
+                                    model_id=activity_id,
+                                    user_id=user_id,
+                                    meta={
+                                        "activity_type": "session_running",
+                                        "session_id": str(session_id)
+                                    }
+                                )
+                            )
 
                         # Create error activity
                         _create_error_activity_sync(db, error_message)
@@ -569,7 +718,7 @@ async def send_message_stream(
                             activity_text = f"Error: {error_msg}"
 
                     # Create "error_occurred" activity
-                    ActivityService.create_activity(
+                    error_activity = ActivityService.create_activity(
                         db_session=db,
                         user_id=user_id,
                         data=ActivityCreate(
@@ -582,6 +731,21 @@ async def send_message_stream(
                         )
                     )
                     logger.info(f"Created 'error_occurred' activity for session {session_id}: {activity_text}")
+
+                    # Emit WebSocket event for error_occurred activity
+                    import asyncio
+                    asyncio.create_task(
+                        event_service.emit_event(
+                            event_type=EventType.ACTIVITY_CREATED,
+                            model_id=error_activity.id,
+                            user_id=user_id,
+                            meta={
+                                "activity_type": "error_occurred",
+                                "session_id": str(session_id),
+                                "agent_id": str(agent_id)
+                            }
+                        )
+                    )
 
                 await asyncio.to_thread(_update_or_replace)
             except Exception as e:

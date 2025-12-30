@@ -18,6 +18,8 @@ from app.models import (
     Session,
 )
 from app.services.activity_service import ActivityService
+from app.services.event_service import event_service
+from app.models.event import EventType
 
 router = APIRouter(prefix="/activities", tags=["activities"])
 
@@ -129,7 +131,7 @@ def get_activity_stats(
 
 
 @router.patch("/{activity_id}", response_model=ActivityPublic)
-def update_activity(
+async def update_activity(
     *,
     session: SessionDep,
     current_user: CurrentUser,
@@ -154,11 +156,22 @@ def update_activity(
     if not updated_activity:
         raise HTTPException(status_code=404, detail="Activity not found")
 
+    # Emit WebSocket event for activity update
+    await event_service.emit_event(
+        event_type=EventType.ACTIVITY_UPDATED,
+        model_id=updated_activity.id,
+        user_id=current_user.id,
+        meta={
+            "activity_type": updated_activity.activity_type,
+            "is_read": updated_activity.is_read
+        }
+    )
+
     return updated_activity
 
 
 @router.post("/mark-read", response_model=dict)
-def mark_activities_as_read(
+async def mark_activities_as_read(
     *,
     session: SessionDep,
     current_user: CurrentUser,
@@ -168,22 +181,36 @@ def mark_activities_as_read(
     Mark multiple activities as read.
     """
     # Verify all activities belong to current user
+    activities_to_update = []
     for activity_id in activity_ids:
         activity = session.get(Activity, activity_id)
         if not activity:
             continue
         if not current_user.is_superuser and (activity.user_id != current_user.id):
             raise HTTPException(status_code=400, detail="Not enough permissions")
+        activities_to_update.append(activity)
 
     count = ActivityService.mark_multiple_as_read(
         db_session=session, activity_ids=activity_ids
     )
 
+    # Emit WebSocket events for each updated activity
+    for activity in activities_to_update:
+        await event_service.emit_event(
+            event_type=EventType.ACTIVITY_UPDATED,
+            model_id=activity.id,
+            user_id=current_user.id,
+            meta={
+                "activity_type": activity.activity_type,
+                "is_read": True
+            }
+        )
+
     return {"updated_count": count}
 
 
 @router.delete("/{activity_id}")
-def delete_activity(
+async def delete_activity(
     *,
     session: SessionDep,
     current_user: CurrentUser,
@@ -200,11 +227,25 @@ def delete_activity(
     if not current_user.is_superuser and (activity.user_id != current_user.id):
         raise HTTPException(status_code=400, detail="Not enough permissions")
 
+    # Store activity info before deletion for event emission
+    activity_type = activity.activity_type
+    user_id = activity.user_id
+
     success = ActivityService.delete_activity(
         db_session=session, activity_id=activity_id
     )
 
     if not success:
         raise HTTPException(status_code=404, detail="Activity not found")
+
+    # Emit WebSocket event for activity deletion
+    await event_service.emit_event(
+        event_type=EventType.ACTIVITY_DELETED,
+        model_id=activity_id,
+        user_id=user_id,
+        meta={
+            "activity_type": activity_type
+        }
+    )
 
     return {"message": "Activity deleted successfully"}

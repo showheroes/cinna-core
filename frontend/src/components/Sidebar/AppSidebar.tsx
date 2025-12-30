@@ -1,6 +1,6 @@
 import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
 import { Bot, Home, Key, MessageSquare, Users, Bell } from "lucide-react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
 import { Logo } from "@/components/Common/Logo"
@@ -22,6 +22,7 @@ import { type Item, Main } from "./Main"
 import { User } from "./User"
 import { ActivitiesService } from "@/client"
 import { cn } from "@/lib/utils"
+import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 
 const itemsBeforeActivities: Item[] = [
   { icon: Home, title: "Dashboard", path: "/" },
@@ -37,12 +38,23 @@ function ActivitiesMenu() {
   const { isMobile, setOpenMobile } = useSidebar()
   const router = useRouterState()
   const currentPath = router.location.pathname
+  const queryClient = useQueryClient()
 
   const { data: activityStats } = useQuery({
     queryKey: ["activity-stats"],
     queryFn: () => ActivitiesService.getActivityStats(),
     refetchInterval: 10000, // Refetch every 10 seconds
   })
+
+  // Subscribe to WebSocket events for activities to update stats in real-time
+  useMultiEventSubscription(
+    [EventTypes.ACTIVITY_CREATED, EventTypes.ACTIVITY_UPDATED, EventTypes.ACTIVITY_DELETED],
+    (event) => {
+      console.log("[Sidebar] Received activity event:", event.type, event)
+      // Invalidate stats to refetch with latest data
+      queryClient.invalidateQueries({ queryKey: ["activity-stats"] })
+    }
+  )
 
   const handleMenuClick = () => {
     if (isMobile) {

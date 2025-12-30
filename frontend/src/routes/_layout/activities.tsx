@@ -10,6 +10,7 @@ import { getColorPreset } from "@/utils/colorPresets"
 import { RelativeTime } from "@/components/Common/RelativeTime"
 import { Bell, CheckCircle2, AlertCircle, FileText, MessageCircle, AlertOctagon, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 
 export const Route = createFileRoute("/_layout/activities")({
   component: ActivitiesList,
@@ -57,6 +58,18 @@ function ActivitiesList() {
       queryClient.invalidateQueries({ queryKey: ["activity-stats"] })
     },
   })
+
+  // Subscribe to WebSocket events for activities
+  useMultiEventSubscription(
+    [EventTypes.ACTIVITY_CREATED, EventTypes.ACTIVITY_UPDATED, EventTypes.ACTIVITY_DELETED],
+    (event) => {
+      console.log("[Activities] Received activity event:", event.type, event)
+      // Invalidate activities list to refetch with latest data
+      queryClient.invalidateQueries({ queryKey: ["activities"] })
+      // Also invalidate stats for sidebar
+      queryClient.invalidateQueries({ queryKey: ["activity-stats"] })
+    }
+  )
 
   useEffect(() => {
     setHeaderContent(
