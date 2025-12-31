@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -46,6 +46,9 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
+  // Scheduler state
+  const [schedulerEnabled, setSchedulerEnabled] = useState(false)
+
   // Entrypoint form
   const entrypointForm = useForm<EntrypointFormData>({
     resolver: zodResolver(entrypointFormSchema),
@@ -83,6 +86,13 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
       })
     }
   }, [agent, entrypointForm, workflowForm])
+
+  // Sync scheduler enabled state with fetched schedule
+  useEffect(() => {
+    if (schedule) {
+      setSchedulerEnabled(schedule.enabled)
+    }
+  }, [schedule])
 
   const entrypointMutation = useMutation({
     mutationFn: (data: EntrypointFormData) =>
@@ -128,6 +138,18 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
     workflowForm.reset({
       workflow_prompt: agent.workflow_prompt ?? undefined,
     })
+  }
+
+  const handleSchedulerToggle = (checked: boolean) => {
+    setSchedulerEnabled(checked)
+
+    if (!checked && schedule) {
+      // Disable will be handled by SmartScheduler's deleteMutation
+      // Just update local state here
+    } else if (checked && schedule) {
+      // Re-enable will be handled by SmartScheduler
+      // Just update local state here
+    }
   }
 
   return (
@@ -193,17 +215,43 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
         {/* Scheduler Card */}
         <Card>
           <CardHeader>
-            <CardTitle>Scheduler</CardTitle>
-            <CardDescription>
-              Schedule execution time for this agent with entrypoint prompt as
-              starting message
-            </CardDescription>
+            <div className="flex items-start justify-between">
+              <div className="space-y-1.5">
+                <CardTitle>Scheduler</CardTitle>
+                <CardDescription>
+                  Schedule execution time for this agent with entrypoint prompt as
+                  starting message
+                </CardDescription>
+              </div>
+              <label className="flex cursor-pointer select-none items-center ml-4 mt-1">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={schedulerEnabled}
+                    onChange={(e) => handleSchedulerToggle(e.target.checked)}
+                    className="sr-only"
+                  />
+                  <div
+                    className={`block h-6 w-11 rounded-full transition-colors ${
+                      schedulerEnabled ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"
+                    }`}
+                  ></div>
+                  <div
+                    className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                      schedulerEnabled ? "translate-x-5" : ""
+                    }`}
+                  ></div>
+                </div>
+              </label>
+            </div>
           </CardHeader>
           <CardContent>
             <SmartScheduler
               agentId={agent.id}
               currentSchedule={schedule ?? undefined}
               onScheduleUpdate={() => refetchSchedule()}
+              enabled={schedulerEnabled}
+              onToggle={handleSchedulerToggle}
             />
           </CardContent>
         </Card>

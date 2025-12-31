@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { Check, Clock, AlertCircle, Sparkles } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import useCustomToast from "@/hooks/useCustomToast"
 import { AgentsService } from "@/client"
@@ -13,17 +12,20 @@ interface SmartSchedulerProps {
   agentId: string
   currentSchedule?: AgentSchedulePublic
   onScheduleUpdate?: () => void
+  enabled: boolean
+  onToggle: (enabled: boolean) => void
 }
 
 export function SmartScheduler({
   agentId,
   currentSchedule,
   onScheduleUpdate,
+  enabled,
+  onToggle,
 }: SmartSchedulerProps) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
   // State management
-  const [enabled, setEnabled] = useState(currentSchedule?.enabled || false)
   const [input, setInput] = useState("")
   const [schedule, setSchedule] = useState<{
     success: boolean
@@ -34,13 +36,15 @@ export function SmartScheduler({
   } | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
 
+  // Track previous enabled value to detect changes
+  const prevEnabledRef = useRef<boolean | undefined>(undefined)
+
   // Get user timezone
   const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   // Sync schedule state with currentSchedule prop
   useEffect(() => {
     if (currentSchedule && currentSchedule.enabled) {
-      setEnabled(true)
       setSchedule({
         success: true,
         description: currentSchedule.description,
@@ -49,6 +53,32 @@ export function SmartScheduler({
       })
     }
   }, [currentSchedule])
+
+  // Handle toggle changes from parent
+  useEffect(() => {
+    // Skip on first render
+    if (prevEnabledRef.current === undefined) {
+      prevEnabledRef.current = enabled
+      return
+    }
+
+    // Only act if enabled actually changed
+    if (prevEnabledRef.current !== enabled) {
+      if (!enabled && currentSchedule) {
+        // User toggled off - delete the schedule
+        deleteMutation.mutate()
+      } else if (enabled && currentSchedule) {
+        // User toggled on - restore schedule state
+        setSchedule({
+          success: true,
+          description: currentSchedule.description,
+          cron_string: currentSchedule.cron_string,
+          next_execution: currentSchedule.next_execution,
+        })
+      }
+      prevEnabledRef.current = enabled
+    }
+  }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // API calls
   const generateMutation = useMutation({
@@ -97,7 +127,7 @@ export function SmartScheduler({
     mutationFn: () => AgentsService.deleteSchedule({ id: agentId }),
     onSuccess: () => {
       setSchedule(null)
-      setEnabled(false)
+      onToggle(false)
       setInput("")
       setHasChanges(false)
       showSuccessToast("Schedule disabled")
@@ -119,23 +149,6 @@ export function SmartScheduler({
         cron_string: schedule.cron_string,
         description: schedule.description,
         enabled: true,
-      })
-    }
-  }
-
-  const handleToggle = (checked: boolean) => {
-    setEnabled(checked)
-
-    if (!checked && currentSchedule) {
-      // Disable existing schedule
-      deleteMutation.mutate()
-    } else if (checked && currentSchedule) {
-      // Re-enable with current schedule data
-      setSchedule({
-        success: true,
-        description: currentSchedule.description,
-        cron_string: currentSchedule.cron_string,
-        next_execution: currentSchedule.next_execution,
       })
     }
   }
@@ -174,38 +187,7 @@ export function SmartScheduler({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Label className="text-base font-semibold">Scheduler</Label>
-
-        {/* Enable/Disable Toggle */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
-            {enabled ? "Enabled" : "Disabled"}
-          </span>
-          <label className="flex cursor-pointer select-none items-center">
-            <div className="relative">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => handleToggle(e.target.checked)}
-                className="sr-only"
-              />
-              <div
-                className={`block h-6 w-11 rounded-full transition-colors ${
-                  enabled ? "bg-orange-400" : "bg-gray-300 dark:bg-gray-600"
-                }`}
-              ></div>
-              <div
-                className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                  enabled ? "translate-x-5" : ""
-                }`}
-              ></div>
-            </div>
-          </label>
-        </div>
-      </div>
-
+    <>
       {/* Scheduler form - only visible when enabled */}
       {enabled && (
         <div className="space-y-4">
@@ -265,6 +247,6 @@ export function SmartScheduler({
           )}
         </div>
       )}
-    </div>
+    </>
   )
 }
