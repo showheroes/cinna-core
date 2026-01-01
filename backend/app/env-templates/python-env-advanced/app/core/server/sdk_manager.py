@@ -84,7 +84,7 @@ class ClaudeCodeSDKManager:
 
         try:
             # Import SDK here to avoid import errors if SDK not installed
-            from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, ResultMessage
+            from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server
 
             # Build options
             options = ClaudeAgentOptions(
@@ -92,6 +92,28 @@ class ClaudeCodeSDKManager:
                 permission_mode=self.permission_mode,
                 cwd=self.workspace_dir,
             )
+
+            # Add custom tools for building mode
+            if mode == "building":
+                try:
+                    # Import the knowledge query tool
+                    from .tools.knowledge_query import query_integration_knowledge
+
+                    # Create MCP server with custom tools
+                    knowledge_server = create_sdk_mcp_server(
+                        name="knowledge",
+                        version="1.0.0",
+                        tools=[query_integration_knowledge]
+                    )
+
+                    # Add to options
+                    options.mcp_servers = {"knowledge": knowledge_server}
+                    options.allowed_tools.append("mcp__knowledge__query_integration_knowledge")
+                    logger.info("Added knowledge query tool for building mode")
+                except ImportError as tool_import_error:
+                    logger.warning(f"Could not import knowledge query tool: {tool_import_error}")
+                except Exception as tool_error:
+                    logger.warning(f"Could not setup knowledge query tool: {tool_error}")
 
             # Set model based on mode
             # Conversation mode: use Haiku for faster, cheaper responses

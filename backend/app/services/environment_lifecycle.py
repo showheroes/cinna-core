@@ -557,6 +557,9 @@ ENV_VERSION={environment.env_version}
 # Network Configuration
 AGENT_PORT={port}
 
+# Backend API Configuration
+BACKEND_URL=http://backend:8000
+
 # Security
 AGENT_AUTH_TOKEN={auth_token}
 
