@@ -434,6 +434,7 @@ class MessageService:
         streaming_events = []  # Store raw streaming events for visualization
         new_external_session_id = external_session_id
         was_interrupted = False  # Track if message was interrupted
+        agent_message_id = None  # Track agent message ID for early creation
         response_metadata = {
             "external_session_id": external_session_id,
             "mode": session_mode,
@@ -577,6 +578,33 @@ class MessageService:
                         }
                     streaming_events.append(event_copy)
 
+                # Create agent message in DB as soon as we receive the first "assistant" event
+                # This ensures the message exists BEFORE any tool calls execute (like handover)
+                # so the sequence number is correctly calculated
+                if event.get("type") == "assistant" and agent_message_id is None:
+                    def _create_initial_agent_message():
+                        with get_fresh_db_session() as db:
+                            # Create placeholder message with initial content
+                            initial_content = event.get("content", "Agent is responding...")
+                            initial_metadata = {
+                                "external_session_id": new_external_session_id,
+                                "mode": session_mode,
+                                "agent_sdk": agent_sdk,
+                                "streaming_in_progress": True  # Mark as incomplete
+                            }
+                            message = MessageService.create_message(
+                                session=db,
+                                session_id=session_id,
+                                role="agent",
+                                content=initial_content,
+                                message_metadata=initial_metadata,
+                            )
+                            return message.id
+
+                    # Create message in background thread and capture ID
+                    agent_message_id = await asyncio.to_thread(_create_initial_agent_message)
+                    logger.info(f"Created initial agent message {agent_message_id} on first assistant event")
+
                 # Collect agent response content
                 if event.get("content"):
                     agent_response_parts.append(event["content"])
@@ -612,20 +640,47 @@ class MessageService:
                 has_questions = MessageService.detect_ask_user_question_tool(streaming_events)
                 tool_questions_status = "unanswered" if has_questions else None
 
-                def _save_agent_message():
+                def _save_or_update_agent_message():
                     with get_fresh_db_session() as db:
-                        MessageService.create_message(
-                            session=db,
-                            session_id=session_id,
-                            role="agent",
-                            content=agent_content,
-                            message_metadata=response_metadata,
-                            tool_questions_status=tool_questions_status,
-                            status="user_interrupted" if was_interrupted else "",
-                            status_message="Interrupted by user" if was_interrupted else None
-                        )
-                await asyncio.to_thread(_save_agent_message)
-                logger.info(f"Agent response saved ({len(streaming_events)} events, model={response_metadata.get('model')}, has_questions={has_questions}, interrupted={was_interrupted})")
+                        if agent_message_id:
+                            # Update existing message that was created on first assistant event
+                            agent_message = db.get(SessionMessage, agent_message_id)
+                            if agent_message:
+                                agent_message.content = agent_content
+                                agent_message.message_metadata = response_metadata
+                                agent_message.tool_questions_status = tool_questions_status
+                                agent_message.status = "user_interrupted" if was_interrupted else ""
+                                agent_message.status_message = "Interrupted by user" if was_interrupted else None
+                                db.add(agent_message)
+                                db.commit()
+                                logger.info(f"Updated agent message {agent_message_id} with final content")
+                            else:
+                                logger.error(f"Agent message {agent_message_id} not found for update, creating new one")
+                                # Fallback: create new message if the initial one was lost
+                                MessageService.create_message(
+                                    session=db,
+                                    session_id=session_id,
+                                    role="agent",
+                                    content=agent_content,
+                                    message_metadata=response_metadata,
+                                    tool_questions_status=tool_questions_status,
+                                    status="user_interrupted" if was_interrupted else "",
+                                    status_message="Interrupted by user" if was_interrupted else None
+                                )
+                        else:
+                            # No assistant events received (edge case), create message normally
+                            MessageService.create_message(
+                                session=db,
+                                session_id=session_id,
+                                role="agent",
+                                content=agent_content,
+                                message_metadata=response_metadata,
+                                tool_questions_status=tool_questions_status,
+                                status="user_interrupted" if was_interrupted else "",
+                                status_message="Interrupted by user" if was_interrupted else None
+                            )
+                await asyncio.to_thread(_save_or_update_agent_message)
+                logger.info(f"Agent response finalized ({len(streaming_events)} events, model={response_metadata.get('model')}, has_questions={has_questions}, interrupted={was_interrupted})")
 
             # Update session status after streaming
             # Keep as "active" when interrupted so user can continue

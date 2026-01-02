@@ -99,7 +99,8 @@ Agent Env SDK → Agent Env Server → Backend Service → Backend API → Front
 - Collects streaming events in memory
 - Captures external session ID from early response
 - Updates `ActiveStreamingManager` with session ID
-- Saves agent message to database when stream completes
+- Creates agent message placeholder on first `assistant` event (ensures correct sequence before tool calls)
+- Updates agent message with final content when stream completes
 - Detects `AskUserQuestion` tool usage for follow-up handling
 - Updates session status (active → completed/interrupted)
 
@@ -425,6 +426,31 @@ Fields:
 
 ## Implementation Details
 
+### Message Sequence Ordering and Early Creation
+
+**Challenge**: Race condition between agent message creation and tool call execution during streaming.
+
+**Problem**: Agent handover tool calls (or other tools) execute during streaming, before the agent message is saved to database. When the handover creates a system message, it queries `MAX(sequence_number)` and gets a number that doesn't account for the in-progress agent message, causing incorrect ordering in the UI.
+
+**Solution** (`message_service.py:stream_message_with_events`):
+- Create agent message placeholder immediately on first `assistant` event
+- Store message ID in `agent_message_id` variable
+- Update existing message with final content when stream completes
+- Mark placeholder with `streaming_in_progress: true` in metadata
+
+**Frontend Filtering** (`MessageList.tsx`):
+- Filter out messages with `message_metadata.streaming_in_progress` flag
+- Prevents empty placeholder from appearing in UI
+- Real-time content shown via `StreamingMessage` component instead
+
+**Sequence Number Flow**:
+1. User message created (sequence N)
+2. First `assistant` event → agent message placeholder created (sequence N+1)
+3. Tool call executes → sees agent message in DB → system message gets sequence N+2
+4. Stream completes → agent message updated at sequence N+1 (not recreated)
+
+**Result**: Messages appear in chronological order: User → Agent → Tool/System messages
+
 ### Session ID Extraction
 
 **Challenge**: SystemMessage.data is a dict, not an object
@@ -480,13 +506,13 @@ Fields:
 - `components/Chat/MessageInput.tsx` - UI for send/stop
 - `components/Chat/MessageBubble.tsx` - Displays interrupted badge and status
 - `components/Chat/StreamEventRenderer.tsx` - Renders streaming events including system notifications
-- `components/Chat/MessageList.tsx` - Message list container
+- `components/Chat/MessageList.tsx` - Message list container, filters out in-progress placeholder messages
 - `components/Chat/StreamingMessage.tsx` - Real-time streaming display
 
 ### Backend
 - `api/routes/messages.py` - API endpoints
 - `api/routes/agents.py` - Agent handover endpoint (triggers background processing)
-- `services/message_service.py` - Streaming orchestration
+- `services/message_service.py` - Streaming orchestration, early agent message creation, sequence ordering
 - `services/agent_service.py` - Agent handover execution with background message processing
 - `services/active_streaming_manager.py` - Stream tracking
 - `services/session_service.py` - Session/external ID management

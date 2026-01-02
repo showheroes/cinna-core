@@ -84,9 +84,15 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming,
             </div>
           ) : (
             <>
-              {messages.map((message) => (
-                <MessageBubble key={message.id} message={message} onSendAnswer={onSendAnswer} />
-              ))}
+              {messages
+                .filter((message) => {
+                  // Filter out messages that are still streaming (placeholder messages)
+                  const metadata = message.message_metadata as Record<string, any> | undefined
+                  return !metadata?.streaming_in_progress
+                })
+                .map((message) => (
+                  <MessageBubble key={message.id} message={message} onSendAnswer={onSendAnswer} />
+                ))}
               {isStreaming && <StreamingMessage events={streamingEvents || []} />}
               <div ref={messagesEndRef} />
             </>
