@@ -22,8 +22,8 @@ AGENT_ID = os.getenv("AGENT_ID")
 # Path to handover config file in workspace
 HANDOVER_CONFIG_PATH = "/app/workspace/docs/agent_handover_config.json"
 
-# Import context variable to get current backend session_id
-from ..sdk_manager import backend_session_context
+# Import functions to get current backend session_id
+from ..sdk_manager import get_backend_session_id, get_current_sdk_session_id
 
 
 def load_handover_config() -> dict[str, Any]:
@@ -128,14 +128,17 @@ async def agent_handover(args: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        # Get current backend session_id from context variable
-        source_session_id = backend_session_context.get()
+        # Get current SDK session ID from global variable
+        sdk_session_id = get_current_sdk_session_id()
 
-        logger.info(f"Executing handover from backend session {source_session_id} to agent {target_agent_id} ({target_agent_name})")
+        # Get backend session ID from the mapping (will use current SDK session if not provided)
+        source_session_id = get_backend_session_id()
+
+        logger.info(f"Executing handover from SDK session {sdk_session_id}, backend session {source_session_id} to agent {target_agent_id} ({target_agent_name})")
 
         # Validate backend session_id is available
         if not source_session_id:
-            logger.error("Backend session ID not available in context")
+            logger.error(f"Backend session ID not available for SDK session {sdk_session_id}")
             return {
                 "content": [{
                     "type": "text",

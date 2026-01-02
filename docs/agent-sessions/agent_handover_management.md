@@ -249,7 +249,8 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 
 **Tool Implementation** in `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py`:
 - Validates target agent ID against configured handovers in JSON
-- Retrieves backend session ID from context variable
+- Retrieves SDK session ID via `get_current_sdk_session_id()` helper function
+- Retrieves backend session ID via `get_backend_session_id()` helper function
 - Calls backend API `POST /agents/handover/execute` with source session ID
 - Backend handles session creation, message posting, and source session logging
 - Returns success confirmation to agent
@@ -273,10 +274,30 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 **Backend Endpoint**: `POST /agents/handover/execute` in `backend/app/api/routes/agents.py`
 - Delegates all logic to `AgentService.execute_handover()`
 
-**Session Context**: Backend session ID passed via ChatRequest payload
+**Session Context**: Backend session ID passed via ChatRequest payload and tracked globally
 - `session_id`: Claude SDK session ID (for SDK resumption)
 - `backend_session_id`: Backend database session UUID (for handover tracking)
-- Context variable `backend_session_context` in `sdk_manager.py` makes session ID available to tools
+- Global state in `sdk_manager.py` maps SDK session IDs to backend session IDs
+- Helper functions `get_current_sdk_session_id()` and `get_backend_session_id()` provide access to tools
+- Async lock `_sdk_session_lock` serializes SDK sessions to prevent race conditions
+- Note: Context variables don't propagate to tool execution contexts, requiring global state
+
+#### 6. Technical Implementation Notes
+
+**Async Context Challenge**:
+Python's `contextvars.ContextVar` does not propagate to new async tasks created by the Claude SDK during tool execution. Tools run in separate async contexts without access to parent context variables.
+
+**Solution Architecture**:
+- Global variables (`_current_sdk_session_id`, `_backend_session_map`) store session state
+- Async lock (`_sdk_session_lock`) in `send_message_stream()` serializes SDK sessions
+- Lock prevents race conditions when multiple concurrent requests arrive
+- Helper functions provide controlled access to global state
+- Cleanup in `finally` block ensures state is cleared after each session
+
+**Trade-offs**:
+- Global state simplifies tool access but requires serialization
+- Lock prevents concurrency within single agent environment (acceptable since SDK is stateful)
+- Alternative approaches (thread-local storage, context propagation) proved incompatible with SDK architecture
 
 ### Integration Points
 
@@ -287,12 +308,12 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 - `backend/app/services/adapters/docker_adapter.py` - Environment communication
 
 **Agent-Env Components**:
-- `backend/app/env-templates/python-env-advanced/app/core/server/routes.py` - Config and chat endpoints
-- `backend/app/env-templates/python-env-advanced/app/core/server/models.py` - ChatRequest with backend_session_id
+- `backend/app/env-templates/python-env-advanced/app/core/server/routes.py` - Config and chat endpoints, passes backend_session_id to SDK manager
+- `backend/app/env-templates/python-env-advanced/app/core/server/models.py` - ChatRequest with backend_session_id field
 - `backend/app/env-templates/python-env-advanced/app/core/server/agent_env_service.py` - Config storage
-- `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py` - Tool registration, context variable management
+- `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py` - Tool registration, global session state with async lock, helper functions for session ID access
 - `backend/app/env-templates/python-env-advanced/app/core/server/prompt_generator.py` - Prompt injection
-- `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py` - Tool implementation
+- `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py` - Tool implementation, uses helper functions to retrieve session IDs
 
 **Frontend Components**:
 - `frontend/src/components/Agents/AgentHandovers.tsx` - Handover configuration management

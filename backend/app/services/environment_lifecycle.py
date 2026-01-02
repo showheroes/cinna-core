@@ -7,11 +7,14 @@ from uuid import UUID
 from sqlmodel import Session
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.models.environment import AgentEnvironment
 from app.models.agent import Agent
+from app.models import User
 from app.core.config import settings
+from app.core import security
+import app.crud as crud
 from .adapters.base import EnvironmentAdapter, EnvInitConfig
 from .adapters.docker_adapter import DockerEnvironmentAdapter
 
@@ -111,26 +114,19 @@ class EnvironmentLifecycleManager:
 
             await self._copy_template(template_dir, instance_dir)
 
-            # 3. Allocate port and generate auth token
+            # 3. Allocate port (only on first create)
             environment.status_message = "Configuring environment..."
             db_session.add(environment)
             db_session.commit()
 
             port = self._allocate_port()
-            auth_token = self._generate_auth_token()
             environment.config["port"] = port
-            environment.config["auth_token"] = auth_token
             environment.config["container_name"] = f"agent-{environment.id}"
-
-            # Mark config as modified so SQLAlchemy detects the change
             flag_modified(environment, "config")
             logger.debug(f"Allocated port {port} for environment {environment.id}")
 
-            # 4. Generate docker-compose.yml
-            self._generate_compose_file(instance_dir, environment, agent, port, auth_token)
-
-            # 5. Generate .env file
-            self._generate_env_file(instance_dir, environment, agent, port, auth_token, anthropic_api_key)
+            # 4. Update configuration files (auth token, compose, env)
+            self._update_environment_config(db_session, instance_dir, environment, agent, anthropic_api_key)
 
             # 6. Build image
             environment.status = "building"
@@ -218,11 +214,12 @@ class EnvironmentLifecycleManager:
     ) -> bool:
         """
         Start environment:
-        1. Update status to 'starting'
-        2. Start container via adapter
-        3. Wait for health check
-        4. Sync agent data (prompts and credentials)
-        5. Update status to 'running'
+        1. Update configuration files (regenerate auth token, docker-compose.yml, .env)
+        2. Update status to 'starting'
+        3. Start container via adapter
+        4. Wait for health check
+        5. Sync agent data (prompts and credentials)
+        6. Update status to 'running'
 
         Args:
             db_session: Database session
@@ -231,15 +228,28 @@ class EnvironmentLifecycleManager:
         """
         # Update status
         environment.status = "starting"
-        environment.status_message = "Starting container..."
+        environment.status_message = "Updating configuration files..."
         db_session.add(environment)
         db_session.commit()
 
         try:
+            # Get instance directory
+            instance_dir = self.instances_dir / str(environment.id)
+
+            # Update configuration files (generates new auth token, docker-compose.yml, .env)
+            # This ensures the environment always has a fresh JWT token before starting
+            self._update_environment_config(db_session, instance_dir, environment, agent)
+            db_session.add(environment)  # Save updated config with new auth token
+            db_session.commit()
+
             # Get adapter
             adapter = self.get_adapter(environment)
 
             # Start container
+            environment.status_message = "Starting container..."
+            db_session.add(environment)
+            db_session.commit()
+
             await adapter.start()
 
             # Sync agent data (prompts and credentials)
@@ -353,6 +363,18 @@ class EnvironmentLifecycleManager:
 
             if not template_core_dir.exists():
                 raise FileNotFoundError(f"Template core directory not found: {template_core_dir}")
+
+            # Get instance directory
+            instance_dir = self.instances_dir / str(environment.id)
+
+            # Update configuration files (generates new auth token, docker-compose.yml, .env)
+            environment.status_message = "Updating configuration files..."
+            db_session.add(environment)
+            db_session.commit()
+
+            self._update_environment_config(db_session, instance_dir, environment, agent)
+            db_session.add(environment)  # Save updated config with new auth token
+            db_session.commit()
 
             # Update status
             environment.status_message = "Updating core files and rebuilding image..."
@@ -492,6 +514,62 @@ class EnvironmentLifecycleManager:
         await asyncio.to_thread(_copy_sync)
         logger.debug(f"Template copy completed")
 
+    def _update_environment_config(
+        self,
+        db_session: Session,
+        instance_dir: Path,
+        environment: AgentEnvironment,
+        agent: Agent,
+        anthropic_api_key: str | None = None
+    ):
+        """
+        Update environment configuration files.
+
+        This method regenerates:
+        1. Auth token (JWT)
+        2. docker-compose.yml
+        3. .env file
+
+        This should be called:
+        - During initial environment creation
+        - During environment rebuild
+        - Before environment start (to ensure fresh configs)
+
+        Args:
+            db_session: Database session
+            instance_dir: Path to environment instance directory
+            environment: Environment model
+            agent: Agent model
+            anthropic_api_key: User's Anthropic API key (optional, if not provided will fetch from user settings)
+        """
+        # 1. Generate new auth token
+        auth_token = self._generate_auth_token(agent.owner_id)
+        environment.config["auth_token"] = auth_token
+        flag_modified(environment, "config")
+        logger.debug(f"Generated new auth token for environment {environment.id}")
+
+        # 2. Get port from config (should already be set)
+        port = environment.config.get("port")
+        if not port:
+            raise ValueError(f"Port not configured for environment {environment.id}")
+
+        # 3. Fetch ANTHROPIC_API_KEY from user AI credentials if not explicitly provided
+        if anthropic_api_key is None:
+            user = db_session.get(User, agent.owner_id)
+            if user:
+                ai_credentials = crud.get_user_ai_credentials(user=user)
+                anthropic_api_key = ai_credentials.anthropic_api_key if ai_credentials else None
+                if anthropic_api_key:
+                    logger.debug(f"Fetched ANTHROPIC_API_KEY from user settings for environment {environment.id}")
+
+        # 4. Generate docker-compose.yml
+        self._generate_compose_file(instance_dir, environment, agent, port, auth_token)
+
+        # 5. Generate .env file
+        self._generate_env_file(instance_dir, environment, agent, port, auth_token, anthropic_api_key)
+
+        logger.info(f"Updated configuration files for environment {environment.id}")
+
     def _generate_compose_file(
         self,
         instance_dir: Path,
@@ -608,7 +686,23 @@ ANTHROPIC_API_KEY={anthropic_api_key or ''}
 
         raise Exception("No available ports")
 
-    def _generate_auth_token(self) -> str:
-        """Generate authentication token for agent container."""
-        import secrets
-        return secrets.token_urlsafe(32)
+    def _generate_auth_token(self, user_id: UUID) -> str:
+        """
+        Generate JWT authentication token for agent container.
+
+        The token contains the user_id of the agent owner, allowing the agent
+        to authenticate as that user when making API calls back to the backend.
+
+        Args:
+            user_id: UUID of the agent owner
+
+        Returns:
+            JWT token string
+        """
+        # Create a JWT token that expires in 10 years (agents are long-lived)
+        # The token contains the user_id so the agent can authenticate as the owner
+        access_token_expires = timedelta(days=365 * 10)
+        return security.create_access_token(
+            subject=str(user_id),
+            expires_delta=access_token_expires
+        )

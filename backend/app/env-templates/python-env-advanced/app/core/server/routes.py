@@ -117,6 +117,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         async for chunk in sdk_manager.send_message_stream(
             message=request.message,
             session_id=request.session_id,
+            backend_session_id=request.backend_session_id,
             system_prompt=request.system_prompt,  # Only use explicit override if provided
             mode=request.mode,
             agent_sdk=request.agent_sdk,

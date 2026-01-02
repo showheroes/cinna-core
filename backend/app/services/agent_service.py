@@ -332,21 +332,26 @@ class AgentService:
         # Generate overall handover prompt
         if handovers_list:
             handover_prompt = (
-                "## Agent Handover Tool\n\n"
-                "You have access to the `agent_handover` tool which allows you to hand over work to other specialized agents. "
-                "Use this tool when the conditions specified in a handover configuration are met.\n\n"
-                "**Available handovers:**\n"
+                "## AGENT HANDOVER INSTRUCTIONS FOR THIS CONVERSATION\n\n"
+                "CRITICAL: You have the `agent_handover` tool available RIGHT NOW in this conversation. "
+                "When you complete a task that matches the trigger conditions below IN THIS CONVERSATION, "
+                "you MUST immediately call the tool IN THE SAME RESPONSE - do not just describe what you would do, "
+                "do not wait for the next message, do not ask for permission. "
+                "Execute the handover IMMEDIATELY when conditions are met.\n\n"
+                "**CONFIGURED HANDOVERS (these apply to the current conversation):**\n"
             )
 
             for h in handovers_list:
-                handover_prompt += f"\n- **{h['name']}** (ID: {h['id']}): {h['prompt']}\n"
+                handover_prompt += f"\n**→ {h['name']}** (ID: {h['id']})\n{h['prompt']}\n"
 
             handover_prompt += (
-                "\n**How to use:**\n"
-                "Call the `agent_handover` tool with:\n"
-                "- `target_agent_id`: The UUID of the target agent\n"
-                "- `target_agent_name`: The name of the target agent\n"
-                "- `handover_message`: The message to send to the target agent with relevant context\n"
+                "\n**HOW TO EXECUTE THE HANDOVER RIGHT NOW:**\n"
+                "As soon as conditions are met in this conversation, call `agent_handover` with:\n"
+                "- `target_agent_id`: UUID of the target agent (shown above)\n"
+                "- `target_agent_name`: Name of the target agent (shown above)\n"
+                "- `handover_message`: The context message as specified in the instructions above\n\n"
+                "CRITICAL: This happens in the CURRENT conversation. When you complete the triggering task, "
+                "call the tool in that same response. Do not wait, do not ask, do not describe - just execute.\n"
             )
         else:
             handover_prompt = ""

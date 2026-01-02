@@ -2,50 +2,55 @@
 
 ## Task
 
-Generate a **concise handover prompt** that defines when and how a source agent should trigger a target agent.
+Generate a **concise, action-oriented handover prompt** that instructs a source agent to USE the agent_handover tool to trigger a target agent.
 
 ## What is a Handover?
 
-A handover is when one agent completes its task and needs to pass control to another agent with specific context. The handover prompt should describe:
+A handover is when one agent completes its task and must USE THE TOOL to pass control to another agent with specific context. The handover prompt is a DIRECT INSTRUCTION to call the agent_handover tool.
 
-1. **Condition**: When should the handover happen?
-2. **Context**: What information should be passed to the target agent?
-3. **Instructions**: How should the message be formatted?
+## Critical Requirements
 
-## Requirements
-
-- **Maximum 2-3 sentences** - This will be added as a tool-call description
-- **Clear trigger condition** - State exactly when to handover
-- **Specific context** - Define what data/results to include
-- **Natural language** - Write as if instructing a human
+- **IMPERATIVE LANGUAGE** - Use "MUST use the agent_handover tool" or "immediately call agent_handover"
+- **EXPLICIT TOOL MENTION** - Always reference the "agent_handover tool" by name
+- **Maximum 2-3 sentences** - This will be added as tool documentation
+- **Clear trigger condition** - State exactly WHEN to use the tool
+- **Specific context** - Define what data/results to include in handover_message
+- **NO MARKDOWN FORMATTING** - No headers, no bold, just plain instructional text
 
 ## Output Format
 
-Return ONLY the handover prompt text. No JSON, no markdown formatting, no extra explanations.
+Return ONLY the handover prompt text. No JSON, no markdown headers/formatting, no code blocks, no extra explanations.
 
-## Good Examples
+## Good Examples (ACTION-ORIENTED)
 
-✅ "Once you've identified the top 3 cryptocurrencies with highest growth potential, hand over to the Cryptocurrency Trader agent with the list of coins and your analysis summary. Example: 'Here are the top 3 cryptos to process: BTC, ETH, SOL with analysis...'
+✅ "As soon as you successfully fetch all cryptocurrency rates in this conversation, IMMEDIATELY use the agent_handover tool to hand over to CryptoRateLogger. Include each symbol with its current price in the handover_message. Example: 'BTC: $87,318.27, ETH: $2,927.89, SOL: $156.43'"
 
-✅ "After completing the code review, if you find critical security issues, hand over to the Security Team Notifier agent with the issue details and affected files. Example: 'Critical security issues found in authentication.py and user.py...'
+✅ "In this conversation, after you complete the code review, if you find any critical security issues, you MUST immediately use the agent_handover tool right then. In the handover_message, list each issue with affected file. Example: 'SQL injection in auth.py line 45, XSS in user_profile.py line 103'"
 
-✅ "When the report generation is complete, hand over to the Email Sender agent with the report file path and recipient list. Example: 'Report generated at /reports/monthly_summary.pdf, send to team@example.com'
+✅ "When you complete the report generation in this conversation, immediately call agent_handover in the same response with the file path and recipient list. Example: 'Report ready at /reports/monthly_summary.pdf, recipients: team@company.com, manager@company.com'"
 
 ## Bad Examples
 
-❌ "Hand over when done" - Too vague, no context specified
+❌ "Once you have fetched the rates, hand over to the Logger agent" - Too passive, no "this conversation", doesn't emphasize TOOL USAGE
 
-❌ "After analysis, send the following detailed breakdown including all technical specifications, performance metrics, comparative analysis against industry standards, and comprehensive recommendations with supporting data to the Trading Bot agent..." - Too long and verbose
+❌ "# IMPORTANT: Hand over when done with results" - Has markdown formatting, too vague, no timing context
 
-❌ "Maybe pass some info to the other agent if needed" - Unclear condition and context
+❌ "Maybe pass some info to the other agent if needed" - Not imperative, unclear condition, optional language
+
+❌ "After detailed analysis including comprehensive data review..." - Too long and verbose
+
+❌ "When analysis is done, hand over" - Doesn't specify "in this conversation" or "immediately", no sense of NOW
 
 ## Guidelines
 
-1. Start with the **completion condition** (e.g., "Once you've...", "After completing...", "When...")
-2. Specify the **target agent's name** explicitly
-3. List the **specific data** to include (e.g., "top 3 items", "error details", "file path")
-4. Provide a **concrete example** of how the handover message should look
-5. Keep it **compact** - remember this is tool documentation, not a full workflow
+1. **ADD TEMPORAL CONTEXT** - Use "in this conversation", "right now", "as soon as", "immediately in the same response"
+2. **START with timing** - "As soon as you...", "In this conversation, when you...", "The moment you complete..."
+3. **EMPHASIZE IMMEDIACY** - "IMMEDIATELY use", "MUST immediately call", "right then"
+4. **Specify target agent name** - Include it in the instruction
+5. **Define handover_message content** - Be specific about what to include
+6. **Provide concrete example** - Show EXACTLY how the handover_message should look
+7. **NO markdown** - No headers (#), no bold (**), just plain instructional text
+8. **Keep it compact** - 2-3 sentences maximum
 
 ## Context You'll Receive
 
@@ -57,3 +62,16 @@ Use these to understand:
 - What the source agent does
 - What the target agent expects
 - How they should connect logically
+
+## CRITICAL REMINDER
+
+The generated prompt MUST make the agent understand this is happening:
+- **In the current conversation** (not some future hypothetical scenario)
+- **Right now** (as soon as the condition is met)
+- **In the same response** (don't wait for next message)
+- **By calling the tool** (not describing or mentioning)
+
+Use phrases like:
+- "As soon as you [complete X] in this conversation, IMMEDIATELY use agent_handover..."
+- "In this conversation, the moment you [finish Y], call agent_handover right then..."
+- "When you [complete Z] in this conversation, immediately call agent_handover in the same response..."

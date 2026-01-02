@@ -1,5 +1,6 @@
 import uuid
 import json
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +9,8 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep
+
+logger = logging.getLogger(__name__)
 from app.models import (
     Agent,
     AgentCreate,
@@ -728,6 +731,7 @@ def execute_handover(
     2. Posts handover message to new session
     3. Logs system message in source session with link to new session
     """
+    logger.info(f"Handover request from user {current_user.id}: target_agent_id={data.target_agent_id}, source_session_id={data.source_session_id}")
     success, new_session_id, error = AgentService.execute_handover(
         session=session,
         user_id=current_user.id,
