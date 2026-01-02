@@ -88,3 +88,17 @@ class GenerateHandoverPromptResponse(SQLModel):
     success: bool
     handover_prompt: str | None = None
     error: str | None = None
+
+
+class ExecuteHandoverRequest(SQLModel):
+    """Request to execute a handover to another agent."""
+    target_agent_id: uuid.UUID
+    target_agent_name: str
+    handover_message: str
+
+
+class ExecuteHandoverResponse(SQLModel):
+    """Response from handover execution."""
+    success: bool
+    session_id: uuid.UUID | None = None
+    error: str | None = None

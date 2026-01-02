@@ -1,6 +1,7 @@
 """
 Agent Environment Service - Business logic for agent environment operations.
 """
+import json
 import logging
 import zipfile
 import uuid
@@ -261,6 +262,68 @@ class AgentEnvService:
         except Exception as e:
             logger.error(f"Failed to read credentials/README.md: {e}")
             return None
+
+    def get_agent_handover_config(self) -> dict:
+        """
+        Get agent handover configuration from JSON file.
+
+        Returns:
+            Dictionary with handovers list and handover_prompt, or empty structure if file doesn't exist
+        """
+        config_file = self.docs_dir / "agent_handover_config.json"
+
+        if not config_file.exists():
+            logger.debug(f"agent_handover_config.json not found at {config_file}")
+            return {"handovers": [], "handover_prompt": ""}
+
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                logger.info(f"Read agent_handover_config.json ({len(config.get('handovers', []))} handovers)")
+                return config
+        except Exception as e:
+            logger.error(f"Failed to read agent_handover_config.json: {e}")
+            return {"handovers": [], "handover_prompt": ""}
+
+    def update_agent_handover_config(
+        self,
+        handovers: list[dict],
+        handover_prompt: str
+    ) -> bool:
+        """
+        Update agent handover configuration in JSON file.
+
+        Creates/updates docs/agent_handover_config.json with:
+        - handovers: Array of {id, name, prompt} objects
+        - handover_prompt: Prompt text to append to conversation mode system prompt
+
+        Args:
+            handovers: List of handover configs with id, name, prompt fields
+            handover_prompt: Instructions for handover tool usage
+
+        Returns:
+            True if successful, False otherwise
+
+        Raises:
+            IOError: If file write fails
+        """
+        # Ensure docs directory exists
+        self.docs_dir.mkdir(parents=True, exist_ok=True)
+
+        config_file = self.docs_dir / "agent_handover_config.json"
+        config = {
+            "handovers": handovers,
+            "handover_prompt": handover_prompt
+        }
+
+        try:
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
+            logger.info(f"Updated agent_handover_config.json ({len(handovers)} handovers)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to write agent_handover_config.json: {e}")
+            raise IOError(f"Failed to write agent_handover_config.json: {str(e)}")
 
     def validate_workspace_path(self, relative_path: str) -> Path:
         """

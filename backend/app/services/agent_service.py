@@ -1,12 +1,16 @@
 from uuid import UUID
 import asyncio
+import logging
 from sqlmodel import Session, select
-from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate
+from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment
 from app.models.environment import AgentEnvironmentCreate
 from app.services.environment_service import EnvironmentService
+from app.services.environment_lifecycle import EnvironmentLifecycleManager
 from app.services.session_service import SessionService
 from app.services.ai_functions_service import AIFunctionsService
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class AgentService:
@@ -287,3 +291,76 @@ class AgentService:
                 "message": str(e),
                 "current_step": "create_agent" if not agent else ("start_environment" if not environment else "create_session")
             }
+
+    @staticmethod
+    async def sync_agent_handover_config(session: Session, agent_id: UUID) -> None:
+        """
+        Sync handover configuration to agent-env.
+
+        Called after creating, updating, or deleting handover configs.
+        Queries all enabled handovers for the agent, formats them, and pushes
+        the configuration to the agent's active environment.
+
+        Args:
+            session: Database session
+            agent_id: UUID of the agent
+        """
+        # Get agent with active environment
+        agent = AgentService.get_agent_with_environment(session=session, agent_id=agent_id)
+        if not agent or not agent.active_environment_id:
+            logger.warning(f"Agent {agent_id} has no active environment, skipping handover sync")
+            return
+
+        environment_id = agent.active_environment_id
+
+        # Get all enabled handovers for this agent
+        handover_configs = session.exec(
+            select(AgentHandoverConfig)
+            .where(AgentHandoverConfig.source_agent_id == agent_id)
+            .where(AgentHandoverConfig.enabled == True)
+        ).all()
+
+        # Format handovers for agent-env
+        handovers_list = []
+        for config in handover_configs:
+            handovers_list.append({
+                "id": str(config.target_agent_id),
+                "name": config.target_agent.name,
+                "prompt": config.handover_prompt
+            })
+
+        # Generate overall handover prompt
+        if handovers_list:
+            handover_prompt = (
+                "## Agent Handover Tool\n\n"
+                "You have access to the `agent_handover` tool which allows you to hand over work to other specialized agents. "
+                "Use this tool when the conditions specified in a handover configuration are met.\n\n"
+                "**Available handovers:**\n"
+            )
+
+            for h in handovers_list:
+                handover_prompt += f"\n- **{h['name']}** (ID: {h['id']}): {h['prompt']}\n"
+
+            handover_prompt += (
+                "\n**How to use:**\n"
+                "Call the `agent_handover` tool with:\n"
+                "- `target_agent_id`: The UUID of the target agent\n"
+                "- `target_agent_name`: The name of the target agent\n"
+                "- `handover_message`: The message to send to the target agent with relevant context\n"
+            )
+        else:
+            handover_prompt = ""
+
+        # Get environment adapter and sync config
+        try:
+            environment = session.get(AgentEnvironment, environment_id)
+            if environment:
+                lifecycle_manager = EnvironmentLifecycleManager()
+                adapter = lifecycle_manager.get_adapter(environment)
+                await adapter.set_agent_handover_config(
+                    handovers=handovers_list,
+                    handover_prompt=handover_prompt
+                )
+                logger.info(f"Synced {len(handovers_list)} handover(s) to environment {environment_id}")
+        except Exception as e:
+            logger.error(f"Failed to sync handover config to environment: {e}")

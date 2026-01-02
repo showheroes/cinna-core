@@ -68,3 +68,15 @@ class WorkspaceTreeResponse(BaseModel):
     scripts: FileNode
     docs: FileNode
     summaries: dict[str, FolderSummary]
+
+
+class AgentHandoverUpdate(BaseModel):
+    """Update agent handover configuration"""
+    handovers: list[dict]  # Array of {id, name, prompt} objects
+    handover_prompt: str  # Prompt text to append to conversation mode system prompt
+
+
+class AgentHandoverResponse(BaseModel):
+    """Agent handover configuration response"""
+    handovers: list[dict]
+    handover_prompt: str

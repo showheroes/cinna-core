@@ -115,6 +115,31 @@ class ClaudeCodeSDKManager:
                 except Exception as tool_error:
                     logger.warning(f"Could not setup knowledge query tool: {tool_error}")
 
+            # Add custom tools for conversation mode
+            if mode == "conversation":
+                try:
+                    # Import the agent handover tool
+                    from .tools.agent_handover import agent_handover
+
+                    # Create MCP server with custom tools
+                    handover_server = create_sdk_mcp_server(
+                        name="handover",
+                        version="1.0.0",
+                        tools=[agent_handover]
+                    )
+
+                    # Add to options
+                    if options.mcp_servers:
+                        options.mcp_servers["handover"] = handover_server
+                    else:
+                        options.mcp_servers = {"handover": handover_server}
+                    options.allowed_tools.append("mcp__handover__agent_handover")
+                    logger.info("Added agent handover tool for conversation mode")
+                except ImportError as tool_import_error:
+                    logger.warning(f"Could not import agent handover tool: {tool_import_error}")
+                except Exception as tool_error:
+                    logger.warning(f"Could not setup agent handover tool: {tool_error}")
+
             # Set model based on mode
             # Conversation mode: use Haiku for faster, cheaper responses
             # Building mode: use default model (Sonnet) for better code generation

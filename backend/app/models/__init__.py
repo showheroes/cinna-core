@@ -100,6 +100,8 @@ from .agent_handover import (
     HandoverConfigsPublic,
     GenerateHandoverPromptRequest,
     GenerateHandoverPromptResponse,
+    ExecuteHandoverRequest,
+    ExecuteHandoverResponse,
 )
 
 __all__ = [
@@ -199,4 +201,6 @@ __all__ = [
     "HandoverConfigsPublic",
     "GenerateHandoverPromptRequest",
     "GenerateHandoverPromptResponse",
+    "ExecuteHandoverRequest",
+    "ExecuteHandoverResponse",
 ]

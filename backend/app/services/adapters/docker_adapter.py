@@ -392,6 +392,36 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
             logger.error(f"Failed to set agent prompts: {e}")
             raise Exception(f"Failed to set agent prompts: {e}")
 
+    async def set_agent_handover_config(self, handovers: list[dict], handover_prompt: str) -> bool:
+        """
+        Update agent handover configuration in JSON file.
+
+        Args:
+            handovers: List of handover configs with id, name, prompt fields
+            handover_prompt: Instructions for handover tool usage in conversation mode
+
+        Returns:
+            True if successful
+        """
+        try:
+            payload = {
+                "handovers": handovers,
+                "handover_prompt": handover_prompt
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/config/agent-handovers",
+                    json=payload,
+                    headers=self._get_headers(),
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                return True
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to set agent handover config: {e}")
+            raise Exception(f"Failed to set agent handover config: {e}")
+
     async def set_config(self, config: dict) -> bool:
         """Set config via HTTP API."""
         try:

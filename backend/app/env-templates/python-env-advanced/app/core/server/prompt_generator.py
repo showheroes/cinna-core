@@ -204,6 +204,39 @@ class PromptGenerator:
             logger.error(f"Failed to scan knowledge directory: {e}")
             return None
 
+    def _load_handover_prompt(self) -> Optional[str]:
+        """
+        Load handover prompt from agent_handover_config.json file.
+
+        Returns the handover_prompt field which contains instructions for using
+        the agent_handover tool in conversation mode.
+
+        Returns:
+            Handover prompt string if exists, None otherwise
+        """
+        import json
+
+        handover_config_path = self.workspace_dir / "docs" / "agent_handover_config.json"
+
+        if not handover_config_path.exists():
+            logger.debug(f"agent_handover_config.json not found at {handover_config_path}")
+            return None
+
+        try:
+            with open(handover_config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                handover_prompt = config.get("handover_prompt", "").strip()
+
+                if handover_prompt:
+                    logger.info(f"Loaded handover prompt ({len(handover_prompt)} chars)")
+                    return handover_prompt
+                else:
+                    logger.debug("Handover prompt is empty")
+                    return None
+        except Exception as e:
+            logger.error(f"Failed to load agent_handover_config.json: {e}")
+            return None
+
     def generate_building_mode_prompt(self) -> Optional[Dict[str, Any]]:
         """
         Generate system prompt for building mode.
@@ -362,6 +395,14 @@ class PromptGenerator:
                 f"Check these folders for documentation files if needed."
             )
             logger.info("Included knowledge topics in conversation mode prompt")
+
+        # Append handover prompt if it exists
+        handover_prompt = self._load_handover_prompt()
+        if handover_prompt:
+            conversation_prompt_parts.append(
+                f"\n\n---\n\n## Agent Handover\n\n{handover_prompt}"
+            )
+            logger.info("Included handover prompt in conversation mode prompt")
 
         # Combine all parts into a single system prompt string
         if conversation_prompt_parts:

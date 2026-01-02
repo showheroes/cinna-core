@@ -194,6 +194,20 @@ class EnvironmentAdapter(ABC):
         pass
 
     @abstractmethod
+    async def set_agent_handover_config(self, handovers: list[dict], handover_prompt: str) -> bool:
+        """
+        Update agent handover configuration in JSON file.
+
+        Args:
+            handovers: List of handover configs with id, name, prompt fields
+            handover_prompt: Instructions for handover tool usage in conversation mode
+
+        Returns:
+            True if successful
+        """
+        pass
+
+    @abstractmethod
     async def set_config(self, config: dict) -> bool:
         """
         Set or update environment configuration.

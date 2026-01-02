@@ -36,6 +36,8 @@ from app.models import (
     HandoverConfigsPublic,
     GenerateHandoverPromptRequest,
     GenerateHandoverPromptResponse,
+    ExecuteHandoverRequest,
+    ExecuteHandoverResponse,
 )
 from app.services.environment_service import EnvironmentService
 from app.services.agent_service import AgentService
@@ -43,6 +45,8 @@ from app.services.credentials_service import CredentialsService
 from app.services.message_service import MessageService
 from app.services.ai_functions_service import AIFunctionsService
 from app.services.agent_scheduler_service import AgentSchedulerService
+from app.services.session_service import SessionService
+from app.models.session import SessionCreate
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -542,7 +546,7 @@ def list_handover_configs(
 
 
 @router.post("/{id}/handovers", response_model=HandoverConfigPublic)
-def create_handover_config(
+async def create_handover_config(
     *,
     session: SessionDep,
     current_user: CurrentUser,
@@ -578,6 +582,9 @@ def create_handover_config(
     session.commit()
     session.refresh(config)
 
+    # Sync handover config to agent-env
+    await AgentService.sync_agent_handover_config(session, id)
+
     return HandoverConfigPublic(
         id=config.id,
         source_agent_id=config.source_agent_id,
@@ -591,7 +598,7 @@ def create_handover_config(
 
 
 @router.put("/{id}/handovers/{handover_id}", response_model=HandoverConfigPublic)
-def update_handover_config(
+async def update_handover_config(
     *,
     session: SessionDep,
     current_user: CurrentUser,
@@ -621,6 +628,9 @@ def update_handover_config(
     session.commit()
     session.refresh(config)
 
+    # Sync handover config to agent-env
+    await AgentService.sync_agent_handover_config(session, id)
+
     target_agent = session.get(Agent, config.target_agent_id)
     return HandoverConfigPublic(
         id=config.id,
@@ -635,7 +645,7 @@ def update_handover_config(
 
 
 @router.delete("/{id}/handovers/{handover_id}")
-def delete_handover_config(
+async def delete_handover_config(
     *,
     session: SessionDep,
     current_user: CurrentUser,
@@ -655,6 +665,9 @@ def delete_handover_config(
 
     session.delete(config)
     session.commit()
+
+    # Sync handover config to agent-env
+    await AgentService.sync_agent_handover_config(session, id)
 
     return Message(message="Handover configuration deleted successfully")
 
@@ -697,3 +710,73 @@ def generate_handover_prompt_endpoint(
     )
 
     return GenerateHandoverPromptResponse(**result)
+
+
+@router.post("/handover/execute", response_model=ExecuteHandoverResponse)
+def execute_handover(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    data: ExecuteHandoverRequest
+) -> Any:
+    """
+    Execute a handover by creating a new session for target agent and sending the handover message.
+    This endpoint is called by agent-env tools to trigger another agent.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get target agent
+        target_agent = session.get(Agent, data.target_agent_id)
+        if not target_agent:
+            return ExecuteHandoverResponse(
+                success=False,
+                error="Target agent not found"
+            )
+
+        # Check permissions
+        if not current_user.is_superuser and (target_agent.owner_id != current_user.id):
+            return ExecuteHandoverResponse(
+                success=False,
+                error="Not enough permissions to access target agent"
+            )
+
+        # Create session for target agent (conversation mode by default)
+        session_create = SessionCreate(
+            agent_id=data.target_agent_id,
+            title=f"Handover from {data.target_agent_name}",
+            mode="conversation",  # Handovers go to conversation mode
+            agent_sdk="claude"
+        )
+
+        new_session = SessionService.create_session(
+            db_session=session,
+            user_id=current_user.id,
+            data=session_create
+        )
+
+        if not new_session:
+            return ExecuteHandoverResponse(
+                success=False,
+                error="Failed to create session - agent may not have active environment"
+            )
+
+        logger.info(
+            f"Handover executed: Created session {new_session.id} for agent {data.target_agent_id}"
+        )
+
+        # Note: The actual message sending happens in the agent-env tool after receiving this response
+        # The tool will use the returned session_id to send the handover_message
+
+        return ExecuteHandoverResponse(
+            success=True,
+            session_id=new_session.id
+        )
+
+    except Exception as e:
+        logger.error(f"Error executing handover: {str(e)}")
+        return ExecuteHandoverResponse(
+            success=False,
+            error=str(e)
+        )

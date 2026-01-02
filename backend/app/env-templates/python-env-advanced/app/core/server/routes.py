@@ -6,7 +6,17 @@ from fastapi.responses import StreamingResponse
 from datetime import datetime
 from typing import Annotated
 
-from .models import HealthCheckResponse, ChatRequest, ChatResponse, AgentPromptsResponse, AgentPromptsUpdate, CredentialsUpdate, WorkspaceTreeResponse
+from .models import (
+    HealthCheckResponse,
+    ChatRequest,
+    ChatResponse,
+    AgentPromptsResponse,
+    AgentPromptsUpdate,
+    AgentHandoverUpdate,
+    AgentHandoverResponse,
+    CredentialsUpdate,
+    WorkspaceTreeResponse
+)
 from .sdk_manager import sdk_manager
 from .agent_env_service import AgentEnvService
 from .active_session_manager import active_session_manager
@@ -317,6 +327,54 @@ async def update_agent_prompts(prompts: AgentPromptsUpdate):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to update agent prompts: {str(e)}"
+        )
+
+
+@router.get("/config/agent-handovers", dependencies=[Depends(verify_auth_token)])
+async def get_agent_handover_config() -> AgentHandoverResponse:
+    """
+    Get current agent handover configuration from JSON file.
+
+    Returns the content of ./docs/agent_handover_config.json containing:
+    - handovers: Array of {id, name, prompt} objects for configured handovers
+    - handover_prompt: Instructions to append to conversation mode system prompt
+    """
+    config = agent_env_service.get_agent_handover_config()
+
+    return AgentHandoverResponse(
+        handovers=config.get("handovers", []),
+        handover_prompt=config.get("handover_prompt", "")
+    )
+
+
+@router.post("/config/agent-handovers", dependencies=[Depends(verify_auth_token)])
+async def update_agent_handover_config(config: AgentHandoverUpdate):
+    """
+    Update agent handover configuration in JSON file.
+
+    Updates ./docs/agent_handover_config.json with:
+    - handovers: Array of configured handover targets (id, name, prompt)
+    - handover_prompt: Instructions for using handover tool in conversation mode
+
+    This is called by the backend when user updates handover configurations in the UI.
+    The handover_prompt is appended to the conversation mode system prompt, and the
+    handovers list is used by the agent_handover tool to validate handover targets.
+    """
+    try:
+        agent_env_service.update_agent_handover_config(
+            handovers=config.handovers,
+            handover_prompt=config.handover_prompt
+        )
+
+        return {
+            "status": "ok",
+            "message": f"Updated agent handover config with {len(config.handovers)} handover(s)"
+        }
+    except IOError as e:
+        logger.error(f"Failed to update agent handover config: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update agent handover config: {str(e)}"
         )
 
 

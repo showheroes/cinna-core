@@ -115,7 +115,14 @@ The AI generates an **initial draft** that users can refine based on their speci
 - Returns AI-generated handover prompt draft
 - User can then edit and save
 
-**File**: `backend/app/api/routes/agents.py` (lines 502-698)
+**Execute Handover**
+- `POST /agents/handover/execute`
+- Body: `{ target_agent_id, target_agent_name, handover_message }`
+- Called by agent-env tool during runtime
+- Creates new session for target agent
+- Returns session ID for message sending
+
+**File**: `backend/app/api/routes/agents.py`
 
 ## User Interface
 
@@ -191,45 +198,86 @@ Located in the **Agent Configuration Tab** (`AgentPromptsTab.tsx`), below the Wo
 
 ## Integration with Agent Runtime
 
-### Current Implementation (Configuration Only)
+### Runtime Implementation
 
-The current implementation provides **configuration management**:
-- UI to define handover conditions
-- Storage of handover prompts
-- AI-assisted prompt generation
+The handover feature is fully integrated with the agent runtime system:
 
-**What's NOT Implemented Yet**:
-- Runtime handover execution
-- Tool registration in agent sessions
-- Automatic session creation for target agent
-- Context passing between agents
+#### 1. Configuration Sync to Agent-Env
 
-### Future Runtime Integration
+When handover configs are created/updated/deleted, they are synced to the agent's environment:
 
-When handover logic is implemented, the flow will be:
+**Service Method**: `AgentService.sync_agent_handover_config()` in `backend/app/services/agent_service.py`
+- Queries all enabled handover configs for the agent
+- Formats handover list with target agent ID, name, and prompt
+- Generates consolidated handover prompt with tool usage instructions
+- Pushes config to agent-env via adapter
 
-1. **Agent Session Initialization**
-   - Query handover configs for agent
-   - Register each enabled config as a tool
-   - Tool name: `handover_to_{target_agent_name}`
-   - Tool description: `handover_prompt` content
+**Environment Storage**: `docs/agent_handover_config.json` in agent workspace
+- Contains array of configured handovers (id, name, prompt)
+- Contains overall handover_prompt for system prompt inclusion
 
-2. **Handover Execution**
-   - Agent calls handover tool with context message
-   - System creates new session for target agent
-   - Uses target agent's active environment
-   - Sets session mode (conversation mode by default)
-   - Sends handover message as first message to target session
+**Adapter Methods**:
+- `DockerEnvironmentAdapter.set_agent_handover_config()` in `backend/app/services/adapters/docker_adapter.py`
+- Calls agent-env endpoint `POST /config/agent-handovers`
 
-3. **Context Passing**
-   - Source agent formats message according to handover prompt
-   - Message includes: results, data, files, recommendations
-   - Target agent receives as entrypoint prompt override
+#### 2. Agent-Env Configuration Management
 
-**File References for Future Implementation**:
-- `backend/app/services/message_service.py` - Session message handling
-- `backend/app/services/agent_service.py` - Session creation logic
-- Agent runtime tool registration (not yet implemented)
+**API Endpoints** in `backend/app/env-templates/python-env-advanced/app/core/server/routes.py`:
+- `GET /config/agent-handovers` - Retrieve current config
+- `POST /config/agent-handovers` - Update config from backend
+
+**Service Methods** in `agent_env_service.py`:
+- `get_agent_handover_config()` - Loads config from JSON file
+- `update_agent_handover_config()` - Saves config to JSON file
+
+#### 3. Tool Registration in Conversation Mode
+
+**SDK Manager** in `sdk_manager.py`:
+- Registers `agent_handover` tool only in conversation mode
+- Tool available as `mcp__handover__agent_handover`
+- Imported from `tools/agent_handover.py`
+
+**Tool Implementation** in `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py`:
+- Validates target agent ID against configured handovers in JSON
+- Calls backend API `POST /agents/handover/execute`
+- Receives session ID for new target agent session
+- Sends handover message to the new session via messages API
+
+#### 4. System Prompt Integration
+
+**Prompt Generator** in `prompt_generator.py`:
+- `_load_handover_prompt()` - Loads handover_prompt from config JSON
+- Appends handover instructions to conversation mode system prompt
+- Provides agents with context about available handovers and usage
+
+#### 5. Handover Execution Flow
+
+**Backend Endpoint**: `POST /agents/handover/execute` in `backend/app/api/routes/agents.py`
+- Creates new conversation session for target agent
+- Uses `SessionService.create_session()` with mode="conversation"
+- Returns session ID to tool for message sending
+
+**Session Creation**: `SessionService.create_session()` in `backend/app/services/session_service.py`
+- Uses target agent's active_environment_id
+- Creates session with auto-generated title from source agent name
+
+**Message Handling**: Tool sends handover message via `POST /sessions/{id}/messages`
+- Message contains context from source agent
+- Target agent receives as first message in new session
+
+### Integration Points
+
+**Backend Services**:
+- `backend/app/services/agent_service.py` - Sync logic
+- `backend/app/services/session_service.py` - Session creation
+- `backend/app/services/adapters/docker_adapter.py` - Environment communication
+
+**Agent-Env Components**:
+- `backend/app/env-templates/python-env-advanced/app/core/server/routes.py` - Config endpoints
+- `backend/app/env-templates/python-env-advanced/app/core/server/agent_env_service.py` - Config storage
+- `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py` - Tool registration
+- `backend/app/env-templates/python-env-advanced/app/core/server/prompt_generator.py` - Prompt injection
+- `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py` - Tool implementation
 
 ## Design Decisions
 
@@ -288,27 +336,48 @@ When handover logic is implemented, the flow will be:
 ### Backend
 
 **Models**:
-- `backend/app/models/agent_handover.py` - Database model and request/response schemas
-- `backend/app/models/__init__.py` - Model exports (lines 95-103, 195-201)
-- `backend/app/models/agent.py` - Agent relationship to handovers (lines 54-59)
+- `backend/app/models/agent_handover.py` - Database models and request/response schemas
+- `backend/app/models/__init__.py` - Model exports
+- `backend/app/models/agent.py` - Agent relationship to handovers
 
 **API Routes**:
-- `backend/app/api/routes/agents.py` - Handover CRUD endpoints (lines 31-37, 502-698)
+- `backend/app/api/routes/agents.py` - Handover CRUD and execution endpoints
+
+**Services**:
+- `backend/app/services/agent_service.py` - `sync_agent_handover_config()` method
+- `backend/app/services/session_service.py` - `create_session()` method
+- `backend/app/services/adapters/base.py` - `set_agent_handover_config()` abstract method
+- `backend/app/services/adapters/docker_adapter.py` - `set_agent_handover_config()` implementation
+- `backend/app/services/environment_lifecycle.py` - `get_adapter()` method
 
 **AI Functions**:
-- `backend/app/agents/handover_generator.py` - Handover prompt generation
+- `backend/app/agents/handover_generator.py` - Handover prompt generation agent
 - `backend/app/agents/prompts/handover_generator_prompt.md` - Generation prompt template
-- `backend/app/agents/__init__.py` - Agent exports (line 6, 8)
-- `backend/app/services/ai_functions_service.py` - Service layer (lines 13, 152-205)
+- `backend/app/services/ai_functions_service.py` - `generate_handover_prompt()` service method
 
 **Database**:
 - `backend/app/alembic/versions/b26f2c36507c_add_agent_handover_config_table.py` - Migration
+
+### Agent-Env
+
+**Configuration**:
+- `backend/app/env-templates/python-env-advanced/app/core/server/routes.py` - Config API endpoints
+- `backend/app/env-templates/python-env-advanced/app/core/server/models.py` - Request/response models
+- `backend/app/env-templates/python-env-advanced/app/core/server/agent_env_service.py` - Config file management
+
+**Runtime**:
+- `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py` - Tool registration
+- `backend/app/env-templates/python-env-advanced/app/core/server/prompt_generator.py` - Prompt injection
+- `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py` - Handover tool implementation
+
+**Storage**:
+- `{workspace}/docs/agent_handover_config.json` - Runtime handover configuration
 
 ### Frontend
 
 **Components**:
 - `frontend/src/components/Agents/AgentHandovers.tsx` - Main handover UI component
-- `frontend/src/components/Agents/AgentPromptsTab.tsx` - Integration point (lines 29, 318)
+- `frontend/src/components/Agents/AgentPromptsTab.tsx` - Integration point
 
 **Generated Client**:
 - `frontend/src/client/sdk.gen.ts` - AgentsService methods
@@ -322,6 +391,7 @@ When handover logic is implemented, the flow will be:
    - Can add handover to different agent
    - Cannot add handover to same agent (self-handover)
    - Cannot add duplicate handover to same target
+   - Config syncs to agent-env automatically on creation
 
 2. **Generate Prompt**
    - AI generates relevant prompt based on agent workflows
@@ -337,6 +407,7 @@ When handover logic is implemented, the flow will be:
    - Toggle switch changes enabled state
    - Disabled handovers are preserved
    - Re-enabling restores original prompt
+   - Config syncs to agent-env automatically
 
 5. **Delete**
    - Confirmation dialog appears
@@ -347,20 +418,30 @@ When handover logic is implemented, the flow will be:
    - Cannot configure handover to another user's agent
    - Can only see/edit own agent handovers
 
+7. **Runtime Execution**
+   - Start conversation session with source agent
+   - Trigger handover condition in conversation
+   - Agent calls handover tool with context message
+   - New session created for target agent
+   - Target agent receives handover message
+   - Verify session shows in target agent's session list
+
 ### Edge Cases
 
+**Configuration**:
 - **No other agents**: Shows message "No other agents available"
 - **All agents configured**: "Add" button disappears when all possible handovers exist
 - **Agent deletion**: Handover configs cascade delete with source agent
 - **Concurrent edits**: Last write wins (no conflict resolution needed)
 
-## Future Enhancements
+**Runtime**:
+- **Target agent not configured**: Tool validates and returns error message
+- **Target agent has no active environment**: Session creation fails, error returned
+- **Target agent deleted**: Handover config auto-deleted on cascade
+- **Disabled handover**: Not included in tool config, agent cannot call it
+- **Invalid agent ID**: Tool rejects with validation error
 
-### Runtime Execution
-- Implement tool registration in agent sessions
-- Automatic target session creation
-- Context message passing
-- Error handling for failed handovers
+## Future Enhancements
 
 ### Advanced Features
 - **Conditional handovers**: Multiple conditions per target (if A then handover, if B don't)
@@ -377,6 +458,13 @@ When handover logic is implemented, the flow will be:
 
 ## Summary
 
-Agent Handover Management provides the **configuration layer** for agent-to-agent collaboration. Users can define when and how agents should trigger each other, with AI assistance to draft effective handover prompts. The feature is designed for future runtime integration where agents will automatically create sessions and pass context to downstream agents, enabling complex multi-agent workflows.
+Agent Handover Management provides **end-to-end agent-to-agent collaboration**. Users configure handover conditions through the UI with AI-assisted prompt generation. At runtime, conversational agents use the `agent_handover` tool to automatically create sessions for target agents and pass context, enabling complex multi-agent workflows.
 
-**Key Principle**: Keep configuration simple and flexible, deferring complex execution logic to future runtime implementation.
+**Key Features**:
+- Configuration management with AI-assisted prompt generation
+- Automatic sync to agent runtime environments
+- Tool registration in conversation mode only
+- Session creation and message passing between agents
+- Validation against configured handovers for security
+
+**Architecture Principle**: Simple configuration layer with powerful runtime execution, keeping handover logic flexible through natural language prompts.
