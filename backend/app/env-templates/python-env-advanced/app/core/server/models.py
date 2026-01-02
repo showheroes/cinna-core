@@ -26,7 +26,8 @@ class AgentPromptsUpdate(BaseModel):
 class ChatRequest(BaseModel):
     """Chat message request"""
     message: str
-    session_id: Optional[str] = None  # External SDK session ID
+    session_id: Optional[str] = None  # External SDK session ID (for Claude SDK resumption)
+    backend_session_id: Optional[str] = None  # Backend database session ID (for handover tracking)
     mode: str = "conversation"  # "building" | "conversation"
     agent_sdk: str = "claude"  # SDK to use: "claude" (more options can be added later)
     system_prompt: Optional[str] = None

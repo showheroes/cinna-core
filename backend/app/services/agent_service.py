@@ -2,7 +2,7 @@ from uuid import UUID
 import asyncio
 import logging
 from sqlmodel import Session, select
-from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment
+from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment, Session as ChatSession
 from app.models.environment import AgentEnvironmentCreate
 from app.services.environment_service import EnvironmentService
 from app.services.environment_lifecycle import EnvironmentLifecycleManager
@@ -364,3 +364,100 @@ class AgentService:
                 logger.info(f"Synced {len(handovers_list)} handover(s) to environment {environment_id}")
         except Exception as e:
             logger.error(f"Failed to sync handover config to environment: {e}")
+
+    @staticmethod
+    def execute_handover(
+        session: Session,
+        user_id: UUID,
+        target_agent_id: UUID,
+        target_agent_name: str,
+        handover_message: str,
+        source_session_id: UUID
+    ) -> tuple[bool, UUID | None, str | None]:
+        """
+        Execute agent handover by creating new session and posting handover message.
+
+        This method:
+        1. Validates target agent exists and user has access
+        2. Creates new conversation session for target agent
+        3. Posts handover message to new session
+        4. Logs system message in source session with link to new session
+
+        Args:
+            session: Database session
+            user_id: User executing the handover
+            target_agent_id: Target agent UUID
+            target_agent_name: Target agent name
+            handover_message: Message to send to target agent
+            source_session_id: Source session UUID (for logging handover)
+
+        Returns:
+            Tuple of (success: bool, session_id: UUID | None, error: str | None)
+        """
+        from app.services.message_service import MessageService
+
+        try:
+            # Get target agent
+            target_agent = session.get(Agent, target_agent_id)
+            if not target_agent:
+                return (False, None, "Target agent not found")
+
+            # Check permissions
+            if target_agent.owner_id != user_id:
+                return (False, None, "Not enough permissions to access target agent")
+
+            # Verify target agent has active environment
+            if not target_agent.active_environment_id:
+                return (False, None, "Target agent has no active environment")
+
+            # Create session for target agent (conversation mode by default)
+            session_create = SessionCreate(
+                agent_id=target_agent_id,
+                title=f"Handover from {target_agent_name}",
+                mode="conversation",
+                agent_sdk="claude"
+            )
+
+            new_session = SessionService.create_session(
+                db_session=session,
+                user_id=user_id,
+                data=session_create
+            )
+
+            if not new_session:
+                return (False, None, "Failed to create session for target agent")
+
+            # Post handover message to new session
+            MessageService.create_message(
+                session=session,
+                session_id=new_session.id,
+                role="user",
+                content=handover_message
+            )
+
+            # Log system message in source session about the handover
+            source_session = session.get(ChatSession, source_session_id)
+            if source_session:
+                MessageService.create_message(
+                    session=session,
+                    session_id=source_session_id,
+                    role="system",
+                    content=f"🔀 Agent handed over to '{target_agent.name}'",
+                    message_metadata={
+                        "handover_type": "agent_handover",
+                        "forwarded_to_session_id": str(new_session.id),
+                        "target_agent_id": str(target_agent_id),
+                        "target_agent_name": target_agent.name
+                    }
+                )
+
+            logger.info(
+                f"Handover executed: Created session {new_session.id} for agent {target_agent_id}, "
+                f"source session: {source_session_id}"
+            )
+
+            return (True, new_session.id, None)
+
+        except Exception as e:
+            logger.error(f"Error executing handover: {str(e)}")
+            return (False, None, str(e))

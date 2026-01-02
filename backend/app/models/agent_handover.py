@@ -95,6 +95,7 @@ class ExecuteHandoverRequest(SQLModel):
     target_agent_id: uuid.UUID
     target_agent_name: str
     handover_message: str
+    source_session_id: uuid.UUID
 
 
 class ExecuteHandoverResponse(SQLModel):

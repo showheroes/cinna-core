@@ -192,7 +192,8 @@ class MessageService:
         user_message: str,
         mode: str,
         agent_sdk: str = "claude",
-        external_session_id: str | None = None
+        external_session_id: str | None = None,
+        backend_session_id: str | None = None
     ) -> AsyncIterator[dict]:
         """
         Send message to environment and stream response.
@@ -224,6 +225,7 @@ class MessageService:
             "mode": mode,
             "agent_sdk": agent_sdk,
             "session_id": external_session_id,
+            "backend_session_id": backend_session_id,
         }
 
         logger.info(
@@ -446,7 +448,8 @@ class MessageService:
                 user_message=user_message_content,
                 mode=session_mode,
                 agent_sdk=agent_sdk,
-                external_session_id=external_session_id
+                external_session_id=external_session_id,
+                backend_session_id=str(session_id)
             ):
                 # Handle interrupted events
                 if event.get("type") == "interrupted":

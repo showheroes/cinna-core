@@ -117,16 +117,26 @@ The AI generates an **initial draft** that users can refine based on their speci
 
 **Execute Handover**
 - `POST /agents/handover/execute`
-- Body: `{ target_agent_id, target_agent_name, handover_message }`
+- Body: `{ target_agent_id, target_agent_name, handover_message, source_session_id }`
 - Called by agent-env tool during runtime
 - Creates new session for target agent
-- Returns session ID for message sending
+- Posts handover message to new session
+- Logs system message in source session with link metadata
+- Returns session ID and success status
 
 **File**: `backend/app/api/routes/agents.py`
 
 ## User Interface
 
-### Component Structure
+### System Message Display
+
+**Component**: `frontend/src/components/Chat/MessageBubble.tsx`
+- Detects handover messages via `message_metadata.handover_type === "agent_handover"`
+- Renders with distinctive blue styling
+- Displays clickable link to new session using `forwarded_to_session_id` from metadata
+- Link navigates to `/sessions/$sessionId` for seamless session switching
+
+### Handover Configuration
 
 **Primary Component**: `frontend/src/components/Agents/AgentHandovers.tsx`
 
@@ -239,9 +249,10 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 
 **Tool Implementation** in `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py`:
 - Validates target agent ID against configured handovers in JSON
-- Calls backend API `POST /agents/handover/execute`
-- Receives session ID for new target agent session
-- Sends handover message to the new session via messages API
+- Retrieves backend session ID from context variable
+- Calls backend API `POST /agents/handover/execute` with source session ID
+- Backend handles session creation, message posting, and source session logging
+- Returns success confirmation to agent
 
 #### 4. System Prompt Integration
 
@@ -252,32 +263,40 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 
 #### 5. Handover Execution Flow
 
+**Business Logic**: `AgentService.execute_handover()` in `backend/app/services/agent_service.py`
+- Validates target agent and permissions
+- Creates new conversation session using `SessionService.create_session()`
+- Posts handover message to new session using `MessageService.create_message()`
+- Logs system message in source session with metadata (forwarded_to_session_id, target_agent_id, target_agent_name)
+- Returns success status and new session ID
+
 **Backend Endpoint**: `POST /agents/handover/execute` in `backend/app/api/routes/agents.py`
-- Creates new conversation session for target agent
-- Uses `SessionService.create_session()` with mode="conversation"
-- Returns session ID to tool for message sending
+- Delegates all logic to `AgentService.execute_handover()`
 
-**Session Creation**: `SessionService.create_session()` in `backend/app/services/session_service.py`
-- Uses target agent's active_environment_id
-- Creates session with auto-generated title from source agent name
-
-**Message Handling**: Tool sends handover message via `POST /sessions/{id}/messages`
-- Message contains context from source agent
-- Target agent receives as first message in new session
+**Session Context**: Backend session ID passed via ChatRequest payload
+- `session_id`: Claude SDK session ID (for SDK resumption)
+- `backend_session_id`: Backend database session UUID (for handover tracking)
+- Context variable `backend_session_context` in `sdk_manager.py` makes session ID available to tools
 
 ### Integration Points
 
 **Backend Services**:
-- `backend/app/services/agent_service.py` - Sync logic
+- `backend/app/services/agent_service.py` - Handover execution and config sync
 - `backend/app/services/session_service.py` - Session creation
+- `backend/app/services/message_service.py` - Message creation and backend session ID propagation
 - `backend/app/services/adapters/docker_adapter.py` - Environment communication
 
 **Agent-Env Components**:
-- `backend/app/env-templates/python-env-advanced/app/core/server/routes.py` - Config endpoints
+- `backend/app/env-templates/python-env-advanced/app/core/server/routes.py` - Config and chat endpoints
+- `backend/app/env-templates/python-env-advanced/app/core/server/models.py` - ChatRequest with backend_session_id
 - `backend/app/env-templates/python-env-advanced/app/core/server/agent_env_service.py` - Config storage
-- `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py` - Tool registration
+- `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py` - Tool registration, context variable management
 - `backend/app/env-templates/python-env-advanced/app/core/server/prompt_generator.py` - Prompt injection
 - `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py` - Tool implementation
+
+**Frontend Components**:
+- `frontend/src/components/Agents/AgentHandovers.tsx` - Handover configuration management
+- `frontend/src/components/Chat/MessageBubble.tsx` - System message rendering with session links
 
 ## Design Decisions
 
@@ -422,9 +441,10 @@ When handover configs are created/updated/deleted, they are synced to the agent'
    - Start conversation session with source agent
    - Trigger handover condition in conversation
    - Agent calls handover tool with context message
-   - New session created for target agent
-   - Target agent receives handover message
-   - Verify session shows in target agent's session list
+   - New session created for target agent with handover message
+   - System message appears in source session with link to new session
+   - Click link to navigate to new session
+   - Verify handover message appears in target agent's new session
 
 ### Edge Cases
 

@@ -1175,6 +1175,69 @@ export const EventBroadcastSchema = {
     description: 'Event broadcast request model.'
 } as const;
 
+export const ExecuteHandoverRequestSchema = {
+    properties: {
+        target_agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Target Agent Id'
+        },
+        target_agent_name: {
+            type: 'string',
+            title: 'Target Agent Name'
+        },
+        handover_message: {
+            type: 'string',
+            title: 'Handover Message'
+        },
+        source_session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Source Session Id'
+        }
+    },
+    type: 'object',
+    required: ['target_agent_id', 'target_agent_name', 'handover_message', 'source_session_id'],
+    title: 'ExecuteHandoverRequest',
+    description: 'Request to execute a handover to another agent.'
+} as const;
+
+export const ExecuteHandoverResponseSchema = {
+    properties: {
+        success: {
+            type: 'boolean',
+            title: 'Success'
+        },
+        session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Id'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['success'],
+    title: 'ExecuteHandoverResponse',
+    description: 'Response from handover execution.'
+} as const;
+
 export const GenerateHandoverPromptRequestSchema = {
     properties: {
         target_agent_id: {

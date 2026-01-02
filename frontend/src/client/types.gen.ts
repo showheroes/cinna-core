@@ -262,6 +262,25 @@ export type EventBroadcast = {
 };
 
 /**
+ * Request to execute a handover to another agent.
+ */
+export type ExecuteHandoverRequest = {
+    target_agent_id: string;
+    target_agent_name: string;
+    handover_message: string;
+    source_session_id: string;
+};
+
+/**
+ * Response from handover execution.
+ */
+export type ExecuteHandoverResponse = {
+    success: boolean;
+    session_id?: (string | null);
+    error?: (string | null);
+};
+
+/**
  * Request to generate handover prompt using AI.
  */
 export type GenerateHandoverPromptRequest = {
@@ -754,6 +773,12 @@ export type AgentsGenerateHandoverPromptEndpointData = {
 };
 
 export type AgentsGenerateHandoverPromptEndpointResponse = (GenerateHandoverPromptResponse);
+
+export type AgentsExecuteHandoverData = {
+    requestBody: ExecuteHandoverRequest;
+};
+
+export type AgentsExecuteHandoverResponse = (ExecuteHandoverResponse);
 
 export type CredentialsReadCredentialsData = {
     limit?: number;

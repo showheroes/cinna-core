@@ -17,11 +17,13 @@ logger = logging.getLogger(__name__)
 # Environment variables for backend connection
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 AGENT_AUTH_TOKEN = os.getenv("AGENT_AUTH_TOKEN")
-ENV_ID = os.getenv("ENV_ID")
 AGENT_ID = os.getenv("AGENT_ID")
 
 # Path to handover config file in workspace
 HANDOVER_CONFIG_PATH = "/app/workspace/docs/agent_handover_config.json"
+
+# Import context variable to get current backend session_id
+from ..sdk_manager import backend_session_context
 
 
 def load_handover_config() -> dict[str, Any]:
@@ -126,9 +128,23 @@ async def agent_handover(args: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        logger.info(f"Executing handover from agent {AGENT_ID} to agent {target_agent_id} ({target_agent_name})")
+        # Get current backend session_id from context variable
+        source_session_id = backend_session_context.get()
 
-        # Prepare request to create session and send message
+        logger.info(f"Executing handover from backend session {source_session_id} to agent {target_agent_id} ({target_agent_name})")
+
+        # Validate backend session_id is available
+        if not source_session_id:
+            logger.error("Backend session ID not available in context")
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": "Error: Backend session ID not available. Cannot execute handover."
+                }],
+                "is_error": True
+            }
+
+        # Prepare request to execute handover
         url = f"{BACKEND_URL}/api/v1/agents/handover/execute"
         headers = {
             "Authorization": f"Bearer {AGENT_AUTH_TOKEN}",
@@ -137,12 +153,16 @@ async def agent_handover(args: dict[str, Any]) -> dict[str, Any]:
         payload = {
             "target_agent_id": target_agent_id,
             "target_agent_name": target_agent_name,
-            "handover_message": handover_message
+            "handover_message": handover_message,
+            "source_session_id": source_session_id
         }
 
         logger.debug(f"Making handover request to {url}")
 
-        # Make request to backend
+        # Make request to backend - backend handles everything:
+        # 1. Creates new session for target agent
+        # 2. Posts handover message to new session
+        # 3. Logs system message in source session
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
 
@@ -154,36 +174,12 @@ async def agent_handover(args: dict[str, Any]) -> dict[str, Any]:
 
                 if success and session_id:
                     logger.info(f"Handover successful: Created session {session_id} for agent {target_agent_id}")
-
-                    # Now send the handover message to the new session
-                    # We'll use the messages API endpoint
-                    message_url = f"{BACKEND_URL}/api/v1/sessions/{session_id}/messages"
-                    message_payload = {
-                        "content": handover_message
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Successfully handed over to agent '{target_agent_name}'. A new session has been created and your message has been sent."
+                        }]
                     }
-
-                    message_response = await client.post(
-                        message_url,
-                        json=message_payload,
-                        headers=headers
-                    )
-
-                    if message_response.status_code in [200, 201]:
-                        return {
-                            "content": [{
-                                "type": "text",
-                                "text": f"Successfully handed over to agent '{target_agent_name}'. A new session (ID: {session_id}) has been created and your message has been sent."
-                            }]
-                        }
-                    else:
-                        logger.error(f"Failed to send message to new session: {message_response.status_code} {message_response.text}")
-                        return {
-                            "content": [{
-                                "type": "text",
-                                "text": f"Session created but failed to send message: {message_response.text}"
-                            }],
-                            "is_error": True
-                        }
                 else:
                     logger.error(f"Handover failed: {error}")
                     return {

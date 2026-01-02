@@ -1,5 +1,6 @@
 import os
 import logging
+import contextvars
 from typing import AsyncIterator, Optional
 from pathlib import Path
 
@@ -8,6 +9,12 @@ from .sdk_utils import SessionLogger, format_message_for_debug, format_sdk_messa
 from .active_session_manager import active_session_manager
 
 logger = logging.getLogger(__name__)
+
+# Context variable to track current SDK session ID (for SDK operations)
+current_session_context: contextvars.ContextVar[str | None] = contextvars.ContextVar('sdk_session_id', default=None)
+
+# Context variable to track current backend session ID (for handover tracking)
+backend_session_context: contextvars.ContextVar[str | None] = contextvars.ContextVar('backend_session_id', default=None)
 
 
 class ClaudeCodeSDKManager:
@@ -44,6 +51,7 @@ class ClaudeCodeSDKManager:
         self,
         message: str,
         session_id: Optional[str] = None,
+        backend_session_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
         mode: str = "conversation",
         agent_sdk: str = "claude",
@@ -187,7 +195,14 @@ class ClaudeCodeSDKManager:
             # For new sessions, we'll register again when we get the real session_id from ResultMessage
             if current_session_id:
                 await active_session_manager.register_session(current_session_id, client)
+                # Set context variable so tools can access the SDK session_id
+                current_session_context.set(current_session_id)
                 logger.info(f"Registered session {current_session_id} for interrupt support")
+
+            # Set backend session context for tools (like handover)
+            if backend_session_id:
+                backend_session_context.set(backend_session_id)
+                logger.info(f"Set backend session context: {backend_session_id}")
 
             # Emit session_created event only for new sessions
             if not session_id:
@@ -267,7 +282,14 @@ class ClaudeCodeSDKManager:
                             logger.info(f"✅ Captured session_id: {current_session_id}")
                             # Register session EARLY so interrupts can be processed
                             await active_session_manager.register_session(current_session_id, client)
+                            # Set context variable so tools can access the SDK session_id
+                            current_session_context.set(current_session_id)
                             logger.info(f"✅ Registered session {current_session_id} for interrupt support (early)")
+
+                            # Backend session context should already be set earlier, but ensure it's set
+                            if backend_session_id and not backend_session_context.get():
+                                backend_session_context.set(backend_session_id)
+                                logger.info(f"✅ Set backend session context: {backend_session_id}")
 
                             # Immediately yield session_created event with session_id
                             # This allows backend to forward pending interrupts early

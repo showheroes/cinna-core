@@ -1,10 +1,11 @@
 import { useState } from "react"
 import { formatDistanceToNow } from "date-fns"
+import { Link } from "@tanstack/react-router"
 import type { MessagePublic } from "@/client"
 import { StreamEventRenderer } from "./StreamEventRenderer"
 import { MessageActions } from "./MessageActions"
 import { AnswerQuestionsModal } from "./AnswerQuestionsModal"
-import { Info, AlertCircle } from "lucide-react"
+import { Info, AlertCircle, ExternalLink } from "lucide-react"
 
 interface MessageBubbleProps {
   message: MessagePublic
@@ -18,6 +19,11 @@ export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
   const isSystem = message.role === "system"
   const isSystemError = isSystem && message.status === "error"
 
+  // Check if this is a handover system message
+  const isHandoverMessage = isSystem && message.message_metadata?.handover_type === "agent_handover"
+  const forwardedToSessionId = message.message_metadata?.forwarded_to_session_id as string | undefined
+  const targetAgentName = message.message_metadata?.target_agent_name as string | undefined
+
   if (isSystem) {
     return (
       <div className="flex justify-center my-4">
@@ -25,10 +31,24 @@ export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
           className={`text-sm px-4 py-2 rounded-lg max-w-2xl ${
             isSystemError
               ? "bg-destructive/10 text-destructive border border-destructive/20"
+              : isHandoverMessage
+              ? "bg-blue-50 dark:bg-blue-950/30 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
               : "bg-muted text-muted-foreground"
           }`}
         >
-          {message.content}
+          <div className="flex items-center gap-2">
+            <span>{message.content}</span>
+            {isHandoverMessage && forwardedToSessionId && (
+              <Link
+                to="/sessions/$sessionId"
+                params={{ sessionId: forwardedToSessionId }}
+                className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2"
+              >
+                <span>View session</span>
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            )}
+          </div>
         </div>
       </div>
     )

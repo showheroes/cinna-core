@@ -155,7 +155,7 @@ async def chat_stream(request: ChatRequest):
     }
     """
     if request.agent_sdk == "claude":
-        logger.info(f"Starting stream for mode={request.mode}, sdk={request.agent_sdk}, session_id={request.session_id}, message={request.message[:50]}...")
+        logger.info(f"Starting stream for mode={request.mode}, sdk={request.agent_sdk}, sdk_session_id={request.session_id}, backend_session_id={request.backend_session_id}, message={request.message[:50]}...")
 
         async def event_stream():
             """Generate SSE events from SDK stream"""
@@ -166,6 +166,7 @@ async def chat_stream(request: ChatRequest):
                 async for chunk in sdk_manager.send_message_stream(
                     message=request.message,
                     session_id=request.session_id,
+                    backend_session_id=request.backend_session_id,
                     system_prompt=request.system_prompt,  # Only use explicit override if provided
                     mode=request.mode,
                     agent_sdk=request.agent_sdk,

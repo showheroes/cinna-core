@@ -722,61 +722,23 @@ def execute_handover(
     """
     Execute a handover by creating a new session for target agent and sending the handover message.
     This endpoint is called by agent-env tools to trigger another agent.
+
+    The handover process:
+    1. Creates new conversation session for target agent
+    2. Posts handover message to new session
+    3. Logs system message in source session with link to new session
     """
-    import logging
-    logger = logging.getLogger(__name__)
+    success, new_session_id, error = AgentService.execute_handover(
+        session=session,
+        user_id=current_user.id,
+        target_agent_id=data.target_agent_id,
+        target_agent_name=data.target_agent_name,
+        handover_message=data.handover_message,
+        source_session_id=data.source_session_id
+    )
 
-    try:
-        # Get target agent
-        target_agent = session.get(Agent, data.target_agent_id)
-        if not target_agent:
-            return ExecuteHandoverResponse(
-                success=False,
-                error="Target agent not found"
-            )
-
-        # Check permissions
-        if not current_user.is_superuser and (target_agent.owner_id != current_user.id):
-            return ExecuteHandoverResponse(
-                success=False,
-                error="Not enough permissions to access target agent"
-            )
-
-        # Create session for target agent (conversation mode by default)
-        session_create = SessionCreate(
-            agent_id=data.target_agent_id,
-            title=f"Handover from {data.target_agent_name}",
-            mode="conversation",  # Handovers go to conversation mode
-            agent_sdk="claude"
-        )
-
-        new_session = SessionService.create_session(
-            db_session=session,
-            user_id=current_user.id,
-            data=session_create
-        )
-
-        if not new_session:
-            return ExecuteHandoverResponse(
-                success=False,
-                error="Failed to create session - agent may not have active environment"
-            )
-
-        logger.info(
-            f"Handover executed: Created session {new_session.id} for agent {data.target_agent_id}"
-        )
-
-        # Note: The actual message sending happens in the agent-env tool after receiving this response
-        # The tool will use the returned session_id to send the handover_message
-
-        return ExecuteHandoverResponse(
-            success=True,
-            session_id=new_session.id
-        )
-
-    except Exception as e:
-        logger.error(f"Error executing handover: {str(e)}")
-        return ExecuteHandoverResponse(
-            success=False,
-            error=str(e)
-        )
+    return ExecuteHandoverResponse(
+        success=success,
+        session_id=new_session_id,
+        error=error
+    )
