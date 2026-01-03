@@ -45,14 +45,16 @@ function ActivitiesList() {
     error: activitiesError,
   } = useQuery({
     queryKey: ["activities", selectedAgentId, activeWorkspaceId],
-    queryFn: () =>
-      ActivitiesService.listActivities({
-        agentId: selectedAgentId || undefined,
-        userWorkspaceId: activeWorkspaceId || undefined,
+    queryFn: ({ queryKey }) => {
+      const [, agentId, workspaceId] = queryKey
+      return ActivitiesService.listActivities({
+        agentId: agentId || undefined,
+        userWorkspaceId: workspaceId ?? "",
         skip: 0,
         limit: 100,
         orderDesc: true,
-      }),
+      })
+    },
     placeholderData: (previousData) => previousData,
   })
 
@@ -60,8 +62,15 @@ function ActivitiesList() {
     data: agentsData,
     isLoading: agentsLoading,
   } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => AgentsService.readAgents({ skip: 0, limit: 100 }),
+    queryKey: ["agents", activeWorkspaceId],
+    queryFn: ({ queryKey }) => {
+      const [, workspaceId] = queryKey
+      return AgentsService.readAgents({
+        skip: 0,
+        limit: 100,
+        userWorkspaceId: workspaceId ?? "",
+      })
+    },
   })
 
   const markAsReadMutation = useMutation({
@@ -234,7 +243,7 @@ function ActivitiesList() {
   const activities = activitiesData?.data || []
 
   return (
-    <div className="p-6 md:p-8 overflow-y-auto h-full">
+    <div className="p-6 md:p-8 overflow-y-auto h-full" key={activeWorkspaceId ?? 'default'}>
       <div className="mx-auto max-w-7xl">
         <div className="flex gap-6">
           {/* Filters sidebar */}

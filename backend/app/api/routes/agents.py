@@ -60,22 +60,40 @@ def read_agents(
     current_user: CurrentUser,
     skip: int = 0,
     limit: int = 100,
-    user_workspace_id: uuid.UUID | None = None,
+    user_workspace_id: str | None = None,
 ) -> Any:
     """
     Retrieve agents. Optionally filter by workspace.
-    If user_workspace_id is not provided, returns all agents.
-    If user_workspace_id is provided (including null for default workspace), filters by that workspace.
+    - If user_workspace_id is not provided (None): returns all agents
+    - If user_workspace_id is empty string (""): filters for default workspace (NULL)
+    - If user_workspace_id is a UUID string: filters for that workspace
     """
+    # Parse workspace filter
+    workspace_filter: uuid.UUID | None = None
+    apply_filter = False
+
+    if user_workspace_id is None:
+        # Parameter not provided - return all agents
+        apply_filter = False
+    elif user_workspace_id == "":
+        # Empty string means default workspace (NULL in database)
+        workspace_filter = None
+        apply_filter = True
+    else:
+        # Parse as UUID
+        try:
+            workspace_filter = uuid.UUID(user_workspace_id)
+            apply_filter = True
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid workspace ID format")
 
     if current_user.is_superuser:
         count_statement = select(func.count()).select_from(Agent)
         statement = select(Agent)
 
-        # Apply workspace filter for superuser too
-        if user_workspace_id is not None:
-            count_statement = count_statement.where(Agent.user_workspace_id == user_workspace_id)
-            statement = statement.where(Agent.user_workspace_id == user_workspace_id)
+        if apply_filter:
+            count_statement = count_statement.where(Agent.user_workspace_id == workspace_filter)
+            statement = statement.where(Agent.user_workspace_id == workspace_filter)
 
         count = session.exec(count_statement).one()
         agents = session.exec(statement.offset(skip).limit(limit)).all()
@@ -90,10 +108,9 @@ def read_agents(
             .where(Agent.owner_id == current_user.id)
         )
 
-        # Apply workspace filter
-        if user_workspace_id is not None:
-            count_statement = count_statement.where(Agent.user_workspace_id == user_workspace_id)
-            statement = statement.where(Agent.user_workspace_id == user_workspace_id)
+        if apply_filter:
+            count_statement = count_statement.where(Agent.user_workspace_id == workspace_filter)
+            statement = statement.where(Agent.user_workspace_id == workspace_filter)
 
         count = session.exec(count_statement).one()
         agents = session.exec(statement.offset(skip).limit(limit)).all()

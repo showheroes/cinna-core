@@ -11,6 +11,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import useWorkspace from "@/hooks/useWorkspace"
+import { WORKSPACE_ICONS } from "@/config/workspaceIcons"
+import { cn } from "@/lib/utils"
 
 interface CreateWorkspaceModalProps {
   open: boolean
@@ -19,12 +21,14 @@ interface CreateWorkspaceModalProps {
 
 export function CreateWorkspaceModal({ open, onClose }: CreateWorkspaceModalProps) {
   const [workspaceName, setWorkspaceName] = useState("")
+  const [selectedIcon, setSelectedIcon] = useState<string>("folder-kanban")
   const { createWorkspaceMutation } = useWorkspace()
 
   // Reset form when modal opens/closes
   useEffect(() => {
     if (!open) {
       setWorkspaceName("")
+      setSelectedIcon("folder-kanban")
     }
   }, [open])
 
@@ -33,7 +37,10 @@ export function CreateWorkspaceModal({ open, onClose }: CreateWorkspaceModalProp
     if (!workspaceName.trim()) return
 
     try {
-      await createWorkspaceMutation.mutateAsync({ name: workspaceName.trim() })
+      await createWorkspaceMutation.mutateAsync({
+        name: workspaceName.trim(),
+        icon: selectedIcon
+      })
       onClose()
     } catch (error) {
       // Error is handled by the mutation's onError callback
@@ -62,6 +69,31 @@ export function CreateWorkspaceModal({ open, onClose }: CreateWorkspaceModalProp
                 autoFocus
                 required
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Icon</Label>
+              <div className="grid grid-cols-5 gap-2">
+                {WORKSPACE_ICONS.map((iconOption) => {
+                  const IconComponent = iconOption.icon
+                  return (
+                    <button
+                      key={iconOption.name}
+                      type="button"
+                      onClick={() => setSelectedIcon(iconOption.name)}
+                      className={cn(
+                        "flex items-center justify-center p-3 rounded-md border-2 transition-colors",
+                        selectedIcon === iconOption.name
+                          ? "border-primary bg-primary/10"
+                          : "border-muted hover:border-muted-foreground/50"
+                      )}
+                      title={iconOption.label}
+                    >
+                      <IconComponent className="h-5 w-5" />
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </div>
           <DialogFooter>

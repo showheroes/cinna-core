@@ -8,6 +8,7 @@ from app.models.user import User
 # Shared properties
 class UserWorkspaceBase(SQLModel):
     name: str = Field(min_length=1, max_length=255)
+    icon: str | None = Field(default=None, max_length=50)
 
 
 # Properties to receive on workspace creation
@@ -18,6 +19,7 @@ class UserWorkspaceCreate(UserWorkspaceBase):
 # Properties to receive on workspace update
 class UserWorkspaceUpdate(SQLModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    icon: str | None = Field(default=None, max_length=50)
 
 
 # Database model

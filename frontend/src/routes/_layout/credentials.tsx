@@ -26,11 +26,12 @@ function CredentialsGrid() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["credentials", activeWorkspaceId],
-    queryFn: async () => {
+    queryFn: async ({ queryKey }) => {
+      const [, workspaceId] = queryKey
       const response = await CredentialsService.readCredentials({
         skip: 0,
         limit: 100,
-        userWorkspaceId: activeWorkspaceId || undefined,
+        userWorkspaceId: workspaceId ?? "",
       })
       return response
     },
@@ -77,6 +78,7 @@ function CredentialsGrid() {
 
 function Credentials() {
   const { setHeaderContent } = usePageHeader()
+  const { activeWorkspaceId } = useWorkspace()
 
   useEffect(() => {
     setHeaderContent(
@@ -94,7 +96,7 @@ function Credentials() {
   return (
     <div className="p-6 md:p-8 overflow-y-auto">
       <div className="mx-auto max-w-7xl">
-        <CredentialsGrid />
+        <CredentialsGrid key={activeWorkspaceId ?? 'default'} />
       </div>
     </div>
   )

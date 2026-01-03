@@ -59,7 +59,7 @@ def list_activities(
     session: SessionDep,
     current_user: CurrentUser,
     agent_id: uuid.UUID | None = None,
-    user_workspace_id: uuid.UUID | None = None,
+    user_workspace_id: str | None = None,
     skip: int = 0,
     limit: int = 100,
     order_desc: bool = True
@@ -69,11 +69,34 @@ def list_activities(
 
     Args:
         agent_id: Optional agent ID to filter by
-        user_workspace_id: Optional workspace filter. If not provided, returns all activities.
+        user_workspace_id: Optional workspace filter
+            - None (not provided): returns all activities
+            - Empty string (""): filters for default workspace (NULL)
+            - UUID string: filters for that workspace
         skip: Number of records to skip
         limit: Number of records to return
         order_desc: Order descending if True, ascending if False
     """
+    # Parse workspace filter
+    workspace_filter: uuid.UUID | None = None
+    apply_workspace_filter = False
+
+    if user_workspace_id is None:
+        # Parameter not provided - return all activities
+        apply_workspace_filter = False
+    elif user_workspace_id == "":
+        # Empty string means default workspace (NULL in database)
+        workspace_filter = None
+        apply_workspace_filter = True
+    else:
+        # Parse as UUID
+        try:
+            workspace_filter = uuid.UUID(user_workspace_id)
+            apply_workspace_filter = True
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Invalid workspace ID format")
+
     # Build query with joins to get agent name and session title
     query = (
         select(Activity, Agent.name, Agent.ui_color_preset, Session.title)
@@ -87,8 +110,8 @@ def list_activities(
         query = query.where(Activity.agent_id == agent_id)
 
     # Filter by workspace if specified
-    if user_workspace_id is not None:
-        query = query.where(Activity.user_workspace_id == user_workspace_id)
+    if apply_workspace_filter:
+        query = query.where(Activity.user_workspace_id == workspace_filter)
 
     # Add ordering
     if order_desc:

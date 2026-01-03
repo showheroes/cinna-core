@@ -32,7 +32,10 @@ export class ActivitiesService {
      *
      * Args:
      * agent_id: Optional agent ID to filter by
-     * user_workspace_id: Optional workspace filter. If not provided, returns all activities.
+     * user_workspace_id: Optional workspace filter
+     * - None (not provided): returns all activities
+     * - Empty string (""): filters for default workspace (NULL)
+     * - UUID string: filters for that workspace
      * skip: Number of records to skip
      * limit: Number of records to return
      * order_desc: Order descending if True, ascending if False
@@ -158,8 +161,9 @@ export class AgentsService {
     /**
      * Read Agents
      * Retrieve agents. Optionally filter by workspace.
-     * If user_workspace_id is not provided, returns all agents.
-     * If user_workspace_id is provided (including null for default workspace), filters by that workspace.
+     * - If user_workspace_id is not provided (None): returns all agents
+     * - If user_workspace_id is empty string (""): filters for default workspace (NULL)
+     * - If user_workspace_id is a UUID string: filters for that workspace
      * @param data The data for the request.
      * @param data.skip
      * @param data.limit
@@ -693,8 +697,9 @@ export class CredentialsService {
     /**
      * Read Credentials
      * Retrieve credentials (without decrypted data).
-     * If user_workspace_id is not provided, returns all credentials.
-     * If user_workspace_id is provided, filters by that workspace.
+     * - If user_workspace_id is not provided (None): returns all credentials
+     * - If user_workspace_id is empty string (""): filters for default workspace (NULL)
+     * - If user_workspace_id is a UUID string: filters for that workspace
      * @param data The data for the request.
      * @param data.skip
      * @param data.limit
@@ -1648,7 +1653,10 @@ export class SessionsService {
      * limit: Number of records to return
      * order_by: Field to order by (created_at, updated_at, last_message_at)
      * order_desc: Order descending if True, ascending if False
-     * user_workspace_id: Optional workspace filter. If not provided, returns all sessions.
+     * user_workspace_id: Optional workspace filter
+     * - None (not provided): returns all sessions
+     * - Empty string (""): filters for default workspace (NULL)
+     * - UUID string: filters for that workspace
      * @param data The data for the request.
      * @param data.skip
      * @param data.limit

@@ -21,6 +21,7 @@ user_workspace
 - id (UUID, PK)
 - user_id (UUID, FK to users)
 - name (str)
+- icon (str, nullable) - Icon identifier for visual representation
 - created_at (datetime)
 - updated_at (datetime)
 ```
@@ -43,14 +44,23 @@ Add `user_workspace_id` (UUID, nullable, FK to user_workspace) to:
 
 **Behavior**: Similar to appearance switcher
 
+**Visual Design**:
+- Displays active workspace's selected icon (or default FolderKanban icon)
+- Shows workspace name in expanded mode
+
 **Menu Structure**:
-1. "Default" (always present)
-2. List of user-created workspaces
+1. "Default" (always present, uses FolderKanban icon)
+2. List of user-created workspaces (each with their selected icon)
 3. Separator
 4. "New Workspace" option
 
+**Menu Features**:
+- Each workspace displays its custom icon
+- Active workspace is highlighted with background color
+- Check icon appears next to active workspace
+
 **Interaction**:
-- Hover/expanded mode shows current workspace name
+- Hover/expanded mode shows current workspace name and icon
 - Clicking opens dropdown menu
 - Selecting workspace switches active context
 
@@ -60,6 +70,28 @@ Add `user_workspace_id` (UUID, nullable, FK to user_workspace) to:
 
 **Form Fields**:
 - Workspace name (required, text input)
+- Icon selector (optional, visual grid selector)
+
+**Icon Selector**:
+- 5-column grid layout with 20 themed icon options
+- Themes include: analytics, financial, data, communication, people, e-commerce, business, startup, productivity, goals, scheduling
+- Icons from lucide-react library
+- Visual selection with hover states and active highlighting
+- Default: "folder-kanban" icon
+
+**Available Icons**:
+- **Analytics**: Bar Chart, Trending Up, Pie Chart, Line Chart
+- **Financial**: Dollar Sign, Credit Card
+- **Data**: Database, Table, Spreadsheet
+- **Communication**: Mail
+- **People**: Users
+- **E-commerce**: Shopping Cart
+- **Business**: Briefcase, Building
+- **Startup**: Rocket
+- **General**: Layers, Folder Kanban
+- **Productivity**: Zap
+- **Goals**: Target
+- **Scheduling**: Calendar
 
 **Similar to**: Modal pattern shown in `docs/development/frontend_development_llm.md:88`
 
@@ -118,6 +150,52 @@ When accessing entity via direct URL:
 - Frontend includes workspace filter in query parameters
 - Multiple browser windows with different workspaces won't conflict
 
+## Workspace Icons
+
+User workspaces support visual customization through selectable icons to help users quickly identify different workspaces.
+
+### Icon Features
+
+**Selection**:
+- Users choose from 20 predefined themed icons during workspace creation
+- Icons organized by themes: analytics, financial, data, communication, business, etc.
+- Default icon: "folder-kanban" (general purpose)
+
+**Display**:
+- Selected icon appears in sidebar button when workspace is active
+- Icons shown next to workspace names in dropdown menu
+- Default workspace always uses FolderKanban icon
+
+**Visual Highlighting**:
+- Active workspace highlighted with background color in dropdown
+- Check icon appears next to active workspace name
+- Icon selector in modal highlights selected icon with primary color border
+
+**Technical Implementation**:
+- Icons stored as string identifiers in database (`icon` column)
+- Icon definitions in `frontend/src/config/workspaceIcons.ts`
+- Uses lucide-react icon library
+- Helper function `getWorkspaceIcon()` maps identifiers to components
+
+### Icon Themes and Options
+
+The system provides 20 curated icons across different themes:
+
+| Theme | Icons | Use Cases |
+|-------|-------|-----------|
+| Analytics | Bar Chart, Trending Up, Pie Chart, Line Chart | Data analysis, reporting, metrics |
+| Financial | Dollar Sign, Credit Card | Finance, accounting, payments |
+| Data | Database, Table, Spreadsheet | Data management, ETL, databases |
+| Communication | Mail | Email processing, messaging |
+| People | Users | HR, customer management, teams |
+| E-commerce | Shopping Cart | Online retail, orders |
+| Business | Briefcase, Building | Corporate, enterprise projects |
+| Startup | Rocket | New ventures, innovation |
+| Productivity | Zap | Automation, efficiency |
+| Goals | Target | OKRs, planning |
+| Scheduling | Calendar | Time management, events |
+| General | Layers, Folder Kanban | Multi-purpose workspaces |
+
 ## Future Extensibility
 
 Design allows for:
@@ -125,14 +203,17 @@ Design allows for:
 - Workspace sharing/collaboration
 - Workspace-level settings
 - Bulk operations across workspaces
+- Workspace color customization (icons already implemented)
+- Custom icon uploads or extended icon libraries
 
 ## Implementation Details
 
 ### Backend Architecture
 
 **Models** (`backend/app/models/user_workspace.py`):
-- `UserWorkspace` - Main model with `id`, `user_id`, `name`, timestamps
+- `UserWorkspace` - Main model with `id`, `user_id`, `name`, `icon`, timestamps
 - `UserWorkspaceCreate/Update/Public` - Request/response schemas
+- `icon` field - Optional string (max 50 chars) storing icon identifier
 - Foreign key: `user_id` → `user.id` with CASCADE delete
 
 **Modified Models**:
@@ -146,9 +227,9 @@ Design allows for:
 
 **API Routes** (`backend/app/api/routes/user_workspaces.py`):
 - `GET /api/v1/user-workspaces` - List with pagination
-- `POST /api/v1/user-workspaces` - Create (requires name)
+- `POST /api/v1/user-workspaces` - Create (requires name, optional icon)
 - `GET /api/v1/user-workspaces/{id}` - Get single
-- `PUT /api/v1/user-workspaces/{id}` - Update
+- `PUT /api/v1/user-workspaces/{id}` - Update (name and/or icon)
 - `DELETE /api/v1/user-workspaces/{id}` - Delete (switches to default if active)
 
 **Workspace Inheritance Logic**:
@@ -164,22 +245,40 @@ Design allows for:
 - Implemented in: `agents.py`, `credentials.py`, `sessions.py`, `activities.py`
 
 **Database Migration**:
-- Migration file: `backend/app/alembic/versions/3a154fd039f5_add_user_workspaces_support.py`
-- Adds `user_workspace` table
-- Adds nullable `user_workspace_id` column to 4 tables
-- Foreign keys with CASCADE delete
+- Initial migration: `backend/app/alembic/versions/3a154fd039f5_add_user_workspaces_support.py`
+  - Adds `user_workspace` table
+  - Adds nullable `user_workspace_id` column to 4 tables
+  - Foreign keys with CASCADE delete
+- Icon field migration: `backend/app/alembic/versions/88ff71b370a1_add_icon_field_to_user_workspace.py`
+  - Adds nullable `icon` column to `user_workspace` table
 
 ### Frontend Architecture
 
-**State Management** (`frontend/src/hooks/useWorkspace.ts`):
-- `useWorkspace()` hook - Central workspace state management
+**State Management** (`frontend/src/hooks/useWorkspace.tsx`):
+- `useWorkspace()` hook - Central workspace state management using React Context
+- `WorkspaceProvider` - Context provider wrapping app in `__root.tsx`
 - localStorage key: `last_user_workspace_id`
 - Exports: `activeWorkspace`, `activeWorkspaceId`, `switchWorkspace()`, `createWorkspaceMutation`, etc.
-- Switching workspace triggers query invalidation for all entity lists
+- **Shared state pattern**: All components access same workspace state via Context (prevents state desync)
+- Switching workspace automatically remounts list page components via `key` prop pattern
+
+**Icon Configuration** (`frontend/src/config/workspaceIcons.ts`):
+- `WORKSPACE_ICONS` - Array of 20 predefined icon options with themes
+- `getWorkspaceIcon()` - Helper function to retrieve icon component by name
+- Icons sourced from lucide-react library
+- Each icon has: name (identifier), icon (component), label (display name), theme (category)
 
 **UI Components**:
-- `SidebarWorkspaceSwitcher` (`frontend/src/components/Common/WorkspaceSwitcher.tsx`) - Dropdown in sidebar footer
-- `CreateWorkspaceModal` (`frontend/src/components/Common/CreateWorkspaceModal.tsx`) - Simple form with name field
+- `SidebarWorkspaceSwitcher` (`frontend/src/components/Common/WorkspaceSwitcher.tsx`)
+  - Dropdown in sidebar footer
+  - Displays active workspace icon in sidebar button
+  - Shows workspace icons in dropdown menu
+  - Highlights active workspace with background color and check icon
+- `CreateWorkspaceModal` (`frontend/src/components/Common/CreateWorkspaceModal.tsx`)
+  - Form with name field and icon selector
+  - Icon selector displays 5-column grid of clickable icons
+  - Selected icon highlighted with primary color
+  - Submits both name and icon to API
 - Both integrated in `AppSidebar.tsx` above Appearance menu
 
 **Entity Creation**:
@@ -189,9 +288,16 @@ Design allows for:
 
 **List Page Filtering**:
 - Query keys include `activeWorkspaceId`: `["agents", activeWorkspaceId]`
-- API calls pass `userWorkspaceId: activeWorkspaceId || undefined`
-- Switching workspace changes query key → automatic refetch
-- Implemented in: `agents.tsx`, `credentials.tsx`, `sessions.tsx`, `activities.tsx`
+- Query functions read workspace ID from `queryKey` parameter (not closure)
+- API calls pass `userWorkspaceId: workspaceId ?? ""`
+- Implemented in: `agents.tsx`, `credentials.tsx`, `sessions.tsx`, `activities.tsx`, `index.tsx`
+
+**Workspace Switching Mechanism**:
+- List page components use `key={activeWorkspaceId ?? 'default'}` prop for forced remount
+- When workspace changes in Context, all components re-render with new `activeWorkspaceId`
+- Changed `key` prop forces React to unmount and remount component tree
+- Fresh queries automatically fetch with new workspace ID from query key
+- Detail pages redirect to index when workspace switches (entity likely doesn't exist in new workspace)
 
 ### Key Design Decisions
 
@@ -207,9 +313,16 @@ Design allows for:
 - Enables multi-window/tab support with different active workspaces
 - REST API principle: workspace filter is just another query parameter
 
-**Query Invalidation Strategy**:
-- `switchWorkspace()` invalidates: `["agents"]`, `["credentials"]`, `["sessions"]`, `["activities"]`
-- Query keys include workspace ID for proper cache separation
+**React Context for Shared State**:
+- `WorkspaceContext` provides single source of truth for `activeWorkspaceId`
+- Prevents state desynchronization across components (each calling `useWorkspace()` sees same state)
+- Before Context: each component had separate state instance → switching didn't propagate
+- After Context: state change in one component triggers re-render in all consumers
+
+**Component Remount via Key Prop**:
+- React `key` prop pattern forces component remount when workspace changes
+- Avoids complex React Query cache manipulation (removeQueries/invalidateQueries issues)
+- Simpler mental model: workspace change = fresh component mount = fresh data fetch
 - Creating workspace auto-switches to it (better UX)
 
 **Null vs Undefined Semantics**:
@@ -225,7 +338,8 @@ Design allows for:
 - **Cross-Workspace Views**: UI already has "all workspaces" capability (pass `undefined` filter)
 - **Bulk Operations**: Service methods accept lists, easy to extend
 - **Workspace Templates**: Add `template_id` field to copy structure
-- **Workspace Colors/Icons**: Add `ui_color`, `icon` fields to model
+- **Workspace Colors**: Add `ui_color` field to model (icons already implemented)
+- **Custom Icons**: Allow users to upload custom SVG icons or choose from extended icon libraries
 
 **Migration Path for Moving Entities**:
 - Add `PATCH /api/v1/agents/{id}/workspace` endpoint

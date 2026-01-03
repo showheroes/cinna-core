@@ -594,10 +594,12 @@ export type UserUpdateMe = {
 
 export type UserWorkspaceCreate = {
     name: string;
+    icon?: (string | null);
 };
 
 export type UserWorkspacePublic = {
     name: string;
+    icon?: (string | null);
     id: string;
     user_id: string;
     created_at: string;
@@ -611,6 +613,7 @@ export type UserWorkspacesPublic = {
 
 export type UserWorkspaceUpdate = {
     name?: (string | null);
+    icon?: (string | null);
 };
 
 export type ValidationError = {

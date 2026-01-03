@@ -4,6 +4,7 @@ import { CheckCircle2, Circle, Loader2, XCircle, AlertTriangle, Key } from "luci
 import { OpenAPI, CredentialsService, AgentsService, SessionsService } from "@/client"
 import { useQuery } from "@tanstack/react-query"
 import type { CredentialPublic } from "@/client"
+import useWorkspace from "@/hooks/useWorkspace"
 
 type SearchParams = {
   description: string
@@ -30,6 +31,7 @@ type Step = {
 function AgentCreating() {
   const navigate = useNavigate()
   const { description, mode } = Route.useSearch()
+  const { activeWorkspaceId } = useWorkspace()
   const [steps, setSteps] = useState<Step[]>([
     { id: "create_agent", label: "Creating agent", status: "pending" },
     { id: "start_environment", label: "Starting default environment", status: "pending" },
@@ -47,11 +49,13 @@ function AgentCreating() {
 
   // Fetch user's credentials
   const { data: credentialsData } = useQuery({
-    queryKey: ["credentials"],
-    queryFn: async () => {
+    queryKey: ["credentials", activeWorkspaceId],
+    queryFn: async ({ queryKey }) => {
+      const [, workspaceId] = queryKey
       const response = await CredentialsService.readCredentials({
         skip: 0,
         limit: 100,
+        userWorkspaceId: workspaceId ?? "",
       })
       return response
     },

@@ -6,6 +6,7 @@ import { MessageSquare, Clock, Wrench, MessageCircle } from "lucide-react"
 import { AnimatedPlaceholder } from "@/components/Common/AnimatedPlaceholder"
 import { RelativeTime } from "@/components/Common/RelativeTime"
 import { getColorPreset } from "@/utils/colorPresets"
+import useWorkspace from "@/hooks/useWorkspace"
 
 interface LatestSessionsProps {
   limit?: number
@@ -13,16 +14,20 @@ interface LatestSessionsProps {
 
 export function LatestSessions({ limit = 8 }: LatestSessionsProps) {
   const navigate = useNavigate()
+  const { activeWorkspaceId } = useWorkspace()
 
   const { data, isLoading } = useQuery({
-    queryKey: ["sessions", "latest", limit],
-    queryFn: () =>
-      SessionsService.listSessions({
+    queryKey: ["sessions", "latest", limit, activeWorkspaceId],
+    queryFn: ({ queryKey }) => {
+      const [, , limitValue, workspaceId] = queryKey
+      return SessionsService.listSessions({
         skip: 0,
-        limit,
+        limit: limitValue as number,
         orderBy: "last_message_at",
         orderDesc: true,
-      }),
+        userWorkspaceId: workspaceId ?? "",
+      })
+    },
   })
 
   const sessions = data?.data || []

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import useCustomToast from "@/hooks/useCustomToast"
+import useWorkspace from "@/hooks/useWorkspace"
 import { handleError } from "@/utils"
 import { getColorPreset } from "@/utils/colorPresets"
 
@@ -31,6 +32,7 @@ interface AgentHandoversProps {
 export function AgentHandovers({ agent }: AgentHandoversProps) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { activeWorkspaceId } = useWorkspace()
 
   // State for dialog
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -41,8 +43,13 @@ export function AgentHandovers({ agent }: AgentHandoversProps) {
 
   // Fetch all agents for selection
   const { data: agentsData } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => AgentsService.readAgents({}),
+    queryKey: ["agents", activeWorkspaceId],
+    queryFn: ({ queryKey }) => {
+      const [, workspaceId] = queryKey
+      return AgentsService.readAgents({
+        userWorkspaceId: workspaceId ?? "",
+      })
+    },
   })
 
   // Fetch handover configs for this agent

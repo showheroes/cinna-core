@@ -2631,6 +2631,18 @@ export const UserWorkspaceCreateSchema = {
             maxLength: 255,
             minLength: 1,
             title: 'Name'
+        },
+        icon: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Icon'
         }
     },
     type: 'object',
@@ -2645,6 +2657,18 @@ export const UserWorkspacePublicSchema = {
             maxLength: 255,
             minLength: 1,
             title: 'Name'
+        },
+        icon: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Icon'
         },
         id: {
             type: 'string',
@@ -2686,6 +2710,18 @@ export const UserWorkspaceUpdateSchema = {
                 }
             ],
             title: 'Name'
+        },
+        icon: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Icon'
         }
     },
     type: 'object',

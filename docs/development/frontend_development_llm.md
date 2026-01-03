@@ -121,3 +121,79 @@ const tabs = [
 ]
 <HashTabs tabs={tabs} defaultTab="tab1" />
 ```
+
+## Workspace Management
+
+### State Access
+- **Hook**: `useWorkspace()` from `@/hooks/useWorkspace`
+- **Returns**: `{ activeWorkspaceId, activeWorkspace, switchWorkspace, workspaces, ... }`
+- **Important**: Uses React Context - all components share same workspace state
+
+### List Pages with Workspace Filtering
+**Problem**: When user switches workspaces, list pages must refresh with new data.
+
+**Solution**: React `key` prop pattern + Context for state sharing
+
+**Implementation Pattern**:
+```tsx
+function MyListPage() {
+  const { activeWorkspaceId } = useWorkspace()
+
+  // Query key MUST include activeWorkspaceId
+  const { data } = useQuery({
+    queryKey: ["myEntities", activeWorkspaceId],
+    queryFn: async ({ queryKey }) => {
+      const [, workspaceId] = queryKey  // Read from queryKey, not closure
+      return MyService.list({
+        userWorkspaceId: workspaceId ?? "",  // Empty string = default workspace
+      })
+    },
+  })
+
+  // Key prop forces remount when workspace changes
+  return (
+    <div key={activeWorkspaceId ?? 'default'}>
+      {/* Component content */}
+    </div>
+  )
+}
+```
+
+**Why This Pattern**:
+- **React Context**: Ensures all components see workspace state changes (prevents desync)
+- **Key prop**: Forces component unmount/remount when workspace changes → fresh queries
+- **Query key includes workspace**: Separates cache by workspace
+- **Read from queryKey param**: Avoids closure issues with stale workspace values
+- **Empty string convention**: Backend interprets `""` as default workspace filter
+
+**Required for pages**: `/`, `/agents`, `/credentials`, `/sessions`, `/activities`
+
+### Detail Pages with Workspace Context
+**Problem**: When viewing an entity detail page (e.g., agent page) and switching workspaces, that entity likely doesn't exist in the new workspace.
+
+**Solution**: Automatic redirect to index
+
+**Implementation**: Handled in `useWorkspace` hook automatically - detail pages redirect to `/` on workspace switch
+
+**List of workspace-aware pages**:
+- `/` - index/dashboard
+- `/agents` - agents list
+- `/credentials` - credentials list
+- `/sessions` - sessions list
+- `/activities` - activities list
+
+**All other pages**: Auto-redirect to index on workspace switch
+
+### Creating Entities in Active Workspace
+```tsx
+const { activeWorkspaceId } = useWorkspace()
+
+const createMutation = useMutation({
+  mutationFn: (data) => MyService.create({
+    requestBody: {
+      ...data,
+      user_workspace_id: activeWorkspaceId,  // Assign to active workspace
+    }
+  }),
+})
+```

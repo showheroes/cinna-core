@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/table"
 import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
+import useWorkspace from "@/hooks/useWorkspace"
 import { handleError } from "@/utils"
 
 interface AgentCredentialsTabProps {
@@ -63,6 +64,7 @@ function getCredentialTypeLabel(type: string): string {
 export function AgentCredentialsTab({ agentId }: AgentCredentialsTabProps) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { activeWorkspaceId } = useWorkspace()
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [selectedCredentialId, setSelectedCredentialId] = useState<
     string | undefined
@@ -80,8 +82,15 @@ export function AgentCredentialsTab({ agentId }: AgentCredentialsTabProps) {
 
   // Fetch all user credentials for the add dialog
   const { data: allCredentialsData } = useQuery({
-    queryKey: ["credentials"],
-    queryFn: () => CredentialsService.readCredentials({ skip: 0, limit: 100 }),
+    queryKey: ["credentials", activeWorkspaceId],
+    queryFn: ({ queryKey }) => {
+      const [, workspaceId] = queryKey
+      return CredentialsService.readCredentials({
+        skip: 0,
+        limit: 100,
+        userWorkspaceId: workspaceId ?? "",
+      })
+    },
     enabled: isAddDialogOpen,
   })
 

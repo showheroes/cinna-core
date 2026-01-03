@@ -11,6 +11,7 @@ import { Send, Bot } from "lucide-react"
 import { usePageHeader } from "@/routes/_layout"
 import AddAgent from "@/components/Agents/AddAgent"
 import useCustomToast from "@/hooks/useCustomToast"
+import useWorkspace from "@/hooks/useWorkspace"
 import PendingItems from "@/components/Pending/PendingItems"
 import { getColorPreset } from "@/utils/colorPresets"
 import { RotatingHints } from "@/components/Common/RotatingHints"
@@ -40,26 +41,37 @@ function Dashboard() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { activeWorkspaceId } = useWorkspace()
 
   const {
     data: agentsData,
     isLoading: agentsLoading,
   } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => AgentsService.readAgents({ skip: 0, limit: 100 }),
+    queryKey: ["agents", activeWorkspaceId],
+    queryFn: ({ queryKey }) => {
+      const [, workspaceId] = queryKey
+      return AgentsService.readAgents({
+        skip: 0,
+        limit: 100,
+        userWorkspaceId: workspaceId ?? "",
+      })
+    },
   })
 
   const {
     data: sessionsData,
   } = useQuery({
-    queryKey: ["sessions", "latest", 8],
-    queryFn: () =>
-      SessionsService.listSessions({
+    queryKey: ["sessions", "latest", 8, activeWorkspaceId],
+    queryFn: ({ queryKey }) => {
+      const [, , , workspaceId] = queryKey
+      return SessionsService.listSessions({
         skip: 0,
         limit: 8,
         orderBy: "last_message_at",
         orderDesc: true,
-      }),
+        userWorkspaceId: workspaceId ?? "",
+      })
+    },
   })
 
   const createMutation = useMutation({
@@ -265,7 +277,7 @@ function Dashboard() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" key={activeWorkspaceId ?? 'default'}>
       {/* Main centered content area */}
       <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
         <div className="w-full max-w-3xl space-y-6">

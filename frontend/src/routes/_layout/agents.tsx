@@ -26,11 +26,12 @@ function AgentsGrid() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["agents", activeWorkspaceId],
-    queryFn: async () => {
+    queryFn: async ({ queryKey }) => {
+      const [, workspaceId] = queryKey
       const response = await AgentsService.readAgents({
         skip: 0,
         limit: 100,
-        userWorkspaceId: activeWorkspaceId || undefined,
+        userWorkspaceId: workspaceId ?? "",
       })
       return response
     },
@@ -77,6 +78,7 @@ function AgentsGrid() {
 
 function Agents() {
   const { setHeaderContent } = usePageHeader()
+  const { activeWorkspaceId } = useWorkspace()
 
   useEffect(() => {
     setHeaderContent(
@@ -94,7 +96,7 @@ function Agents() {
   return (
     <div className="p-6 md:p-8 overflow-y-auto">
       <div className="mx-auto max-w-7xl">
-        <AgentsGrid />
+        <AgentsGrid key={activeWorkspaceId ?? 'default'} />
       </div>
     </div>
   )

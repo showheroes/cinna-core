@@ -23,9 +23,12 @@ function SessionsList() {
     error: sessionsError,
   } = useQuery({
     queryKey: ["sessions", activeWorkspaceId],
-    queryFn: () => SessionsService.listSessions({
-      userWorkspaceId: activeWorkspaceId || undefined,
-    }),
+    queryFn: ({ queryKey }) => {
+      const [, workspaceId] = queryKey
+      return SessionsService.listSessions({
+        userWorkspaceId: workspaceId ?? "",
+      })
+    },
   })
 
   useEffect(() => {
@@ -82,7 +85,7 @@ function SessionsList() {
   const sessions = sessionsData?.data || []
 
   return (
-    <div className="p-6 md:p-8 overflow-y-auto">
+    <div className="p-6 md:p-8 overflow-y-auto" key={activeWorkspaceId ?? 'default'}>
       <div className="mx-auto max-w-7xl space-y-6">
         {/* Agent Sessions Grid */}
         {sessions.length === 0 ? (

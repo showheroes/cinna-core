@@ -25,21 +25,40 @@ def read_credentials(
     current_user: CurrentUser,
     skip: int = 0,
     limit: int = 100,
-    user_workspace_id: uuid.UUID | None = None,
+    user_workspace_id: str | None = None,
 ) -> Any:
     """
     Retrieve credentials (without decrypted data).
-    If user_workspace_id is not provided, returns all credentials.
-    If user_workspace_id is provided, filters by that workspace.
+    - If user_workspace_id is not provided (None): returns all credentials
+    - If user_workspace_id is empty string (""): filters for default workspace (NULL)
+    - If user_workspace_id is a UUID string: filters for that workspace
     """
+    # Parse workspace filter
+    workspace_filter: uuid.UUID | None = None
+    apply_filter = False
+
+    if user_workspace_id is None:
+        # Parameter not provided - return all credentials
+        apply_filter = False
+    elif user_workspace_id == "":
+        # Empty string means default workspace (NULL in database)
+        workspace_filter = None
+        apply_filter = True
+    else:
+        # Parse as UUID
+        try:
+            workspace_filter = uuid.UUID(user_workspace_id)
+            apply_filter = True
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid workspace ID format")
+
     if current_user.is_superuser:
         count_statement = select(func.count()).select_from(Credential)
         statement = select(Credential)
 
-        # Apply workspace filter
-        if user_workspace_id is not None:
-            count_statement = count_statement.where(Credential.user_workspace_id == user_workspace_id)
-            statement = statement.where(Credential.user_workspace_id == user_workspace_id)
+        if apply_filter:
+            count_statement = count_statement.where(Credential.user_workspace_id == workspace_filter)
+            statement = statement.where(Credential.user_workspace_id == workspace_filter)
 
         count = session.exec(count_statement).one()
         credentials = session.exec(statement.offset(skip).limit(limit)).all()
@@ -54,10 +73,9 @@ def read_credentials(
             .where(Credential.owner_id == current_user.id)
         )
 
-        # Apply workspace filter
-        if user_workspace_id is not None:
-            count_statement = count_statement.where(Credential.user_workspace_id == user_workspace_id)
-            statement = statement.where(Credential.user_workspace_id == user_workspace_id)
+        if apply_filter:
+            count_statement = count_statement.where(Credential.user_workspace_id == workspace_filter)
+            statement = statement.where(Credential.user_workspace_id == workspace_filter)
 
         count = session.exec(count_statement).one()
         credentials = session.exec(statement.offset(skip).limit(limit)).all()

@@ -4,9 +4,10 @@ import {
   type UserWorkspaceCreate,
   type UserWorkspacePublic,
 } from "@/client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, createContext, useContext, type ReactNode } from "react"
 import { handleError } from "@/utils"
 import useCustomToast from "./useCustomToast"
+import { useRouter } from "@tanstack/react-router"
 
 const WORKSPACE_STORAGE_KEY = "last_user_workspace_id"
 
@@ -22,18 +23,65 @@ const setActiveWorkspaceId = (workspaceId: string | null) => {
   }
 }
 
-const useWorkspace = () => {
-  const queryClient = useQueryClient()
-  const { showErrorToast } = useCustomToast()
+// Create context for shared workspace state
+const WorkspaceContext = createContext<{
+  activeWorkspaceId: string | null
+  setActiveWorkspaceIdState: (id: string | null) => void
+} | null>(null)
+
+export const WorkspaceProvider = ({ children }: { children: ReactNode }) => {
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(
     getActiveWorkspaceId()
   )
+
+  return (
+    <WorkspaceContext.Provider value={{ activeWorkspaceId, setActiveWorkspaceIdState }}>
+      {children}
+    </WorkspaceContext.Provider>
+  )
+}
+
+const useWorkspace = () => {
+  const queryClient = useQueryClient()
+  const { showErrorToast } = useCustomToast()
+  const router = useRouter()
+  const context = useContext(WorkspaceContext)
+  const isInitialMount = useRef(true)
+
+  if (!context) {
+    throw new Error('useWorkspace must be used within WorkspaceProvider')
+  }
+
+  const { activeWorkspaceId, setActiveWorkspaceIdState } = context
 
   // Load active workspace ID from localStorage on mount
   useEffect(() => {
     const storedId = getActiveWorkspaceId()
     setActiveWorkspaceIdState(storedId)
-  }, [])
+  }, [setActiveWorkspaceIdState])
+
+  // Handle workspace change - redirect if needed
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
+    }
+
+    console.log('Workspace changed to:', activeWorkspaceId)
+
+    // If on a detail page (not a list page), redirect to index
+    const listPages = ['/', '/agents', '/credentials', '/sessions', '/activities']
+    const currentPath = window.location.pathname
+
+    if (!listPages.includes(currentPath)) {
+      console.log('Redirecting to index from:', currentPath)
+      router.navigate({ to: '/' })
+    }
+
+    // Note: We don't need to manually invalidate queries here
+    // The key prop on components will force them to remount when activeWorkspaceId changes
+    // React Query will automatically fetch when new queries are mounted
+  }, [activeWorkspaceId, router])
 
   // Fetch all user workspaces
   const { data: workspacesData } = useQuery({
@@ -53,12 +101,6 @@ const useWorkspace = () => {
   const switchWorkspace = (workspaceId: string | null) => {
     setActiveWorkspaceId(workspaceId)
     setActiveWorkspaceIdState(workspaceId)
-
-    // Invalidate all entity queries to refetch with new workspace filter
-    queryClient.invalidateQueries({ queryKey: ["agents"] })
-    queryClient.invalidateQueries({ queryKey: ["credentials"] })
-    queryClient.invalidateQueries({ queryKey: ["sessions"] })
-    queryClient.invalidateQueries({ queryKey: ["activities"] })
   }
 
   // Create new workspace

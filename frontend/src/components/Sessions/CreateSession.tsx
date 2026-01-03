@@ -23,6 +23,7 @@ import {
 import { AgentsService, SessionsService } from "@/client"
 import type { SessionCreate } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
+import useWorkspace from "@/hooks/useWorkspace"
 import { MessageSquarePlus } from "lucide-react"
 
 interface CreateSessionProps {
@@ -40,10 +41,18 @@ export function CreateSession({ variant = "default", size = "default", className
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { activeWorkspaceId } = useWorkspace()
 
   const { data: agentsData } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => AgentsService.readAgents({ skip: 0, limit: 100 }),
+    queryKey: ["agents", activeWorkspaceId],
+    queryFn: ({ queryKey }) => {
+      const [, workspaceId] = queryKey
+      return AgentsService.readAgents({
+        skip: 0,
+        limit: 100,
+        userWorkspaceId: workspaceId ?? "",
+      })
+    },
     enabled: open,
   })
 
