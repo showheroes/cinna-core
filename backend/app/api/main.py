@@ -13,6 +13,7 @@ from app.api.routes import (
     oauth,
     private,
     sessions,
+    ssh_keys,
     users,
     user_workspaces,
     utils,
@@ -28,6 +29,7 @@ api_router.include_router(utils.router)
 api_router.include_router(items.router)
 api_router.include_router(agents.router)
 api_router.include_router(credentials.router)
+api_router.include_router(ssh_keys.router)
 api_router.include_router(environments.router)
 api_router.include_router(sessions.router)
 api_router.include_router(messages.router)

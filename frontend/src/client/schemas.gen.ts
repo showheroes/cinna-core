@@ -1854,6 +1854,129 @@ export const PrivateUserCreateSchema = {
     title: 'PrivateUserCreate'
 } as const;
 
+export const SSHKeyGenerateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'SSHKeyGenerate'
+} as const;
+
+export const SSHKeyImportSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        public_key: {
+            type: 'string',
+            title: 'Public Key'
+        },
+        private_key: {
+            type: 'string',
+            title: 'Private Key'
+        },
+        passphrase: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Passphrase'
+        }
+    },
+    type: 'object',
+    required: ['name', 'public_key', 'private_key'],
+    title: 'SSHKeyImport'
+} as const;
+
+export const SSHKeyPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        public_key: {
+            type: 'string',
+            title: 'Public Key'
+        },
+        fingerprint: {
+            type: 'string',
+            title: 'Fingerprint'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'public_key', 'fingerprint', 'created_at', 'updated_at'],
+    title: 'SSHKeyPublic'
+} as const;
+
+export const SSHKeyUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    title: 'SSHKeyUpdate'
+} as const;
+
+export const SSHKeysPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/SSHKeyPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'SSHKeysPublic'
+} as const;
+
 export const SaveScheduleRequestSchema = {
     properties: {
         cron_string: {

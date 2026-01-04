@@ -110,6 +110,14 @@ from .user_workspace import (
     UserWorkspacePublic,
     UserWorkspacesPublic,
 )
+from .ssh_key import (
+    UserSSHKey,
+    SSHKeyGenerate,
+    SSHKeyImport,
+    SSHKeyPublic,
+    SSHKeysPublic,
+    SSHKeyUpdate,
+)
 
 __all__ = [
     # Core
@@ -216,4 +224,11 @@ __all__ = [
     "UserWorkspaceUpdate",
     "UserWorkspacePublic",
     "UserWorkspacesPublic",
+    # SSH Keys
+    "UserSSHKey",
+    "SSHKeyGenerate",
+    "SSHKeyImport",
+    "SSHKeyPublic",
+    "SSHKeysPublic",
+    "SSHKeyUpdate",
 ]

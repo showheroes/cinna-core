@@ -524,6 +524,35 @@ export type SetPassword = {
     new_password: string;
 };
 
+export type SSHKeyGenerate = {
+    name: string;
+};
+
+export type SSHKeyImport = {
+    name: string;
+    public_key: string;
+    private_key: string;
+    passphrase?: (string | null);
+};
+
+export type SSHKeyPublic = {
+    name: string;
+    id: string;
+    public_key: string;
+    fingerprint: string;
+    created_at: string;
+    updated_at: string;
+};
+
+export type SSHKeysPublic = {
+    data: Array<SSHKeyPublic>;
+    count: number;
+};
+
+export type SSHKeyUpdate = {
+    name?: (string | null);
+};
+
 export type Token = {
     access_token: string;
     token_type?: string;
@@ -1106,6 +1135,39 @@ export type SessionsResetSdkSessionData = {
 };
 
 export type SessionsResetSdkSessionResponse = (Message);
+
+export type SshKeysReadSshKeysResponse = (SSHKeysPublic);
+
+export type SshKeysImportSshKeyData = {
+    requestBody: SSHKeyImport;
+};
+
+export type SshKeysImportSshKeyResponse = (SSHKeyPublic);
+
+export type SshKeysReadSshKeyData = {
+    id: string;
+};
+
+export type SshKeysReadSshKeyResponse = (SSHKeyPublic);
+
+export type SshKeysUpdateSshKeyData = {
+    id: string;
+    requestBody: SSHKeyUpdate;
+};
+
+export type SshKeysUpdateSshKeyResponse = (SSHKeyPublic);
+
+export type SshKeysDeleteSshKeyData = {
+    id: string;
+};
+
+export type SshKeysDeleteSshKeyResponse = (Message);
+
+export type SshKeysGenerateSshKeyData = {
+    requestBody: SSHKeyGenerate;
+};
+
+export type SshKeysGenerateSshKeyResponse = (SSHKeyPublic);
 
 export type UsersReadUsersData = {
     limit?: number;
