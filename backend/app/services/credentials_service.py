@@ -632,6 +632,7 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
             "type": credential.type,
             "notes": credential.notes,
             "owner_id": credential.owner_id,
+            "user_workspace_id": credential.user_workspace_id,
             "credential_data": credential_data
         }
 
