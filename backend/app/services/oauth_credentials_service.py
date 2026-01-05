@@ -161,10 +161,6 @@ class OAuthCredentialsService:
         }
         auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
 
-        # Debug logging
-        logger.info(f"OAuth authorization params: {params}")
-        logger.info(f"OAuth authorization URL: {auth_url}")
-
         return {
             "authorization_url": auth_url,
             "state": state
@@ -234,10 +230,6 @@ class OAuthCredentialsService:
                     },
                 )
 
-            # Debug logging
-            logger.info(f"Token response status: {token_response.status_code}")
-            logger.info(f"Token response body: {token_response.text}")
-
             if token_response.status_code != 200:
                 logger.error(f"Token exchange failed: {token_response.text}")
                 raise HTTPException(
@@ -245,11 +237,8 @@ class OAuthCredentialsService:
                     detail="Failed to exchange authorization code"
                 )
 
-            token_data = token_response.json()
-            logger.info(f"Token data payload: {token_data}")
-            logger.info(f"Successfully exchanged code for tokens (credential {credential_id})")
-
             # Extract token information
+            token_data = token_response.json()
             access_token = token_data.get("access_token")
             refresh_token = token_data.get("refresh_token")
             expires_in = token_data.get("expires_in", 3600)  # Default 1 hour
