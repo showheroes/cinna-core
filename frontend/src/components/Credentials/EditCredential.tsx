@@ -17,25 +17,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { Form } from "@/components/ui/form"
 import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 import {
-  EmailImapFields,
-  OdooFields,
-  OAuthCredentialFields,
-  ApiTokenFields,
-} from "@/components/Credentials/CredentialFields"
+  OdooCredentialForm,
+  ApiTokenCredentialForm,
+  OAuthCredentialForm,
+  GenericCredentialForm,
+} from "@/components/Credentials/CredentialForms"
 
 const formSchema = z.object({
   name: z.string().min(1, { message: "Name is required" }),
@@ -125,28 +116,12 @@ const EditCredential = ({ credential, onSuccess }: EditCredentialProps) => {
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        Name <span className="text-destructive">*</span>
-                      </FormLabel>
-                      <FormControl>
-                        <Input placeholder="My Credential" type="text" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {credential.type === "email_imap" && (
-                  <EmailImapFields control={form.control} />
+                {credential.type === "odoo" && (
+                  <OdooCredentialForm form={form} />
                 )}
 
-                {credential.type === "odoo" && (
-                  <OdooFields control={form.control} />
+                {credential.type === "api_token" && (
+                  <ApiTokenCredentialForm form={form} />
                 )}
 
                 {(credential.type === "gmail_oauth" ||
@@ -155,30 +130,19 @@ const EditCredential = ({ credential, onSuccess }: EditCredentialProps) => {
                   credential.type === "gdrive_oauth_readonly" ||
                   credential.type === "gcalendar_oauth" ||
                   credential.type === "gcalendar_oauth_readonly") && (
-                  <OAuthCredentialFields
-                    control={form.control}
+                  <OAuthCredentialForm
+                    form={form}
                     credentialType={credential.type}
                     credentialId={credential.id}
                   />
                 )}
 
-                {credential.type === "api_token" && (
-                  <ApiTokenFields control={form.control} watch={form.watch} />
+                {credential.type === "email_imap" && (
+                  <GenericCredentialForm
+                    form={form}
+                    credentialType={credential.type}
+                  />
                 )}
-
-                <FormField
-                  control={form.control}
-                  name="notes"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Notes</FormLabel>
-                      <FormControl>
-                        <Textarea placeholder="Additional notes..." {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
               </div>
 
               <DialogFooter>
@@ -187,9 +151,11 @@ const EditCredential = ({ credential, onSuccess }: EditCredentialProps) => {
                     Cancel
                   </Button>
                 </DialogClose>
-                <LoadingButton type="submit" loading={mutation.isPending}>
-                  Save
-                </LoadingButton>
+                {form.formState.isDirty && (
+                  <LoadingButton type="submit" loading={mutation.isPending}>
+                    Save
+                  </LoadingButton>
+                )}
               </DialogFooter>
             </form>
           </Form>

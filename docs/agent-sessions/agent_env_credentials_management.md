@@ -113,14 +113,43 @@ workspace/
 - Credentials encrypted using `encrypt_field()` / `decrypt_field()` (`backend/app/core/security.py`)
 - Stored in `Credential.encrypted_data` field
 
-### Environment Layer
-- **`credentials.json`**: Full data (scripts read this)
-- **`README.md`**: Redacted data (included in agent prompt)
+### Environment Layer - Multi-Layer Security
 
-### Redaction Rules
+**Layer 1: Field Whitelisting (Agent Environment)**
+- **`credentials.json`**: Only whitelisted fields are included (WHITELIST approach)
+- `CredentialsService.AGENT_ENV_ALLOWED_FIELDS` defines exactly what fields are transferred
+- Security-critical fields NEVER exposed to agent container:
+  - OAuth `refresh_token` - Backend handles token refresh
+  - OAuth `client_secret` - Should never leave backend server
+  - Any field not explicitly whitelisted is excluded
+- Unknown credential types return empty dict (fail-safe default)
+
+**Example for Gmail OAuth:**
+```python
+# Fields sent to agent environment (whitelisted):
+{
+  "access_token": "...",      # Required for API calls
+  "token_type": "Bearer",     # Token type
+  "expires_at": 1234567890,   # Expiration timestamp
+  "scope": "...",             # Granted scopes
+  "granted_user_email": "...", # User's email
+  "granted_user_name": "..."   # User's name
+}
+
+# Fields EXCLUDED (not in whitelist):
+# - refresh_token (backend handles refresh)
+# - client_secret (should never leave backend)
+# - granted_at (not needed by agent)
+```
+
+**Layer 2: Redaction (Agent Prompt)**
+- **`README.md`**: Redacted data included in agent prompt
+- Shows **FILTERED** credential structure (same as credentials.json)
+- Sensitive values replaced by `***REDACTED***` for display
 - Only redacts fields that have actual values (not empty/null)
 - Empty fields shown as-is (safe, indicates missing configuration)
-- README shows exact same structure as JSON (agent not confused)
+- README shows exact same structure as credentials.json (no confusion)
+- **Important**: Fields removed by whitelist (e.g., `refresh_token`) do NOT appear in README
 
 ## Automatic Synchronization
 

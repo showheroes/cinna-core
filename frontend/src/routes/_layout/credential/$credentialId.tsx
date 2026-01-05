@@ -31,12 +31,13 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 import DeleteCredential from "@/components/Credentials/DeleteCredential"
 import { usePageHeader } from "@/routes/_layout"
+import { OAuthCredentialFields } from "@/components/Credentials/CredentialFields"
 import {
-  EmailImapFields,
-  OdooFields,
-  OAuthCredentialFields,
-  ApiTokenFields,
-} from "@/components/Credentials/CredentialFields"
+  OdooCredentialForm,
+  ApiTokenCredentialForm,
+  OAuthCredentialForm,
+  GenericCredentialForm,
+} from "@/components/Credentials/CredentialForms"
 
 const formSchema = z.object({
   name: z.string().min(1, { message: "Name is required" }),
@@ -182,91 +183,152 @@ function CredentialDetail() {
     )
   }
 
+  const isOAuthCredential = [
+    "gmail_oauth",
+    "gmail_oauth_readonly",
+    "gdrive_oauth",
+    "gdrive_oauth_readonly",
+    "gcalendar_oauth",
+    "gcalendar_oauth_readonly",
+  ].includes(credentialWithData.type)
+
   return (
     <div className="p-6 md:p-8 overflow-y-auto">
       <div className="mx-auto max-w-7xl">
-        <Card>
-        <CardHeader>
-          <CardTitle>Credential Details</CardTitle>
-          <CardDescription>
-            Update your credential information below.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>
-                      Name <span className="text-destructive">*</span>
-                    </FormLabel>
-                    <FormControl>
-                      <Input placeholder="My Credential" type="text" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+        {/* Two-column layout for OAuth credentials */}
+        {isOAuthCredential ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Card: Basic Information */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Basic Information</CardTitle>
+                <CardDescription>
+                  Update the name and notes for this credential.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Form {...form}>
+                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            Name <span className="text-destructive">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input placeholder="My Credential" type="text" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
 
-              {credentialWithData.type === "email_imap" && (
-                <EmailImapFields control={form.control} />
-              )}
+                    <FormField
+                      control={form.control}
+                      name="notes"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Notes</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Additional notes..."
+                              className="min-h-[100px]"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
 
-              {credentialWithData.type === "odoo" && (
-                <OdooFields control={form.control} />
-              )}
+                    {form.formState.isDirty && (
+                      <div className="flex justify-end gap-2 pt-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => form.reset()}
+                          disabled={mutation.isPending}
+                        >
+                          Reset
+                        </Button>
+                        <LoadingButton type="submit" loading={mutation.isPending}>
+                          Save Changes
+                        </LoadingButton>
+                      </div>
+                    )}
+                  </form>
+                </Form>
+              </CardContent>
+            </Card>
 
-              {(credentialWithData.type === "gmail_oauth" ||
-                credentialWithData.type === "gmail_oauth_readonly" ||
-                credentialWithData.type === "gdrive_oauth" ||
-                credentialWithData.type === "gdrive_oauth_readonly" ||
-                credentialWithData.type === "gcalendar_oauth" ||
-                credentialWithData.type === "gcalendar_oauth_readonly") && (
-                <OAuthCredentialFields
-                  control={form.control}
-                  credentialType={credentialWithData.type}
-                  credentialId={credentialWithData.id}
-                />
-              )}
+            {/* Right Card: OAuth Authorization */}
+            <OAuthCredentialFields
+              credentialType={credentialWithData.type}
+              credentialId={credentialWithData.id}
+            />
+          </div>
+        ) : (
+          /* Single card layout for non-OAuth credentials */
+          <Card>
+            <CardHeader>
+              <CardTitle>Credential Details</CardTitle>
+              <CardDescription>
+                Update your credential information below.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                  {credentialWithData.type === "odoo" && (
+                    <OdooCredentialForm form={form} />
+                  )}
 
-              {credentialWithData.type === "api_token" && (
-                <ApiTokenFields control={form.control} watch={form.watch} />
-              )}
+                  {credentialWithData.type === "api_token" && (
+                    <ApiTokenCredentialForm form={form} />
+                  )}
 
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Textarea placeholder="Additional notes..." {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  {(credentialWithData.type === "gmail_oauth" ||
+                    credentialWithData.type === "gmail_oauth_readonly" ||
+                    credentialWithData.type === "gdrive_oauth" ||
+                    credentialWithData.type === "gdrive_oauth_readonly" ||
+                    credentialWithData.type === "gcalendar_oauth" ||
+                    credentialWithData.type === "gcalendar_oauth_readonly") && (
+                    <OAuthCredentialForm
+                      form={form}
+                      credentialType={credentialWithData.type}
+                      credentialId={credentialWithData.id}
+                    />
+                  )}
 
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => navigate({ to: "/credentials" })}
-                  disabled={mutation.isPending}
-                >
-                  Cancel
-                </Button>
-                <LoadingButton type="submit" loading={mutation.isPending}>
-                  Save Changes
-                </LoadingButton>
-              </div>
-            </form>
-          </Form>
-        </CardContent>
-        </Card>
+                  {credentialWithData.type === "email_imap" && (
+                    <GenericCredentialForm
+                      form={form}
+                      credentialType={credentialWithData.type}
+                    />
+                  )}
+
+                  {form.formState.isDirty && (
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => form.reset()}
+                        disabled={mutation.isPending}
+                      >
+                        Reset
+                      </Button>
+                      <LoadingButton type="submit" loading={mutation.isPending}>
+                        Save Changes
+                      </LoadingButton>
+                    </div>
+                  )}
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )

@@ -22,7 +22,7 @@ class CredentialsService:
     - Format credentials for different environments
     """
 
-    # Fields to redact in credentials (by credential type)
+    # Fields to redact in credentials (by credential type) - for README/prompt display
     SENSITIVE_FIELDS = {
         "email_imap": ["password"],
         "odoo": ["api_token"],
@@ -33,6 +33,67 @@ class CredentialsService:
         "gcalendar_oauth": ["access_token", "refresh_token"],
         "gcalendar_oauth_readonly": ["access_token", "refresh_token"],
         "api_token": ["http_header_value"],
+    }
+
+    # WHITELIST: Fields that ARE allowed to be exposed to agent environment
+    # Security: Only explicitly listed fields are transferred. Any field not listed is excluded.
+    # This prevents accidental exposure of new sensitive fields (refresh_token, client_secret, etc.)
+    AGENT_ENV_ALLOWED_FIELDS = {
+        # Non-OAuth credentials: Need all functional fields for agent to use them
+        "email_imap": ["host", "port", "login", "password", "is_ssl"],
+        "odoo": ["url", "database_name", "login", "api_token"],
+        "api_token": ["http_header_name", "http_header_value"],
+
+        # OAuth credentials: Only expose access token and metadata
+        # refresh_token and client_secret are NEVER included (backend handles token refresh)
+        "gmail_oauth": [
+            "access_token",      # Required for API calls
+            "token_type",        # Usually "Bearer"
+            "expires_at",        # Token expiration timestamp
+            "scope",             # Granted scopes
+            "granted_user_email", # User's email (for display/logging)
+            "granted_user_name"   # User's name (for display/logging)
+        ],
+        "gmail_oauth_readonly": [
+            "access_token",
+            "token_type",
+            "expires_at",
+            "scope",
+            "granted_user_email",
+            "granted_user_name"
+        ],
+        "gdrive_oauth": [
+            "access_token",
+            "token_type",
+            "expires_at",
+            "scope",
+            "granted_user_email",
+            "granted_user_name"
+        ],
+        "gdrive_oauth_readonly": [
+            "access_token",
+            "token_type",
+            "expires_at",
+            "scope",
+            "granted_user_email",
+            "granted_user_name"
+        ],
+        "gcalendar_oauth": [
+            "access_token",
+            "token_type",
+            "expires_at",
+            "scope",
+            "granted_user_email",
+            "granted_user_name"
+        ],
+        "gcalendar_oauth_readonly": [
+            "access_token",
+            "token_type",
+            "expires_at",
+            "scope",
+            "granted_user_email",
+            "granted_user_name"
+        ],
     }
 
     @staticmethod
@@ -135,6 +196,57 @@ class CredentialsService:
                     "http_header_name": "Authorization",
                     "http_header_value": header_string
                 }
+
+    @staticmethod
+    def filter_credential_data_for_agent_env(credential_type: str, credential_data: dict) -> dict:
+        """
+        Filter credential data using WHITELIST approach before exposing to agent environment.
+
+        Security: Only explicitly allowed fields are included. Any field not in the whitelist
+        is excluded, preventing accidental exposure of sensitive data (refresh tokens,
+        client secrets, etc.).
+
+        Whitelist rationale:
+        - OAuth credentials: Only access_token + metadata (no refresh_token or client_secret)
+        - Non-OAuth credentials: Only functional fields needed by agent
+        - Unknown credential types: Empty dict (fail-safe)
+
+        Args:
+            credential_type: Type of credential
+            credential_data: Original credential data
+
+        Returns:
+            New dict containing ONLY whitelisted fields that exist in original data
+        """
+        # Get allowed fields for this credential type
+        allowed_fields = CredentialsService.AGENT_ENV_ALLOWED_FIELDS.get(credential_type, [])
+
+        if not allowed_fields:
+            logger.warning(
+                f"No allowed fields defined for credential type '{credential_type}'. "
+                f"Credential will be empty in agent environment. "
+                f"Add this type to AGENT_ENV_ALLOWED_FIELDS if it should be accessible."
+            )
+            return {}
+
+        # Build new dict with ONLY whitelisted fields
+        filtered = {}
+        for field in allowed_fields:
+            if field in credential_data:
+                filtered[field] = credential_data[field]
+                logger.debug(f"Including '{field}' in {credential_type} for agent env")
+            else:
+                logger.debug(f"Field '{field}' not found in {credential_type} data (expected for whitelist)")
+
+        # Log any fields that were excluded
+        excluded_fields = set(credential_data.keys()) - set(filtered.keys())
+        if excluded_fields:
+            logger.info(
+                f"Excluded {len(excluded_fields)} field(s) from {credential_type} "
+                f"before agent env sync: {sorted(excluded_fields)}"
+            )
+
+        return filtered
 
     @staticmethod
     def redact_credential_data(credential_type: str, credential_data: dict) -> dict:
@@ -538,19 +650,37 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         """
         Prepare credentials data for syncing to agent environment.
 
+        Security: Filters out sensitive fields (refresh tokens, client secrets) that
+        should never be exposed to the agent container. The agent only receives
+        the minimum data needed to function (e.g., access tokens but not refresh tokens).
+
         Returns:
             Dictionary with two keys:
-            - "credentials_json": Full credentials data (for credentials.json file)
+            - "credentials_json": Filtered credentials data (for credentials.json file)
             - "credentials_readme": Redacted README content (for credentials/README.md file)
+                                    Based on FILTERED structure to match credentials.json
         """
         # Get credentials with decrypted data
         credentials = CredentialsService.get_agent_credentials_with_data(session, agent_id)
 
-        # Generate README with redacted data
-        readme_content = CredentialsService.generate_credentials_readme(credentials)
+        # Filter out sensitive fields that should never be exposed to agent environment
+        # (e.g., refresh tokens, client secrets for OAuth credentials)
+        filtered_credentials = []
+        for cred in credentials:
+            filtered_cred = copy.deepcopy(cred)
+            filtered_cred["credential_data"] = CredentialsService.filter_credential_data_for_agent_env(
+                cred["type"],
+                cred["credential_data"]
+            )
+            filtered_credentials.append(filtered_cred)
+
+        # Generate README with redacted data (for agent prompt context)
+        # IMPORTANT: Use filtered_credentials so README matches credentials.json structure
+        # This ensures agent sees the same fields in README as in the actual JSON file
+        readme_content = CredentialsService.generate_credentials_readme(filtered_credentials)
 
         return {
-            "credentials_json": credentials,
+            "credentials_json": filtered_credentials,
             "credentials_readme": readme_content
         }
 

@@ -68,7 +68,7 @@ function CredentialsGrid() {
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 auto-rows-fr">
       {credentials.map((credential) => (
         <CredentialCard key={credential.id} credential={credential} />
       ))}

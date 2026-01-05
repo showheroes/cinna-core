@@ -1,6 +1,6 @@
-import { Control } from "react-hook-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -9,12 +9,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { CredentialsService } from "@/client"
+import { CredentialsService, type OAuthMetadataResponse } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
+import { RelativeTime } from "@/components/Common/RelativeTime"
 
 interface OAuthCredentialFieldsProps {
-  control: Control<any>
   credentialType: string
   credentialId?: string
 }
@@ -30,21 +30,21 @@ const CREDENTIAL_TYPE_NAMES: Record<string, string> = {
 }
 
 export function OAuthCredentialFields({
-  control,
   credentialType,
   credentialId,
 }: OAuthCredentialFieldsProps) {
   const displayName = CREDENTIAL_TYPE_NAMES[credentialType] || "Google Service"
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [showScopes, setShowScopes] = useState(false)
 
   // Fetch OAuth metadata if credential already exists
-  const { data: metadata, isLoading: isLoadingMetadata } = useQuery({
+  const { data: metadata, isLoading: isLoadingMetadata } = useQuery<OAuthMetadataResponse | null>({
     queryKey: ["oauthMetadata", credentialId],
-    queryFn: () =>
-      credentialId
-        ? CredentialsService.getOauthMetadata({ credentialId })
-        : Promise.resolve(null),
+    queryFn: async () => {
+      if (!credentialId) return null
+      return await CredentialsService.getOauthMetadata({ credentialId })
+    },
     enabled: !!credentialId,
     refetchInterval: false,
   })
@@ -115,117 +115,134 @@ export function OAuthCredentialFields({
   }
 
   const isAuthorized = metadata && metadata.user_email
-  const isExpiringSoon = metadata?.expires_at
-    ? metadata.expires_at < Date.now() / 1000 + 86400 // Expires within 24 hours
-    : false
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>OAuth Authorization</CardTitle>
-          <CardDescription>
-            Grant access to your {displayName} account
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-col gap-2">
+    <Card>
+      <CardHeader>
+        <CardTitle>OAuth Authorization</CardTitle>
+        <CardDescription>
+          Grant access to your {displayName} account
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {!credentialId ? (
+          // Show message if credential not saved yet
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <p className="text-sm text-muted-foreground">
+              Please save the credential first to authorize with Google.
+            </p>
+          </div>
+        ) : isLoadingMetadata ? (
+          // Loading state
+          <div className="flex items-center justify-center py-12">
+            <div className="text-sm text-muted-foreground">Loading authorization status...</div>
+          </div>
+        ) : !isAuthorized ? (
+          // Not authorized - show centered grant button
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <div className="text-center space-y-2">
+              <p className="text-sm text-muted-foreground">
+                No authorization found. Click below to grant access.
+              </p>
+            </div>
             <Button
               type="button"
-              variant={isAuthorized ? "outline" : "default"}
+              size="lg"
               onClick={handleGrantFromGoogle}
-              disabled={!credentialId || authorizeMutation.isPending}
-              className="w-full"
+              disabled={authorizeMutation.isPending}
             >
               {authorizeMutation.isPending
                 ? "Opening authorization..."
-                : isAuthorized
-                  ? "Re-authorize with Google"
-                  : "Grant from Google"}
+                : "Grant from Google"}
             </Button>
+          </div>
+        ) : (
+          // Authorized - show metadata and actions
+          <div className="space-y-4">
+            {/* Authorization Status */}
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <span className="font-medium">Active</span>
+            </div>
 
-            {isAuthorized && (
+            {/* Account Email - Inline */}
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm text-muted-foreground">Account:</span>
+              <span className="text-sm font-medium break-all">{metadata.user_email}</span>
+            </div>
+
+            {/* Expiration - Inline */}
+            {metadata.expires_at && (
+              <div className="flex items-baseline gap-2">
+                <span className="text-sm text-muted-foreground">Expires:</span>
+                <span
+                  className="text-sm font-medium"
+                  title={new Date(metadata.expires_at * 1000).toLocaleString()}
+                >
+                  <RelativeTime
+                    timestamp={new Date(metadata.expires_at * 1000)}
+                    fallback="soon"
+                  />
+                </span>
+              </div>
+            )}
+
+            {/* Collapsible Scopes */}
+            {metadata.scopes && metadata.scopes.length > 0 && (
+              <div className="border-t pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowScopes(!showScopes)}
+                  className="flex items-center justify-between w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <span>Granted Scopes ({metadata.scopes.length})</span>
+                  {showScopes ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                </button>
+                {showScopes && (
+                  <div className="mt-2 rounded-lg border p-3 bg-muted/30">
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {metadata.scopes.map((scope, i) => (
+                        <li key={i} className="break-all">
+                          • {scope}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 pt-4 border-t">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleGrantFromGoogle}
+                disabled={authorizeMutation.isPending}
+                className="flex-1"
+              >
+                {authorizeMutation.isPending
+                  ? "Opening authorization..."
+                  : "Re-authorize"}
+              </Button>
               <Button
                 type="button"
                 variant="outline"
                 onClick={handleRefreshToken}
                 disabled={refreshMutation.isPending}
-                className="w-full"
+                className="flex-1"
               >
                 <RefreshCw className="mr-2 h-4 w-4" />
                 {refreshMutation.isPending ? "Refreshing..." : "Refresh Token"}
               </Button>
-            )}
-
-            {!credentialId && (
-              <p className="text-sm text-muted-foreground">
-                Please save the credential first, then you can authorize with Google.
-              </p>
-            )}
-          </div>
-
-          {/* OAuth Metadata Display */}
-          {credentialId && (
-            <div className="mt-4 space-y-2 rounded-lg border p-4 bg-muted/50">
-              <h4 className="text-sm font-medium">Authorization Status</h4>
-              {isLoadingMetadata ? (
-                <div className="text-sm text-muted-foreground">Loading...</div>
-              ) : isAuthorized ? (
-                <div className="space-y-1 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">Status:</span>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                        isExpiringSoon
-                          ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                          : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                      }`}
-                    >
-                      {isExpiringSoon ? "Expires Soon" : "Active"}
-                    </span>
-                  </div>
-                  <div className="text-muted-foreground">
-                    <span className="font-medium">Email:</span> {metadata.user_email}
-                  </div>
-                  {metadata.user_name && (
-                    <div className="text-muted-foreground">
-                      <span className="font-medium">Name:</span> {metadata.user_name}
-                    </div>
-                  )}
-                  {metadata.expires_at && (
-                    <div className="text-muted-foreground">
-                      <span className="font-medium">Expires:</span>{" "}
-                      {new Date(metadata.expires_at * 1000).toLocaleString()}
-                    </div>
-                  )}
-                  {metadata.granted_at && (
-                    <div className="text-muted-foreground">
-                      <span className="font-medium">Granted:</span>{" "}
-                      {new Date(metadata.granted_at * 1000).toLocaleString()}
-                    </div>
-                  )}
-                  {metadata.scopes && metadata.scopes.length > 0 && (
-                    <div className="text-muted-foreground">
-                      <span className="font-medium">Scopes:</span>
-                      <ul className="ml-4 mt-1 list-disc text-xs">
-                        {metadata.scopes.map((scope, i) => (
-                          <li key={i} className="break-all">
-                            {scope}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  Not yet authorized. Click "Grant from Google" to authorize.
-                </div>
-              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

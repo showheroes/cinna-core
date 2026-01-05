@@ -62,14 +62,14 @@ function getCredentialTypeLabel(type: string): string {
 
 export function CredentialCard({ credential }: CredentialCardProps) {
   return (
-    <Card className="relative transition-all hover:shadow-md hover:-translate-y-0.5">
-      <Link
-        to="/credential/$credentialId"
-        params={{ credentialId: credential.id }}
-        className="block"
-      >
-        <CardHeader className="pb-3">
-          <div className="flex items-start gap-3 mb-2">
+    <Link
+      to="/credential/$credentialId"
+      params={{ credentialId: credential.id }}
+      className="block h-full"
+    >
+      <Card className="relative transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer h-full flex flex-col gap-0">
+        <CardHeader className="pb-2">
+          <div className="flex items-start gap-3">
             <div className="rounded-lg bg-primary/10 p-2 text-primary">
               {getCredentialIcon(credential.type)}
             </div>
@@ -80,20 +80,20 @@ export function CredentialCard({ credential }: CredentialCardProps) {
             </div>
           </div>
           {credential.notes && (
-            <CardDescription className="line-clamp-2 min-h-[2.5rem]">
+            <CardDescription className="line-clamp-2 min-h-[2.5rem] mt-2">
               {credential.notes}
             </CardDescription>
           )}
         </CardHeader>
 
-        <CardContent>
+        <CardContent className="pt-0 flex-1 min-h-0">
           <div className="flex items-center gap-2">
             <Badge variant="secondary">
               {getCredentialTypeLabel(credential.type)}
             </Badge>
           </div>
         </CardContent>
-      </Link>
-    </Card>
+      </Card>
+    </Link>
   )
 }
