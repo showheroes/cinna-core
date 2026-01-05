@@ -12,6 +12,11 @@ class CredentialType(str, Enum):
     EMAIL_IMAP = "email_imap"
     ODOO = "odoo"
     GMAIL_OAUTH = "gmail_oauth"
+    GMAIL_OAUTH_READONLY = "gmail_oauth_readonly"
+    GDRIVE_OAUTH = "gdrive_oauth"
+    GDRIVE_OAUTH_READONLY = "gdrive_oauth_readonly"
+    GCALENDAR_OAUTH = "gcalendar_oauth"
+    GCALENDAR_OAUTH_READONLY = "gcalendar_oauth_readonly"
     API_TOKEN = "api_token"
 
 

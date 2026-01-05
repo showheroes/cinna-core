@@ -34,7 +34,7 @@ import { usePageHeader } from "@/routes/_layout"
 import {
   EmailImapFields,
   OdooFields,
-  GmailOAuthFields,
+  OAuthCredentialFields,
   ApiTokenFields,
 } from "@/components/Credentials/CredentialFields"
 
@@ -54,6 +54,16 @@ function getCredentialTypeLabel(type: string): string {
       return "Odoo"
     case "gmail_oauth":
       return "Gmail OAuth"
+    case "gmail_oauth_readonly":
+      return "Gmail OAuth (Read-Only)"
+    case "gdrive_oauth":
+      return "Google Drive OAuth"
+    case "gdrive_oauth_readonly":
+      return "Google Drive OAuth (Read-Only)"
+    case "gcalendar_oauth":
+      return "Google Calendar OAuth"
+    case "gcalendar_oauth_readonly":
+      return "Google Calendar OAuth (Read-Only)"
     case "api_token":
       return "API Token"
     default:
@@ -209,8 +219,17 @@ function CredentialDetail() {
                 <OdooFields control={form.control} />
               )}
 
-              {credentialWithData.type === "gmail_oauth" && (
-                <GmailOAuthFields control={form.control} />
+              {(credentialWithData.type === "gmail_oauth" ||
+                credentialWithData.type === "gmail_oauth_readonly" ||
+                credentialWithData.type === "gdrive_oauth" ||
+                credentialWithData.type === "gdrive_oauth_readonly" ||
+                credentialWithData.type === "gcalendar_oauth" ||
+                credentialWithData.type === "gcalendar_oauth_readonly") && (
+                <OAuthCredentialFields
+                  control={form.control}
+                  credentialType={credentialWithData.type}
+                  credentialId={credentialWithData.id}
+                />
               )}
 
               {credentialWithData.type === "api_token" && (

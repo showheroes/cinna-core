@@ -271,7 +271,7 @@ export type CredentialsPublic = {
     count: number;
 };
 
-export type CredentialType = 'email_imap' | 'odoo' | 'gmail_oauth' | 'api_token';
+export type CredentialType = 'email_imap' | 'odoo' | 'gmail_oauth' | 'gmail_oauth_readonly' | 'gdrive_oauth' | 'gdrive_oauth_readonly' | 'gcalendar_oauth' | 'gcalendar_oauth_readonly' | 'api_token';
 
 export type CredentialUpdate = {
     name?: (string | null);
@@ -495,8 +495,36 @@ export type NewPassword = {
     new_password: string;
 };
 
+export type OAuthAuthorizeResponse = {
+    authorization_url: string;
+    state: string;
+};
+
+export type OAuthCallbackRequest = {
+    code: string;
+    state: string;
+};
+
+export type OAuthCallbackResponse = {
+    credential_id: string;
+    message: string;
+};
+
 export type OAuthConfig = {
     google_enabled: boolean;
+};
+
+export type OAuthMetadataResponse = {
+    user_email: (string | null);
+    user_name: (string | null);
+    scopes: (Array<(string)> | null);
+    expires_at: (number | null);
+    granted_at: (number | null);
+};
+
+export type OAuthRefreshResponse = {
+    message: string;
+    expires_at: (number | null);
 };
 
 export type PrivateUserCreate = {
@@ -974,6 +1002,30 @@ export type CredentialsReadCredentialWithDataData = {
 };
 
 export type CredentialsReadCredentialWithDataResponse = (CredentialWithData);
+
+export type CredentialsOauthAuthorizeData = {
+    credentialId: string;
+};
+
+export type CredentialsOauthAuthorizeResponse = (OAuthAuthorizeResponse);
+
+export type CredentialsOauthCallbackData = {
+    requestBody: OAuthCallbackRequest;
+};
+
+export type CredentialsOauthCallbackResponse = (OAuthCallbackResponse);
+
+export type CredentialsGetOauthMetadataData = {
+    credentialId: string;
+};
+
+export type CredentialsGetOauthMetadataResponse = (OAuthMetadataResponse);
+
+export type CredentialsRefreshOauthTokenData = {
+    credentialId: string;
+};
+
+export type CredentialsRefreshOauthTokenResponse = (OAuthRefreshResponse);
 
 export type EnvironmentsGetEnvironmentData = {
     id: string;

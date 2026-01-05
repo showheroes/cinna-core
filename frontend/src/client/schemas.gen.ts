@@ -1360,7 +1360,7 @@ export const CredentialPublicSchema = {
 
 export const CredentialTypeSchema = {
     type: 'string',
-    enum: ['email_imap', 'odoo', 'gmail_oauth', 'api_token'],
+    enum: ['email_imap', 'odoo', 'gmail_oauth', 'gmail_oauth_readonly', 'gdrive_oauth', 'gdrive_oauth_readonly', 'gcalendar_oauth', 'gcalendar_oauth_readonly', 'api_token'],
     title: 'CredentialType'
 } as const;
 
@@ -2188,6 +2188,55 @@ export const NewPasswordSchema = {
     title: 'NewPassword'
 } as const;
 
+export const OAuthAuthorizeResponseSchema = {
+    properties: {
+        authorization_url: {
+            type: 'string',
+            title: 'Authorization Url'
+        },
+        state: {
+            type: 'string',
+            title: 'State'
+        }
+    },
+    type: 'object',
+    required: ['authorization_url', 'state'],
+    title: 'OAuthAuthorizeResponse'
+} as const;
+
+export const OAuthCallbackRequestSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        state: {
+            type: 'string',
+            title: 'State'
+        }
+    },
+    type: 'object',
+    required: ['code', 'state'],
+    title: 'OAuthCallbackRequest'
+} as const;
+
+export const OAuthCallbackResponseSchema = {
+    properties: {
+        credential_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Credential Id'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        }
+    },
+    type: 'object',
+    required: ['credential_id', 'message'],
+    title: 'OAuthCallbackResponse'
+} as const;
+
 export const OAuthConfigSchema = {
     properties: {
         google_enabled: {
@@ -2198,6 +2247,95 @@ export const OAuthConfigSchema = {
     type: 'object',
     required: ['google_enabled'],
     title: 'OAuthConfig'
+} as const;
+
+export const OAuthMetadataResponseSchema = {
+    properties: {
+        user_email: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Email'
+        },
+        user_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Name'
+        },
+        scopes: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Scopes'
+        },
+        expires_at: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expires At'
+        },
+        granted_at: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Granted At'
+        }
+    },
+    type: 'object',
+    required: ['user_email', 'user_name', 'scopes', 'expires_at', 'granted_at'],
+    title: 'OAuthMetadataResponse'
+} as const;
+
+export const OAuthRefreshResponseSchema = {
+    properties: {
+        message: {
+            type: 'string',
+            title: 'Message'
+        },
+        expires_at: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expires At'
+        }
+    },
+    type: 'object',
+    required: ['message', 'expires_at'],
+    title: 'OAuthRefreshResponse'
 } as const;
 
 export const PrivateUserCreateSchema = {

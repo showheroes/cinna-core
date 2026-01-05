@@ -41,7 +41,17 @@ import { handleError } from "@/utils"
 
 const formSchema = z.object({
   name: z.string().min(1, { message: "Name is required" }),
-  type: z.enum(["email_imap", "odoo", "gmail_oauth", "api_token"]),
+  type: z.enum([
+    "email_imap",
+    "odoo",
+    "gmail_oauth",
+    "gmail_oauth_readonly",
+    "gdrive_oauth",
+    "gdrive_oauth_readonly",
+    "gcalendar_oauth",
+    "gcalendar_oauth_readonly",
+    "api_token",
+  ]),
 })
 
 type FormData = z.infer<typeof formSchema>
@@ -148,6 +158,11 @@ const AddCredential = () => {
                         <SelectItem value="email_imap">Email (IMAP)</SelectItem>
                         <SelectItem value="odoo">Odoo</SelectItem>
                         <SelectItem value="gmail_oauth">Gmail OAuth</SelectItem>
+                        <SelectItem value="gmail_oauth_readonly">Gmail OAuth (Read-Only)</SelectItem>
+                        <SelectItem value="gdrive_oauth">Google Drive OAuth</SelectItem>
+                        <SelectItem value="gdrive_oauth_readonly">Google Drive OAuth (Read-Only)</SelectItem>
+                        <SelectItem value="gcalendar_oauth">Google Calendar OAuth</SelectItem>
+                        <SelectItem value="gcalendar_oauth_readonly">Google Calendar OAuth (Read-Only)</SelectItem>
                         <SelectItem value="api_token">API Token</SelectItem>
                       </SelectContent>
                     </Select>

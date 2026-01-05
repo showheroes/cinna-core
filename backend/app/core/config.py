@@ -100,6 +100,8 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REDIRECT_URI: str = "http://localhost:5173/auth/google/callback"
+    # Separate redirect URI for credential OAuth (to differentiate from user OAuth)
+    GOOGLE_CREDENTIALS_REDIRECT_URI: str = "http://localhost:5173/credentials/oauth/callback"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -22,6 +22,11 @@ function getCredentialIcon(type: string) {
     case "odoo":
       return <Database className="h-5 w-5" />
     case "gmail_oauth":
+    case "gmail_oauth_readonly":
+    case "gdrive_oauth":
+    case "gdrive_oauth_readonly":
+    case "gcalendar_oauth":
+    case "gcalendar_oauth_readonly":
       return <AtSign className="h-5 w-5" />
     case "api_token":
       return <Key className="h-5 w-5" />
@@ -38,6 +43,16 @@ function getCredentialTypeLabel(type: string): string {
       return "Odoo"
     case "gmail_oauth":
       return "Gmail OAuth"
+    case "gmail_oauth_readonly":
+      return "Gmail OAuth (Read-Only)"
+    case "gdrive_oauth":
+      return "Google Drive OAuth"
+    case "gdrive_oauth_readonly":
+      return "Google Drive OAuth (Read-Only)"
+    case "gcalendar_oauth":
+      return "Google Calendar OAuth"
+    case "gcalendar_oauth_readonly":
+      return "Google Calendar OAuth (Read-Only)"
     case "api_token":
       return "API Token"
     default:

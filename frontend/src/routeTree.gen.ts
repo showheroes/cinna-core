@@ -23,6 +23,7 @@ import { Route as LayoutCredentialsRouteImport } from './routes/_layout/credenti
 import { Route as LayoutAgentsRouteImport } from './routes/_layout/agents'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutActivitiesRouteImport } from './routes/_layout/activities'
+import { Route as CredentialsOauthCallbackRouteImport } from './routes/credentials/oauth/callback'
 import { Route as LayoutSessionSessionIdRouteImport } from './routes/_layout/session/$sessionId'
 import { Route as LayoutKnowledgeSourceSourceIdRouteImport } from './routes/_layout/knowledge-source/$sourceId'
 import { Route as LayoutCredentialCredentialIdRouteImport } from './routes/_layout/credential/$credentialId'
@@ -99,6 +100,12 @@ const LayoutActivitiesRoute = LayoutActivitiesRouteImport.update({
   path: '/activities',
   getParentRoute: () => LayoutRoute,
 } as any)
+const CredentialsOauthCallbackRoute =
+  CredentialsOauthCallbackRouteImport.update({
+    id: '/credentials/oauth/callback',
+    path: '/credentials/oauth/callback',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const LayoutSessionSessionIdRoute = LayoutSessionSessionIdRouteImport.update({
   id: '/session/$sessionId',
   path: '/session/$sessionId',
@@ -152,6 +159,7 @@ export interface FileRoutesByFullPath {
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
 export interface FileRoutesByTo {
@@ -173,6 +181,7 @@ export interface FileRoutesByTo {
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
 export interface FileRoutesById {
@@ -196,6 +205,7 @@ export interface FileRoutesById {
   '/_layout/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/_layout/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/_layout/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/_layout/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
 export interface FileRouteTypes {
@@ -219,6 +229,7 @@ export interface FileRouteTypes {
     | '/credential/$credentialId'
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
+    | '/credentials/oauth/callback'
     | '/agent/$agentId/conversations'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -240,6 +251,7 @@ export interface FileRouteTypes {
     | '/credential/$credentialId'
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
+    | '/credentials/oauth/callback'
     | '/agent/$agentId/conversations'
   id:
     | '__root__'
@@ -262,6 +274,7 @@ export interface FileRouteTypes {
     | '/_layout/credential/$credentialId'
     | '/_layout/knowledge-source/$sourceId'
     | '/_layout/session/$sessionId'
+    | '/credentials/oauth/callback'
     | '/_layout/agent/$agentId/conversations'
   fileRoutesById: FileRoutesById
 }
@@ -271,6 +284,7 @@ export interface RootRouteChildren {
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
+  CredentialsOauthCallbackRoute: typeof CredentialsOauthCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -373,6 +387,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutActivitiesRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/credentials/oauth/callback': {
+      id: '/credentials/oauth/callback'
+      path: '/credentials/oauth/callback'
+      fullPath: '/credentials/oauth/callback'
+      preLoaderRoute: typeof CredentialsOauthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_layout/session/$sessionId': {
       id: '/_layout/session/$sessionId'
       path: '/session/$sessionId'
@@ -472,6 +493,7 @@ const rootRouteChildren: RootRouteChildren = {
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
+  CredentialsOauthCallbackRoute: CredentialsOauthCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,4 +1,4 @@
 export { EmailImapFields } from "./EmailImapFields"
 export { OdooFields } from "./OdooFields"
-export { GmailOAuthFields } from "./GmailOAuthFields"
+export { OAuthCredentialFields } from "./OAuthCredentialFields"
 export { ApiTokenFields } from "./ApiTokenFields"

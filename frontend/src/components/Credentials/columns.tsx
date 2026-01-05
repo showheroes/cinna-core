@@ -36,6 +36,11 @@ const credentialTypeLabels: Record<string, string> = {
   email_imap: "Email (IMAP)",
   odoo: "Odoo",
   gmail_oauth: "Gmail OAuth",
+  gmail_oauth_readonly: "Gmail OAuth (Read-Only)",
+  gdrive_oauth: "Google Drive OAuth",
+  gdrive_oauth_readonly: "Google Drive OAuth (Read-Only)",
+  gcalendar_oauth: "Google Calendar OAuth",
+  gcalendar_oauth_readonly: "Google Calendar OAuth (Read-Only)",
   api_token: "API Token",
 }
 

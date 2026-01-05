@@ -54,6 +54,16 @@ function getCredentialTypeLabel(type: string): string {
       return "Odoo"
     case "gmail_oauth":
       return "Gmail OAuth"
+    case "gmail_oauth_readonly":
+      return "Gmail OAuth (Read-Only)"
+    case "gdrive_oauth":
+      return "Google Drive OAuth"
+    case "gdrive_oauth_readonly":
+      return "Google Drive OAuth (Read-Only)"
+    case "gcalendar_oauth":
+      return "Google Calendar OAuth"
+    case "gcalendar_oauth_readonly":
+      return "Google Calendar OAuth (Read-Only)"
     case "api_token":
       return "API Token"
     default:

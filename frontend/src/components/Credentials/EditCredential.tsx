@@ -33,7 +33,7 @@ import { handleError } from "@/utils"
 import {
   EmailImapFields,
   OdooFields,
-  GmailOAuthFields,
+  OAuthCredentialFields,
   ApiTokenFields,
 } from "@/components/Credentials/CredentialFields"
 
@@ -149,8 +149,17 @@ const EditCredential = ({ credential, onSuccess }: EditCredentialProps) => {
                   <OdooFields control={form.control} />
                 )}
 
-                {credential.type === "gmail_oauth" && (
-                  <GmailOAuthFields control={form.control} />
+                {(credential.type === "gmail_oauth" ||
+                  credential.type === "gmail_oauth_readonly" ||
+                  credential.type === "gdrive_oauth" ||
+                  credential.type === "gdrive_oauth_readonly" ||
+                  credential.type === "gcalendar_oauth" ||
+                  credential.type === "gcalendar_oauth_readonly") && (
+                  <OAuthCredentialFields
+                    control={form.control}
+                    credentialType={credential.type}
+                    credentialId={credential.id}
+                  />
                 )}
 
                 {credential.type === "api_token" && (
