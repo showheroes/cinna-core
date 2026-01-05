@@ -118,6 +118,20 @@ from .ssh_key import (
     SSHKeysPublic,
     SSHKeyUpdate,
 )
+from .knowledge import (
+    AIKnowledgeGitRepo,
+    AIKnowledgeGitRepoCreate,
+    AIKnowledgeGitRepoUpdate,
+    AIKnowledgeGitRepoPublic,
+    AIKnowledgeGitRepoWorkspace,
+    KnowledgeArticle,
+    KnowledgeArticlePublic,
+    KnowledgeArticleDetail,
+    SourceStatus,
+    WorkspaceAccessType,
+    CheckAccessResponse,
+    RefreshKnowledgeResponse,
+)
 
 __all__ = [
     # Core
@@ -231,4 +245,17 @@ __all__ = [
     "SSHKeyPublic",
     "SSHKeysPublic",
     "SSHKeyUpdate",
+    # Knowledge Management
+    "AIKnowledgeGitRepo",
+    "AIKnowledgeGitRepoCreate",
+    "AIKnowledgeGitRepoUpdate",
+    "AIKnowledgeGitRepoPublic",
+    "AIKnowledgeGitRepoWorkspace",
+    "KnowledgeArticle",
+    "KnowledgeArticlePublic",
+    "KnowledgeArticleDetail",
+    "SourceStatus",
+    "WorkspaceAccessType",
+    "CheckAccessResponse",
+    "RefreshKnowledgeResponse",
 ]

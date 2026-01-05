@@ -1,5 +1,5 @@
 import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
-import { Bot, Home, Key, MessageSquare, Users, Bell } from "lucide-react"
+import { Bot, Home, Key, MessageSquare, Users, Bell, BookOpen } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
@@ -90,6 +90,33 @@ function ActivitiesMenu() {
   )
 }
 
+function KnowledgeSourcesMenu() {
+  const { isMobile, setOpenMobile } = useSidebar()
+  const router = useRouterState()
+  const currentPath = router.location.pathname
+
+  const handleMenuClick = () => {
+    if (isMobile) {
+      setOpenMobile(false)
+    }
+  }
+
+  const isActive = currentPath === "/knowledge-sources" || currentPath.startsWith("/knowledge-source/")
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton tooltip="Knowledge Sources" isActive={isActive} asChild>
+          <RouterLink to="/knowledge-sources" onClick={handleMenuClick}>
+            <BookOpen />
+            <span>Knowledge Sources</span>
+          </RouterLink>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  )
+}
+
 function AdminMenu() {
   const { isMobile, setOpenMobile } = useSidebar()
   const router = useRouterState()
@@ -133,6 +160,7 @@ export function AppSidebar() {
       <SidebarFooter>
         <WebSocketStatus />
         <SidebarWorkspaceSwitcher />
+        <KnowledgeSourcesMenu />
         <SidebarAppearance />
         {currentUser?.is_superuser && <AdminMenu />}
         <User user={currentUser} />

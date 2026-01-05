@@ -17,12 +17,14 @@ import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutSessionsRouteImport } from './routes/_layout/sessions'
+import { Route as LayoutKnowledgeSourcesRouteImport } from './routes/_layout/knowledge-sources'
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutCredentialsRouteImport } from './routes/_layout/credentials'
 import { Route as LayoutAgentsRouteImport } from './routes/_layout/agents'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutActivitiesRouteImport } from './routes/_layout/activities'
 import { Route as LayoutSessionSessionIdRouteImport } from './routes/_layout/session/$sessionId'
+import { Route as LayoutKnowledgeSourceSourceIdRouteImport } from './routes/_layout/knowledge-source/$sourceId'
 import { Route as LayoutCredentialCredentialIdRouteImport } from './routes/_layout/credential/$credentialId'
 import { Route as LayoutAgentCreatingRouteImport } from './routes/_layout/agent/creating'
 import { Route as LayoutAgentAgentIdRouteImport } from './routes/_layout/agent/$agentId'
@@ -67,6 +69,11 @@ const LayoutSessionsRoute = LayoutSessionsRouteImport.update({
   path: '/sessions',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutKnowledgeSourcesRoute = LayoutKnowledgeSourcesRouteImport.update({
+  id: '/knowledge-sources',
+  path: '/knowledge-sources',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutItemsRoute = LayoutItemsRouteImport.update({
   id: '/items',
   path: '/items',
@@ -97,6 +104,12 @@ const LayoutSessionSessionIdRoute = LayoutSessionSessionIdRouteImport.update({
   path: '/session/$sessionId',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutKnowledgeSourceSourceIdRoute =
+  LayoutKnowledgeSourceSourceIdRouteImport.update({
+    id: '/knowledge-source/$sourceId',
+    path: '/knowledge-source/$sourceId',
+    getParentRoute: () => LayoutRoute,
+  } as any)
 const LayoutCredentialCredentialIdRoute =
   LayoutCredentialCredentialIdRouteImport.update({
     id: '/credential/$credentialId',
@@ -130,12 +143,14 @@ export interface FileRoutesByFullPath {
   '/agents': typeof LayoutAgentsRoute
   '/credentials': typeof LayoutCredentialsRoute
   '/items': typeof LayoutItemsRoute
+  '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/sessions': typeof LayoutSessionsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
   '/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/agent/creating': typeof LayoutAgentCreatingRoute
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
+  '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
@@ -149,12 +164,14 @@ export interface FileRoutesByTo {
   '/agents': typeof LayoutAgentsRoute
   '/credentials': typeof LayoutCredentialsRoute
   '/items': typeof LayoutItemsRoute
+  '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/sessions': typeof LayoutSessionsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
   '/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/agent/creating': typeof LayoutAgentCreatingRoute
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
+  '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
@@ -170,12 +187,14 @@ export interface FileRoutesById {
   '/_layout/agents': typeof LayoutAgentsRoute
   '/_layout/credentials': typeof LayoutCredentialsRoute
   '/_layout/items': typeof LayoutItemsRoute
+  '/_layout/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/_layout/sessions': typeof LayoutSessionsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
   '/_layout/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/_layout/agent/creating': typeof LayoutAgentCreatingRoute
   '/_layout/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
+  '/_layout/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/_layout/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/_layout/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
 }
@@ -191,12 +210,14 @@ export interface FileRouteTypes {
     | '/agents'
     | '/credentials'
     | '/items'
+    | '/knowledge-sources'
     | '/sessions'
     | '/settings'
     | '/'
     | '/agent/$agentId'
     | '/agent/creating'
     | '/credential/$credentialId'
+    | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
     | '/agent/$agentId/conversations'
   fileRoutesByTo: FileRoutesByTo
@@ -210,12 +231,14 @@ export interface FileRouteTypes {
     | '/agents'
     | '/credentials'
     | '/items'
+    | '/knowledge-sources'
     | '/sessions'
     | '/settings'
     | '/'
     | '/agent/$agentId'
     | '/agent/creating'
     | '/credential/$credentialId'
+    | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
     | '/agent/$agentId/conversations'
   id:
@@ -230,12 +253,14 @@ export interface FileRouteTypes {
     | '/_layout/agents'
     | '/_layout/credentials'
     | '/_layout/items'
+    | '/_layout/knowledge-sources'
     | '/_layout/sessions'
     | '/_layout/settings'
     | '/_layout/'
     | '/_layout/agent/$agentId'
     | '/_layout/agent/creating'
     | '/_layout/credential/$credentialId'
+    | '/_layout/knowledge-source/$sourceId'
     | '/_layout/session/$sessionId'
     | '/_layout/agent/$agentId/conversations'
   fileRoutesById: FileRoutesById
@@ -306,6 +331,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutSessionsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/knowledge-sources': {
+      id: '/_layout/knowledge-sources'
+      path: '/knowledge-sources'
+      fullPath: '/knowledge-sources'
+      preLoaderRoute: typeof LayoutKnowledgeSourcesRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/items': {
       id: '/_layout/items'
       path: '/items'
@@ -346,6 +378,13 @@ declare module '@tanstack/react-router' {
       path: '/session/$sessionId'
       fullPath: '/session/$sessionId'
       preLoaderRoute: typeof LayoutSessionSessionIdRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/knowledge-source/$sourceId': {
+      id: '/_layout/knowledge-source/$sourceId'
+      path: '/knowledge-source/$sourceId'
+      fullPath: '/knowledge-source/$sourceId'
+      preLoaderRoute: typeof LayoutKnowledgeSourceSourceIdRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/credential/$credentialId': {
@@ -396,12 +435,14 @@ interface LayoutRouteChildren {
   LayoutAgentsRoute: typeof LayoutAgentsRoute
   LayoutCredentialsRoute: typeof LayoutCredentialsRoute
   LayoutItemsRoute: typeof LayoutItemsRoute
+  LayoutKnowledgeSourcesRoute: typeof LayoutKnowledgeSourcesRoute
   LayoutSessionsRoute: typeof LayoutSessionsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutAgentAgentIdRoute: typeof LayoutAgentAgentIdRouteWithChildren
   LayoutAgentCreatingRoute: typeof LayoutAgentCreatingRoute
   LayoutCredentialCredentialIdRoute: typeof LayoutCredentialCredentialIdRoute
+  LayoutKnowledgeSourceSourceIdRoute: typeof LayoutKnowledgeSourceSourceIdRoute
   LayoutSessionSessionIdRoute: typeof LayoutSessionSessionIdRoute
 }
 
@@ -411,12 +452,14 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAgentsRoute: LayoutAgentsRoute,
   LayoutCredentialsRoute: LayoutCredentialsRoute,
   LayoutItemsRoute: LayoutItemsRoute,
+  LayoutKnowledgeSourcesRoute: LayoutKnowledgeSourcesRoute,
   LayoutSessionsRoute: LayoutSessionsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutAgentAgentIdRoute: LayoutAgentAgentIdRouteWithChildren,
   LayoutAgentCreatingRoute: LayoutAgentCreatingRoute,
   LayoutCredentialCredentialIdRoute: LayoutCredentialCredentialIdRoute,
+  LayoutKnowledgeSourceSourceIdRoute: LayoutKnowledgeSourceSourceIdRoute,
   LayoutSessionSessionIdRoute: LayoutSessionSessionIdRoute,
 }
 

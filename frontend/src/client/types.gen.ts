@@ -164,6 +164,55 @@ export type AgentUpdate = {
 };
 
 /**
+ * Schema for creating a knowledge git repository.
+ */
+export type AIKnowledgeGitRepoCreate = {
+    name: string;
+    description?: (string | null);
+    git_url: string;
+    branch?: string;
+    ssh_key_id?: (string | null);
+    workspace_access_type?: WorkspaceAccessType;
+    workspace_ids?: (Array<(string)> | null);
+};
+
+/**
+ * Public schema for knowledge git repository.
+ */
+export type AIKnowledgeGitRepoPublic = {
+    name: string;
+    description?: (string | null);
+    git_url: string;
+    branch?: string;
+    ssh_key_id?: (string | null);
+    is_enabled?: boolean;
+    status?: SourceStatus;
+    status_message?: (string | null);
+    last_checked_at?: (string | null);
+    last_sync_at?: (string | null);
+    sync_commit_hash?: (string | null);
+    workspace_access_type?: WorkspaceAccessType;
+    id: string;
+    user_id: string;
+    created_at: string;
+    updated_at: string;
+    article_count?: number;
+};
+
+/**
+ * Schema for updating a knowledge git repository.
+ */
+export type AIKnowledgeGitRepoUpdate = {
+    name?: (string | null);
+    description?: (string | null);
+    branch?: (string | null);
+    ssh_key_id?: (string | null);
+    is_enabled?: (boolean | null);
+    workspace_access_type?: (WorkspaceAccessType | null);
+    workspace_ids?: (Array<(string)> | null);
+};
+
+/**
  * Decrypted AI service credentials
  */
 export type AIServiceCredentials = {
@@ -188,6 +237,14 @@ export type Body_login_login_access_token = {
     scope?: string;
     client_id?: (string | null);
     client_secret?: (string | null);
+};
+
+/**
+ * Response for check access endpoint.
+ */
+export type CheckAccessResponse = {
+    accessible: boolean;
+    message: string;
 };
 
 export type CredentialCreate = {
@@ -373,6 +430,22 @@ export type ItemUpdate = {
 };
 
 /**
+ * Public schema for knowledge article.
+ */
+export type KnowledgeArticlePublic = {
+    id: string;
+    git_repo_id: string;
+    title: string;
+    description: string;
+    tags: Array<(string)>;
+    features: Array<(string)>;
+    file_path: string;
+    embedding_model: (string | null);
+    embedding_dimensions: (number | null);
+    updated_at: string;
+};
+
+/**
  * Request model for querying integration knowledge.
  */
 export type KnowledgeQueryRequest = {
@@ -431,6 +504,15 @@ export type PrivateUserCreate = {
     password: string;
     full_name: string;
     is_verified?: boolean;
+};
+
+/**
+ * Response for refresh knowledge endpoint.
+ */
+export type RefreshKnowledgeResponse = {
+    status: string;
+    message: string;
+    task_id?: (string | null);
 };
 
 /**
@@ -523,6 +605,11 @@ export type SessionUpdate = {
 export type SetPassword = {
     new_password: string;
 };
+
+/**
+ * Status of a knowledge source.
+ */
+export type SourceStatus = 'pending' | 'connected' | 'error' | 'disconnected';
 
 export type SSHKeyGenerate = {
     name: string;
@@ -650,6 +737,11 @@ export type ValidationError = {
     msg: string;
     type: string;
 };
+
+/**
+ * Type of workspace access for a knowledge source.
+ */
+export type WorkspaceAccessType = 'all' | 'specific';
 
 export type ActivitiesCreateActivityData = {
     requestBody: ActivityCreate;
@@ -1000,6 +1092,71 @@ export type KnowledgeQueryKnowledgeData = {
 };
 
 export type KnowledgeQueryKnowledgeResponse = (KnowledgeQueryResponse);
+
+export type KnowledgeSourcesListKnowledgeSourcesData = {
+    limit?: number;
+    skip?: number;
+    workspaceId?: (string | null);
+};
+
+export type KnowledgeSourcesListKnowledgeSourcesResponse = (Array<AIKnowledgeGitRepoPublic>);
+
+export type KnowledgeSourcesCreateKnowledgeSourceData = {
+    requestBody: AIKnowledgeGitRepoCreate;
+};
+
+export type KnowledgeSourcesCreateKnowledgeSourceResponse = (AIKnowledgeGitRepoPublic);
+
+export type KnowledgeSourcesGetKnowledgeSourceData = {
+    sourceId: string;
+};
+
+export type KnowledgeSourcesGetKnowledgeSourceResponse = (AIKnowledgeGitRepoPublic);
+
+export type KnowledgeSourcesUpdateKnowledgeSourceData = {
+    requestBody: AIKnowledgeGitRepoUpdate;
+    sourceId: string;
+};
+
+export type KnowledgeSourcesUpdateKnowledgeSourceResponse = (AIKnowledgeGitRepoPublic);
+
+export type KnowledgeSourcesDeleteKnowledgeSourceData = {
+    sourceId: string;
+};
+
+export type KnowledgeSourcesDeleteKnowledgeSourceResponse = (unknown);
+
+export type KnowledgeSourcesEnableKnowledgeSourceData = {
+    sourceId: string;
+};
+
+export type KnowledgeSourcesEnableKnowledgeSourceResponse = (AIKnowledgeGitRepoPublic);
+
+export type KnowledgeSourcesDisableKnowledgeSourceData = {
+    sourceId: string;
+};
+
+export type KnowledgeSourcesDisableKnowledgeSourceResponse = (AIKnowledgeGitRepoPublic);
+
+export type KnowledgeSourcesCheckKnowledgeSourceAccessData = {
+    sourceId: string;
+};
+
+export type KnowledgeSourcesCheckKnowledgeSourceAccessResponse = (CheckAccessResponse);
+
+export type KnowledgeSourcesRefreshKnowledgeSourceData = {
+    sourceId: string;
+};
+
+export type KnowledgeSourcesRefreshKnowledgeSourceResponse = (RefreshKnowledgeResponse);
+
+export type KnowledgeSourcesListKnowledgeArticlesData = {
+    limit?: number;
+    skip?: number;
+    sourceId: string;
+};
+
+export type KnowledgeSourcesListKnowledgeArticlesResponse = (Array<KnowledgeArticlePublic>);
 
 export type LoginLoginAccessTokenData = {
     formData: Body_login_login_access_token;

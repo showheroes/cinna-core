@@ -8,6 +8,7 @@ from app.api.routes import (
     events,
     items,
     knowledge,
+    knowledge_sources,
     login,
     messages,
     oauth,
@@ -38,6 +39,7 @@ api_router.include_router(user_workspaces.router)
 api_router.include_router(activities.router)
 api_router.include_router(events.router)
 api_router.include_router(knowledge.router)
+api_router.include_router(knowledge_sources.router)
 
 
 if settings.ENVIRONMENT == "local":

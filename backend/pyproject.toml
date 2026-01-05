@@ -29,6 +29,7 @@ dependencies = [
     "python-engineio>=4.13.0",
     "pytz>=2025.2",
     "croniter>=6.0.0",
+    "pgvector>=0.4.2",
 ]
 
 [tool.uv]
