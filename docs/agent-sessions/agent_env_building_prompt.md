@@ -475,8 +475,15 @@ The prompt explicitly requires the agent to:
 
 The prompt enforces strict organization:
 - **All scripts** → `./scripts/`
-- **All output files** → `./files/`
+- **Machine-format files** (JSON, CSV, binaries) → `./files/`
+- **Human documentation** (Markdown, reports) → `./docs/`
 - **All packages** → installed via `uv`
+
+This separation ensures:
+- Clear distinction between code, data, and documentation
+- Users know where to find readable reports (docs/) vs. raw data (files/)
+- Scripts know where to look for input/output data (files/)
+- Consistent organization across all workflows
 
 ## Example Assembled Prompt
 
@@ -554,6 +561,7 @@ The conversation mode system prompt is lightweight and execution-focused:
    - Execution flow and decision-making guidelines
    - Database schemas, file formats, and data structures
    - Error handling patterns and success criteria
+   - **File organization guidelines** (see below)
 
 2. **scripts/README.md** (Available Tools)
    - Catalog of existing scripts and their usage
@@ -570,6 +578,37 @@ The conversation mode system prompt is lightweight and execution-focused:
    - Topic folder names listed in prompt for awareness
    - Agent reads specific knowledge files on-demand during execution
    - Provides access to integration documentation when needed
+
+### File Organization for Conversation Mode
+
+**CRITICAL**: Conversation agents must save files to the appropriate workspace folders:
+
+**Machine-Format Files** → `./files/`
+- JSON data files (API responses, processed data, configurations)
+- CSV files (reports, datasets, exports)
+- Binary files (images, PDFs, archives)
+- Temporary data files (intermediate processing results)
+- **Purpose**: Data that scripts and agents read/write programmatically
+
+**Human Documentation** → `./docs/`
+- Markdown files (reports, summaries, documentation)
+- Text-based reports (analysis results, findings)
+- Human-readable summaries (workflow results, logs)
+- **Purpose**: Documentation meant for users to read
+
+**Examples**:
+- ✅ **Correct**: Save API response → `./files/api_response.json`
+- ✅ **Correct**: Save user report → `./docs/daily_summary.md`
+- ✅ **Correct**: Save CSV export → `./files/sales_data.csv`
+- ✅ **Correct**: Save analysis → `./docs/performance_analysis.md`
+- ❌ **Wrong**: Save user report → `./files/report.md` (should be in docs/)
+- ❌ **Wrong**: Save JSON data → `./docs/data.json` (should be in files/)
+
+**Why This Matters**:
+- Clear separation between machine data and human documentation
+- Users know where to find readable reports (docs/) vs. raw data (files/)
+- Scripts know where to look for input/output data (files/)
+- Consistent organization across all workflows
 
 ### Differences from Building Mode
 
@@ -1028,6 +1067,13 @@ What is my time-off balance?
    - Emphasize conversation agent is a "bridge": Execute → Parse → Rephrase → Communicate
    - Workflow prompt must include BOTH script execution AND result presentation
    - Provide side-by-side examples of good vs. bad entrypoints
+
+10. **Enforce File Organization Standards**
+   - Machine-format files (JSON, CSV, binaries) → `./files/`
+   - Human documentation (Markdown, reports) → `./docs/`
+   - Explain benefits: clear separation, users know where to find reports, scripts know where data lives
+   - Provide examples of correct and incorrect file placement
+   - Include in both building and conversation mode prompts for consistency
 
 ## Quick Reference: Modifying Building Agent Prompts
 
