@@ -127,10 +127,14 @@ from .knowledge import (
     KnowledgeArticle,
     KnowledgeArticlePublic,
     KnowledgeArticleDetail,
+    KnowledgeArticleChunk,
+    KnowledgeArticleChunkPublic,
     SourceStatus,
     WorkspaceAccessType,
     CheckAccessResponse,
     RefreshKnowledgeResponse,
+    ArticleListItem,
+    ArticleContent,
 )
 
 __all__ = [
@@ -254,8 +258,12 @@ __all__ = [
     "KnowledgeArticle",
     "KnowledgeArticlePublic",
     "KnowledgeArticleDetail",
+    "KnowledgeArticleChunk",
+    "KnowledgeArticleChunkPublic",
     "SourceStatus",
     "WorkspaceAccessType",
     "CheckAccessResponse",
     "RefreshKnowledgeResponse",
+    "ArticleListItem",
+    "ArticleContent",
 ]

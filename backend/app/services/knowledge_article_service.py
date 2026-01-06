@@ -346,3 +346,238 @@ def delete_orphaned_articles(
         logger.info(f"Deleted {deleted_count} orphaned articles")
 
     return deleted_count
+
+
+def chunk_and_embed_article(
+    *,
+    session: Session,
+    article_id: str,
+    embedding_model: str = "text-embedding-004"
+) -> Dict[str, Any]:
+    """
+    Chunk an article and generate embeddings for each chunk.
+
+    Args:
+        session: Database session
+        article_id: Article ID to process
+        embedding_model: Embedding model to use
+
+    Returns:
+        Dictionary with processing results:
+        {
+            "chunks_created": int,
+            "chunks_updated": int,
+            "total_chunks": int
+        }
+
+    Raises:
+        ValueError: If article not found
+    """
+    from app.models.knowledge import KnowledgeArticleChunk
+    from app.services.embedding_service import (
+        chunk_text,
+        prepare_article_for_embedding,
+        generate_embedding,
+        EmbeddingError
+    )
+
+    # Get article
+    article = session.get(KnowledgeArticle, article_id)
+    if not article:
+        raise ValueError(f"Article not found: {article_id}")
+
+    # Prepare text for embedding
+    full_text = prepare_article_for_embedding(
+        title=article.title,
+        description=article.description,
+        content=article.content
+    )
+
+    # Split into chunks
+    text_chunks = chunk_text(full_text)
+
+    logger.info(f"Article {article.title} split into {len(text_chunks)} chunks")
+
+    results = {
+        "chunks_created": 0,
+        "chunks_updated": 0,
+        "total_chunks": len(text_chunks)
+    }
+
+    # Process each chunk
+    for idx, chunk_text in enumerate(text_chunks):
+        try:
+            # Generate embedding for chunk
+            embedding, dimensions = generate_embedding(
+                text=chunk_text,
+                model=embedding_model
+            )
+
+            # Check if chunk already exists
+            existing_chunk = session.exec(
+                select(KnowledgeArticleChunk).where(
+                    KnowledgeArticleChunk.article_id == article_id,
+                    KnowledgeArticleChunk.chunk_index == idx
+                )
+            ).first()
+
+            if existing_chunk:
+                # Update existing chunk
+                existing_chunk.chunk_text = chunk_text
+                existing_chunk.embedding = embedding
+                existing_chunk.embedding_model = embedding_model
+                existing_chunk.embedding_dimensions = dimensions
+
+                session.add(existing_chunk)
+                results["chunks_updated"] += 1
+
+                logger.debug(f"Updated chunk {idx} for article {article.title}")
+
+            else:
+                # Create new chunk
+                new_chunk = KnowledgeArticleChunk(
+                    article_id=article_id,
+                    chunk_index=idx,
+                    chunk_text=chunk_text,
+                    embedding=embedding,
+                    embedding_model=embedding_model,
+                    embedding_dimensions=dimensions
+                )
+
+                session.add(new_chunk)
+                results["chunks_created"] += 1
+
+                logger.debug(f"Created chunk {idx} for article {article.title}")
+
+        except EmbeddingError as e:
+            logger.error(f"Failed to generate embedding for chunk {idx}: {str(e)}")
+            # Continue with other chunks even if one fails
+
+    # Delete orphaned chunks (if article was re-chunked with fewer chunks)
+    orphaned_chunks = session.exec(
+        select(KnowledgeArticleChunk).where(
+            KnowledgeArticleChunk.article_id == article_id,
+            KnowledgeArticleChunk.chunk_index >= len(text_chunks)
+        )
+    ).all()
+
+    for chunk in orphaned_chunks:
+        session.delete(chunk)
+        logger.debug(f"Deleted orphaned chunk {chunk.chunk_index}")
+
+    # Commit all changes
+    session.commit()
+
+    logger.info(
+        f"Chunking complete for article {article.title}: "
+        f"{results['chunks_created']} created, {results['chunks_updated']} updated"
+    )
+
+    return results
+
+
+def chunk_and_embed_all_articles(
+    *,
+    session: Session,
+    git_repo_id: str,
+    embedding_model: str = "text-embedding-004"
+) -> Dict[str, Any]:
+    """
+    Chunk and embed all articles for a repository.
+
+    Only processes articles that:
+    1. Have no chunks (new articles)
+    2. Have been updated since chunks were created (content changed)
+    3. Have chunks but no embeddings (embedding failed previously)
+
+    Args:
+        session: Database session
+        git_repo_id: Repository ID
+        embedding_model: Embedding model to use
+
+    Returns:
+        Dictionary with processing results
+    """
+    from app.models.knowledge import KnowledgeArticleChunk
+
+    # Get all articles for repository
+    articles = session.exec(
+        select(KnowledgeArticle).where(
+            KnowledgeArticle.git_repo_id == git_repo_id
+        )
+    ).all()
+
+    total_results = {
+        "articles_processed": 0,
+        "articles_skipped": 0,
+        "articles_failed": 0,
+        "total_chunks_created": 0,
+        "total_chunks_updated": 0,
+        "errors": []
+    }
+
+    for article in articles:
+        try:
+            # Check if article needs embedding by examining existing chunks
+            existing_chunks = session.exec(
+                select(KnowledgeArticleChunk).where(
+                    KnowledgeArticleChunk.article_id == article.id
+                )
+            ).all()
+
+            needs_embedding = False
+
+            if not existing_chunks:
+                # No chunks exist - need to embed
+                needs_embedding = True
+                logger.debug(f"Article {article.title} has no chunks - will embed")
+            else:
+                # Chunks exist - check if content changed or embeddings missing
+                # Get the newest chunk creation time
+                newest_chunk_time = max(chunk.created_at for chunk in existing_chunks)
+
+                # If article was updated after chunks were created, content changed
+                if article.updated_at > newest_chunk_time:
+                    needs_embedding = True
+                    logger.debug(
+                        f"Article {article.title} updated after chunks "
+                        f"(article: {article.updated_at}, chunks: {newest_chunk_time}) - will re-embed"
+                    )
+                # Check if any chunks are missing embeddings
+                elif any(chunk.embedding is None for chunk in existing_chunks):
+                    needs_embedding = True
+                    logger.debug(f"Article {article.title} has chunks without embeddings - will re-embed")
+                else:
+                    # Chunks exist and are up to date
+                    logger.debug(f"Article {article.title} has up-to-date embeddings - skipping")
+                    total_results["articles_skipped"] += 1
+
+            if needs_embedding:
+                results = chunk_and_embed_article(
+                    session=session,
+                    article_id=str(article.id),
+                    embedding_model=embedding_model
+                )
+
+                total_results["articles_processed"] += 1
+                total_results["total_chunks_created"] += results["chunks_created"]
+                total_results["total_chunks_updated"] += results["chunks_updated"]
+
+        except Exception as e:
+            logger.error(f"Failed to process article {article.title}: {str(e)}")
+            total_results["articles_failed"] += 1
+            total_results["errors"].append({
+                "article_id": str(article.id),
+                "article_title": article.title,
+                "error": str(e)
+            })
+
+    logger.info(
+        f"Batch processing complete: {total_results['articles_processed']} processed, "
+        f"{total_results['articles_skipped']} skipped, "
+        f"{total_results['articles_failed']} failed, "
+        f"{total_results['total_chunks_created']} chunks created, "
+        f"{total_results['total_chunks_updated']} chunks updated"
+    )
+
+    return total_results

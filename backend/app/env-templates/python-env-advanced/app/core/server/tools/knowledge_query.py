@@ -21,23 +21,30 @@ ENV_ID = os.getenv("ENV_ID")
 
 @tool(
     "query_integration_knowledge",
-    "Query the knowledge base for integration guidance (e.g., 'odoo api integration', 'salesforce rest api')",
-    {"query": str}
+    "Query the knowledge base for integration guidance. Use in two steps: 1) Discovery: query='search terms' returns article list, 2) Retrieval: query='search terms' + article_ids=['id1','id2'] returns full content",
+    {"query": str, "article_ids": list[str]}
 )
 async def query_integration_knowledge(args: dict[str, Any]) -> dict[str, Any]:
     """
     Query the backend knowledge base for integration guidance.
 
+    **Two-step process:**
+    1. Discovery: Call with only 'query' to get a list of relevant articles
+    2. Retrieval: Call with 'query' and 'article_ids' to get full content
+
     This tool is only available in building mode and allows the agent to get
     expert guidance on how to build integrations with various systems.
 
     Args:
-        args: Dictionary with 'query' key containing the search query
+        args: Dictionary with:
+            - 'query' (str): Search query
+            - 'article_ids' (list[str], optional): List of article IDs to retrieve
 
     Returns:
         Tool response with knowledge content or error message
     """
     query = args.get("query", "").strip()
+    article_ids = args.get("article_ids")
 
     if not query:
         return {
@@ -82,7 +89,7 @@ async def query_integration_knowledge(args: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        logger.info(f"Querying knowledge base from env {ENV_ID}: {query}")
+        logger.info(f"Querying knowledge base from env {ENV_ID}: {query} (article_ids={article_ids})")
 
         # Prepare request
         url = f"{BACKEND_URL}/api/v1/knowledge/query"
@@ -91,7 +98,11 @@ async def query_integration_knowledge(args: dict[str, Any]) -> dict[str, Any]:
             "X-Agent-Env-Id": ENV_ID,
             "Content-Type": "application/json"
         }
+
+        # Build payload with optional article_ids
         payload = {"query": query}
+        if article_ids:
+            payload["article_ids"] = article_ids
 
         logger.debug(f"Making request to {url} with env_id={ENV_ID}")
 
@@ -101,21 +112,111 @@ async def query_integration_knowledge(args: dict[str, Any]) -> dict[str, Any]:
 
             if response.status_code == 200:
                 data = response.json()
-                content = data.get("content", "No content returned")
-                source = data.get("source")
+                response_type = data.get("type")
 
-                result_text = f"Knowledge Query Result:\n\n{content}"
-                if source:
-                    result_text += f"\n\n(Source: {source})"
+                # Handle discovery response (article list)
+                if response_type == "article_list":
+                    articles = data.get("articles", [])
 
-                logger.info(f"Knowledge query successful: {query}")
+                    if not articles:
+                        return {
+                            "content": [{
+                                "type": "text",
+                                "text": "No relevant articles found in the knowledge base for this query."
+                            }]
+                        }
 
-                return {
-                    "content": [{
-                        "type": "text",
-                        "text": result_text
-                    }]
-                }
+                    # Format article list for agent
+                    result_lines = [
+                        f"Found {len(articles)} relevant articles:",
+                        ""
+                    ]
+
+                    for i, article in enumerate(articles, 1):
+                        result_lines.append(f"{i}. [{article['id']}] {article['title']}")
+                        result_lines.append(f"   Description: {article['description']}")
+                        if article.get('tags'):
+                            result_lines.append(f"   Tags: {', '.join(article['tags'])}")
+                        if article.get('features'):
+                            result_lines.append(f"   Features: {', '.join(article['features'])}")
+                        result_lines.append(f"   Source: {article.get('source_name', 'Unknown')}")
+                        result_lines.append("")
+
+                    result_lines.append("To retrieve full article content, call this tool again with:")
+                    result_lines.append(f"query_integration_knowledge({{\"query\": \"{query}\", \"article_ids\": [\"<article_id_1>\", \"<article_id_2>\"]}}")
+
+                    result_text = "\n".join(result_lines)
+
+                    logger.info(f"Discovery successful: found {len(articles)} articles")
+
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": result_text
+                        }]
+                    }
+
+                # Handle retrieval response (full articles)
+                elif response_type == "full_articles":
+                    articles = data.get("articles", [])
+
+                    if not articles:
+                        return {
+                            "content": [{
+                                "type": "text",
+                                "text": "No articles found with the specified IDs."
+                            }]
+                        }
+
+                    # Format full article content for agent
+                    result_lines = [
+                        f"Retrieved {len(articles)} article(s):",
+                        "=" * 80,
+                        ""
+                    ]
+
+                    for article in articles:
+                        result_lines.append(f"# {article['title']}")
+                        result_lines.append("")
+                        result_lines.append(f"**Description:** {article['description']}")
+                        result_lines.append(f"**Source:** {article.get('source_name', 'Unknown')}")
+                        result_lines.append(f"**File:** {article.get('file_path', 'N/A')}")
+
+                        if article.get('tags'):
+                            result_lines.append(f"**Tags:** {', '.join(article['tags'])}")
+                        if article.get('features'):
+                            result_lines.append(f"**Features:** {', '.join(article['features'])}")
+
+                        result_lines.append("")
+                        result_lines.append("---")
+                        result_lines.append("")
+                        result_lines.append(article.get('content', 'No content available'))
+                        result_lines.append("")
+                        result_lines.append("=" * 80)
+                        result_lines.append("")
+
+                    result_text = "\n".join(result_lines)
+
+                    logger.info(f"Retrieval successful: {len(articles)} articles")
+
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": result_text
+                        }]
+                    }
+
+                # Unknown response type
+                else:
+                    logger.warning(f"Unknown response type: {response_type}")
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Unexpected response format from knowledge base: {response_type}"
+                        }],
+                        "is_error": True
+                    }
+
             elif response.status_code == 401:
                 logger.error(f"Authentication failed when querying knowledge base for env {ENV_ID}")
                 return {

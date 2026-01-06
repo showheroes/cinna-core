@@ -38,6 +38,7 @@ from app.services.knowledge_article_service import (
     process_repository_articles,
     delete_orphaned_articles,
     parse_settings_json,
+    chunk_and_embed_all_articles,
     ParseError,
 )
 
@@ -542,6 +543,37 @@ def refresh_knowledge(
                 current_file_paths=current_file_paths
             )
 
+            # Generate embeddings for all articles
+            logger.info(f"Starting embedding generation for source {source_id}")
+            try:
+                from app.services.embedding_service import DEFAULT_EMBEDDING_MODEL
+
+                embedding_results = chunk_and_embed_all_articles(
+                    session=session,
+                    git_repo_id=str(source.id),
+                    embedding_model=DEFAULT_EMBEDDING_MODEL
+                )
+
+                logger.info(
+                    f"Embedding generation complete: "
+                    f"{embedding_results['articles_processed']} articles processed, "
+                    f"{embedding_results['total_chunks_created']} chunks created, "
+                    f"{embedding_results['total_chunks_updated']} chunks updated, "
+                    f"{embedding_results['articles_failed']} failed"
+                )
+
+            except Exception as e:
+                # Log error but don't fail the entire refresh
+                # Articles are still usable without embeddings
+                logger.error(f"Failed to generate embeddings: {str(e)}", exc_info=True)
+                embedding_results = {
+                    "articles_processed": 0,
+                    "articles_failed": 0,
+                    "total_chunks_created": 0,
+                    "total_chunks_updated": 0,
+                    "errors": [{"error": str(e)}]
+                }
+
             # Update source metadata
             source.status = SourceStatus.connected
             source.last_sync_at = datetime.utcnow()
@@ -559,8 +591,25 @@ def refresh_knowledge(
             if deleted_count > 0:
                 message_parts.append(f"{deleted_count} deleted")
 
+            # Add embedding information
+            if embedding_results['articles_processed'] > 0 or embedding_results.get('articles_skipped', 0) > 0:
+                embed_parts = []
+                if embedding_results['articles_processed'] > 0:
+                    embed_parts.append(f"{embedding_results['articles_processed']} embedded")
+                if embedding_results.get('articles_skipped', 0) > 0:
+                    embed_parts.append(f"{embedding_results['articles_skipped']} skipped (up-to-date)")
+                if embedding_results['total_chunks_created'] > 0:
+                    embed_parts.append(f"{embedding_results['total_chunks_created']} chunks created")
+                if embedding_results['total_chunks_updated'] > 0:
+                    embed_parts.append(f"{embedding_results['total_chunks_updated']} chunks updated")
+
+                message_parts.append(f"Embeddings: {', '.join(embed_parts)}")
+
+            if embedding_results.get('articles_failed', 0) > 0:
+                message_parts.append(f"{embedding_results['articles_failed']} articles failed embedding")
+
             if results['errors']:
-                message_parts.append(f"{len(results['errors'])} errors")
+                message_parts.append(f"{len(results['errors'])} article parse errors")
                 source.status_message = "; ".join(message_parts) + ". Check logs for error details."
             else:
                 source.status_message = "; ".join(message_parts)

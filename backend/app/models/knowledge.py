@@ -179,6 +179,48 @@ class KnowledgeArticleDetail(KnowledgeArticlePublic):
     commit_hash: Optional[str]
 
 
+# Knowledge Article Chunk Model
+class KnowledgeArticleChunkBase(SQLModel):
+    """Base model for knowledge article chunk."""
+
+    chunk_index: int
+    chunk_text: str = Field(sa_column=Column(Text))
+    embedding_model: Optional[str] = None
+    embedding_dimensions: Optional[int] = None
+
+
+class KnowledgeArticleChunk(KnowledgeArticleChunkBase, table=True):
+    """Knowledge article chunk table with vector embeddings for semantic search."""
+
+    __tablename__ = "knowledge_article_chunks"
+    __table_args__ = (
+        Index("idx_chunk_article_idx_unique", "article_id", "chunk_index", unique=True),
+        Index("idx_chunks_article", "article_id"),
+        Index("idx_chunks_model", "embedding_model"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    article_id: uuid.UUID = Field(foreign_key="knowledge_articles.id", ondelete="CASCADE", index=True)
+    # Using pgvector type for vector storage
+    # Will store embeddings as vector type with dynamic dimensions
+    embedding: Optional[list[float]] = Field(default=None, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relationships
+    article: Optional[KnowledgeArticle] = Relationship()
+
+
+class KnowledgeArticleChunkPublic(SQLModel):
+    """Public schema for knowledge article chunk."""
+
+    id: uuid.UUID
+    article_id: uuid.UUID
+    chunk_index: int
+    chunk_text: str
+    embedding_model: Optional[str]
+    embedding_dimensions: Optional[int]
+
+
 # Response schemas
 class CheckAccessResponse(SQLModel):
     """Response for check access endpoint."""
@@ -193,3 +235,29 @@ class RefreshKnowledgeResponse(SQLModel):
     status: str
     message: str
     task_id: Optional[str] = None
+
+
+# Knowledge Query Response Schemas
+class ArticleListItem(SQLModel):
+    """Article metadata for discovery step."""
+
+    id: uuid.UUID
+    title: str
+    description: str
+    tags: list[str]
+    features: list[str]
+    source_name: str
+    git_repo_id: uuid.UUID
+
+
+class ArticleContent(SQLModel):
+    """Full article content for retrieval step."""
+
+    id: uuid.UUID
+    title: str
+    description: str
+    content: str
+    file_path: str
+    tags: list[str]
+    features: list[str]
+    source_name: str
