@@ -2,10 +2,11 @@
 Service layer for knowledge source management.
 
 This service provides CRUD operations for Git-based knowledge repositories.
-Git operations, parsing, and embedding generation will be implemented in a later phase.
+Includes Git clone/pull operations, article parsing, and database storage.
 """
 
 import uuid
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -23,6 +24,24 @@ from app.models.knowledge import (
     CheckAccessResponse,
     RefreshKnowledgeResponse,
 )
+from app.services.ssh_key_service import SSHKeyService
+from app.services.git_operations import (
+    create_ssh_key_file,
+    verify_repository_access,
+    clone_repository_context,
+    get_current_commit_hash,
+    GitOperationError,
+    GitAuthenticationError,
+    GitConnectionError,
+)
+from app.services.knowledge_article_service import (
+    process_repository_articles,
+    delete_orphaned_articles,
+    parse_settings_json,
+    ParseError,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def create_source(
@@ -185,7 +204,7 @@ def update_source(
 
     # Check if Git config changed (requires re-verification)
     git_config_changed = False
-    if data.git_url is not None or data.branch is not None or data.ssh_key_id is not None:
+    if data.branch is not None or data.ssh_key_id is not None:
         git_config_changed = True
 
     # Update fields
@@ -334,7 +353,8 @@ def check_access(
     """
     Check if the Git repository is accessible.
 
-    NOTE: This is a stub implementation. Actual Git operations will be implemented later.
+    Verifies repository access using Git ls-remote without cloning.
+    Updates source status based on the result.
 
     Args:
         session: Database session
@@ -342,7 +362,7 @@ def check_access(
         user_id: ID of the user (for ownership check)
 
     Returns:
-        Access check response
+        Access check response with accessibility status and message
     """
     source = session.get(AIKnowledgeGitRepo, source_id)
     if not source or source.user_id != user_id:
@@ -351,18 +371,83 @@ def check_access(
             message="Source not found or access denied",
         )
 
-    # TODO: Implement actual Git access check
-    # For now, just update the status to connected
-    source.status = SourceStatus.connected
-    source.status_message = "Access check not yet implemented. Marked as connected."
-    source.last_checked_at = datetime.utcnow()
-    source.updated_at = datetime.utcnow()
-    session.commit()
+    ssh_key_path = None
+    temp_key_context = None
 
-    return CheckAccessResponse(
-        accessible=True,
-        message="Access check not yet implemented. Source marked as connected.",
-    )
+    try:
+        # If SSH key is required, decrypt it
+        if source.ssh_key_id:
+            key_data = SSHKeyService.get_decrypted_private_key(
+                session=session,
+                key_id=source.ssh_key_id,
+                user_id=user_id
+            )
+
+            if not key_data:
+                source.status = SourceStatus.error
+                source.status_message = "SSH key not found or access denied"
+                source.last_checked_at = datetime.utcnow()
+                source.updated_at = datetime.utcnow()
+                session.commit()
+
+                return CheckAccessResponse(
+                    accessible=False,
+                    message="SSH key not found or access denied"
+                )
+
+            private_key, passphrase = key_data
+
+            # Create temporary SSH key file
+            temp_key_context = create_ssh_key_file(private_key, passphrase)
+            ssh_key_path = temp_key_context.__enter__()
+
+        # Verify repository access
+        accessible, message = verify_repository_access(
+            git_url=source.git_url,
+            branch=source.branch,
+            ssh_key_path=ssh_key_path
+        )
+
+        # Update source status
+        if accessible:
+            source.status = SourceStatus.connected
+            source.status_message = message
+        else:
+            source.status = SourceStatus.error
+            source.status_message = message
+
+        source.last_checked_at = datetime.utcnow()
+        source.updated_at = datetime.utcnow()
+        session.commit()
+
+        logger.info(f"Access check for source {source_id}: {accessible}")
+
+        return CheckAccessResponse(
+            accessible=accessible,
+            message=message
+        )
+
+    except Exception as e:
+        logger.error(f"Unexpected error checking access for source {source_id}: {e}")
+
+        source.status = SourceStatus.error
+        source.status_message = f"Unexpected error: {str(e)}"
+        source.last_checked_at = datetime.utcnow()
+        source.updated_at = datetime.utcnow()
+        session.commit()
+
+        return CheckAccessResponse(
+            accessible=False,
+            message=f"Unexpected error: {str(e)}"
+        )
+
+    finally:
+        # Clean up temporary SSH key file
+        if temp_key_context:
+            try:
+                temp_key_context.__exit__(None, None, None)
+            except Exception as e:
+                logger.warning(f"Failed to clean up SSH key file: {e}")
 
 
 def refresh_knowledge(
@@ -374,8 +459,8 @@ def refresh_knowledge(
     """
     Trigger knowledge refresh from Git repository.
 
-    NOTE: This is a stub implementation. Actual Git operations, parsing,
-    and embedding generation will be implemented later.
+    Clones the repository, parses .ai-knowledge/settings.json,
+    and stores articles in the database. Embeddings will be generated in a later phase.
 
     Args:
         session: Database session
@@ -383,7 +468,7 @@ def refresh_knowledge(
         user_id: ID of the user (for ownership check)
 
     Returns:
-        Refresh response
+        Refresh response with status and details
     """
     source = session.get(AIKnowledgeGitRepo, source_id)
     if not source or source.user_id != user_id:
@@ -398,16 +483,169 @@ def refresh_knowledge(
             message="Source is disabled. Enable it first to refresh knowledge.",
         )
 
-    # TODO: Implement actual Git clone, parse, and embedding generation
-    # For now, just update the last sync timestamp
-    source.last_sync_at = datetime.utcnow()
-    source.updated_at = datetime.utcnow()
-    session.commit()
+    ssh_key_path = None
+    temp_key_context = None
 
-    return RefreshKnowledgeResponse(
-        status="success",
-        message="Knowledge refresh not yet implemented. Timestamp updated.",
-    )
+    try:
+        # If SSH key is required, decrypt it
+        if source.ssh_key_id:
+            key_data = SSHKeyService.get_decrypted_private_key(
+                session=session,
+                key_id=source.ssh_key_id,
+                user_id=user_id
+            )
+
+            if not key_data:
+                source.status = SourceStatus.error
+                source.status_message = "SSH key not found or access denied"
+                source.updated_at = datetime.utcnow()
+                session.commit()
+
+                return RefreshKnowledgeResponse(
+                    status="error",
+                    message="SSH key not found or access denied"
+                )
+
+            private_key, passphrase = key_data
+
+            # Create temporary SSH key file
+            temp_key_context = create_ssh_key_file(private_key, passphrase)
+            ssh_key_path = temp_key_context.__enter__()
+
+        # Clone repository and process articles
+        with clone_repository_context(
+            git_url=source.git_url,
+            branch=source.branch,
+            ssh_key_path=ssh_key_path
+        ) as (repo_path, repo):
+            # Get current commit hash
+            commit_hash = get_current_commit_hash(repo)
+
+            logger.info(f"Processing articles from commit {commit_hash}")
+
+            # Parse settings.json to get list of current articles
+            settings = parse_settings_json(repo_path)
+            current_file_paths = [article.path for article in settings.static_articles]
+
+            # Process all articles
+            results = process_repository_articles(
+                session=session,
+                git_repo_id=str(source.id),
+                repo_path=repo_path,
+                commit_hash=commit_hash
+            )
+
+            # Delete orphaned articles (removed from settings.json)
+            deleted_count = delete_orphaned_articles(
+                session=session,
+                git_repo_id=str(source.id),
+                current_file_paths=current_file_paths
+            )
+
+            # Update source metadata
+            source.status = SourceStatus.connected
+            source.last_sync_at = datetime.utcnow()
+            source.sync_commit_hash = commit_hash
+            source.updated_at = datetime.utcnow()
+
+            # Build status message
+            message_parts = [
+                f"Successfully processed {results['total']} articles:",
+                f"{results['created']} created",
+                f"{results['updated']} updated",
+                f"{results['skipped']} unchanged"
+            ]
+
+            if deleted_count > 0:
+                message_parts.append(f"{deleted_count} deleted")
+
+            if results['errors']:
+                message_parts.append(f"{len(results['errors'])} errors")
+                source.status_message = "; ".join(message_parts) + ". Check logs for error details."
+            else:
+                source.status_message = "; ".join(message_parts)
+
+            session.commit()
+
+            logger.info(f"Knowledge refresh complete for source {source_id}")
+
+            return RefreshKnowledgeResponse(
+                status="success",
+                message=source.status_message
+            )
+
+    except GitAuthenticationError as e:
+        logger.error(f"Authentication error refreshing source {source_id}: {e}")
+
+        source.status = SourceStatus.error
+        source.status_message = f"Authentication failed: {str(e)}"
+        source.updated_at = datetime.utcnow()
+        session.commit()
+
+        return RefreshKnowledgeResponse(
+            status="error",
+            message=source.status_message
+        )
+
+    except GitConnectionError as e:
+        logger.error(f"Connection error refreshing source {source_id}: {e}")
+
+        source.status = SourceStatus.error
+        source.status_message = f"Connection failed: {str(e)}"
+        source.updated_at = datetime.utcnow()
+        session.commit()
+
+        return RefreshKnowledgeResponse(
+            status="error",
+            message=source.status_message
+        )
+
+    except ParseError as e:
+        logger.error(f"Parse error refreshing source {source_id}: {e}")
+
+        source.status = SourceStatus.error
+        source.status_message = f"Parse error: {str(e)}"
+        source.updated_at = datetime.utcnow()
+        session.commit()
+
+        return RefreshKnowledgeResponse(
+            status="error",
+            message=source.status_message
+        )
+
+    except GitOperationError as e:
+        logger.error(f"Git operation error refreshing source {source_id}: {e}")
+
+        source.status = SourceStatus.error
+        source.status_message = f"Git error: {str(e)}"
+        source.updated_at = datetime.utcnow()
+        session.commit()
+
+        return RefreshKnowledgeResponse(
+            status="error",
+            message=source.status_message
+        )
+
+    except Exception as e:
+        logger.error(f"Unexpected error refreshing source {source_id}: {e}", exc_info=True)
+
+        source.status = SourceStatus.error
+        source.status_message = f"Unexpected error: {str(e)}"
+        source.updated_at = datetime.utcnow()
+        session.commit()
+
+        return RefreshKnowledgeResponse(
+            status="error",
+            message=source.status_message
+        )
+
+    finally:
+        # Clean up temporary SSH key file
+        if temp_key_context:
+            try:
+                temp_key_context.__exit__(None, None, None)
+            except Exception as e:
+                logger.warning(f"Failed to clean up SSH key file: {e}")
 
 
 def get_article_count(

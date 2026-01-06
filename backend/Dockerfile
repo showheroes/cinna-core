@@ -4,10 +4,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app/
 
-# Install Docker CLI and docker-compose for Docker-in-Docker support
+# Install Docker CLI, docker-compose, and git
 RUN apt-get update && apt-get install -y \
     docker.io \
     docker-compose \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
