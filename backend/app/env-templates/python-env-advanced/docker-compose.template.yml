@@ -32,10 +32,9 @@ services:
       - ${HOST_INSTANCE_DIR}/app/core:/app/core
       - ${HOST_INSTANCE_DIR}/app/workspace:/app/workspace
 
-    # Networks: agent-bridge (shared with backend) + isolated network
+    # Networks: agent-bridge (shared with backend and other agents)
     networks:
       - agent-bridge
-      - agent-env-${ENV_ID}
 
     # Resource limits
     deploy:
@@ -63,9 +62,3 @@ networks:
   agent-bridge:
     external: true
     name: agent-bridge
-
-  # Isolated network for this agent environment
-  agent-env-${ENV_ID}:
-    driver: bridge
-    name: agent-env-${ENV_ID}
-    internal: false  # Allow outbound internet access
