@@ -58,7 +58,7 @@ export function LatestSessions({ limit = 8 }: LatestSessionsProps) {
             <button
               key={session.id}
               onClick={() => handleSessionClick(session.id)}
-              className="w-full text-left px-3 py-2 rounded-md hover:bg-accent transition-colors group"
+              className="w-full text-left px-3 py-2 rounded-md hover:bg-gradient-to-r hover:from-accent/50 hover:to-accent/30 transition-all group"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">

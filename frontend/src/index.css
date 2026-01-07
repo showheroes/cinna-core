@@ -118,6 +118,13 @@
   body {
     @apply bg-background text-foreground;
   }
+  .dark body {
+    background-image: url('/assets/images/dark-background-gradient-mesh-1.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
   button,
   [role="button"] {
     cursor: pointer;

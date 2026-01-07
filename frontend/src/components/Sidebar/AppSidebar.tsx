@@ -109,7 +109,7 @@ function KnowledgeSourcesMenu() {
         <SidebarMenuButton tooltip="Knowledge Sources" isActive={isActive} asChild>
           <RouterLink to="/knowledge-sources" onClick={handleMenuClick}>
             <BookOpen />
-            <span>Knowledge Sources</span>
+            <span>Knowledge</span>
           </RouterLink>
         </SidebarMenuButton>
       </SidebarMenuItem>

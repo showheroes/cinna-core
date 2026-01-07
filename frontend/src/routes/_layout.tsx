@@ -46,7 +46,7 @@ function Layout() {
       <SidebarProvider>
         <AppSidebar />
         <SidebarInset className="flex flex-col h-screen">
-          <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-4 border-b px-4 bg-background">
+          <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-4 border-b px-4 bg-background/60">
             <SidebarTrigger className="-ml-1 text-muted-foreground" />
             {headerContent && (
               <div className="flex-1 flex items-center justify-between gap-4 min-w-0">
