@@ -51,3 +51,21 @@ from app.services.event_service import event_service
 # Mount the Socket.IO ASGI app at /ws
 socket_app = event_service.get_asgi_app()
 app.mount("/ws", socket_app)
+
+
+# Startup and shutdown events
+from app.services.file_cleanup_scheduler import start_scheduler, shutdown_scheduler
+
+
+@app.on_event("startup")
+def on_startup():
+    """Start background services on app startup"""
+    start_scheduler()
+    logger.info("Application startup complete")
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    """Stop background services on app shutdown"""
+    shutdown_scheduler()
+    logger.info("Application shutdown complete")

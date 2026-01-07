@@ -26,8 +26,12 @@ class MessageService:
         tool_questions_status: str | None = None,
         status: str = "",
         status_message: str | None = None,
+        file_ids: list[UUID] | None = None,
     ) -> SessionMessage:
-        """Create message in session with auto-incremented sequence"""
+        """Create message in session with auto-incremented sequence.
+
+        If file_ids provided, creates message_files junction records.
+        """
         # Get the next sequence number for this session
         statement = select(func.max(SessionMessage.sequence_number)).where(
             SessionMessage.session_id == session_id
@@ -61,6 +65,21 @@ class MessageService:
             chat_session.last_message_at = datetime.utcnow()
             session.add(chat_session)
 
+        # Flush to ensure message exists in DB before creating message_files
+        # This prevents foreign key constraint violations
+        session.flush()
+
+        # Create message_files records if files attached
+        if file_ids:
+            from app.models.file_upload import MessageFile
+            for file_id in file_ids:
+                message_file = MessageFile(
+                    message_id=message.id,
+                    file_id=file_id,
+                    # agent_env_path set later when files uploaded to agent-env
+                )
+                session.add(message_file)
+
         session.commit()
         session.refresh(message)
         return message
@@ -68,8 +87,11 @@ class MessageService:
     @staticmethod
     def get_session_messages(
         session: Session, session_id: UUID, limit: int = 100, offset: int = 0
-    ) -> list[SessionMessage]:
-        """Get messages for session ordered by sequence"""
+    ) -> list["MessagePublic"]:
+        """Get messages for session ordered by sequence with files populated"""
+        from app.services.file_service import FileService
+        from app.models.session import MessagePublic
+
         statement = (
             select(SessionMessage)
             .where(SessionMessage.session_id == session_id)
@@ -77,7 +99,32 @@ class MessageService:
             .offset(offset)
             .limit(limit)
         )
-        return list(session.exec(statement).all())
+        db_messages = list(session.exec(statement).all())
+
+        # Convert to MessagePublic and populate files
+        messages = []
+        for msg in db_messages:
+            files = FileService.get_message_files(
+                session=session,
+                message_id=msg.id
+            )
+            message_public = MessagePublic(
+                id=msg.id,
+                session_id=msg.session_id,
+                role=msg.role,
+                content=msg.content,
+                sequence_number=msg.sequence_number,
+                timestamp=msg.timestamp,
+                message_metadata=msg.message_metadata,
+                tool_questions_status=msg.tool_questions_status,
+                answers_to_message_id=msg.answers_to_message_id,
+                status=msg.status,
+                status_message=msg.status_message,
+                files=files
+            )
+            messages.append(message_public)
+
+        return messages
 
     @staticmethod
     def get_last_n_messages(

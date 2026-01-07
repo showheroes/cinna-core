@@ -6,6 +6,7 @@ from app.api.routes import (
     credentials,
     environments,
     events,
+    files,
     items,
     knowledge,
     knowledge_sources,
@@ -42,6 +43,7 @@ api_router.include_router(activities.router)
 api_router.include_router(events.router)
 api_router.include_router(knowledge.router)
 api_router.include_router(knowledge_sources.router)
+api_router.include_router(files.router)
 
 
 if settings.ENVIRONMENT == "local":

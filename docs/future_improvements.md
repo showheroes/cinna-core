@@ -2,22 +2,6 @@
 
 ## User Scenarios and Features
 
-### File based interaction with the user
-
-User uploads file to the agent and asks to make certain actions related to that file.
-
-User story 1:
-- user uploads a list of employees in Odoo ERP
-- user requests to enrich his file this their data, like add names to the list of emails 
-
-User story 2:
-- user uploads PDF file
-- user asks to book expense and send expense report in Odoo ERP
-
-Features required:
-- user should be able to upload files to the conversation (or directly in the agent-env)
-- user should be able to reference these files in the dialog
-
 ### User-expertise levels/roles
 
 Certain users could not have enough expertise to build agents, but it's fine to provide them

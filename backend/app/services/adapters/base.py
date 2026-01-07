@@ -375,3 +375,48 @@ class EnvironmentAdapter(ABC):
             List of log lines, or async iterator if follow=True
         """
         pass
+
+    # === User File Upload (via HTTP API) ===
+
+    @abstractmethod
+    async def upload_file_to_agent_env(
+        self,
+        filename: str,
+        content: bytes,
+    ) -> dict:
+        """
+        Upload user file to agent environment via HTTP API.
+
+        This uploads files through the agent-env's file upload endpoint,
+        which handles sanitization, conflict resolution, and proper placement
+        in the workspace/uploads/ directory.
+
+        Args:
+            filename: Suggested filename (agent-env may sanitize/rename)
+            content: File bytes
+
+        Returns:
+            dict with:
+                "path": str (e.g., "./uploads/filename.pdf"),
+                "filename": str (final filename, may differ if conflict),
+                "size": int (bytes)
+        """
+        pass
+
+    @abstractmethod
+    async def upload_files_to_agent_env(
+        self,
+        files: list[tuple[str, bytes]],  # [(filename, content), ...]
+    ) -> list[dict]:
+        """
+        Upload multiple user files to agent environment (batch operation).
+
+        Uploads files concurrently via HTTP API for better performance.
+
+        Args:
+            files: List of (filename, content) tuples
+
+        Returns:
+            List of file info dicts (same format as upload_file_to_agent_env)
+        """
+        pass

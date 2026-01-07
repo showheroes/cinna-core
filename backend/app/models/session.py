@@ -3,6 +3,8 @@ from datetime import datetime
 from sqlmodel import SQLModel, Field, Column
 from sqlalchemy import JSON, UniqueConstraint
 
+from app.models.file_upload import FileUploadPublic
+
 
 class Session(SQLModel, table=True):
     __tablename__ = "session"
@@ -39,6 +41,9 @@ class SessionMessage(SQLModel, table=True):
     answers_to_message_id: uuid.UUID | None = Field(default=None, foreign_key="message.id")
     status: str = ""  # "" | "user_interrupted" | "error"
     status_message: str | None = None  # Error details or interrupt reason
+
+    # Note: 'files' attribute is populated at runtime by service layer
+    # (Not declared as Field to avoid SQLModel table column creation)
 
 
 # Pydantic Schemas
@@ -94,6 +99,7 @@ class SessionsPublicExtended(SQLModel):
 class MessageCreate(SQLModel):
     content: str
     answers_to_message_id: uuid.UUID | None = None
+    file_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class MessagePublic(SQLModel):
@@ -108,6 +114,7 @@ class MessagePublic(SQLModel):
     answers_to_message_id: uuid.UUID | None
     status: str
     status_message: str | None
+    files: list[FileUploadPublic] = Field(default_factory=list)
 
 
 class MessagesPublic(SQLModel):

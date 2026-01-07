@@ -26,13 +26,14 @@ export const Route = createFileRoute("/_layout/session/$sessionId")({
   validateSearch: (search: Record<string, unknown>) => {
     return {
       initialMessage: (search.initialMessage as string) || undefined,
+      fileIds: (search.fileIds as string) || undefined,
     }
   },
 })
 
 function ChatInterface() {
   const { sessionId } = Route.useParams()
-  const { initialMessage } = Route.useSearch()
+  const { initialMessage, fileIds } = Route.useSearch()
   const navigate = useNavigate()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { setHeaderContent } = usePageHeader()
@@ -74,8 +75,8 @@ function ChatInterface() {
   })
 
   const handleSendMessage = useCallback(
-    async (content: string) => {
-      await sendMessage(content)
+    async (content: string, fileIds?: string[]) => {
+      await sendMessage(content, undefined, fileIds)
     },
     [sendMessage]
   )
@@ -99,8 +100,10 @@ function ChatInterface() {
       !messagesLoading
     ) {
       initialMessageSent.current = true
+      // Parse fileIds from comma-separated string to array
+      const fileIdsArray = fileIds ? fileIds.split(',').filter(id => id.trim()) : undefined
       // Use the same handleSendMessage that the UI uses
-      handleSendMessage(initialMessage)
+      handleSendMessage(initialMessage, fileIdsArray)
       // Clear the search param after sending
       navigate({
         to: "/session/$sessionId",
@@ -111,6 +114,7 @@ function ChatInterface() {
     }
   }, [
     initialMessage,
+    fileIds,
     isStreaming,
     session,
     messagesData,

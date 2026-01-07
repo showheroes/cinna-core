@@ -141,6 +141,39 @@ class Settings(BaseSettings):
     DEFAULT_AGENT_ENV_NAME: str = "python-env-advanced"
     DEFAULT_AGENT_ENV_VERSION: str = "1.0.0"
 
+    # File Upload Settings
+    UPLOAD_BASE_PATH: str = "/app/data/uploads"
+    UPLOAD_MAX_FILE_SIZE_MB: int = 100
+    UPLOAD_MAX_USER_STORAGE_GB: int = 10
+    UPLOAD_RATE_LIMIT_PER_MINUTE: int = 10
+
+    # Allowed mime types (comma-separated)
+    UPLOAD_ALLOWED_MIME_TYPES: str = (
+        "application/pdf,text/plain,text/csv,"
+        "application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+        "image/png,image/jpeg,image/gif,image/webp,"
+        "application/zip,application/x-tar,application/gzip,"
+        "application/json,text/javascript,text/html,text/x-python"
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def allowed_mime_types(self) -> set[str]:
+        """Parse comma-separated mime types into set"""
+        return set(mime.strip() for mime in self.UPLOAD_ALLOWED_MIME_TYPES.split(","))
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def upload_max_file_size_bytes(self) -> int:
+        """Convert MB to bytes"""
+        return self.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def upload_max_user_storage_bytes(self) -> int:
+        """Convert GB to bytes"""
+        return self.UPLOAD_MAX_USER_STORAGE_GB * 1024 * 1024 * 1024
+
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":
             message = (

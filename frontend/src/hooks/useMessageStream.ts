@@ -33,7 +33,7 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
   // Track if we've already checked for active streams on mount
   const hasCheckedForActiveStream = useRef(false)
 
-  const sendMessage = useCallback(async (content: string, answersToMessageId?: string) => {
+  const sendMessage = useCallback(async (content: string, answersToMessageId?: string, fileIds?: string[]) => {
     setIsStreaming(true)
     setStreamingEvents([])
     setIsInterruptPending(false)
@@ -70,6 +70,7 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
           timestamp: new Date().toISOString(),
           message_metadata: {},
           answers_to_message_id: answersToMessageId || null,
+          files: [],
         }
 
         return {
@@ -96,7 +97,7 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
       }
 
       // Send message via REST API (triggers background WebSocket streaming)
-      const requestBody: any = { content }
+      const requestBody: any = { content, file_ids: fileIds || [] }
       if (answersToMessageId) {
         requestBody.answers_to_message_id = answersToMessageId
       }
@@ -120,6 +121,11 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
 
       const data = await response.json()
       console.log("Message processing started:", data)
+
+      // Immediately refresh messages to get the real message with files
+      // This replaces the optimistic message (which has empty files array)
+      // with the actual message from the backend that includes attached files
+      await queryClient.invalidateQueries({ queryKey: ["messages", sessionId] })
 
       // Fetch session immediately to get temporary title (set before streaming starts)
       setTimeout(() => {
@@ -205,6 +211,12 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
 
       case "stream_completed":
         console.log("Stream completed")
+        setIsInterruptPending(false)
+        handleStreamComplete(false)
+        break
+
+      case "done":
+        console.log("Agent processing done")
         setIsInterruptPending(false)
         handleStreamComplete(false)
         break

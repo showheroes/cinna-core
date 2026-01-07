@@ -237,6 +237,19 @@ class PromptGenerator:
             logger.error(f"Failed to load agent_handover_config.json: {e}")
             return None
 
+    def _get_environment_context(self) -> str:
+        """
+        Get environment context section for both building and conversation modes.
+
+        Returns:
+            Environment context string with working directory and uploaded files location
+        """
+        return (
+            f"\n\n---\n\n## Environment Context\n\n"
+            f"**WORKING_DIRECTORY**: `/app/workspace` (all relative paths are from here)\n\n"
+            f"**Uploaded files location**: `./uploads/` (user-uploaded files are here, access them with relative path `./uploads/filename`)\n"
+        )
+
     def generate_building_mode_prompt(self) -> Optional[Dict[str, Any]]:
         """
         Generate system prompt for building mode.
@@ -328,6 +341,10 @@ class PromptGenerator:
             )
             logger.info("Included knowledge topics in building mode prompt")
 
+        # Append environment context
+        building_prompt += self._get_environment_context()
+        logger.info("Included environment context in building mode prompt")
+
         # Return SystemPromptPreset dict
         logger.info("Generated building mode prompt with claude_code preset + BUILDING_AGENT.md + docs")
         return {
@@ -395,6 +412,10 @@ class PromptGenerator:
                 f"Check these folders for documentation files if needed."
             )
             logger.info("Included knowledge topics in conversation mode prompt")
+
+        # Append environment context
+        conversation_prompt_parts.append(self._get_environment_context())
+        logger.info("Included environment context in conversation mode prompt")
 
         # Append handover prompt if it exists
         handover_prompt = self._load_handover_prompt()

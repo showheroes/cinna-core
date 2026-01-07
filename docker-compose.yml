@@ -57,6 +57,7 @@ services:
       - ENV_TEMPLATES_DIR=app/env-templates
       - ENV_INSTANCES_DIR=/agent-environments
       - HOST_AGENT_ENVIRONMENTS_DIR=${HOST_AGENT_ENVIRONMENTS_DIR:-./backend/agent-environments}
+      - UPLOAD_BASE_PATH=/app/data/uploads
     ports:
       # Expose backend API and WebSocket port
       # WebSocket uses the same port as the HTTP API (Socket.IO upgrades the connection)
@@ -66,6 +67,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount agent-environments directory
       - ${HOST_AGENT_ENVIRONMENTS_DIR:-./backend/agent-environments}:/agent-environments
+      # Backend Data Uploads
+      - ./backend/data/uploads:/app/data/uploads
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/utils/health-check/"]
       interval: 10s

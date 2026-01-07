@@ -231,6 +231,37 @@ export type AIServiceCredentialsUpdate = {
     google_ai_api_key?: (string | null);
 };
 
+/**
+ * Full article content for retrieval step.
+ */
+export type ArticleContent = {
+    id: string;
+    title: string;
+    description: string;
+    content: string;
+    file_path: string;
+    tags: Array<(string)>;
+    features: Array<(string)>;
+    source_name: string;
+};
+
+/**
+ * Article metadata for discovery step.
+ */
+export type ArticleListItem = {
+    id: string;
+    title: string;
+    description: string;
+    tags: Array<(string)>;
+    features: Array<(string)>;
+    source_name: string;
+    git_repo_id: string;
+};
+
+export type Body_files_upload_file = {
+    file: (Blob | File);
+};
+
 export type Body_login_login_access_token = {
     grant_type?: (string | null);
     username: string;
@@ -346,6 +377,18 @@ export type ExecuteHandoverResponse = {
 };
 
 /**
+ * Response schema for file upload
+ */
+export type FileUploadPublic = {
+    id: string;
+    filename: string;
+    file_size: number;
+    mime_type: string;
+    status: string;
+    uploaded_at: string;
+};
+
+/**
  * Request to generate handover prompt using AI.
  */
 export type GenerateHandoverPromptRequest = {
@@ -451,14 +494,23 @@ export type KnowledgeArticlePublic = {
  */
 export type KnowledgeQueryRequest = {
     query: string;
+    article_ids?: (Array<(string)> | null);
 };
 
 /**
- * Response model for knowledge queries.
+ * Response for discovery step (article list).
  */
-export type KnowledgeQueryResponse = {
-    content: string;
-    source?: (string | null);
+export type KnowledgeQueryResponseDiscovery = {
+    type?: string;
+    articles: Array<ArticleListItem>;
+};
+
+/**
+ * Response for retrieval step (full articles).
+ */
+export type KnowledgeQueryResponseRetrieval = {
+    type?: string;
+    articles: Array<ArticleContent>;
 };
 
 export type Message = {
@@ -468,6 +520,7 @@ export type Message = {
 export type MessageCreate = {
     content: string;
     answers_to_message_id?: (string | null);
+    file_ids?: Array<(string)>;
 };
 
 export type MessagePublic = {
@@ -484,6 +537,7 @@ export type MessagePublic = {
     answers_to_message_id: (string | null);
     status: string;
     status_message: (string | null);
+    files?: Array<FileUploadPublic>;
 };
 
 export type MessagesPublic = {
@@ -1106,6 +1160,24 @@ export type EventsGetConnectionStatsResponse = (unknown);
 
 export type EventsTestEventResponse = (unknown);
 
+export type FilesUploadFileData = {
+    formData: Body_files_upload_file;
+};
+
+export type FilesUploadFileResponse = (FileUploadPublic);
+
+export type FilesDeleteFileData = {
+    fileId: string;
+};
+
+export type FilesDeleteFileResponse = (unknown);
+
+export type FilesDownloadFileData = {
+    fileId: string;
+};
+
+export type FilesDownloadFileResponse = (unknown);
+
 export type ItemsReadItemsData = {
     limit?: number;
     skip?: number;
@@ -1144,7 +1216,7 @@ export type KnowledgeQueryKnowledgeData = {
     xAgentEnvId?: (string | null);
 };
 
-export type KnowledgeQueryKnowledgeResponse = (KnowledgeQueryResponse);
+export type KnowledgeQueryKnowledgeResponse = ((KnowledgeQueryResponseDiscovery | KnowledgeQueryResponseRetrieval));
 
 export type KnowledgeSourcesListKnowledgeSourcesData = {
     limit?: number;

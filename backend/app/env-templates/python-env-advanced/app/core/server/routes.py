@@ -1,10 +1,11 @@
 import os
 import logging
 import json
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status, File, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from datetime import datetime
 from typing import Annotated
+from pathlib import Path
 
 from .models import (
     HealthCheckResponse,
@@ -15,7 +16,8 @@ from .models import (
     AgentHandoverUpdate,
     AgentHandoverResponse,
     CredentialsUpdate,
-    WorkspaceTreeResponse
+    WorkspaceTreeResponse,
+    FileUploadResponse
 )
 from .sdk_manager import sdk_manager
 from .agent_env_service import AgentEnvService
@@ -415,7 +417,7 @@ async def update_credentials(credentials: CredentialsUpdate):
 @router.get("/workspace/tree", dependencies=[Depends(verify_auth_token)])
 async def get_workspace_tree() -> WorkspaceTreeResponse:
     """
-    Get complete workspace tree structure for files, logs, scripts, docs.
+    Get complete workspace tree structure for files, logs, scripts, docs, uploads.
 
     Returns:
         JSON tree with all folders/files and folder summaries
@@ -431,6 +433,7 @@ async def get_workspace_tree() -> WorkspaceTreeResponse:
       "logs": {...},
       "scripts": {...},
       "docs": {...},
+      "uploads": {...},
       "summaries": {
         "files": {"fileCount": 42, "totalSize": 1048576},
         "logs": {"fileCount": 10, "totalSize": 204800},
@@ -532,3 +535,55 @@ async def download_workspace_item(path: str):
     except IOError as e:
         logger.error(f"Failed to download {path}: {e}")
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+
+@router.post("/files/upload", response_model=FileUploadResponse, dependencies=[Depends(verify_auth_token)])
+async def upload_file_to_workspace(
+    file: UploadFile = File(...),
+    filename: str = Form(...),
+) -> FileUploadResponse:
+    """
+    Receive file from backend and store to workspace/uploads/ directory.
+
+    Request:
+    - file: Binary file content (multipart/form-data)
+    - filename: Suggested filename (will be sanitized)
+    - auth_token: Bearer token for authentication
+
+    Response:
+    {
+        "path": "./uploads/document.pdf",
+        "filename": "document.pdf",
+        "size": 1234567,
+        "message": "File uploaded successfully"
+    }
+
+    Security:
+    - Validates auth token
+    - Sanitizes filename (prevent directory traversal)
+    - Handles filename conflicts (append _1, _2, etc.)
+    """
+    # Sanitize filename
+    safe_filename = AgentEnvService.sanitize_filename(filename)
+
+    # Ensure uploads directory exists
+    uploads_dir = Path("/app/workspace/uploads")
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    # Handle filename conflicts
+    final_filename = AgentEnvService.resolve_filename_conflict(safe_filename, uploads_dir)
+
+    # Target path
+    target_path = uploads_dir / final_filename
+
+    # Write file
+    content = await file.read()
+    target_path.write_bytes(content)
+
+    # Return relative path (what agent will see)
+    return FileUploadResponse(
+        path=f"./uploads/{final_filename}",
+        filename=final_filename,
+        size=len(content),
+        message="File uploaded successfully"
+    )

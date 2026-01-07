@@ -63,11 +63,12 @@ class FolderSummary(BaseModel):
 
 
 class WorkspaceTreeResponse(BaseModel):
-    """Complete workspace tree with 4 main folders"""
+    """Complete workspace tree with 5 main folders"""
     files: FileNode
     logs: FileNode
     scripts: FileNode
     docs: FileNode
+    uploads: FileNode
     summaries: dict[str, FolderSummary]
 
 
@@ -81,3 +82,11 @@ class AgentHandoverResponse(BaseModel):
     """Agent handover configuration response"""
     handovers: list[dict]
     handover_prompt: str
+
+
+class FileUploadResponse(BaseModel):
+    """Response for file upload endpoint"""
+    path: str  # Relative path: ./uploads/document.pdf
+    filename: str  # Final filename (may differ from requested if conflict)
+    size: int  # File size in bytes
+    message: str

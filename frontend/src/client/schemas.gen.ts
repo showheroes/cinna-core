@@ -1194,6 +1194,112 @@ export const AgentsPublicSchema = {
     title: 'AgentsPublic'
 } as const;
 
+export const ArticleContentSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        description: {
+            type: 'string',
+            title: 'Description'
+        },
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        file_path: {
+            type: 'string',
+            title: 'File Path'
+        },
+        tags: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Tags'
+        },
+        features: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Features'
+        },
+        source_name: {
+            type: 'string',
+            title: 'Source Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'description', 'content', 'file_path', 'tags', 'features', 'source_name'],
+    title: 'ArticleContent',
+    description: 'Full article content for retrieval step.'
+} as const;
+
+export const ArticleListItemSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        description: {
+            type: 'string',
+            title: 'Description'
+        },
+        tags: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Tags'
+        },
+        features: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Features'
+        },
+        source_name: {
+            type: 'string',
+            title: 'Source Name'
+        },
+        git_repo_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Git Repo Id'
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'description', 'tags', 'features', 'source_name', 'git_repo_id'],
+    title: 'ArticleListItem',
+    description: 'Article metadata for discovery step.'
+} as const;
+
+export const Body_files_upload_fileSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_files-upload_file'
+} as const;
+
 export const Body_login_login_access_tokenSchema = {
     properties: {
         grant_type: {
@@ -1633,6 +1739,41 @@ export const ExecuteHandoverResponseSchema = {
     description: 'Response from handover execution.'
 } as const;
 
+export const FileUploadPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        filename: {
+            type: 'string',
+            title: 'Filename'
+        },
+        file_size: {
+            type: 'integer',
+            title: 'File Size'
+        },
+        mime_type: {
+            type: 'string',
+            title: 'Mime Type'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        uploaded_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Uploaded At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'filename', 'file_size', 'mime_type', 'status', 'uploaded_at'],
+    title: 'FileUploadPublic',
+    description: 'Response schema for file upload'
+} as const;
+
 export const GenerateHandoverPromptRequestSchema = {
     properties: {
         target_agent_id: {
@@ -2017,6 +2158,21 @@ export const KnowledgeQueryRequestSchema = {
         query: {
             type: 'string',
             title: 'Query'
+        },
+        article_ids: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string',
+                        format: 'uuid'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Article Ids'
         }
     },
     type: 'object',
@@ -2025,28 +2181,46 @@ export const KnowledgeQueryRequestSchema = {
     description: 'Request model for querying integration knowledge.'
 } as const;
 
-export const KnowledgeQueryResponseSchema = {
+export const KnowledgeQueryResponseDiscoverySchema = {
     properties: {
-        content: {
+        type: {
             type: 'string',
-            title: 'Content'
+            title: 'Type',
+            default: 'article_list'
         },
-        source: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Source'
+        articles: {
+            items: {
+                '$ref': '#/components/schemas/ArticleListItem'
+            },
+            type: 'array',
+            title: 'Articles'
         }
     },
     type: 'object',
-    required: ['content'],
-    title: 'KnowledgeQueryResponse',
-    description: 'Response model for knowledge queries.'
+    required: ['articles'],
+    title: 'KnowledgeQueryResponseDiscovery',
+    description: 'Response for discovery step (article list).'
+} as const;
+
+export const KnowledgeQueryResponseRetrievalSchema = {
+    properties: {
+        type: {
+            type: 'string',
+            title: 'Type',
+            default: 'full_articles'
+        },
+        articles: {
+            items: {
+                '$ref': '#/components/schemas/ArticleContent'
+            },
+            type: 'array',
+            title: 'Articles'
+        }
+    },
+    type: 'object',
+    required: ['articles'],
+    title: 'KnowledgeQueryResponseRetrieval',
+    description: 'Response for retrieval step (full articles).'
 } as const;
 
 export const MessageSchema = {
@@ -2078,6 +2252,14 @@ export const MessageCreateSchema = {
                 }
             ],
             title: 'Answers To Message Id'
+        },
+        file_ids: {
+            items: {
+                type: 'string',
+                format: 'uuid'
+            },
+            type: 'array',
+            title: 'File Ids'
         }
     },
     type: 'object',
@@ -2156,6 +2338,13 @@ export const MessagePublicSchema = {
                 }
             ],
             title: 'Status Message'
+        },
+        files: {
+            items: {
+                '$ref': '#/components/schemas/FileUploadPublic'
+            },
+            type: 'array',
+            title: 'Files'
         }
     },
     type: 'object',

@@ -176,12 +176,14 @@ class AgentEnvService:
         """
         scripts_dir = self.workspace_dir / "scripts"
         files_dir = self.workspace_dir / "files"
+        uploads_dir = self.workspace_dir / "uploads"
 
         return {
             "workspace_dir": str(self.workspace_dir),
             "docs_dir": str(self.docs_dir),
             "has_scripts_dir": scripts_dir.exists(),
             "has_files_dir": files_dir.exists(),
+            "has_uploads_dir": uploads_dir.exists(),
             "has_docs_dir": self.docs_dir.exists(),
             "has_workflow_prompt": (self.docs_dir / "WORKFLOW_PROMPT.md").exists(),
             "has_entrypoint_prompt": (self.docs_dir / "ENTRYPOINT_PROMPT.md").exists(),
@@ -379,7 +381,7 @@ class AgentEnvService:
 
     def get_workspace_tree(self) -> WorkspaceTreeResponse:
         """
-        Build complete workspace tree for files, logs, scripts, docs folders.
+        Build complete workspace tree for files, logs, scripts, docs, uploads folders.
 
         Returns:
             WorkspaceTreeResponse with full tree structure and summaries
@@ -393,8 +395,8 @@ class AgentEnvService:
         if not self.workspace_dir.is_dir():
             raise IOError(f"Workspace path is not a directory: {self.workspace_dir}")
 
-        # Define the 4 main folders to scan
-        folders = ["files", "logs", "scripts", "docs"]
+        # Define the 5 main folders to scan
+        folders = ["files", "logs", "scripts", "docs", "uploads"]
         tree_nodes = {}
         summaries = {}
 
@@ -429,6 +431,7 @@ class AgentEnvService:
             logs=tree_nodes["logs"],
             scripts=tree_nodes["scripts"],
             docs=tree_nodes["docs"],
+            uploads=tree_nodes["uploads"],
             summaries=summaries
         )
 
@@ -619,3 +622,80 @@ class AgentEnvService:
                 zip_path.unlink()
             logger.error(f"Failed to create zip archive: {e}")
             raise IOError(f"Failed to create zip archive: {str(e)}")
+
+    @staticmethod
+    def sanitize_filename(filename: str) -> str:
+        """
+        Sanitize filename for agent-env storage.
+
+        Rules:
+        - Remove/replace dangerous characters
+        - Preserve extension
+        - Limit length to 255 characters
+        - Replace spaces with underscores
+        """
+        import re
+        import unicodedata
+        import os
+
+        # Normalize unicode
+        filename = unicodedata.normalize('NFKD', filename)
+        filename = filename.encode('ascii', 'ignore').decode('ascii')
+
+        # Remove path separators and dangerous chars
+        filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', filename)
+
+        # Replace spaces with underscores
+        filename = filename.replace(' ', '_')
+
+        # Remove multiple underscores
+        filename = re.sub(r'_+', '_', filename)
+
+        # Truncate to 255 chars while preserving extension
+        if len(filename) > 255:
+            name, ext = os.path.splitext(filename)
+            max_name_len = 255 - len(ext)
+            filename = name[:max_name_len] + ext
+
+        # Ensure filename is not empty
+        if not filename:
+            filename = "file"
+
+        return filename
+
+    @staticmethod
+    def resolve_filename_conflict(
+        filename: str,
+        directory: Path,
+        max_attempts: int = 100
+    ) -> str:
+        """
+        Generate unique filename if conflict exists.
+
+        If document.pdf exists, tries:
+        - document_1.pdf
+        - document_2.pdf
+        - ...
+        - document_100.pdf
+
+        Raises HTTPException if max_attempts exceeded.
+        """
+        from fastapi import HTTPException
+        import os
+
+        base_path = directory / filename
+        if not base_path.exists():
+            return filename
+
+        name, ext = os.path.splitext(filename)
+
+        for i in range(1, max_attempts + 1):
+            new_filename = f"{name}_{i}{ext}"
+            new_path = directory / new_filename
+            if not new_path.exists():
+                return new_filename
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not resolve filename conflict for {filename} after {max_attempts} attempts"
+        )

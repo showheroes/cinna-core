@@ -1,21 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState, useMemo, KeyboardEvent } from "react"
+import { useEffect, useState, useMemo, KeyboardEvent, DragEvent } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
-import { AgentsService, SessionsService } from "@/client"
-import type { SessionCreate } from "@/client"
+import { AgentsService, SessionsService, FilesService } from "@/client"
+import type { SessionCreate, FileUploadPublic } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Send, Bot } from "lucide-react"
+import { Send, Bot, Paperclip, Plus } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { usePageHeader } from "@/routes/_layout"
-import AddAgent from "@/components/Agents/AddAgent"
 import useCustomToast from "@/hooks/useCustomToast"
 import useWorkspace from "@/hooks/useWorkspace"
 import PendingItems from "@/components/Pending/PendingItems"
 import { getColorPreset } from "@/utils/colorPresets"
 import { RotatingHints } from "@/components/Common/RotatingHints"
 import { LatestSessions } from "@/components/Sessions/LatestSessions"
+import { FileUploadModal } from "@/components/Chat/FileUploadModal"
+import { FileBadge } from "@/components/Chat/FileBadge"
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
@@ -37,6 +44,9 @@ function Dashboard() {
   const [message, setMessage] = useState("")
   const [inputMode, setInputMode] = useState<"automatic" | "manual">("automatic")
   const [previousMode, setPreviousMode] = useState<"conversation" | "building">("conversation")
+  const [attachedFiles, setAttachedFiles] = useState<FileUploadPublic[]>([])
+  const [showFileModal, setShowFileModal] = useState(false)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -63,7 +73,7 @@ function Dashboard() {
   } = useQuery({
     queryKey: ["sessions", "latest", 8, activeWorkspaceId],
     queryFn: ({ queryKey }) => {
-      const [, , , workspaceId] = queryKey
+      const [, , , workspaceId] = queryKey as [string, string, number, string | undefined]
       return SessionsService.listSessions({
         skip: 0,
         limit: 8,
@@ -80,10 +90,11 @@ function Dashboard() {
     onSuccess: (session, variables) => {
       const initialMessage = variables.initialMessage
       setMessage("")
+      setAttachedFiles([])
       navigate({
         to: "/session/$sessionId",
         params: { sessionId: session.id },
-        search: { initialMessage },
+        search: { initialMessage, fileIds: attachedFiles.map(f => f.id).join(',') } as any,
       })
     },
     onError: (error: any) => {
@@ -91,6 +102,19 @@ function Dashboard() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["sessions"] })
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (fileId: string) => FilesService.deleteFile({ fileId }),
+  })
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => {
+      return FilesService.uploadFile({ formData: { file } })
+    },
+    onSuccess: (data) => {
+      setAttachedFiles(prev => [...prev, data])
     },
   })
 
@@ -170,7 +194,7 @@ function Dashboard() {
 
   const handleSend = () => {
     const trimmedMessage = message.trim()
-    if (!trimmedMessage || createMutation.isPending) {
+    if ((!trimmedMessage && attachedFiles.length === 0) || createMutation.isPending) {
       return
     }
 
@@ -205,6 +229,45 @@ function Dashboard() {
 
     // Reset to automatic mode after sending
     setInputMode("automatic")
+  }
+
+  const handleFileUploaded = (file: FileUploadPublic) => {
+    setAttachedFiles(prev => [...prev, file])
+  }
+
+  const handleFileRemove = async (fileId: string) => {
+    // Optimistic update
+    setAttachedFiles(prev => prev.filter(f => f.id !== fileId))
+    // Call API to delete
+    await deleteMutation.mutateAsync(fileId)
+  }
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOver(true)
+  }
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOver(false)
+  }
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOver(false)
+
+    const files = Array.from(e.dataTransfer.files)
+    files.forEach(file => {
+      // Validate file size (100MB)
+      if (file.size > 100 * 1024 * 1024) {
+        showErrorToast(`File ${file.name} is too large (max 100MB)`)
+        return
+      }
+      uploadMutation.mutate(file)
+    })
   }
 
   const handleMessageChange = (value: string) => {
@@ -322,29 +385,57 @@ function Dashboard() {
 
           {/* Message Input */}
           <div className="space-y-4">
-            <Textarea
-              value={message}
-              onChange={(e) => handleMessageChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                selectedAgentId === NEW_AGENT_ID
-                  ? "Describe what you want the agent to do and what result you expect..."
-                  : mode === "building"
+            {/* Textarea with drag-drop support */}
+            <div
+              className="relative"
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <Textarea
+                value={message}
+                onChange={(e) => handleMessageChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  selectedAgentId === NEW_AGENT_ID
                     ? "Describe what you want the agent to do and what result you expect..."
-                    : "Type your message to start a conversation..."
-              }
-              className={`min-h-[120px] max-h-[300px] resize-none text-base transition-colors ${
-                mode === "building"
-                  ? "border-orange-400 bg-orange-50 dark:bg-orange-950/20 focus-visible:ring-orange-400"
-                  : ""
-              }`}
-              rows={4}
-            />
+                    : mode === "building"
+                      ? "Describe what you want the agent to do and what result you expect..."
+                      : "Type your message to start a conversation..."
+                }
+                className={`min-h-[120px] max-h-[300px] resize-none text-base transition-colors ${
+                  mode === "building"
+                    ? "border-orange-400 bg-orange-50 dark:bg-orange-950/20 focus-visible:ring-orange-400"
+                    : ""
+                } ${
+                  isDraggingOver ? 'border-primary border-2 bg-primary/5' : ''
+                }`}
+                rows={4}
+              />
+              {isDraggingOver && (
+                <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-primary border-dashed rounded-md pointer-events-none">
+                  <p className="text-sm font-medium text-primary">Drop files to attach</p>
+                </div>
+              )}
+            </div>
 
             <div className="flex items-center justify-between">
-              <RotatingHints />
+              {/* Footer: Show attached files or rotating hints */}
+              {attachedFiles.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {attachedFiles.map(file => (
+                    <FileBadge
+                      key={file.id}
+                      file={file}
+                      onRemove={() => handleFileRemove(file.id)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <RotatingHints />
+              )}
 
-              {/* Mode Switch and Send Button */}
+              {/* Mode Switch, Attach Button, and Send Button */}
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">
@@ -379,9 +470,28 @@ function Dashboard() {
                   </label>
                 </div>
 
+                {/* Attach File Button */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={() => setShowFileModal(true)}>
+                      <Paperclip className="h-4 w-4 mr-2" />
+                      Attach File
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
                 <Button
                   onClick={handleSend}
-                  disabled={createMutation.isPending || !message.trim()}
+                  disabled={createMutation.isPending || (!message.trim() && attachedFiles.length === 0)}
                   size="icon"
                   className="h-9 w-9"
                 >
@@ -390,12 +500,19 @@ function Dashboard() {
               </div>
             </div>
           </div>
+
+          {/* File Upload Modal */}
+          <FileUploadModal
+            open={showFileModal}
+            onOpenChange={setShowFileModal}
+            onFileUploaded={handleFileUploaded}
+          />
         </div>
       </div>
 
       {/* Latest Sessions - Sticky at bottom, growing upward */}
       {sessionsData && sessionsData.data.length > 0 && (
-        <div className="bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6 py-4">
+        <div className="px-6 py-4">
           <div className="max-h-[45vh] overflow-y-auto">
             <div className="w-full max-w-3xl mx-auto">
               <LatestSessions limit={8} />

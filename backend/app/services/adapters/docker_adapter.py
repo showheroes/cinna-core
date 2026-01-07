@@ -741,3 +741,40 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
             return self.docker_client.containers.get(self.container_name)
         except docker.errors.NotFound:
             return None
+
+    async def upload_file_to_agent_env(
+        self,
+        filename: str,
+        content: bytes,
+    ) -> dict:
+        """
+        Upload user file to Docker agent-env via HTTP API.
+
+        POST http://{container_name}:{port}/files/upload
+        """
+        url = f"{self.base_url}/files/upload"
+
+        files = {
+            'file': (filename, content, 'application/octet-stream')
+        }
+        data = {
+            'filename': filename
+        }
+        headers = self._get_headers()
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, files=files, data=data, headers=headers)
+            response.raise_for_status()
+            return response.json()
+
+    async def upload_files_to_agent_env(
+        self,
+        files: list[tuple[str, bytes]],
+    ) -> list[dict]:
+        """
+        Upload multiple user files concurrently.
+
+        Uses asyncio.gather for parallel uploads.
+        """
+        tasks = [self.upload_file_to_agent_env(filename, content) for filename, content in files]
+        return await asyncio.gather(*tasks)

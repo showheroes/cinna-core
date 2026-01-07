@@ -14,6 +14,7 @@ interface WorkspaceTreeResponse {
   scripts?: FileNode
   logs?: FileNode
   docs?: FileNode
+  uploads?: FileNode
 }
 
 interface EnvironmentPanelProps {
@@ -108,6 +109,7 @@ export function EnvironmentPanel({ isOpen, environmentId }: EnvironmentPanelProp
   const scriptsData: TreeItem[] = workspaceData?.scripts ? [convertFileNodeToTreeItem(workspaceData.scripts)] : []
   const logsData: TreeItem[] = workspaceData?.logs ? [convertFileNodeToTreeItem(workspaceData.logs)] : []
   const docsData: TreeItem[] = workspaceData?.docs ? [convertFileNodeToTreeItem(workspaceData.docs)] : []
+  const uploadsData: TreeItem[] = workspaceData?.uploads ? [convertFileNodeToTreeItem(workspaceData.uploads)] : []
 
   return (
     <div className={`absolute top-0 right-0 h-full bg-background border-l border-border shadow-lg z-10 flex flex-col transition-all duration-200 ${isWidePanelMode ? 'w-[768px]' : 'w-96'}`}>
@@ -159,6 +161,14 @@ export function EnvironmentPanel({ isOpen, environmentId }: EnvironmentPanelProp
               onToggleFolder={handleToggleFolder}
               onDownload={handleDownload}
               pathPrefix="docs"
+            />
+            <WorkspaceTabContent
+              value="uploads"
+              data={uploadsData}
+              expandedFolders={expandedFolders}
+              onToggleFolder={handleToggleFolder}
+              onDownload={handleDownload}
+              pathPrefix="uploads"
             />
           </>
         )}

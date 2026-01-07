@@ -5,6 +5,7 @@ import type { MessagePublic } from "@/client"
 import { StreamEventRenderer } from "./StreamEventRenderer"
 import { MessageActions } from "./MessageActions"
 import { AnswerQuestionsModal } from "./AnswerQuestionsModal"
+import { FileBadge } from "./FileBadge"
 import { Info, AlertCircle, ExternalLink } from "lucide-react"
 
 interface MessageBubbleProps {
@@ -32,8 +33,8 @@ export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
             isSystemError
               ? "bg-destructive/10 text-destructive border border-destructive/20"
               : isHandoverMessage
-              ? "bg-blue-50 dark:bg-blue-950/30 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
-              : "bg-muted text-muted-foreground"
+              ? "bg-blue-50/60 dark:bg-blue-950/20 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
+              : "bg-muted/60 text-muted-foreground"
           }`}
         >
           <div className="flex items-center gap-2">
@@ -126,8 +127,8 @@ export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
           <div
             className={`rounded-lg px-4 py-3 ${
               isUser
-                ? "bg-gradient-to-br from-sky-50 to-blue-50 dark:from-sky-950/25 dark:to-blue-950/25 border border-sky-100/50 dark:border-sky-900/15 text-foreground shadow-sm"
-                : "bg-muted text-foreground"
+                ? "bg-green-50/60 dark:bg-green-950/20 border border-green-100/50 dark:border-green-900/30 text-foreground shadow-sm"
+                : "bg-muted/60 text-foreground"
             }`}
           >
             <div className="space-y-2">
@@ -136,6 +137,20 @@ export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
               ) : (
                 <StreamEventRenderer events={streamingEvents} />
               )}
+
+              {/* File badges */}
+              {message.files && message.files.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-2 border-t border-border/50">
+                  {message.files.map((file: any) => (
+                    <FileBadge
+                      key={file.id}
+                      file={file}
+                      downloadable={true}
+                    />
+                  ))}
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-2">
                 <p
                   className={`text-xs ${
