@@ -2,6 +2,27 @@
 
 ## User Scenarios and Features
 
+### Graceful Resource Usage
+
+Every agent-env goes into suspended mode when it's not used for longer than 10 minutes.
+When we detect user's intention to use a certain agent, re-activate the env.
+Signs of intentions:
+- user opens a session with that agent
+- user clicked the agent in the main dashboard UI and started typing message
+
+If env is inactive, and we already in the situation that message was sent to the session,
+on the backend we start activating environment, send event to the frontend to show 'Activating Agent ...',
+and once env is active, send another event 'environment activated', and then send message to the agent.
+
+Usually activation of the env should take a few seconds, less than 10, so it should be pretty comfortable process.
+
+### Improved handover processing
+
+When background-executed session (via CRON) is over and according to the session logs
+no agent's handover happened, but in the configuration of the agent such handover config is present,
+send one more user message to the agent to check that handover conditions were checked and handover
+is really not necessary.
+
 ### User-expertise levels/roles
 
 Certain users could not have enough expertise to build agents, but it's fine to provide them
@@ -42,19 +63,6 @@ Features required:
 - knowledge on how to communication with git-hub API and credentials for it
 - maybe oauth credentials integrations as a GitHub app
 
-### Files Meta-data Extraction
-
-Agent during communication could be requested about details of a certain file, for example
-agent needs to know what is the content of that PDF to make actions, like parse details
-and do something with it, like book expenses.
-
-Features required:
-- agent-env tool to extract OCR data from a file and return back to the agent 
-
-To avoid MCP tool context overload, probably it makes sense to add it to the knowledge article 
-(inside container) as a prebuild script to extract data, that LLM could potentially use locally 
-when it's needed, even seamlessly integrate with scripts that LLM is building for faster response.   
-
 ### Agent Communication to a User
 
 In certain scenarios agent should be able to notify its owner of a required action in the offline mode too.
@@ -84,3 +92,4 @@ Required features:
 - instructions for building an agent that all 'destructive' or potentially dangerous actions - make a user request
 - downloading files from ODOO - instructions (document analysis in general) - maybe as a separate sub-services available to the agent??
 - RESTRICT users from using modifications to the agents (let only certain users to rely on building mode, in most scenarios special team members are bulding, and other teams members are using) - role on the user (user / agent builder)
+- agent handover during certain periods (when user leaves on vacation, another user can take care and use his agents for a while)
