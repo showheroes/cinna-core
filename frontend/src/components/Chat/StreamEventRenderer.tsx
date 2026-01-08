@@ -15,9 +15,10 @@ interface StreamEvent {
 
 interface StreamEventRendererProps {
   events: StreamEvent[]
+  conversationModeUi?: string
 }
 
-export function StreamEventRenderer({ events }: StreamEventRendererProps) {
+export function StreamEventRenderer({ events, conversationModeUi = "detailed" }: StreamEventRendererProps) {
   if (!events || events.length === 0) {
     return null
   }
@@ -32,6 +33,7 @@ export function StreamEventRenderer({ events }: StreamEventRendererProps) {
               key={idx}
               toolName={event.tool_name || "Unknown Tool"}
               toolInput={event.metadata?.tool_input}
+              conversationModeUi={conversationModeUi}
             />
           )
         } else if (event.type === "assistant" && event.content.trim()) {

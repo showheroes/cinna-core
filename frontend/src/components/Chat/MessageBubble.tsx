@@ -11,9 +11,10 @@ import { Info, AlertCircle, ExternalLink } from "lucide-react"
 interface MessageBubbleProps {
   message: MessagePublic
   onSendAnswer?: (content: string, answersToMessageId: string) => void
+  conversationModeUi?: string
 }
 
-export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
+export function MessageBubble({ message, onSendAnswer, conversationModeUi = "detailed" }: MessageBubbleProps) {
   const [showAnswerModal, setShowAnswerModal] = useState(false)
 
   const isUser = message.role === "user"
@@ -135,7 +136,7 @@ export function MessageBubble({ message, onSendAnswer }: MessageBubbleProps) {
               {isUser ? (
                 <p className="whitespace-pre-wrap break-words">{message.content}</p>
               ) : (
-                <StreamEventRenderer events={streamingEvents} />
+                <StreamEventRenderer events={streamingEvents} conversationModeUi={conversationModeUi} />
               )}
 
               {/* File badges */}

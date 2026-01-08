@@ -1,4 +1,4 @@
-import { Wrench } from "lucide-react"
+import { Wrench, FileText, FileEdit } from "lucide-react"
 import { MarkdownRenderer } from "./MarkdownRenderer"
 import { ReadToolBlock } from "./ReadToolBlock"
 import { TodoWriteToolBlock } from "./TodoWriteToolBlock"
@@ -10,15 +10,29 @@ import { WebSearchToolBlock } from "./WebSearchToolBlock"
 import { BashToolBlock } from "./BashToolBlock"
 import { KnowledgeQueryToolBlock } from "./KnowledgeQueryToolBlock"
 import { AgentHandoverToolBlock } from "./AgentHandoverToolBlock"
+import { CompactBashBlock } from "./CompactBashBlock"
 
 interface ToolCallBlockProps {
   toolName: string
   toolInput?: Record<string, any>
+  conversationModeUi?: string
 }
 
-export function ToolCallBlock({ toolName, toolInput }: ToolCallBlockProps) {
+export function ToolCallBlock({ toolName, toolInput, conversationModeUi = "detailed" }: ToolCallBlockProps) {
+  const isCompact = conversationModeUi === "compact"
+
   // Special rendering for Read tool
   if (toolName === "Read" && toolInput?.file_path) {
+    if (isCompact) {
+      // Compact mode: just show filename
+      const fileName = toolInput.file_path.split('/').pop() || toolInput.file_path
+      return (
+        <div className="inline-flex items-center gap-2 text-sm text-muted-foreground/80 mb-1">
+          <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>Reading file <code className="font-mono bg-muted px-1 py-0.5 rounded text-xs">{fileName}</code></span>
+        </div>
+      )
+    }
     return <ReadToolBlock filePath={toolInput.file_path} />
   }
 
@@ -29,6 +43,16 @@ export function ToolCallBlock({ toolName, toolInput }: ToolCallBlockProps) {
 
   // Special rendering for Edit tool
   if (toolName === "Edit" && toolInput?.file_path && toolInput?.old_string && toolInput?.new_string) {
+    if (isCompact) {
+      // Compact mode: just show filename
+      const fileName = toolInput.file_path.split('/').pop() || toolInput.file_path
+      return (
+        <div className="inline-flex items-center gap-2 text-sm text-muted-foreground/80 mb-1">
+          <FileEdit className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>Editing file <code className="font-mono bg-muted px-1 py-0.5 rounded text-xs">{fileName}</code> ...</span>
+        </div>
+      )
+    }
     return <EditToolBlock filePath={toolInput.file_path} oldString={toolInput.old_string} newString={toolInput.new_string} />
   }
 
@@ -54,6 +78,9 @@ export function ToolCallBlock({ toolName, toolInput }: ToolCallBlockProps) {
 
   // Special rendering for Bash tool
   if (toolName === "Bash" && toolInput?.command) {
+    if (isCompact) {
+      return <CompactBashBlock command={toolInput.command} />
+    }
     return <BashToolBlock command={toolInput.command} />
   }
 

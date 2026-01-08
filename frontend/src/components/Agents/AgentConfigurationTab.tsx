@@ -15,6 +15,13 @@ import {
 } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Card,
   CardContent,
   CardDescription,
@@ -61,12 +68,32 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
     },
   })
 
+  const updateConversationModeMutation = useMutation({
+    mutationFn: (conversationMode: string) =>
+      AgentsService.updateAgent({
+        id: agent.id,
+        requestBody: { conversation_mode_ui: conversationMode }
+      }),
+    onSuccess: () => {
+      showSuccessToast("Conversation mode updated successfully")
+      queryClient.invalidateQueries({ queryKey: ["agent", agent.id] })
+      queryClient.invalidateQueries({ queryKey: ["agents"] })
+    },
+    onError: (error: any) => {
+      showErrorToast(error.message || "Failed to update conversation mode")
+    },
+  })
+
   const handleColorChange = (colorPreset: string) => {
     updateMutation.mutate({ ui_color_preset: colorPreset })
   }
 
   const handleDashboardVisibilityChange = (checked: boolean) => {
     updateDashboardVisibilityMutation.mutate(checked)
+  }
+
+  const handleConversationModeChange = (mode: string) => {
+    updateConversationModeMutation.mutate(mode)
   }
 
   const currentPreset = getColorPreset(agent.ui_color_preset)
@@ -81,7 +108,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
             Customize how your agent appears in the interface
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
           <div>
             <label className="text-sm font-medium mb-3 block">Color Preset</label>
             <div className="flex items-center gap-4">
@@ -112,7 +139,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
             Control where and how this agent appears in the application
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium">Show on Dashboard</p>
@@ -125,6 +152,30 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
               onCheckedChange={handleDashboardVisibilityChange}
               disabled={updateDashboardVisibilityMutation.isPending}
             />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Conversation Mode</p>
+              <p className="text-xs text-muted-foreground">
+                {agent.conversation_mode_ui === "compact"
+                  ? "Compact format for tool calls"
+                  : "Detailed format for tool calls"}
+              </p>
+            </div>
+            <Select
+              value={agent.conversation_mode_ui || "detailed"}
+              onValueChange={handleConversationModeChange}
+              disabled={updateConversationModeMutation.isPending}
+            >
+              <SelectTrigger className="w-[130px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="compact">Compact</SelectItem>
+                <SelectItem value="detailed">Detailed</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>

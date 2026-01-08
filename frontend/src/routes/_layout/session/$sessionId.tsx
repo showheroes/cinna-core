@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { ArrowLeft, EllipsisVertical, Package } from "lucide-react"
 
-import { SessionsService, MessagesService } from "@/client"
+import { SessionsService, MessagesService, AgentsService } from "@/client"
 import { MessageList } from "@/components/Chat/MessageList"
 import { MessageInput } from "@/components/Chat/MessageInput"
 import EditSession from "@/components/Sessions/EditSession"
@@ -60,6 +60,14 @@ function ChatInterface() {
     queryKey: ["messages", sessionId],
     queryFn: () => MessagesService.getMessages({ sessionId, offset: 0, limit: 100 }),
     enabled: !!sessionId,
+  })
+
+  const {
+    data: agent,
+  } = useQuery({
+    queryKey: ["agent", session?.agent_id],
+    queryFn: () => AgentsService.readAgent({ id: session!.agent_id! }),
+    enabled: !!session?.agent_id,
   })
 
   const { sendMessage, stopMessage, isStreaming, streamingEvents, isInterruptPending } = useMessageStream({
@@ -222,6 +230,7 @@ function ChatInterface() {
           streamingEvents={streamingEvents}
           isStreaming={isStreaming}
           onSendAnswer={handleSendAnswer}
+          conversationModeUi={agent?.conversation_mode_ui || "detailed"}
         />
         <EnvironmentPanel isOpen={envPanelOpen} environmentId={session?.environment_id} />
       </div>

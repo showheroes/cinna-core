@@ -1009,6 +1009,10 @@ export const AgentPublicSchema = {
             type: 'boolean',
             title: 'Show On Dashboard'
         },
+        conversation_mode_ui: {
+            type: 'string',
+            title: 'Conversation Mode Ui'
+        },
         created_at: {
             type: 'string',
             format: 'date-time',
@@ -1038,7 +1042,7 @@ export const AgentPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'name', 'description', 'workflow_prompt', 'entrypoint_prompt', 'is_active', 'active_environment_id', 'ui_color_preset', 'show_on_dashboard', 'created_at', 'updated_at', 'owner_id', 'user_workspace_id'],
+    required: ['id', 'name', 'description', 'workflow_prompt', 'entrypoint_prompt', 'is_active', 'active_environment_id', 'ui_color_preset', 'show_on_dashboard', 'conversation_mode_ui', 'created_at', 'updated_at', 'owner_id', 'user_workspace_id'],
     title: 'AgentPublic'
 } as const;
 
@@ -1184,6 +1188,17 @@ export const AgentUpdateSchema = {
                 }
             ],
             title: 'Show On Dashboard'
+        },
+        conversation_mode_ui: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Conversation Mode Ui'
         }
     },
     type: 'object',

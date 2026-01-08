@@ -15,15 +15,16 @@ interface StreamEvent {
 
 interface StreamingMessageProps {
   events: StreamEvent[]
+  conversationModeUi?: string
 }
 
-export function StreamingMessage({ events }: StreamingMessageProps) {
+export function StreamingMessage({ events, conversationModeUi = "detailed" }: StreamingMessageProps) {
   return (
     <div className="flex justify-start mb-4">
       <div className="max-w-[70%] rounded-lg px-4 py-3 bg-muted text-foreground">
         <div className="space-y-2">
           {events.length > 0 ? (
-            <StreamEventRenderer events={events} />
+            <StreamEventRenderer events={events} conversationModeUi={conversationModeUi} />
           ) : (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
