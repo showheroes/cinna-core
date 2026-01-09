@@ -111,12 +111,6 @@ export function EnvironmentCard({ environment, agentId, onActivate }: Environmen
               {environment.id}
             </span>
             </h3>
-            {environment.is_active && (
-                <Badge variant="default" className="gap-1">
-                <CheckCircle2 className="h-3 w-3" />
-                Active
-              </Badge>
-            )}
           </div>
           <div className="space-y-1 text-sm text-muted-foreground">
             <p>

@@ -23,11 +23,25 @@ logger = logging.getLogger(__name__)
 
 class EnvironmentLifecycleManager:
     """
-    Manages environment lifecycle:
-    - Creation (copy template → instance directory)
-    - Initialization (build image, create .env)
-    - Start/Stop/Restart
-    - Status monitoring
+    Manages environment lifecycle using Docker terminology:
+
+    Container Operations (Docker terminology):
+    - UP: Create and start container (docker-compose up)
+    - STOP: Stop container but keep it (docker-compose stop)
+    - DOWN: Remove container completely (docker-compose down)
+
+    Lifecycle Methods:
+    - create_environment_instance: Copy template, build image, prepare instance
+    - start_environment: Start/create container (UP), setup if new, sync data
+    - stop_environment: Stop container but keep it (STOP)
+    - suspend_environment: Stop container to save resources (STOP with status=suspended)
+    - activate_suspended_environment: Restart suspended container (UP), sync data only
+    - rebuild_environment: Update infrastructure (DOWN + build + UP), full setup
+    - delete_environment_instance: Remove all resources (DOWN + cleanup)
+
+    Data Sync Strategy:
+    - DYNAMIC DATA (synced every UP): prompts, credentials
+    - CONTAINER SETUP (only for NEW containers): custom packages, system files
     """
 
     def __init__(self):
@@ -61,6 +75,23 @@ class EnvironmentLifecycleManager:
             )
         else:
             raise NotImplementedError(f"Environment type '{environment.type}' not implemented")
+
+    async def _container_exists(self, environment: AgentEnvironment) -> bool:
+        """
+        Check if container exists (regardless of running state).
+
+        Args:
+            environment: Environment instance
+
+        Returns:
+            True if container exists (stopped or running)
+        """
+        adapter = self.get_adapter(environment)
+        try:
+            container = adapter.get_container()
+            return container is not None
+        except Exception:
+            return False
 
     async def create_environment_instance(
         self,
@@ -163,19 +194,22 @@ class EnvironmentLifecycleManager:
             logger.error(f"Failed to create environment {environment.id}: {e}")
             raise
 
-    async def _sync_agent_data(
+    async def _sync_dynamic_data(
         self,
         db_session: Session,
         environment: AgentEnvironment,
         agent: Agent
     ):
         """
-        Sync agent data (prompts and credentials) to running environment.
+        Sync dynamic agent data to running container.
 
-        This is called after:
-        - Environment starts
-        - Environment rebuilds (if it was running)
-        - Environment restarts
+        DYNAMIC DATA (synced every time on activation/up):
+        - Agent prompts (workflow, entrypoint)
+        - Credentials files
+
+        This should be called every time container becomes running:
+        - After container starts (new or existing)
+        - After backend updates (even if container was already running)
 
         Args:
             db_session: Database session
@@ -185,7 +219,7 @@ class EnvironmentLifecycleManager:
         adapter = self.get_adapter(environment)
 
         # Set prompts in docs files
-        environment.status_message = "Configuring agent prompts..."
+        environment.status_message = "Syncing agent prompts..."
         db_session.add(environment)
         db_session.commit()
 
@@ -206,6 +240,38 @@ class EnvironmentLifecycleManager:
         )
         await adapter.set_credentials(credentials_data)
 
+    async def _setup_new_container(
+        self,
+        db_session: Session,
+        environment: AgentEnvironment,
+        agent: Agent
+    ):
+        """
+        Setup operations for NEW container only.
+
+        CONTAINER SETUP (only when container is newly created):
+        - Installing custom dependencies from workspace_requirements.txt
+        - Any other one-time setup for new containers
+
+        This should NOT be called when:
+        - Restarting an existing stopped container
+        - Container already exists and is just being started
+
+        Args:
+            db_session: Database session
+            environment: Environment instance
+            agent: Agent instance
+        """
+        adapter = self.get_adapter(environment)
+
+        # Install custom packages (only needed for new containers)
+        environment.status_message = "Installing custom packages..."
+        db_session.add(environment)
+        db_session.commit()
+
+        await adapter.install_custom_packages()
+        logger.debug(f"New container setup completed for environment {environment.id}")
+
     async def start_environment(
         self,
         db_session: Session,
@@ -213,12 +279,16 @@ class EnvironmentLifecycleManager:
         agent: Agent
     ) -> bool:
         """
-        Start environment:
-        1. Update configuration files (regenerate auth token, docker-compose.yml, .env)
-        2. Update status to 'starting'
-        3. Start container via adapter
-        4. Wait for health check
-        5. Sync agent data (prompts and credentials)
+        Start (up) environment container.
+
+        Docker terminology: 'docker-compose up' - creates and starts container
+
+        Process:
+        1. Check if container exists
+        2. Update configuration files (regenerate auth token, docker-compose.yml, .env)
+        3. Start/create container (docker up)
+        4. Setup new container if it was just created
+        5. Sync dynamic data (always)
         6. Update status to 'running'
 
         Args:
@@ -228,16 +298,24 @@ class EnvironmentLifecycleManager:
         """
         # Update status
         environment.status = "starting"
-        environment.status_message = "Updating configuration files..."
+        environment.status_message = "Checking container state..."
         db_session.add(environment)
         db_session.commit()
 
         try:
+            # Check if container exists
+            container_existed = await self._container_exists(environment)
+            logger.info(f"Starting environment {environment.id} (container_existed={container_existed})")
+
             # Get instance directory
             instance_dir = self.instances_dir / str(environment.id)
 
             # Update configuration files (generates new auth token, docker-compose.yml, .env)
             # This ensures the environment always has a fresh JWT token before starting
+            environment.status_message = "Updating configuration files..."
+            db_session.add(environment)
+            db_session.commit()
+
             self._update_environment_config(db_session, instance_dir, environment, agent)
             db_session.add(environment)  # Save updated config with new auth token
             db_session.commit()
@@ -245,15 +323,20 @@ class EnvironmentLifecycleManager:
             # Get adapter
             adapter = self.get_adapter(environment)
 
-            # Start container
+            # Start container (docker-compose up)
             environment.status_message = "Starting container..."
             db_session.add(environment)
             db_session.commit()
 
             await adapter.start()
 
-            # Sync agent data (prompts and credentials)
-            await self._sync_agent_data(db_session, environment, agent)
+            # Setup new container if it was just created
+            if not container_existed:
+                logger.info(f"Setting up new container for environment {environment.id}")
+                await self._setup_new_container(db_session, environment, agent)
+
+            # Always sync dynamic data
+            await self._sync_dynamic_data(db_session, environment, agent)
 
             # Update status
             environment.status = "running"
@@ -279,26 +362,40 @@ class EnvironmentLifecycleManager:
         db_session: Session,
         environment: AgentEnvironment
     ) -> bool:
-        """Stop environment container."""
+        """
+        Stop environment container (keeps container).
+
+        Docker terminology: 'docker-compose stop' - stops container but keeps it
+
+        The container can be quickly restarted later without rebuilding.
+
+        Args:
+            db_session: Database session
+            environment: Environment instance
+
+        Returns:
+            True if successful
+        """
         try:
+            logger.info(f"Stopping environment {environment.id}")
             adapter = self.get_adapter(environment)
             await adapter.stop()
 
             environment.status = "stopped"
+            environment.status_message = "Environment stopped"
             db_session.add(environment)
             db_session.commit()
 
-            # Release port
-            if "port" in environment.config:
-                self._allocated_ports.discard(environment.config["port"])
-
+            logger.info(f"Environment {environment.id} stopped successfully")
             return True
         except Exception as e:
             environment.status = "error"
+            environment.status_message = f"Failed to stop environment: {str(e)}"
             environment.config["last_error"] = str(e)
             flag_modified(environment, "config")
             db_session.add(environment)
             db_session.commit()
+            logger.error(f"Failed to stop environment {environment.id}: {e}")
             raise
 
     async def suspend_environment(
@@ -309,8 +406,11 @@ class EnvironmentLifecycleManager:
         """
         Suspend environment container to save resources.
 
+        Docker terminology: 'docker-compose stop' - stops container but keeps it
+
         This stops the container but keeps the status as 'suspended' instead of 'stopped',
-        indicating it can be quickly reactivated when needed.
+        indicating it will be automatically reactivated when needed.
+        The container can be quickly restarted without rebuilding.
 
         Args:
             db_session: Database session
@@ -352,8 +452,13 @@ class EnvironmentLifecycleManager:
         """
         Activate a suspended environment.
 
-        This starts the container and sets status to 'running'.
-        Similar to start_environment but optimized for suspended environments.
+        Docker terminology: 'docker-compose up' - starts existing stopped container
+
+        When a container is suspended, it exists but is stopped. We just need to:
+        1. Start the existing container (docker-compose up)
+        2. Sync dynamic data (prompts and credentials)
+
+        NO container setup needed since container already exists and was previously configured.
 
         Args:
             db_session: Database session
@@ -403,15 +508,17 @@ class EnvironmentLifecycleManager:
             # Get adapter
             adapter = self.get_adapter(environment)
 
-            # Start container
+            # Start container (docker-compose up on existing stopped container)
             environment.status_message = "Starting container..."
             db_session.add(environment)
             db_session.commit()
 
             await adapter.start()
 
-            # Sync agent data (prompts and credentials)
-            await self._sync_agent_data(db_session, environment, agent)
+            # Container already exists and was previously set up, so skip container setup
+            # Only sync dynamic data (prompts and credentials)
+            logger.info(f"Syncing dynamic data for suspended environment {environment.id}")
+            await self._sync_dynamic_data(db_session, environment, agent)
 
             # Update status
             environment.status = "running"
@@ -484,13 +591,17 @@ class EnvironmentLifecycleManager:
         """
         Rebuild environment with updated core files while preserving workspace.
 
+        Docker terminology: 'docker-compose down' + 'docker-compose build' + 'docker-compose up'
+
         This operation:
         1. Checks if container is running
-        2. Stops container if running
-        3. Updates core files from template
-        4. Rebuilds Docker image
-        5. Starts container if it was running before
-        6. Syncs agent data (prompts and credentials) if container is running
+        2. Stops container if running (docker-compose stop)
+        3. Deletes container (docker-compose down) - NEW container will be created
+        4. Updates core files from template
+        5. Rebuilds Docker image (docker-compose build)
+        6. Starts NEW container if it was running before (docker-compose up)
+        7. Setup new container (install packages, etc.)
+        8. Syncs dynamic data (prompts and credentials)
 
         Args:
             db_session: Database session
@@ -544,15 +655,20 @@ class EnvironmentLifecycleManager:
             db_session.add(environment)
             db_session.commit()
 
-            # Rebuild via adapter
+            # Rebuild via adapter (does: down, update files, build, optionally up)
             await adapter.rebuild(
                 template_core_dir=template_core_dir,
                 was_running=was_running
             )
 
-            # Sync agent data if environment is now running
+            # If container was restarted, setup new container and sync data
             if was_running:
-                await self._sync_agent_data(db_session, environment, agent)
+                # Setup new container (install packages, etc.)
+                logger.info(f"Setting up new container after rebuild for environment {environment.id}")
+                await self._setup_new_container(db_session, environment, agent)
+
+                # Sync dynamic data
+                await self._sync_dynamic_data(db_session, environment, agent)
 
                 environment.status = "running"
                 environment.status_message = "Environment rebuilt and restarted"
@@ -626,12 +742,22 @@ class EnvironmentLifecycleManager:
         environment: AgentEnvironment
     ) -> bool:
         """
-        Delete environment instance:
-        1. Delete container, volumes, and networks via adapter
-        2. Remove instance directory
-        3. Release port
+        Delete environment instance completely.
+
+        Docker terminology: 'docker-compose down' - removes container, volumes, networks
+
+        Process:
+        1. Delete container and all associated resources (docker-compose down -v)
+        2. Remove instance directory from filesystem
+        3. Release port allocation
+
+        Args:
+            environment: Environment instance
+
+        Returns:
+            True if deletion successful
         """
-        # Delete container and all associated resources
+        # Delete container and all associated resources (docker-compose down -v)
         try:
             adapter = self.get_adapter(environment)
             await adapter.delete()

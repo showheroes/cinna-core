@@ -231,6 +231,33 @@ workspace/knowledge/
 
 ## Operations
 
+### Docker Terminology
+
+The environment lifecycle uses standard Docker operations:
+
+- **UP** (`docker-compose up`) - Creates and starts container
+  - If container doesn't exist: creates new container from image
+  - If container exists but stopped: starts existing container
+- **STOP** (`docker-compose stop`) - Stops container but keeps it
+  - Container still exists and can be restarted quickly
+  - All data and configuration preserved
+- **DOWN** (`docker-compose down`) - Removes container completely
+  - Container deleted, new container will be created on next UP
+  - Volumes preserved (workspace data not lost)
+
+### Data Sync Strategy
+
+**Dynamic Data** (synced on every container start):
+- Agent prompts (workflow_prompt, entrypoint_prompt)
+- Credentials files
+- Applied when: Container starts (new or existing), backend updates agent config
+
+**Container Setup** (only for NEW containers):
+- Installing custom Python packages from `workspace_requirements.txt`
+- One-time container initialization
+- Applied when: New container created (first start or after rebuild)
+- NOT applied when: Restarting existing stopped/suspended container
+
 ### Environment Creation
 
 **Entry Point**: `backend/app/services/environment_lifecycle.py::create_environment_instance()`
@@ -251,15 +278,27 @@ workspace/knowledge/
 
 **Entry Point**: `backend/app/services/environment_lifecycle.py::start_environment()`
 
+**Docker Operation**: `UP` (docker-compose up) - creates or starts container
+
 **Process**:
-1. Run `docker-compose up -d`
-2. Mount volumes:
+1. Check if container exists (using `_container_exists()` helper)
+2. Update configuration files (regenerate auth token, docker-compose.yml, .env)
+3. Run `docker-compose up -d`:
+   - If container doesn't exist: creates new container from image
+   - If container exists but stopped: starts existing container
+4. Mount volumes:
    - `{instance_dir}/app/core:/app/core` (read-only in practice)
    - `{instance_dir}/app/workspace:/app/workspace` (read-write)
-3. Wait for health check at `/health` endpoint
-4. **Install workspace dependencies** from `workspace_requirements.txt` (if exists)
-5. Sync prompts to `workspace/docs/` via `DockerEnvironmentAdapter.set_agent_prompts()`
-6. Update database status to `running`
+5. Wait for health check at `/health` endpoint
+6. **If container is NEW** (didn't exist before):
+   - Install workspace dependencies from `workspace_requirements.txt` via `_setup_new_container()`
+   - One-time container initialization
+7. **Always** sync dynamic data via `_sync_dynamic_data()`:
+   - Sync prompts to `workspace/docs/` via `DockerEnvironmentAdapter.set_agent_prompts()`
+   - Sync credentials via `DockerEnvironmentAdapter.set_credentials()`
+8. Update database status to `running`
+
+**Optimization**: Restarting an existing stopped container skips package installation (step 6), making restarts much faster.
 
 **Note**: Core files are both baked into image AND volume-mounted for easier development. Production could use image-only.
 
@@ -267,11 +306,16 @@ workspace/knowledge/
 
 **Entry Point**: `backend/app/services/environment_lifecycle.py::rebuild_environment()`
 
+**Docker Operation**: `DOWN` → build → `UP` - removes old container, creates new one
+
 **Purpose**: Update core system files and knowledge base from template while preserving workspace data
 
 **Process**:
-1. Check if environment is running → stop if needed (`docker-compose stop`)
-2. Remove old container via `docker-compose down` (keeps volumes)
+1. Check if environment is running → stop if needed (`STOP` - docker-compose stop)
+2. **Remove old container** via `docker-compose down` (`DOWN` operation):
+   - Old container completely deleted
+   - Volumes kept (workspace data preserved)
+   - New container will be created from new image
 3. Delete old core directory: `{instance_dir}/app/core`
 4. Copy fresh core from template: `{template_dir}/app/core` → `{instance_dir}/app/core`
 5. Update knowledge files from template: `{template_dir}/app/workspace/knowledge` → `{instance_dir}/app/workspace/knowledge`
@@ -281,8 +325,13 @@ workspace/knowledge/
 6. Rebuild Docker image via `DockerEnvironmentAdapter.rebuild()`
    - Runs `docker-compose build` (uses cache for speed)
    - New core files baked into image
-7. Start container if it was running before (`docker-compose up -d` creates new container from new image)
+7. **If was running**: Start NEW container (`UP` - docker-compose up -d):
+   - Creates completely new container from new image
+   - Run full container setup via `_setup_new_container()` (install packages)
+   - Sync dynamic data via `_sync_dynamic_data()` (prompts, credentials)
 8. Update status to `running` or `stopped`
+
+**Key Point**: Rebuild creates a NEW container (not restarting old one), so full container setup is required.
 
 **Preserved**:
 - All workspace data (scripts, files, docs, credentials, databases, logs)
@@ -309,7 +358,13 @@ workspace/knowledge/
 - `backend/app/services/environment_lifecycle.py::suspend_environment()`
 - `backend/app/services/environment_lifecycle.py::activate_suspended_environment()`
 
+**Docker Operations**:
+- Suspension: `STOP` (docker-compose stop) - keeps container
+- Activation: `UP` (docker-compose up) - starts existing container
+
 **Purpose**: Gracefully manage resource usage by suspending inactive environments and reactivating them on-demand
+
+**Key Optimization**: Suspended containers are STOPPED (not removed), so activation is fast and skips package installation.
 
 #### Automatic Suspension
 
@@ -325,11 +380,12 @@ workspace/knowledge/
    - Environment is not the active one for its agent
 
 **Process**:
-1. Stop Docker container via `DockerEnvironmentAdapter.stop()` → `docker-compose stop`
-2. Container is stopped but not removed (suspended state, not destroyed)
-3. Set status to `suspended` (instead of `stopped`)
-4. Set status message: "Environment suspended due to inactivity"
-5. Emit `ENVIRONMENT_SUSPENDED` WebSocket event to user
+1. Stop Docker container via `DockerEnvironmentAdapter.stop()` → `docker-compose stop` (`STOP` operation)
+2. Container is stopped but NOT removed (suspended state, not destroyed)
+3. Container and all its configuration preserved (fast reactivation)
+4. Set status to `suspended` (instead of `stopped`)
+5. Set status message: "Environment suspended due to inactivity"
+6. Emit `ENVIRONMENT_SUSPENDED` WebSocket event to user
 
 **Activity Tracking**:
 - `last_activity_at` updated when:
@@ -381,13 +437,22 @@ The environment will automatically reactivate when you send a message or open a 
 1. Emit `ENVIRONMENT_ACTIVATING` WebSocket event
 2. Set status to `activating`, status_message: "Activating environment..."
 3. Update configuration files (regenerate auth token, docker-compose.yml, .env)
-4. Start Docker container via `DockerEnvironmentAdapter.start()` → `docker-compose up -d`
-5. Existing container starts (no rebuild needed, fast activation)
+4. Start Docker container via `DockerEnvironmentAdapter.start()` → `docker-compose up -d` (`UP` operation)
+5. Existing stopped container starts (no rebuild, no new container created)
 6. Wait for health check (up to 120 seconds)
-7. Sync agent data (prompts, credentials)
-8. Set status to `running`, status_message: "Environment activated"
-9. Update `last_activity_at` to current time
-10. Emit `ENVIRONMENT_ACTIVATED` WebSocket event
+7. **Skip container setup** (packages already installed in existing container)
+8. **Only sync dynamic data** via `_sync_dynamic_data()`:
+   - Sync prompts to `workspace/docs/`
+   - Sync credentials files
+9. Set status to `running`, status_message: "Environment activated"
+10. Update `last_activity_at` to current time
+11. Emit `ENVIRONMENT_ACTIVATED` WebSocket event
+
+**Performance Optimization**:
+- Container already exists with packages installed
+- No package installation step (unlike new container or rebuild)
+- Only syncs dynamic data (prompts and credentials)
+- Typical activation time: < 10 seconds
 
 **Error Handling**:
 - On failure: Set status to `error`, emit `ENVIRONMENT_ACTIVATION_FAILED` event
@@ -448,12 +513,14 @@ The environment will automatically reactivate when you send a message or open a 
 
 1. **Resource Efficiency**: Inactive environments don't consume CPU/memory
 2. **Seamless UX**: Users don't manage suspension manually (mostly automatic)
-3. **Fast Reactivation**: Typically < 10 seconds (existing container starts, no rebuild)
+3. **Fast Reactivation**: Typically < 10 seconds (existing container starts, no package installation)
 4. **Real-time Feedback**: WebSocket events provide instant status updates
 5. **No Data Loss**: Workspace data fully preserved during suspension
 6. **Cost Savings**: Reduces infrastructure costs for inactive users
 7. **Intelligent Scheduling**: Doesn't suspend if user is online with active environment
-8. **Container Preservation**: Suspended containers kept intact (`stop` not `down`), rebuild creates new containers from new images
+8. **Container Preservation**: Suspended containers use `STOP` not `DOWN` - container kept intact with all packages installed
+9. **Optimized Performance**: Activation only syncs dynamic data, skips container setup
+10. **Clear Operations**: Uses standard Docker terminology (UP/STOP/DOWN) for predictable behavior
 
 ## Docker Configuration
 
@@ -529,16 +596,31 @@ The environment will automatically reactivate when you send a message or open a 
 
 **Environment Lifecycle Manager**:
 - `backend/app/services/environment_lifecycle.py`
-- Methods: `create_environment_instance()`, `start_environment()`, `stop_environment()`, `suspend_environment()`, `activate_suspended_environment()`, `rebuild_environment()`
+- Public Methods:
+  - `create_environment_instance()` - Copy template, build image
+  - `start_environment()` - UP operation, smart container setup
+  - `stop_environment()` - STOP operation, keep container
+  - `suspend_environment()` - STOP operation with suspended status
+  - `activate_suspended_environment()` - UP operation, optimized for existing containers
+  - `rebuild_environment()` - DOWN → build → UP, full setup
+  - `delete_environment_instance()` - DOWN operation with cleanup
+- Helper Methods:
+  - `_container_exists()` - Check if container exists (stopped or running)
+  - `_sync_dynamic_data()` - Sync prompts and credentials (always needed)
+  - `_setup_new_container()` - Install packages and one-time setup (only for new containers)
 
 **Docker Adapter**:
 - `backend/app/services/adapters/docker_adapter.py`
 - Methods:
-  - `initialize()` - Build Docker image
-  - `start()` - Start container (`docker-compose up -d`)
-  - `stop()` - Stop container without removing (`docker-compose stop`)
-  - `rebuild()` - Remove old container (`docker-compose down`), rebuild image, create new container
-  - `delete()` - Remove container and volumes (`docker-compose down -v --remove-orphans`)
+  - `initialize()` - Build Docker image (docker-compose build)
+  - `start()` - UP operation (docker-compose up -d), wait for health check
+  - `stop()` - STOP operation (docker-compose stop)
+  - `rebuild()` - DOWN + build + optional UP (docker-compose down, build, up)
+  - `delete()` - DOWN operation with volumes (docker-compose down -v --remove-orphans)
+  - `install_custom_packages()` - Install workspace dependencies (called by lifecycle manager)
+  - `set_agent_prompts()` - Sync prompts via HTTP API
+  - `set_credentials()` - Sync credentials via HTTP API
+  - `get_container()` - Get Docker container object (for existence check)
 
 **Base Adapter Interface**:
 - `backend/app/services/adapters/base.py::EnvironmentAdapter.rebuild()`
@@ -573,3 +655,7 @@ The environment will automatically reactivate when you send a message or open a 
 10. **Seamless Reactivation**: Fast activation (< 10 seconds) with real-time WebSocket feedback
 11. **Cost Optimization**: Reduces infrastructure costs by suspending idle resources
 12. **Smart Scheduling**: Intelligent suspension logic prevents disrupting active users
+13. **Optimized Container Lifecycle**: Suspended containers skip package installation on reactivation (only sync dynamic data)
+14. **Clear Docker Operations**: Uses standard UP/STOP/DOWN terminology for predictable, maintainable behavior
+15. **Intelligent Setup**: Automatically detects new vs existing containers and applies appropriate setup steps
+16. **Separation of Concerns**: Dynamic data (prompts, credentials) synced separately from container setup (packages)

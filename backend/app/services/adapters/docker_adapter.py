@@ -86,7 +86,12 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
         return True
 
     async def start(self) -> bool:
-        """Start environment using docker-compose up."""
+        """
+        Start environment using docker-compose up.
+
+        This only starts the container and waits for health check.
+        Package installation and other setup should be handled by the lifecycle manager.
+        """
         logger.info(f"Starting container {self.container_name} (env_id={self.env_id})")
         await self._run_compose_command(["up", "-d"])
         logger.info(f"Container {self.container_name} started, waiting for health check")
@@ -104,10 +109,6 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
 
                 if health.status == "healthy":
                     logger.info(f"Container {self.container_name} is healthy after {waited}s")
-
-                    # Install custom packages after container is healthy
-                    await self.install_custom_packages()
-
                     return True
                 else:
                     logger.debug(f"Container {self.container_name} not yet healthy: {health.message}")
