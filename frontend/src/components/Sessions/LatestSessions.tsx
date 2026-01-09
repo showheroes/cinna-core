@@ -46,11 +46,6 @@ export function LatestSessions({ limit = 8 }: LatestSessionsProps) {
 
   return (
     <div className="w-full">
-      <div className="flex items-center gap-2 mb-2 px-1">
-        <MessageSquare className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-muted-foreground">Recent Conversations</h2>
-      </div>
-
       <div className="space-y-0.5">
         {sessions.map((session: SessionPublicExtended) => {
           const colorPreset = getColorPreset(session.agent_ui_color_preset)
