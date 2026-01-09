@@ -2,9 +2,11 @@ from uuid import UUID
 from datetime import datetime
 import logging
 import asyncio
+from typing import Any
 from sqlmodel import Session as DBSession, select
 from sqlalchemy.orm.attributes import flag_modified
 from app.models import Session, SessionCreate, SessionUpdate, Agent, AgentEnvironment
+from app.core.db import engine
 
 logger = logging.getLogger(__name__)
 
@@ -300,3 +302,167 @@ class SessionService:
                 logger.info(f"Set fallback session title after error: {fallback_title}")
             except Exception as fallback_error:
                 logger.error(f"Failed to set fallback title: {fallback_error}", exc_info=True)
+
+    # Event handlers for event bus integration
+    # These handlers react to streaming events and update session status accordingly
+
+    @staticmethod
+    async def handle_stream_started(event_data: dict[str, Any]) -> None:
+        """
+        React to STREAM_STARTED events and update session status.
+
+        When streaming starts:
+        - Set interaction_status to "running"
+        - Set status to "active"
+
+        Args:
+            event_data: Full event dict with type, model_id, meta, user_id, timestamp
+        """
+        try:
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+
+            if not session_id:
+                logger.error(f"Invalid STREAM_STARTED event: missing session_id: {meta}")
+                return
+
+            # Use fresh database session to avoid conflicts
+            with DBSession(engine) as db:
+                session = db.get(Session, UUID(session_id))
+                if not session:
+                    logger.warning(f"Session {session_id} not found for STREAM_STARTED event")
+                    return
+
+                session.interaction_status = "running"
+                session.status = "active"
+                session.updated_at = datetime.utcnow()
+
+                db.add(session)
+                db.commit()
+
+                logger.info(f"Session {session_id} status updated to 'active' with interaction_status 'running' (STREAM_STARTED)")
+
+        except Exception as e:
+            logger.error(f"Error handling STREAM_STARTED event: {e}", exc_info=True)
+
+    @staticmethod
+    async def handle_stream_completed(event_data: dict[str, Any]) -> None:
+        """
+        React to STREAM_COMPLETED events and update session status.
+
+        When streaming completes:
+        - Clear interaction_status (set to empty string)
+        - Set status based on interruption:
+          - If interrupted: "active" (user can continue)
+          - If not interrupted: "completed"
+
+        Args:
+            event_data: Full event dict with type, model_id, meta, user_id, timestamp
+        """
+        try:
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+            was_interrupted = meta.get("was_interrupted", False)
+
+            if not session_id:
+                logger.error(f"Invalid STREAM_COMPLETED event: missing session_id: {meta}")
+                return
+
+            # Use fresh database session to avoid conflicts
+            with DBSession(engine) as db:
+                session = db.get(Session, UUID(session_id))
+                if not session:
+                    logger.warning(f"Session {session_id} not found for STREAM_COMPLETED event")
+                    return
+
+                session.interaction_status = ""
+                session.status = "active" if was_interrupted else "completed"
+                session.updated_at = datetime.utcnow()
+
+                db.add(session)
+                db.commit()
+
+                status_msg = f"'active' (interrupted)" if was_interrupted else "'completed'"
+                logger.info(f"Session {session_id} status updated to {status_msg} with interaction_status cleared (STREAM_COMPLETED)")
+
+        except Exception as e:
+            logger.error(f"Error handling STREAM_COMPLETED event: {e}", exc_info=True)
+
+    @staticmethod
+    async def handle_stream_error(event_data: dict[str, Any]) -> None:
+        """
+        React to STREAM_ERROR events and update session status.
+
+        When streaming encounters an error:
+        - Clear interaction_status
+        - Set status to "error"
+
+        Args:
+            event_data: Full event dict with type, model_id, meta, user_id, timestamp
+        """
+        try:
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+            error_type = meta.get("error_type", "Unknown")
+
+            if not session_id:
+                logger.error(f"Invalid STREAM_ERROR event: missing session_id: {meta}")
+                return
+
+            # Use fresh database session to avoid conflicts
+            with DBSession(engine) as db:
+                session = db.get(Session, UUID(session_id))
+                if not session:
+                    logger.warning(f"Session {session_id} not found for STREAM_ERROR event")
+                    return
+
+                session.interaction_status = ""
+                session.status = "error"
+                session.updated_at = datetime.utcnow()
+
+                db.add(session)
+                db.commit()
+
+                logger.info(f"Session {session_id} status updated to 'error' (STREAM_ERROR: {error_type})")
+
+        except Exception as e:
+            logger.error(f"Error handling STREAM_ERROR event: {e}", exc_info=True)
+
+    @staticmethod
+    async def handle_stream_interrupted(event_data: dict[str, Any]) -> None:
+        """
+        React to STREAM_INTERRUPTED events and update session status.
+
+        When streaming is interrupted:
+        - Clear interaction_status
+        - Set status to "active" (user can continue)
+
+        Args:
+            event_data: Full event dict with type, model_id, meta, user_id, timestamp
+        """
+        try:
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+
+            if not session_id:
+                logger.error(f"Invalid STREAM_INTERRUPTED event: missing session_id: {meta}")
+                return
+
+            # Use fresh database session to avoid conflicts
+            with DBSession(engine) as db:
+                session = db.get(Session, UUID(session_id))
+                if not session:
+                    logger.warning(f"Session {session_id} not found for STREAM_INTERRUPTED event")
+                    return
+
+                session.interaction_status = ""
+                session.status = "active"
+                session.updated_at = datetime.utcnow()
+
+                db.add(session)
+                db.commit()
+
+                logger.info(f"Session {session_id} status updated to 'active' with interaction_status cleared (STREAM_INTERRUPTED)")
+
+        except Exception as e:
+            logger.error(f"Error handling STREAM_INTERRUPTED event: {e}", exc_info=True)

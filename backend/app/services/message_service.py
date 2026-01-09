@@ -479,18 +479,6 @@ class MessageService:
             external_session_id=external_session_id
         )
 
-        # Set interaction_status to 'running'
-        def _set_running_status():
-            with get_fresh_db_session() as db:
-                from app.services.session_service import SessionService
-                from app.models import SessionUpdate
-                SessionService.update_session(
-                    db_session=db,
-                    session_id=session_id,
-                    data=SessionUpdate(interaction_status="running")
-                )
-        await asyncio.to_thread(_set_running_status)
-
         # Get user_id for event emission
         def _get_user_id():
             with get_fresh_db_session() as db:
@@ -587,24 +575,7 @@ class MessageService:
                                         session=chat_session_db,
                                         external_session_id=None
                                     )
-                                # Also update session status to "idle"
-                                SessionService.update_session_status(
-                                    db_session=db,
-                                    session_id=session_id,
-                                    status="idle"
-                                )
                         await asyncio.to_thread(_clear_corrupted_session)
-                    else:
-                        # Update session status to "idle" (not "error" - we're showing error in chat)
-                        def _update_idle_status():
-                            with get_fresh_db_session() as db:
-                                from app.services.session_service import SessionService
-                                SessionService.update_session_status(
-                                    db_session=db,
-                                    session_id=session_id,
-                                    status="idle"
-                                )
-                        await asyncio.to_thread(_update_idle_status)
 
                     # Save error as a system message in the chat
                     def _save_error_message():
@@ -809,33 +780,10 @@ class MessageService:
                 await asyncio.to_thread(_save_or_update_agent_message)
                 logger.info(f"Agent response finalized ({len(streaming_events)} events, model={response_metadata.get('model')}, has_questions={has_questions}, interrupted={was_interrupted})")
 
-            # Update session status after streaming
-            # Keep as "active" when interrupted so user can continue
-            # Mark as "completed" only when finished normally
-            if was_interrupted:
-                def _update_active_status():
-                    with get_fresh_db_session() as db:
-                        from app.services.session_service import SessionService
-                        SessionService.update_session_status(
-                            db_session=db,
-                            session_id=session_id,
-                            status="active"
-                        )
-                await asyncio.to_thread(_update_active_status)
-                logger.info("Session kept as 'active' after interruption")
-            else:
-                def _update_completed_status():
-                    with get_fresh_db_session() as db:
-                        from app.services.session_service import SessionService
-                        SessionService.update_session_status(
-                            db_session=db,
-                            session_id=session_id,
-                            status="completed"
-                        )
-                await asyncio.to_thread(_update_completed_status)
-
-                # Emit stream_completed event for event-driven post-processing
-                # This allows services (like EnvironmentService) to react to stream completion
+            # Emit stream_completed event for event-driven post-processing
+            # This allows services (like EnvironmentService and SessionService) to react to stream completion
+            # SessionService will update session status based on was_interrupted flag
+            if not was_interrupted:
                 try:
                     from app.models.event import EventType
 
@@ -880,18 +828,8 @@ class MessageService:
         except Exception as e:
             logger.error(f"Error in message stream: {e}", exc_info=True)
 
-            # Update session status to "error" when streaming fails (non-blocking)
-            def _update_error_status():
-                with get_fresh_db_session() as db:
-                    from app.services.session_service import SessionService
-                    SessionService.update_session_status(
-                        db_session=db,
-                        session_id=session_id,
-                        status="error"
-                    )
-            await asyncio.to_thread(_update_error_status)
-
             # Emit STREAM_ERROR event for activity tracking
+            # SessionService will update session status to "error" via event handler
             try:
                 from app.services.event_service import event_service as evt_service
                 from app.models.event import EventType
@@ -917,19 +855,8 @@ class MessageService:
                 "error_type": type(e).__name__
             }
         finally:
-            # Clear interaction_status
-            def _clear_running_status():
-                with get_fresh_db_session() as db:
-                    from app.services.session_service import SessionService
-                    from app.models import SessionUpdate
-                    SessionService.update_session(
-                        db_session=db,
-                        session_id=session_id,
-                        data=SessionUpdate(interaction_status="")
-                    )
-            await asyncio.to_thread(_clear_running_status)
-
             # Always unregister stream when done (success, error, or interruption)
+            # Note: SessionService handles interaction_status updates via event handlers
             await active_streaming_manager.unregister_stream(session_id)
             logger.info(f"Stream unregistered for session {session_id}")
 
@@ -1052,14 +979,8 @@ class MessageService:
                     )
                 )
 
-            # Set session status to "active" before streaming starts
-            SessionService.update_session_status(
-                db_session=db_session,
-                session_id=session_id,
-                status="active"
-            )
-
             # Get environment details
+            # Note: Session status will be updated by SessionService via STREAM_STARTED event
             base_url = MessageService.get_environment_url(environment)
             auth_headers = MessageService.get_auth_headers(environment)
             session_mode = chat_session.mode

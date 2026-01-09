@@ -74,6 +74,7 @@ def on_startup():
     from app.models.event import EventType
     from app.services.environment_service import EnvironmentService
     from app.services.activity_service import ActivityService
+    from app.services.session_service import SessionService
 
     # Environment service handlers
     event_service.register_handler(
@@ -99,7 +100,26 @@ def on_startup():
         handler=ActivityService.handle_stream_interrupted
     )
 
-    logger.info("Registered backend event handlers (EnvironmentService, ActivityService)")
+    # Session service handlers for session status management
+    # These handlers update session status based on streaming events
+    event_service.register_handler(
+        event_type=EventType.STREAM_STARTED,
+        handler=SessionService.handle_stream_started
+    )
+    event_service.register_handler(
+        event_type=EventType.STREAM_COMPLETED,
+        handler=SessionService.handle_stream_completed
+    )
+    event_service.register_handler(
+        event_type=EventType.STREAM_ERROR,
+        handler=SessionService.handle_stream_error
+    )
+    event_service.register_handler(
+        event_type=EventType.STREAM_INTERRUPTED,
+        handler=SessionService.handle_stream_interrupted
+    )
+
+    logger.info("Registered backend event handlers (EnvironmentService, ActivityService, SessionService)")
 
     logger.info("Application startup complete")
 
