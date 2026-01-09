@@ -267,8 +267,11 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 **Business Logic**: `AgentService.execute_handover()` in `backend/app/services/agent_service.py`
 - Async method that validates target agent and permissions
 - Creates new conversation session using `SessionService.create_session()`
-- Launches background task to process handover message using `MessageService.handle_stream_message()`
-- Background task runs independently, similar to frontend message processing flow
+- Creates user message with handover content using `MessageService.create_message()`
+- Initiates streaming using `SessionService.initiate_stream()` which handles:
+  - Checking environment status
+  - Starting background processing if environment is ready
+  - Marking session as pending_stream if environment is not ready
 - Message is saved and processed by target agent without blocking handover response
 - Logs system message in source session with metadata (forwarded_to_session_id, target_agent_id, target_agent_name)
 - Returns success status and new session ID immediately while processing continues in background

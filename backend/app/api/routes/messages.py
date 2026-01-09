@@ -58,67 +58,32 @@ async def send_message_stream(
     """
     Send message to agent environment and stream response via WebSocket.
 
-    This endpoint:
+    This endpoint delegates to SessionService.send_session_message() which:
     1. Validates session ownership
-    2. Handles file attachments (if present) via MessageService
+    2. Handles file attachments (if present)
     3. Creates user message with sent_to_agent_status='pending'
-    4. Delegates to SessionService to initiate streaming
-    5. Returns immediately with status
+    4. Initiates streaming
 
     Streaming events are emitted via WebSocket to room: session_{session_id}_stream
     Frontend should subscribe to this room before calling this endpoint.
     """
-    # Verify session exists and user owns it
-    chat_session = session.get(Session, session_id)
-    if not chat_session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if not current_user.is_superuser and (chat_session.user_id != current_user.id):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
-
-    # Handle file attachments if present
-    has_files = bool(message_in.file_ids)
-
-    if has_files:
-        # Prepare user message with files using service layer
-        # This creates the message with sent_to_agent_status='pending' by default
-        try:
-            user_message, message_content_for_agent = await MessageService.prepare_user_message_with_files(
-                session=session,
-                session_id=session_id,
-                message_content=message_in.content,
-                file_ids=message_in.file_ids,
-                environment_id=chat_session.environment_id,
-                user_id=current_user.id,
-                answers_to_message_id=message_in.answers_to_message_id
-            )
-            logger.info(f"Prepared message with {len(message_in.file_ids)} files for session {session_id}")
-        except HTTPException:
-            raise  # Re-raise HTTP exceptions from service
-        except Exception as e:
-            logger.error(f"Failed to prepare message with files: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to prepare message with files: {str(e)}")
-    else:
-        # Create user message without files
-        # sent_to_agent_status='pending' by default
-        user_message = MessageService.create_message(
-            session=session,
-            session_id=session_id,
-            role="user",
-            content=message_in.content,
-            answers_to_message_id=message_in.answers_to_message_id
-        )
-        logger.info(f"Created user message for session {session_id}")
-
-    # Delegate to SessionService to decide when to stream
     from app.services.session_service import SessionService
 
-    result = await SessionService.initiate_stream(
+    # Send message using centralized service method
+    result = await SessionService.send_session_message(
         session_id=session_id,
+        user_id=current_user.id,
+        content=message_in.content,
+        file_ids=message_in.file_ids,
+        answers_to_message_id=message_in.answers_to_message_id,
         get_fresh_db_session=lambda: DBSession(engine)
     )
 
-    # Build response based on result
+    # Handle error results
+    if result["action"] == "error":
+        raise HTTPException(status_code=500, detail=result["message"])
+
+    # Build response
     response = {
         "status": "ok",
         "session_id": str(session_id),
@@ -131,13 +96,12 @@ async def send_message_stream(
     elif result["action"] == "pending":
         response["message"] = result["message"]
         response["pending"] = True
-    elif result["action"] == "error":
-        raise HTTPException(status_code=500, detail=result["message"])
     else:
         response["message"] = result.get("message", "Message received")
 
-    if has_files:
-        response["files_attached"] = len(message_in.file_ids)
+    # Add files info if present
+    if result.get("files_attached"):
+        response["files_attached"] = result["files_attached"]
 
     return response
 

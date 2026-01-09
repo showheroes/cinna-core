@@ -486,6 +486,111 @@ class SessionService:
                 logger.error(f"Failed to set fallback title: {fallback_error}", exc_info=True)
 
     @staticmethod
+    async def send_session_message(
+        session_id: UUID,
+        user_id: UUID,
+        content: str,
+        file_ids: list[UUID] | None = None,
+        answers_to_message_id: UUID | None = None,
+        get_fresh_db_session: callable = None
+    ) -> dict[str, Any]:
+        """
+        Send a message to a session and initiate streaming.
+
+        This method encapsulates the full flow of sending a message:
+        1. Validates session ownership and existence
+        2. Handles file attachments if present
+        3. Creates user message with sent_to_agent_status='pending'
+        4. Delegates to initiate_stream() for processing
+
+        This is the centralized entry point for sending messages to sessions,
+        used by both API endpoints and internal services (like handover).
+
+        Args:
+            session_id: Session UUID
+            user_id: User ID (for ownership validation)
+            content: Message content
+            file_ids: Optional list of file IDs to attach
+            answers_to_message_id: Optional message ID being answered
+            get_fresh_db_session: Callable that returns a fresh DB session (context manager)
+                                 If None, uses default engine session
+
+        Returns:
+            dict with status information:
+            {
+                "action": "streaming" | "pending" | "no_pending_messages" | "error",
+                "message": str,
+                "pending_count": int,
+                "files_attached": int (if files present)
+            }
+        """
+        # Default get_fresh_db_session if not provided
+        if get_fresh_db_session is None:
+            get_fresh_db_session = lambda: DBSession(engine)
+
+        with get_fresh_db_session() as db:
+            from app.models import Session as ChatSession, AgentEnvironment
+            from app.services.message_service import MessageService
+
+            # Get session
+            chat_session = db.get(ChatSession, session_id)
+            if not chat_session:
+                return {"action": "error", "message": "Session not found"}
+
+            # Validate ownership
+            if chat_session.user_id != user_id:
+                return {"action": "error", "message": "Not enough permissions"}
+
+            # Get environment
+            environment = db.get(AgentEnvironment, chat_session.environment_id)
+            if not environment:
+                return {"action": "error", "message": "Environment not found"}
+
+            # Handle file attachments if present
+            has_files = bool(file_ids)
+
+            if has_files:
+                try:
+                    # Prepare user message with files
+                    user_message, message_content_for_agent = await MessageService.prepare_user_message_with_files(
+                        session=db,
+                        session_id=session_id,
+                        message_content=content,
+                        file_ids=file_ids,
+                        environment_id=chat_session.environment_id,
+                        user_id=user_id,
+                        answers_to_message_id=answers_to_message_id
+                    )
+                    logger.info(f"Prepared message with {len(file_ids)} files for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to prepare message with files: {e}", exc_info=True)
+                    return {"action": "error", "message": f"Failed to prepare message with files: {str(e)}"}
+            else:
+                # Create user message without files
+                user_message = MessageService.create_message(
+                    session=db,
+                    session_id=session_id,
+                    role="user",
+                    content=content,
+                    answers_to_message_id=answers_to_message_id
+                )
+                logger.info(f"Created user message for session {session_id}")
+
+        # Delegate to initiate_stream to decide when to stream
+        # Note: We exit the DB session context before calling initiate_stream
+        # because it will create its own fresh sessions
+        result = await SessionService.initiate_stream(
+            session_id=session_id,
+            get_fresh_db_session=get_fresh_db_session
+        )
+
+        # Add files info to result if files were attached
+        if has_files:
+            result["files_attached"] = len(file_ids)
+
+        return result
+
+    @staticmethod
     async def initiate_stream(
         session_id: UUID,
         get_fresh_db_session: callable

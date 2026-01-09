@@ -407,15 +407,15 @@ class AgentService:
             # Get target agent
             target_agent = session.get(Agent, target_agent_id)
             if not target_agent:
-                return (False, None, "Target agent not found")
+                return False, None, "Target agent not found"
 
             # Check permissions
             if target_agent.owner_id != user_id:
-                return (False, None, "Not enough permissions to access target agent")
+                return False, None, "Not enough permissions to access target agent"
 
             # Verify target agent has active environment
             if not target_agent.active_environment_id:
-                return (False, None, "Target agent has no active environment")
+                return False, None, "Target agent has no active environment"
 
             # Create session for target agent (conversation mode by default)
             session_create = SessionCreate(
@@ -432,49 +432,25 @@ class AgentService:
             )
 
             if not new_session:
-                return (False, None, "Failed to create session for target agent")
+                return False, None, "Failed to create session for target agent"
 
-            # Trigger background processing of the handover message
-            # This initiates the agent processing in the background, similar to when frontend sends a message
-            # Note: handle_stream_message will save the user message, so we don't need to create it explicitly
-            async def process_handover_message():
-                """Background task to process the handover message with the target agent."""
-                db_session = None
-                try:
-                    logger.info(f"Starting background processing for handover message in session {new_session.id}")
+            # Send handover message using centralized service method
+            # This handles message creation and stream initiation
+            result = await SessionService.send_session_message(
+                session_id=new_session.id,
+                user_id=user_id,
+                content=handover_message,
+                file_ids=None,
+                answers_to_message_id=None,
+                get_fresh_db_session=lambda: Session(engine)
+            )
 
-                    # Create a database session for initial operations
-                    # handle_stream_message uses this for quick lookups, then delegates to
-                    # stream_message_with_events which uses get_fresh_db_session for long-running operations
-                    db_session = Session(engine)
+            # Log the result for debugging
+            if result["action"] == "error":
+                logger.error(f"Failed to send handover message: {result['message']}")
+                return False, None, f"Failed to send handover message: {result['message']}"
 
-                    # Use handle_stream_message to initiate full message processing
-                    # We consume the stream but don't send events anywhere (no frontend connection)
-                    stream = MessageService.handle_stream_message(
-                        session_id=new_session.id,
-                        message_content=handover_message,
-                        answers_to_message_id=None,
-                        db_session=db_session,
-                        get_fresh_db_session=lambda: Session(engine)
-                    )
-
-                    # Consume the stream to completion (events are discarded since no frontend)
-                    async for _ in stream:
-                        pass  # Events are processed internally, we just need to consume the iterator
-
-                    logger.info(f"Completed background processing for handover message in session {new_session.id}")
-
-                except Exception as e:
-                    logger.error(f"Error in background handover message processing: {str(e)}", exc_info=True)
-                finally:
-                    # Clean up database session
-                    if db_session:
-                        db_session.close()
-
-            # Start the background task without awaiting (fire-and-forget)
-            asyncio.create_task(process_handover_message())
-
-            logger.info(f"Initiated background processing for handover message in session {new_session.id}")
+            logger.info(f"Handover message sent to session {new_session.id}, action: {result['action']}")
 
             # Log system message in source session about the handover
             source_session = session.get(ChatSession, source_session_id)
@@ -497,8 +473,8 @@ class AgentService:
                 f"source session: {source_session_id}"
             )
 
-            return (True, new_session.id, None)
+            return True, new_session.id, None
 
         except Exception as e:
             logger.error(f"Error executing handover: {str(e)}")
-            return (False, None, str(e))
+            return False, None, str(e)
