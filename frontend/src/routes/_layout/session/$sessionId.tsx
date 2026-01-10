@@ -337,7 +337,7 @@ function ChatInterface() {
           onSendAnswer={handleSendAnswer}
           conversationModeUi={session.mode === "building" ? "detailed" : (agent?.conversation_mode_ui || "detailed")}
         />
-        <EnvironmentPanel isOpen={envPanelOpen} environmentId={session?.environment_id} />
+        <EnvironmentPanel isOpen={envPanelOpen} environmentId={session?.environment_id} agentId={session?.agent_id ?? undefined} />
       </div>
       <MessageInput
         ref={messageInputRef}

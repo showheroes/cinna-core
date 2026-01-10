@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Tabs } from "@/components/ui/tabs"
-import { WorkspaceService, OpenAPI } from "@/client"
+import { WorkspaceService, OpenAPI, AgentsService, CredentialsService } from "@/client"
 import type { AxiosRequestConfig } from "axios"
 import { TabHeader } from "./TabHeader"
 import { WorkspaceTabContent } from "./WorkspaceTabContent"
+import { CredentialsTabContent } from "./CredentialsTabContent"
 import { LoadingState, ErrorState, NoEnvironmentState } from "./StateComponents"
 import { convertFileNodeToTreeItem, type FileNode } from "./utils"
 import type { TreeItem, DatabaseTableItem } from "./types"
+import useWorkspace from "@/hooks/useWorkspace"
+import useCustomToast from "@/hooks/useCustomToast"
+import { handleError } from "@/utils"
 
 interface WorkspaceTreeResponse {
   files?: FileNode
@@ -20,14 +24,92 @@ interface WorkspaceTreeResponse {
 interface EnvironmentPanelProps {
   isOpen: boolean
   environmentId?: string
+  agentId?: string
 }
 
-export function EnvironmentPanel({ isOpen, environmentId }: EnvironmentPanelProps) {
+export function EnvironmentPanel({ isOpen, environmentId, agentId }: EnvironmentPanelProps) {
   const [activeTab, setActiveTab] = useState("files")
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [isWidePanelMode, setIsWidePanelMode] = useState(false)
   // Database tables state: path -> { tables: DatabaseTableItem[], loading: boolean, error: string | null }
   const [databaseTables, setDatabaseTables] = useState<Record<string, { tables: DatabaseTableItem[], loading: boolean, error: string | null }>>({})
+
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { activeWorkspaceId } = useWorkspace()
+
+  // Fetch agent credentials
+  const {
+    data: agentCredentialsData,
+    isLoading: isLoadingAgentCredentials,
+  } = useQuery({
+    queryKey: ["agent-credentials", agentId],
+    queryFn: () => AgentsService.readAgentCredentials({ id: agentId! }),
+    enabled: !!agentId && activeTab === "credentials",
+  })
+
+  // Fetch all user credentials
+  const {
+    data: allCredentialsData,
+    isLoading: isLoadingAllCredentials,
+  } = useQuery({
+    queryKey: ["credentials", activeWorkspaceId],
+    queryFn: () => CredentialsService.readCredentials({
+      skip: 0,
+      limit: 100,
+      userWorkspaceId: activeWorkspaceId ?? "",
+    }),
+    enabled: activeTab === "credentials",
+  })
+
+  const agentCredentials = agentCredentialsData?.data || []
+  const allCredentials = allCredentialsData?.data || []
+
+  // Check if a credential is shared with the agent
+  const isCredentialShared = useCallback((credentialId: string) => {
+    return agentCredentials.some((ac) => ac.id === credentialId)
+  }, [agentCredentials])
+
+  // Add credential mutation
+  const addCredentialMutation = useMutation({
+    mutationFn: (credentialId: string) =>
+      AgentsService.addCredentialToAgent({
+        id: agentId!,
+        requestBody: { credential_id: credentialId },
+      }),
+    onSuccess: () => {
+      showSuccessToast("Credential shared")
+    },
+    onError: handleError.bind(showErrorToast),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["agent-credentials", agentId] })
+    },
+  })
+
+  // Remove credential mutation
+  const removeCredentialMutation = useMutation({
+    mutationFn: (credentialId: string) =>
+      AgentsService.removeCredentialFromAgent({
+        id: agentId!,
+        credentialId: credentialId,
+      }),
+    onSuccess: () => {
+      showSuccessToast("Credential unshared")
+    },
+    onError: handleError.bind(showErrorToast),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["agent-credentials", agentId] })
+    },
+  })
+
+  // Toggle credential share/unshare
+  const handleToggleCredential = useCallback((credentialId: string) => {
+    if (isCredentialShared(credentialId)) {
+      removeCredentialMutation.mutate(credentialId)
+    } else {
+      addCredentialMutation.mutate(credentialId)
+    }
+  }, [isCredentialShared, addCredentialMutation, removeCredentialMutation])
 
   // Set up request interceptor for blob downloads (only once)
   useEffect(() => {
@@ -163,71 +245,86 @@ export function EnvironmentPanel({ isOpen, environmentId }: EnvironmentPanelProp
           onToggleWidePanel={() => setIsWidePanelMode(!isWidePanelMode)}
         />
 
-        {/* Show loading/error/no-env state for all tabs */}
-        {!environmentId ? (
-          <div className="flex-1"><NoEnvironmentState /></div>
-        ) : isLoading ? (
-          <div className="flex-1"><LoadingState /></div>
-        ) : error ? (
-          <div className="flex-1"><ErrorState error={error} onRetry={refetch} /></div>
+        {/* Credentials tab - separate from workspace tabs */}
+        {activeTab === "credentials" ? (
+          <CredentialsTabContent
+            credentials={allCredentials}
+            isLoading={isLoadingAgentCredentials || isLoadingAllCredentials}
+            isCredentialShared={isCredentialShared}
+            onToggleCredential={handleToggleCredential}
+            isMutating={addCredentialMutation.isPending || removeCredentialMutation.isPending}
+            mutatingCredentialId={
+              addCredentialMutation.isPending ? addCredentialMutation.variables :
+              removeCredentialMutation.isPending ? removeCredentialMutation.variables : undefined
+            }
+          />
         ) : (
-          <>
-            <WorkspaceTabContent
-              value="files"
-              data={filesData}
-              expandedFolders={expandedFolders}
-              onToggleFolder={handleToggleFolder}
-              onDownload={handleDownload}
-              pathPrefix="files"
-              envId={environmentId}
-              databaseTables={databaseTables}
-              onFetchDatabaseTables={handleFetchDatabaseTables}
-            />
-            <WorkspaceTabContent
-              value="scripts"
-              data={scriptsData}
-              expandedFolders={expandedFolders}
-              onToggleFolder={handleToggleFolder}
-              onDownload={handleDownload}
-              pathPrefix="scripts"
-              envId={environmentId}
-              databaseTables={databaseTables}
-              onFetchDatabaseTables={handleFetchDatabaseTables}
-            />
-            <WorkspaceTabContent
-              value="logs"
-              data={logsData}
-              expandedFolders={expandedFolders}
-              onToggleFolder={handleToggleFolder}
-              onDownload={handleDownload}
-              pathPrefix="logs"
-              envId={environmentId}
-              databaseTables={databaseTables}
-              onFetchDatabaseTables={handleFetchDatabaseTables}
-            />
-            <WorkspaceTabContent
-              value="docs"
-              data={docsData}
-              expandedFolders={expandedFolders}
-              onToggleFolder={handleToggleFolder}
-              onDownload={handleDownload}
-              pathPrefix="docs"
-              envId={environmentId}
-              databaseTables={databaseTables}
-              onFetchDatabaseTables={handleFetchDatabaseTables}
-            />
-            <WorkspaceTabContent
-              value="uploads"
-              data={uploadsData}
-              expandedFolders={expandedFolders}
-              onToggleFolder={handleToggleFolder}
-              onDownload={handleDownload}
-              pathPrefix="uploads"
-              envId={environmentId}
-              databaseTables={databaseTables}
-              onFetchDatabaseTables={handleFetchDatabaseTables}
-            />
-          </>
+          /* Show loading/error/no-env state for workspace tabs */
+          !environmentId ? (
+            <div className="flex-1"><NoEnvironmentState /></div>
+          ) : isLoading ? (
+            <div className="flex-1"><LoadingState /></div>
+          ) : error ? (
+            <div className="flex-1"><ErrorState error={error} onRetry={refetch} /></div>
+          ) : (
+            <>
+              <WorkspaceTabContent
+                value="files"
+                data={filesData}
+                expandedFolders={expandedFolders}
+                onToggleFolder={handleToggleFolder}
+                onDownload={handleDownload}
+                pathPrefix="files"
+                envId={environmentId}
+                databaseTables={databaseTables}
+                onFetchDatabaseTables={handleFetchDatabaseTables}
+              />
+              <WorkspaceTabContent
+                value="scripts"
+                data={scriptsData}
+                expandedFolders={expandedFolders}
+                onToggleFolder={handleToggleFolder}
+                onDownload={handleDownload}
+                pathPrefix="scripts"
+                envId={environmentId}
+                databaseTables={databaseTables}
+                onFetchDatabaseTables={handleFetchDatabaseTables}
+              />
+              <WorkspaceTabContent
+                value="logs"
+                data={logsData}
+                expandedFolders={expandedFolders}
+                onToggleFolder={handleToggleFolder}
+                onDownload={handleDownload}
+                pathPrefix="logs"
+                envId={environmentId}
+                databaseTables={databaseTables}
+                onFetchDatabaseTables={handleFetchDatabaseTables}
+              />
+              <WorkspaceTabContent
+                value="docs"
+                data={docsData}
+                expandedFolders={expandedFolders}
+                onToggleFolder={handleToggleFolder}
+                onDownload={handleDownload}
+                pathPrefix="docs"
+                envId={environmentId}
+                databaseTables={databaseTables}
+                onFetchDatabaseTables={handleFetchDatabaseTables}
+              />
+              <WorkspaceTabContent
+                value="uploads"
+                data={uploadsData}
+                expandedFolders={expandedFolders}
+                onToggleFolder={handleToggleFolder}
+                onDownload={handleDownload}
+                pathPrefix="uploads"
+                envId={environmentId}
+                databaseTables={databaseTables}
+                onFetchDatabaseTables={handleFetchDatabaseTables}
+              />
+            </>
+          )
         )}
       </Tabs>
     </div>

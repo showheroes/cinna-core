@@ -1,9 +1,10 @@
-import { FileText, FileCode, ScrollText, BookOpen, Upload, ChevronDown, Maximize2, Minimize2 } from "lucide-react"
+import { FileText, FileCode, ScrollText, BookOpen, Upload, ChevronDown, Maximize2, Minimize2, KeyRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
@@ -19,7 +20,8 @@ const TAB_LABELS: Record<string, string> = {
   scripts: "Scripts",
   logs: "Logs",
   docs: "Docs",
-  uploads: "Uploads"
+  uploads: "Uploads",
+  credentials: "Credentials"
 }
 
 export function TabHeader({ activeTab, onTabChange, isWidePanelMode, onToggleWidePanel }: TabHeaderProps) {
@@ -59,6 +61,11 @@ export function TabHeader({ activeTab, onTabChange, isWidePanelMode, onToggleWid
             <DropdownMenuItem onClick={() => onTabChange("uploads")}>
               <Upload className="h-4 w-4 mr-2" />
               Uploads
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onTabChange("credentials")}>
+              <KeyRound className="h-4 w-4 mr-2" />
+              Credentials
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
