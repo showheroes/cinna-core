@@ -5,6 +5,7 @@ import {
   Play,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Table as TableIcon,
   Eye,
   Database,
@@ -55,6 +56,7 @@ export function DatabaseViewer({
   const [expandedSchema, setExpandedSchema] = useState<Set<string>>(
     new Set(["tables", "views"])
   )
+  const [schemaPanelOpen, setSchemaPanelOpen] = useState(false)
 
   // Extract filename from path
   const filename = dbPath.split("/").pop() || "database"
@@ -203,21 +205,18 @@ export function DatabaseViewer({
           </div>
         </div>
         <Button
-          variant="outline"
+          variant={schemaPanelOpen ? "secondary" : "ghost"}
           size="sm"
-          onClick={handleDownloadCSV}
-          disabled={
-            !queryMutation.data || queryMutation.data.columns.length === 0
-          }
+          onClick={() => setSchemaPanelOpen(!schemaPanelOpen)}
           className="shrink-0"
         >
-          <Download className="h-4 w-4 mr-2" />
-          Export CSV
+          <Database className="h-4 w-4 mr-1.5" />
+          Schema
         </Button>
       </div>
     )
     return () => setHeaderContent(null)
-  }, [filename, dbPath, queryMutation.data, setHeaderContent])
+  }, [filename, dbPath, schemaPanelOpen, setHeaderContent])
 
   // Loading state
   if (isLoadingSchema) {
@@ -253,45 +252,8 @@ export function DatabaseViewer({
 
   return (
     <div className="h-full flex overflow-hidden">
-      {/* Schema Sidebar */}
-      <div className="w-64 border-r bg-muted/30 flex flex-col shrink-0">
-        <div className="p-3 border-b">
-          <h2 className="text-sm font-semibold">Schema</h2>
-        </div>
-        <div className="flex-1 overflow-auto p-2">
-          {/* Tables */}
-          {schema.tables.length > 0 && (
-            <SchemaSection
-              title="Tables"
-              items={schema.tables}
-              isExpanded={expandedSchema.has("tables")}
-              onToggle={() => toggleSchemaSection("tables")}
-              selectedTable={selectedTable}
-              onTableClick={handleTableClick}
-              expandedItems={expandedSchema}
-              onToggleItem={(name) => toggleSchemaSection(`table:${name}`)}
-            />
-          )}
-
-          {/* Views */}
-          {schema.views.length > 0 && (
-            <SchemaSection
-              title="Views"
-              items={schema.views}
-              isExpanded={expandedSchema.has("views")}
-              onToggle={() => toggleSchemaSection("views")}
-              selectedTable={selectedTable}
-              onTableClick={handleTableClick}
-              expandedItems={expandedSchema}
-              onToggleItem={(name) => toggleSchemaSection(`view:${name}`)}
-              isView
-            />
-          )}
-        </div>
-      </div>
-
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Query Editor */}
         <div className="border-b p-4 space-y-3">
           {/* Mode Toggle */}
@@ -353,7 +315,7 @@ export function DatabaseViewer({
         </div>
 
         {/* Results Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Status Bar */}
           <div className="border-b px-4 py-2 flex items-center justify-between text-sm bg-muted/30">
             <div className="flex items-center gap-4">
@@ -377,32 +339,46 @@ export function DatabaseViewer({
               )}
             </div>
 
-            {/* Pagination (Auto mode only) */}
-            {mode === "auto" && result && result.query_type === "SELECT" && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1 || isQuerying}
-                >
-                  Previous
-                </Button>
-                <span className="text-muted-foreground">Page {page}</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={!result.has_more || isQuerying}
-                >
-                  Next
-                </Button>
-              </div>
-            )}
+            {/* Pagination and Export */}
+            <div className="flex items-center gap-2">
+              {mode === "auto" && result && result.query_type === "SELECT" && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1 || isQuerying}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-muted-foreground min-w-[60px] text-center">Page {page}</span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setPage((p) => p + 1)}
+                    disabled={!result.has_more || isQuerying}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={handleDownloadCSV}
+                disabled={!result || result.columns.length === 0}
+                title="Export to CSV"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           {/* Results Table */}
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 overflow-auto p-4 min-w-0">
             {result && result.columns.length > 0 && (
               <Table>
                 <TableHeader>
@@ -448,6 +424,45 @@ export function DatabaseViewer({
                       : "Select a table or execute a query"}
                 </p>
               </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Schema Panel */}
+      <div className={`shrink-0 bg-background border-l border-border flex flex-col transition-all duration-200 overflow-hidden ${schemaPanelOpen ? "w-72" : "w-0 border-l-0"}`}>
+        <div className="w-72 flex flex-col h-full">
+          <div className="p-3 border-b flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Schema</h2>
+          </div>
+          <div className="flex-1 overflow-auto p-2">
+            {/* Tables */}
+            {schema.tables.length > 0 && (
+              <SchemaSection
+                title="Tables"
+                items={schema.tables}
+                isExpanded={expandedSchema.has("tables")}
+                onToggle={() => toggleSchemaSection("tables")}
+                selectedTable={selectedTable}
+                onTableClick={handleTableClick}
+                expandedItems={expandedSchema}
+                onToggleItem={(name) => toggleSchemaSection(`table:${name}`)}
+              />
+            )}
+
+            {/* Views */}
+            {schema.views.length > 0 && (
+              <SchemaSection
+                title="Views"
+                items={schema.views}
+                isExpanded={expandedSchema.has("views")}
+                onToggle={() => toggleSchemaSection("views")}
+                selectedTable={selectedTable}
+                onTableClick={handleTableClick}
+                expandedItems={expandedSchema}
+                onToggleItem={(name) => toggleSchemaSection(`view:${name}`)}
+                isView
+              />
             )}
           </div>
         </div>
