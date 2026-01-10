@@ -45,7 +45,7 @@ function Layout() {
     <HeaderContext.Provider value={{ setHeaderContent }}>
       <SidebarProvider>
         <AppSidebar />
-        <SidebarInset className="flex flex-col h-screen">
+        <SidebarInset className="flex flex-col h-screen overflow-hidden">
           <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-4 border-b px-4 bg-background/60">
             <SidebarTrigger className="-ml-1 text-muted-foreground" />
             {headerContent && (
@@ -54,7 +54,7 @@ function Layout() {
               </div>
             )}
           </header>
-          <main className="flex-1 flex flex-col min-h-0">
+          <main className="flex-1 flex flex-col min-h-0 min-w-0">
             <Outlet />
           </main>
         </SidebarInset>
