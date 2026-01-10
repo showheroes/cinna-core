@@ -161,12 +161,20 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
         await self.start()
         return True
 
-    async def rebuild(self, template_core_dir: Path, was_running: bool) -> bool:
+    async def rebuild(
+        self,
+        template_dir: Path,
+        template_core_dir: Path,
+        rebuild_overwrite_files: list[str],
+        was_running: bool
+    ) -> bool:
         """
         Rebuild environment with updated core files and knowledge base.
 
         Args:
+            template_dir: Path to template root directory
             template_core_dir: Path to template's core directory
+            rebuild_overwrite_files: List of template root files to overwrite in instance
             was_running: Whether container was running before rebuild
 
         Returns:
@@ -175,10 +183,11 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
         Process:
         1. Container should already be stopped
         2. Remove old container (docker-compose down)
-        3. Update core files from template
-        4. Update knowledge files from template (add/update only, preserve user-created files)
-        5. Rebuild Docker image (includes new core files)
-        6. Start container if it was running before (creates new container from new image)
+        3. Overwrite infrastructure files from template (Dockerfile, pyproject.toml, etc.)
+        4. Update core files from template
+        5. Update knowledge files from template (add/update only, preserve user-created files)
+        6. Rebuild Docker image (includes new core files)
+        7. Start container if it was running before (creates new container from new image)
         """
         logger.info(f"Rebuilding environment {self.env_id}")
 
@@ -193,18 +202,28 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
         await self._run_compose_command(["down"])
         logger.debug(f"Old container removed")
 
+        # Overwrite infrastructure files from template
+        import shutil
+        logger.info(f"Overwriting infrastructure files from template: {rebuild_overwrite_files}")
+        for filename in rebuild_overwrite_files:
+            src_file = template_dir / filename
+            dst_file = self.env_dir / filename
+            if src_file.exists():
+                await asyncio.to_thread(shutil.copy2, src_file, dst_file)
+                logger.debug(f"Overwrote {filename} from template")
+            else:
+                logger.warning(f"Template file not found, skipping: {src_file}")
+
         # Update core files from template
         logger.info(f"Updating core files from template: {template_core_dir}")
         instance_core_dir = self.env_dir / "app" / "core"
 
         # Remove old core files
         if instance_core_dir.exists():
-            import shutil
             await asyncio.to_thread(shutil.rmtree, instance_core_dir)
             logger.debug(f"Removed old core directory: {instance_core_dir}")
 
         # Copy new core files
-        import shutil
         await asyncio.to_thread(
             shutil.copytree,
             template_core_dir,

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, BinaryIO
 from uuid import UUID
+from pathlib import Path
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -145,18 +146,27 @@ class EnvironmentAdapter(ABC):
         pass
 
     @abstractmethod
-    async def rebuild(self, template_core_dir, was_running: bool) -> bool:
+    async def rebuild(
+        self,
+        template_dir: Path,
+        template_core_dir: Path,
+        rebuild_overwrite_files: list[str],
+        was_running: bool
+    ) -> bool:
         """
         Rebuild environment with updated core files while preserving workspace.
 
         This operation:
         1. Stops the container if running
-        2. Updates core system files from template
-        3. Rebuilds the Docker image
-        4. Starts the container if it was running before
+        2. Overwrites infrastructure files from template (Dockerfile, pyproject.toml, etc.)
+        3. Updates core system files from template
+        4. Rebuilds the Docker image
+        5. Starts the container if it was running before
 
         Args:
+            template_dir: Path to template root directory
             template_core_dir: Path to template's core directory
+            rebuild_overwrite_files: List of template root files to overwrite in instance
             was_running: Whether container was running before rebuild
 
         Returns:

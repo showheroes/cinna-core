@@ -316,20 +316,22 @@ The environment lifecycle uses standard Docker operations:
    - Old container completely deleted
    - Volumes kept (workspace data preserved)
    - New container will be created from new image
-3. Delete old core directory: `{instance_dir}/app/core`
-4. Copy fresh core from template: `{template_dir}/app/core` → `{instance_dir}/app/core`
-5. Update knowledge files from template: `{template_dir}/app/workspace/knowledge` → `{instance_dir}/app/workspace/knowledge`
+3. **Overwrite infrastructure files** from template (defined in `REBUILD_OVERWRITE_FILES`):
+   - `uv.lock`, `pyproject.toml`, `Dockerfile`, `docker-compose.template.yml`
+4. Delete old core directory: `{instance_dir}/app/core`
+5. Copy fresh core from template: `{template_dir}/app/core` → `{instance_dir}/app/core`
+6. Update knowledge files from template: `{template_dir}/app/workspace/knowledge` → `{instance_dir}/app/workspace/knowledge`
    - **Add/Update only**: New and updated knowledge files from template are copied
    - **Preserve user files**: User-created knowledge files not in template are kept
    - **No deletions**: Existing knowledge files are never deleted
-6. Rebuild Docker image via `DockerEnvironmentAdapter.rebuild()`
+7. Rebuild Docker image via `DockerEnvironmentAdapter.rebuild()`
    - Runs `docker-compose build` (uses cache for speed)
    - New core files baked into image
-7. **If was running**: Start NEW container (`UP` - docker-compose up -d):
+8. **If was running**: Start NEW container (`UP` - docker-compose up -d):
    - Creates completely new container from new image
    - Run full container setup via `_setup_new_container()` (install packages)
    - Sync dynamic data via `_sync_dynamic_data()` (prompts, credentials)
-8. Update status to `running` or `stopped`
+9. Update status to `running` or `stopped`
 
 **Key Point**: Rebuild creates a NEW container (not restarting old one), so full container setup is required.
 
@@ -342,6 +344,7 @@ The environment lifecycle uses standard Docker operations:
 - Agent prompts
 
 **Updated**:
+- **Infrastructure files** (`uv.lock`, `pyproject.toml`, `Dockerfile`, `docker-compose.template.yml`)
 - Core server code (modular architecture)
 - API routes and request handling
 - SDK manager orchestration

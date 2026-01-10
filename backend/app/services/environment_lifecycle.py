@@ -20,6 +20,15 @@ from .adapters.docker_adapter import DockerEnvironmentAdapter
 
 logger = logging.getLogger(__name__)
 
+# Files from template root that should be overwritten during rebuild
+# These are infrastructure files that may be updated in the template
+REBUILD_OVERWRITE_FILES = [
+    "uv.lock",
+    "pyproject.toml",
+    "Dockerfile",
+    "docker-compose.template.yml",
+]
+
 
 class EnvironmentLifecycleManager:
     """
@@ -657,7 +666,9 @@ class EnvironmentLifecycleManager:
 
             # Rebuild via adapter (does: down, update files, build, optionally up)
             await adapter.rebuild(
+                template_dir=template_dir,
                 template_core_dir=template_core_dir,
+                rebuild_overwrite_files=REBUILD_OVERWRITE_FILES,
                 was_running=was_running
             )
 
