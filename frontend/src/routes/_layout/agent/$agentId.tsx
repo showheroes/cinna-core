@@ -6,6 +6,7 @@ import { useState, useEffect } from "react"
 import { AgentsService } from "@/client"
 import { AgentPromptsTab } from "@/components/Agents/AgentPromptsTab"
 import { AgentCredentialsTab } from "@/components/Agents/AgentCredentialsTab"
+import { AgentPluginsTab } from "@/components/Agents/AgentPluginsTab"
 import { AgentEnvironmentsTab } from "@/components/Agents/AgentEnvironmentsTab"
 import { AgentConfigurationTab } from "@/components/Agents/AgentConfigurationTab"
 import EditAgent from "@/components/Agents/EditAgent"
@@ -100,6 +101,7 @@ function AgentDetail() {
   const tabs = [
     { value: "configuration", title: "Configuration", content: <AgentPromptsTab agent={agent} /> },
     { value: "credentials", title: "Credentials", content: <AgentCredentialsTab agentId={agent.id} /> },
+    { value: "plugins", title: "Plugins", content: <AgentPluginsTab agentId={agent.id} /> },
     { value: "environments", title: "Environments", content: <AgentEnvironmentsTab agentId={agent.id} /> },
     { value: "interface", title: "Interface", content: <AgentConfigurationTab agent={agent} /> },
   ]

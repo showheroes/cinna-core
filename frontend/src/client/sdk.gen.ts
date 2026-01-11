@@ -1957,11 +1957,15 @@ export class LlmPluginsService {
      * - Public marketplaces
      *
      * Optional filters:
-     * - search: Search in name/description
+     * - search: Search in name/description/author/category
      * - category: Filter by category
+     * - skip: Pagination offset (default 0)
+     * - limit: Maximum items per page (default 30)
      * @param data The data for the request.
      * @param data.search
      * @param data.category
+     * @param data.skip
+     * @param data.limit
      * @returns LLMPluginMarketplacePluginsPublic Successful Response
      * @throws ApiError
      */
@@ -1971,7 +1975,9 @@ export class LlmPluginsService {
             url: '/api/v1/llm-plugins/discover',
             query: {
                 search: data.search,
-                category: data.category
+                category: data.category,
+                skip: data.skip,
+                limit: data.limit
             },
             errors: {
                 422: 'Validation Error'

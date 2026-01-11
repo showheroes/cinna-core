@@ -624,19 +624,23 @@ class LLMPluginService:
         session: Session,
         user_id: uuid.UUID,
         search: str | None = None,
-        category: str | None = None
-    ) -> list[LLMPluginMarketplacePluginPublic]:
+        category: str | None = None,
+        skip: int = 0,
+        limit: int = 30
+    ) -> tuple[list[LLMPluginMarketplacePluginPublic], int]:
         """
         Discover available plugins for a user.
 
         Args:
             session: Database session
             user_id: User ID
-            search: Optional search term for name/description
+            search: Optional search term for name/description/author/category
             category: Optional category filter
+            skip: Number of items to skip (pagination offset)
+            limit: Maximum number of items to return
 
         Returns:
-            List of discoverable plugins
+            Tuple of (list of discoverable plugins, total count)
         """
         # Get accessible marketplaces
         marketplaces = LLMPluginService.list_marketplaces(session, user_id, include_public=True)
@@ -644,7 +648,7 @@ class LLMPluginService:
         marketplace_names = {m.id: m.name for m in marketplaces}
 
         if not marketplace_ids:
-            return []
+            return [], 0
 
         # Query plugins from accessible marketplaces
         statement = select(LLMPluginMarketplacePlugin).where(
@@ -656,17 +660,25 @@ class LLMPluginService:
 
         plugins = session.exec(statement).all()
 
-        # Filter by search term if provided
+        # Filter by search term if provided (searches name, description, author, category)
         if search:
             search_lower = search.lower()
             plugins = [
                 p for p in plugins
                 if search_lower in (p.name or "").lower()
                 or search_lower in (p.description or "").lower()
+                or search_lower in (p.author_name or "").lower()
+                or search_lower in (p.category or "").lower()
             ]
 
+        # Get total count before pagination
+        total_count = len(plugins)
+
+        # Apply pagination
+        plugins = plugins[skip:skip + limit]
+
         # Convert to public schema with marketplace name
-        return [
+        result = [
             LLMPluginMarketplacePluginPublic(
                 id=p.id,
                 marketplace_id=p.marketplace_id,
@@ -691,6 +703,7 @@ class LLMPluginService:
             )
             for p in plugins
         ]
+        return result, total_count
 
     @staticmethod
     def get_plugin(

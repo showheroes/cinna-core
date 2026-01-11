@@ -230,6 +230,8 @@ def discover_plugins(
     current_user: CurrentUser,
     search: str | None = None,
     category: str | None = None,
+    skip: int = 0,
+    limit: int = 30,
 ) -> Any:
     """
     Discover available plugins.
@@ -239,16 +241,20 @@ def discover_plugins(
     - Public marketplaces
 
     Optional filters:
-    - search: Search in name/description
+    - search: Search in name/description/author/category
     - category: Filter by category
+    - skip: Pagination offset (default 0)
+    - limit: Maximum items per page (default 30)
     """
-    plugins = LLMPluginService.discover_plugins(
+    plugins, total_count = LLMPluginService.discover_plugins(
         session=session,
         user_id=current_user.id,
         search=search,
         category=category,
+        skip=skip,
+        limit=limit,
     )
-    return LLMPluginMarketplacePluginsPublic(data=plugins, count=len(plugins))
+    return LLMPluginMarketplacePluginsPublic(data=plugins, count=total_count)
 
 
 @router.get("/plugins/{plugin_id}", response_model=LLMPluginMarketplacePluginPublic)

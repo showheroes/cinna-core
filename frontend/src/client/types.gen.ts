@@ -1566,7 +1566,9 @@ export type LlmPluginsSyncMarketplaceResponse = (LLMPluginMarketplacePublic);
 
 export type LlmPluginsDiscoverPluginsData = {
     category?: (string | null);
+    limit?: number;
     search?: (string | null);
+    skip?: number;
 };
 
 export type LlmPluginsDiscoverPluginsResponse = (LLMPluginMarketplacePluginsPublic);
