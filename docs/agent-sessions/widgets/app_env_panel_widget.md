@@ -21,13 +21,14 @@ A user runs an agent that generates a data report. The agent processes data and 
 
 **Subcomponents**:
 - `TabHeader.tsx` - Dropdown navigation menu with panel width toggle
-- `WorkspaceTabContent.tsx` - Reusable tab content wrapper (eliminates duplication)
-- `TreeItemRenderer.tsx` - Recursive tree rendering for files and folders
+- `WorkspaceTabContent.tsx` - Reusable tab content wrapper for workspace sections
+- `CredentialsTabContent.tsx` - Credentials share/unshare UI with checkbox list
+- `TreeItemRenderer.tsx` - Recursive tree rendering for files, folders, and SQLite databases
 - `StateComponents.tsx` - Loading, error, empty, and no-environment states
 - `FileIcon.tsx` - Type-specific file icons
 
 **Utilities**:
-- `types.ts` - TypeScript interfaces (FileItem, FolderItem, TreeItem)
+- `types.ts` - TypeScript interfaces (FileItem, FolderItem, TreeItem, DatabaseTableItem, SQLite types)
 - `utils.ts` - Formatting and conversion functions
 
 **Integration Point**: `frontend/src/routes/_layout/session/$sessionId.tsx`
@@ -39,10 +40,12 @@ A user runs an agent that generates a data report. The agent processes data and 
 ### Navigation Structure
 
 **Dropdown Menu** (full-width button with expand/shrink toggle):
-- **Files**: Environment-generated files (CSV, JSON, TXT, etc.) - **Default selection**
+- **Files**: Environment-generated files (CSV, JSON, TXT, SQLite, etc.) - **Default selection**
 - **Scripts**: Python/executable scripts created by agents
 - **Logs**: Agent execution logs, error logs, debug logs
 - **Docs**: Generated documentation (Markdown files)
+- **Uploads**: User-uploaded files
+- **Credentials**: Manage credentials shared with the agent
 
 **Layout**: Dropdown selector (flex-1) + Expand/Shrink button (Maximize2/Minimize2 icons)
 - No visual separator between menu and content list
@@ -57,14 +60,17 @@ Panel visibility is controlled by a boolean state in the session component. The 
 
 ### Section Navigation
 
-All sections (Files, Scripts, Logs, Docs) are accessed through a single dropdown menu to conserve space and maintain a clean interface. The dropdown button always displays the currently active section and uses a "secondary" variant to indicate it's an interactive control. This unified navigation pattern provides consistent access to all panel features without visual clutter.
+All sections (Files, Scripts, Logs, Docs, Uploads, Credentials) are accessed through a single dropdown menu to conserve space and maintain a clean interface. The dropdown button always displays the currently active section and uses a "secondary" variant to indicate it's an interactive control. Workspace sections (Files through Uploads) share the tree-based file browser, while Credentials has its own dedicated UI.
 
 ### Data Flow
 
 **API Integration**:
 Panel fetches workspace data from backend proxy endpoints that communicate with agent environment containers:
-- Single endpoint: `GET /api/v1/environments/{env_id}/workspace/tree`
-- Returns: `WorkspaceTreeResponse` with four root nodes (files, scripts, logs, docs)
+- Workspace tree: `GET /api/v1/environments/{env_id}/workspace/tree`
+- Returns: `WorkspaceTreeResponse` with root nodes (files, scripts, logs, docs, uploads)
+- Database tables: `GET /api/v1/environments/{env_id}/workspace/database/{path}/tables`
+- Agent credentials: `GET /api/v1/agents/{agent_id}/credentials`
+- All credentials: `GET /api/v1/credentials`
 - Cache: 5 seconds (React Query `staleTime`)
 - Loading states: Managed via `useQuery` hook (loading, error, success)
 
@@ -119,6 +125,57 @@ Both files and folders display download button on hover (opacity-0 → group-hov
 - Implementation: `handleDownload()` in `EnvironmentPanel.tsx`
 - API: `GET /api/v1/environments/{env_id}/workspace/download/{path}`
 
+### SQLite Database Browser
+
+SQLite files (`.sqlite`, `.db`) are expandable to reveal their tables and views:
+
+**Interaction:**
+- Click SQLite file → expands/collapses like a folder
+- On first expand: fetches table list via `GET /api/v1/environments/{env_id}/workspace/database/{path}/tables`
+- Re-fetches fresh data on each expand
+- Click table/view → opens `/environment/{envId}/database?path=...&table=...` in new tab
+
+**Display:**
+- Tables: Table2 icon (blue)
+- Views: Table2 icon (purple)
+- Loading state: Spinner with "Loading tables..."
+- Error state: "Error loading tables"
+- Empty state: "No tables found"
+
+**Types** (`types.ts`):
+- `DatabaseTableItem` - Table/view entry with name, type, parent database path
+- `SQLiteTableInfo`, `SQLiteColumnInfo` - Schema metadata
+- `SQLiteQueryResult` - Query execution results with pagination
+
+### Credentials Tab
+
+Quick access to manage which credentials are shared with the agent:
+
+**Component**: `CredentialsTabContent.tsx`
+
+**Display:**
+- Lists all credentials from user's active workspace
+- Checkbox indicates shared status with current agent
+- Shows credential name and type label (e.g., "Gmail OAuth", "API Token")
+
+**Supported Credential Types:**
+- `email_imap` → "Email (IMAP)"
+- `gmail_oauth` / `gmail_oauth_readonly` → "Gmail OAuth" / "Gmail OAuth (Read-Only)"
+- `gdrive_oauth` / `gdrive_oauth_readonly` → "Google Drive OAuth" / "Google Drive OAuth (Read-Only)"
+- `gcalendar_oauth` / `gcalendar_oauth_readonly` → "Google Calendar OAuth" / "Google Calendar OAuth (Read-Only)"
+- `odoo` → "Odoo"
+- `api_token` → "API Token"
+
+**Actions:**
+- Check → shares credential with agent (`AgentsService.addCredentialToAgent`)
+- Uncheck → unshares credential (`AgentsService.removeCredentialFromAgent`)
+- Success toast on share/unshare
+- Loading spinner on individual item during mutation
+
+**States:**
+- Loading: Centered spinner
+- Empty: "No credentials available" with guidance to create credentials
+
 ## Icons
 
 Items are visually distinguished by type-specific icons:
@@ -136,10 +193,15 @@ Items are visually distinguished by type-specific icons:
 - PY (Python): FileCode (purple)
 - LOG: ScrollText (yellow)
 - MD (Markdown): BookOpen (indigo)
+- SQLite: Database icon (expandable)
 - Default: FileText (gray)
 
+**Database Table Icons:**
+- Table: Table2 (blue)
+- View: Table2 (purple)
+
 Component: `FileIcon.tsx` - Type-specific icon rendering with color coding
-Component: `TreeItemRenderer.tsx` - Recursive tree rendering with folder/file distinction
+Component: `TreeItemRenderer.tsx` - Recursive tree rendering with folder/file/database distinction
 
 ## Sticky Behavior
 
@@ -158,6 +220,8 @@ The panel uses absolute positioning within a relative container that encompasses
 ✅ **Progressive disclosure**: Extension/size appear on hover
 ✅ **Compact single-line layout**: Efficient space usage
 ✅ **Tooltips**: Full names and dates on truncated items
+✅ **SQLite database browser**: Expand `.sqlite` files to view/open tables
+✅ **Credentials management**: Share/unshare credentials with agent directly from panel
 
 ### Planned Features
 
@@ -173,10 +237,9 @@ The panel uses absolute positioning within a relative container that encompasses
 
 ### Section Menu Expansion
 
-The dropdown menu is extensible for additional sections beyond the current four. Future candidates:
+The dropdown menu is extensible for additional sections. Future candidates:
 - **Terminal**: Interactive CLI access
 - **Metrics/Analytics**: Performance and usage statistics
-- **Database**: Query results and database snapshots
 - **API Requests**: HTTP request history and responses
 - **Environment Variables**: View and manage env vars
 - **Artifacts**: Specialized outputs (charts, visualizations, exports)
@@ -196,20 +259,23 @@ The panel is session-scoped. Each session has its own isolated environment, so a
 ## Implementation Details
 
 **Component Architecture:**
-- `EnvironmentPanel.tsx` (main) - Panel state, data fetching, download handling
+- `EnvironmentPanel.tsx` (main) - Panel state, data fetching, download handling, credentials mutations
 - `TabHeader.tsx` - Dropdown navigation with width toggle
-- `WorkspaceTabContent.tsx` - Reusable tab wrapper component
-- `TreeItemRenderer.tsx` - Recursive tree item rendering
+- `WorkspaceTabContent.tsx` - Reusable tab wrapper for workspace sections
+- `CredentialsTabContent.tsx` - Credentials management UI
+- `TreeItemRenderer.tsx` - Recursive tree item rendering (files, folders, SQLite)
 - `StateComponents.tsx` - Loading, error, empty, no-environment states
 - `FileIcon.tsx` - File type icon component
-- `types.ts` - TypeScript interfaces (FileItem, FolderItem, TreeItem)
+- `types.ts` - TypeScript interfaces (FileItem, FolderItem, TreeItem, DatabaseTableItem)
 - `utils.ts` - Formatting utilities and API response conversion
 
 **State Management:**
-- `activeTab` - Current selected section (files/scripts/logs/docs)
-- `expandedFolders` - Set of expanded folder paths
+- `activeTab` - Current selected section (files/scripts/logs/docs/uploads/credentials)
+- `expandedFolders` - Set of expanded folder paths (also used for SQLite files)
 - `isWidePanelMode` - Panel width toggle (384px/768px)
-- `useQuery` - React Query for data fetching with 5-second cache
+- `databaseTables` - Record of SQLite file paths → { tables, loading, error }
+- `useQuery` - React Query for workspace tree and credentials fetching
+- `useMutation` - React Query for credential share/unshare operations
 
 **Key Features:**
 1. **Modular architecture**: Separated concerns into focused components
@@ -219,6 +285,8 @@ The panel is session-scoped. Each session has its own isolated environment, so a
 5. **Path-based folder keys**: Prevents conflicts (`files/data/archive`)
 6. **Event isolation**: `e.stopPropagation()` for download buttons
 7. **Error handling**: Loading, error, empty, and no-environment states
+8. **SQLite expansion**: Database files expand to show tables/views inline
+9. **Credentials management**: Toggle credential sharing without leaving panel
 
 **Visual Design:**
 - Meta info dimming: `text-muted-foreground/60`
