@@ -63,48 +63,6 @@ def authenticate(*, session: Session, email: str, password: str) -> User | None:
     return db_user
 
 
-def get_user_by_google_id(*, session: Session, google_id: str) -> User | None:
-    """Get user by Google ID."""
-    statement = select(User).where(User.google_id == google_id)
-    return session.exec(statement).first()
-
-
-def create_user_from_google(
-    *, session: Session, email: str, google_id: str, full_name: str | None
-) -> User:
-    """Create user from Google OAuth (no password)."""
-    db_obj = User(
-        email=email,
-        google_id=google_id,
-        full_name=full_name,
-        hashed_password=None,
-        is_active=True,
-        is_superuser=False,
-    )
-    session.add(db_obj)
-    session.commit()
-    session.refresh(db_obj)
-    return db_obj
-
-
-def link_google_account(*, session: Session, user: User, google_id: str) -> User:
-    """Link Google account to existing user."""
-    user.google_id = google_id
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return user
-
-
-def unlink_google_account(*, session: Session, user: User) -> User:
-    """Unlink Google account from user."""
-    user.google_id = None
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return user
-
-
 def create_item(*, session: Session, item_in: ItemCreate, owner_id: uuid.UUID) -> Item:
     db_item = Item.model_validate(item_in, update={"owner_id": owner_id})
     session.add(db_item)
