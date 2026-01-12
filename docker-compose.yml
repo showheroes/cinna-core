@@ -26,6 +26,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
       - SENTRY_DSN=${SENTRY_DSN}
+      - AUTH_WHITELIST_USER_DOMAINS=${AUTH_WHITELIST_USER_DOMAINS}
       - ENV_TEMPLATES_DIR=app/env-templates
       - ENV_INSTANCES_DIR=/agent-environments
       - HOST_AGENT_ENVIRONMENTS_DIR=${HOST_AGENT_ENVIRONMENTS_DIR:-./backend/agent-environments}
