@@ -4,6 +4,7 @@ import asyncio
 import contextvars
 from typing import AsyncIterator, Optional
 from pathlib import Path
+from collections import deque
 
 from .prompt_generator import PromptGenerator
 from .sdk_utils import SessionLogger, format_message_for_debug, format_sdk_message
@@ -11,6 +12,53 @@ from .active_session_manager import active_session_manager
 from .agent_env_service import AgentEnvService
 
 logger = logging.getLogger(__name__)
+
+# Separate logger for CLI stderr to allow different log levels/handlers
+cli_stderr_logger = logging.getLogger(f"{__name__}.cli_stderr")
+
+
+class CLIStderrCapture:
+    """
+    Captures stderr output from the Claude CLI subprocess.
+
+    Logs each line to the app logger and maintains a rolling buffer
+    of recent lines for inclusion in error messages.
+    """
+
+    def __init__(self, max_lines: int = 100):
+        self._buffer: deque[str] = deque(maxlen=max_lines)
+        self._line_count = 0
+
+    def __call__(self, line: str) -> None:
+        """Callback invoked by SDK for each stderr line."""
+        self._line_count += 1
+        self._buffer.append(line)
+        # Log each stderr line - use error level to ensure visibility
+        cli_stderr_logger.error(f"[Claude CLI] {line}")
+
+    def get_recent_lines(self, count: int = 50) -> list[str]:
+        """Get the most recent stderr lines."""
+        lines = list(self._buffer)
+        return lines[-count:] if len(lines) > count else lines
+
+    def get_all_lines(self) -> list[str]:
+        """Get all captured stderr lines."""
+        return list(self._buffer)
+
+    def get_summary(self) -> str:
+        """Get a summary string of captured stderr for error messages."""
+        lines = self.get_recent_lines(20)
+        if not lines:
+            return "No stderr output captured"
+
+        summary = f"Last {len(lines)} stderr lines (total: {self._line_count}):\n"
+        summary += "\n".join(f"  {line}" for line in lines)
+        return summary
+
+    @property
+    def line_count(self) -> int:
+        """Total number of stderr lines received."""
+        return self._line_count
 
 # Context variable to track current SDK session ID (for SDK operations like interrupts)
 current_session_context: contextvars.ContextVar[str | None] = contextvars.ContextVar('sdk_session_id', default=None)
@@ -195,11 +243,15 @@ class ClaudeCodeSDKManager:
                 all_allowed_tools = list(set(pre_allowed_tools + user_allowed_tools))
                 logger.info(f"Merged allowed tools: {len(all_allowed_tools)} tools")
 
+                # Create stderr capture to log CLI output and collect for error reporting
+                stderr_capture = CLIStderrCapture(max_lines=200)
+
                 # Build options
                 options = ClaudeAgentOptions(
                     allowed_tools=all_allowed_tools,
                     permission_mode=self.permission_mode,
                     cwd=self.workspace_dir,
+                    stderr=stderr_capture,  # Capture CLI stderr output
                 )
 
                 # Add custom tools for building mode
@@ -357,6 +409,8 @@ class ClaudeCodeSDKManager:
                     error_msg = str(e)
                     if "No conversation found" in error_msg or "Cannot write to terminated process" in error_msg:
                         logger.warning(f"Session {current_session_id} appears corrupted, will retry without resuming")
+                        if stderr_capture.line_count > 0:
+                            logger.warning(f"CLI stderr output:\n{stderr_capture.get_summary()}")
 
                         # Clean up the corrupted client
                         try:
@@ -374,10 +428,13 @@ class ClaudeCodeSDKManager:
                             "content": "Previous session was corrupted or interrupted. Please send your message again to start a new session.",
                             "error_type": "CorruptedSession",
                             "session_corrupted": True,  # Signal to backend to clear external_session_id
+                            "stderr_lines": stderr_capture.get_recent_lines(10),
                         }
                         return
 
                     logger.error(f"Error sending query to SDK client: {e}", exc_info=True)
+                    if stderr_capture.line_count > 0:
+                        logger.error(f"CLI stderr output:\n{stderr_capture.get_summary()}")
                     raise
 
                 # Stream responses using receive_messages()
@@ -509,17 +566,23 @@ class ClaudeCodeSDKManager:
                                 }
                                 interrupt_event_yielded = True
                         else:
-                            logger.warning(f"Session {current_session_id} died with exit code -9 (likely corrupted from previous interrupt)")
-                            # Yield corrupted session error
+                            # Log captured stderr for debugging
+                            logger.error(f"Session {current_session_id} died with exit code -9 (SIGKILL)")
+                            logger.error(f"Possible causes: OOM kill, resource limits, or corrupted session")
+                            logger.error(f"CLI stderr output:\n{stderr_capture.get_summary()}")
+                            # Yield corrupted session error with stderr info
                             yield {
                                 "type": "error",
                                 "content": "Session was corrupted from a previous interrupt. Please try your message again.",
                                 "error_type": "CorruptedSession",
                                 "session_corrupted": True,
+                                "stderr_lines": stderr_capture.get_recent_lines(10),
                             }
                     else:
-                        # This is an unexpected error
+                        # This is an unexpected error - include stderr in logs
                         logger.error(f"Error during receive_messages iteration: {e}", exc_info=True)
+                        if stderr_capture.line_count > 0:
+                            logger.error(f"CLI stderr output:\n{stderr_capture.get_summary()}")
                         raise
                 finally:
                     # Unregister session from active session manager
@@ -547,10 +610,14 @@ class ClaudeCodeSDKManager:
                 }
             except Exception as e:
                 logger.error(f"SDK error: {type(e).__name__}: {e}", exc_info=True)
+                # Include stderr in logs if available
+                if 'stderr_capture' in locals() and stderr_capture.line_count > 0:
+                    logger.error(f"CLI stderr output:\n{stderr_capture.get_summary()}")
                 yield {
                     "type": "error",
                     "content": f"SDK error: {str(e)}",
                     "error_type": type(e).__name__,
+                    "stderr_lines": stderr_capture.get_recent_lines(10) if 'stderr_capture' in locals() else [],
                 }
 
 
