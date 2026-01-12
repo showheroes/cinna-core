@@ -33,7 +33,13 @@ def get_messages(
 ) -> Any:
     """
     Get session messages.
+
+    For messages with tools_needing_approval metadata, filters out tools
+    that have already been approved in the agent's allowed_tools config.
+    This prevents showing approval buttons for already-approved tools on page reload.
     """
+    from app.models import Agent
+
     # Verify session exists and user owns it
     chat_session = session.get(Session, session_id)
     if not chat_session:
@@ -45,6 +51,26 @@ def get_messages(
     messages = MessageService.get_session_messages(
         session=session, session_id=session_id, limit=limit, offset=offset
     )
+
+    # Get agent's allowed_tools to filter out already-approved tools from messages
+    allowed_tools: set[str] = set()
+    if chat_session.environment_id:
+        environment = session.get(AgentEnvironment, chat_session.environment_id)
+        if environment and environment.agent_id:
+            agent = session.get(Agent, environment.agent_id)
+            if agent and agent.agent_sdk_config:
+                allowed_tools = set(agent.agent_sdk_config.get("allowed_tools", []))
+
+    # Filter tools_needing_approval for each message
+    if allowed_tools:
+        for msg in messages:
+            if msg.message_metadata and "tools_needing_approval" in msg.message_metadata:
+                original_tools = msg.message_metadata.get("tools_needing_approval", [])
+                # Filter out tools that are now approved
+                filtered_tools = [t for t in original_tools if t not in allowed_tools]
+                # Update the metadata (this doesn't persist to DB, just affects this response)
+                msg.message_metadata["tools_needing_approval"] = filtered_tools
+
     return MessagesPublic(data=messages, count=len(messages))
 
 

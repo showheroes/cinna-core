@@ -952,7 +952,8 @@ class LLMPluginService:
     def prepare_plugins_for_environment(
         session: Session,
         agent_id: uuid.UUID,
-        mode: str | None = None
+        mode: str | None = None,
+        allowed_tools: list[str] | None = None
     ) -> dict:
         """
         Prepare plugin data for syncing to agent environment.
@@ -961,12 +962,13 @@ class LLMPluginService:
             session: Database session
             agent_id: Agent ID
             mode: Optional filter by mode ("conversation" or "building")
+            allowed_tools: Optional list of allowed tools from agent SDK config
 
         Returns:
             Dictionary with plugin data for environment:
             - all_plugins: All plugins (for file sync, includes disabled)
             - active_plugins: Only enabled plugins (for context)
-            - settings_json: Settings containing only active plugins
+            - settings_json: Settings containing active plugins and allowed_tools
         """
         links = LLMPluginService.get_agent_plugins(session, agent_id)
 
@@ -1004,10 +1006,15 @@ class LLMPluginService:
             if not link.disabled:
                 active_plugins.append(plugin_data)
 
+        # Build settings_json with active_plugins and allowed_tools
+        settings_json = {"active_plugins": active_plugins}
+        if allowed_tools is not None:
+            settings_json["allowed_tools"] = allowed_tools
+
         return {
             "all_plugins": all_plugins,
             "active_plugins": active_plugins,
-            "settings_json": {"active_plugins": active_plugins},
+            "settings_json": settings_json,
         }
 
     # ==========================================================================

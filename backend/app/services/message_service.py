@@ -8,8 +8,17 @@ import asyncio
 from sqlmodel import Session, select, func
 from app.models import SessionMessage, Session as ChatSession, AgentEnvironment, Agent, SessionUpdate
 from app.services.active_streaming_manager import active_streaming_manager
+from app.services.agent_service import AgentService
 
 logger = logging.getLogger(__name__)
+
+# Pre-allowed tools that never require user approval
+# These match the default tools in agent-env's sdk_manager.py
+PRE_ALLOWED_TOOLS = frozenset([
+    "Read", "Edit", "Glob", "Grep", "Bash", "Write", "WebFetch", "WebSearch", "TodoWrite",
+    "Task", "Skill", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "NotebookEdit",
+    "KillShell", "TaskOutput",  # Additional built-in tools
+])
 
 
 class MessageService:
@@ -696,12 +705,20 @@ class MessageService:
             external_session_id=external_session_id
         )
 
-        # Get user_id for event emission
-        def _get_user_id():
+        # Get user_id and agent's allowed_tools for event emission and tool approval checking
+        def _get_session_context():
             with get_fresh_db_session() as db:
                 session_db = db.get(ChatSession, session_id)
-                return session_db.user_id if session_db else None
-        user_id = await asyncio.to_thread(_get_user_id)
+                user_id = session_db.user_id if session_db else None
+                allowed_tools = set()
+                if session_db:
+                    env = db.get(AgentEnvironment, environment_id)
+                    if env and env.agent_id:
+                        agent = db.get(Agent, env.agent_id)
+                        if agent and agent.agent_sdk_config:
+                            allowed_tools = set(agent.agent_sdk_config.get("allowed_tools", []))
+                return user_id, allowed_tools
+        user_id, agent_allowed_tools = await asyncio.to_thread(_get_session_context)
 
         # Emit STREAM_STARTED event for activity tracking
         try:
@@ -728,6 +745,7 @@ class MessageService:
         new_external_session_id = external_session_id
         was_interrupted = False  # Track if message was interrupted
         agent_message_id = None  # Track agent message ID for early creation
+        tools_needing_approval = set()  # Track all tools that need approval in this message
         response_metadata = {
             "external_session_id": external_session_id,
             "mode": session_mode,
@@ -878,6 +896,46 @@ class MessageService:
                                     )
                         await asyncio.to_thread(_store_session_id)
 
+                # Handle tools_init event - update agent's sdk_tools
+                if event.get("type") == "system" and event.get("subtype") == "tools_init":
+                    tools_list = event.get("data", {}).get("tools", [])
+                    if tools_list:
+                        def _update_sdk_tools():
+                            with get_fresh_db_session() as db:
+                                # Get agent_id from environment
+                                env = db.get(AgentEnvironment, environment_id)
+                                if env and env.agent_id:
+                                    try:
+                                        AgentService.update_sdk_tools(
+                                            session=db,
+                                            agent_id=env.agent_id,
+                                            tools=tools_list
+                                        )
+                                        logger.info(f"Updated sdk_tools for agent {env.agent_id} with {len(tools_list)} tools")
+                                    except Exception as e:
+                                        logger.error(f"Failed to update sdk_tools: {e}")
+                        await asyncio.to_thread(_update_sdk_tools)
+                    # Don't forward this event to frontend - it's internal
+                    continue
+
+                # Check tool events for approval status
+                if event.get("type") == "tool" and event.get("tool_name"):
+                    tool_name = event["tool_name"]
+                    # Check if tool needs approval (not in pre-allowed or agent's allowed_tools)
+                    needs_approval = (
+                        tool_name not in PRE_ALLOWED_TOOLS and
+                        tool_name not in agent_allowed_tools
+                    )
+                    if needs_approval:
+                        # Add metadata to flag this tool needs approval
+                        if "metadata" not in event:
+                            event["metadata"] = {}
+                        event["metadata"]["needs_approval"] = True
+                        event["metadata"]["tool_name"] = tool_name
+                        # Track for summary in final message metadata
+                        tools_needing_approval.add(tool_name)
+                        logger.info(f"Tool '{tool_name}' flagged as needing approval")
+
                 # Store raw event for visualization (exclude done/error events from storage)
                 if event.get("type") not in ["done", "error", "session_created"]:
                     event_copy = {
@@ -889,7 +947,7 @@ class MessageService:
                     if event.get("metadata"):
                         event_copy["metadata"] = {
                             k: v for k, v in event["metadata"].items()
-                            if k in ["tool_id", "tool_input", "model"]
+                            if k in ["tool_id", "tool_input", "model", "needs_approval", "tool_name"]
                         }
                     streaming_events.append(event_copy)
 
@@ -949,6 +1007,11 @@ class MessageService:
 
                 # Store structured events in metadata
                 response_metadata["external_session_id"] = new_external_session_id
+
+                # Add tools needing approval summary if any
+                if tools_needing_approval:
+                    response_metadata["tools_needing_approval"] = list(tools_needing_approval)
+                    logger.info(f"Message has {len(tools_needing_approval)} tools needing approval: {tools_needing_approval}")
                 response_metadata["streaming_events"] = streaming_events
 
                 # Detect if AskUserQuestion tool was used

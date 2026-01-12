@@ -274,10 +274,16 @@ class EnvironmentLifecycleManager:
 
         adapter = self.get_adapter(environment)
 
-        # Prepare plugin data
+        # Get allowed_tools from agent SDK config
+        allowed_tools = None
+        if agent.agent_sdk_config:
+            allowed_tools = agent.agent_sdk_config.get("allowed_tools", [])
+
+        # Prepare plugin data with allowed_tools
         plugins_data = LLMPluginService.prepare_plugins_for_environment(
             session=db_session,
-            agent_id=agent.id
+            agent_id=agent.id,
+            allowed_tools=allowed_tools
         )
 
         # Get plugin files for each installed plugin

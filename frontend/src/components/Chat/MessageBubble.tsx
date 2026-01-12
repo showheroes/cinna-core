@@ -1,21 +1,58 @@
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { formatDistanceToNow } from "date-fns"
 import { Link } from "@tanstack/react-router"
+import { toast } from "sonner"
 import type { MessagePublic } from "@/client"
 import { StreamEventRenderer } from "./StreamEventRenderer"
 import { MessageActions } from "./MessageActions"
 import { AnswerQuestionsModal } from "./AnswerQuestionsModal"
 import { FileBadge } from "./FileBadge"
 import { Info, AlertCircle, ExternalLink } from "lucide-react"
+import { useToolApproval } from "@/hooks/useToolApproval"
 
 interface MessageBubbleProps {
   message: MessagePublic
   onSendAnswer?: (content: string, answersToMessageId: string) => void
+  onSendMessage?: (content: string) => void
   conversationModeUi?: string
+  agentId?: string
 }
 
-export function MessageBubble({ message, onSendAnswer, conversationModeUi = "detailed" }: MessageBubbleProps) {
+export function MessageBubble({ message, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId }: MessageBubbleProps) {
   const [showAnswerModal, setShowAnswerModal] = useState(false)
+  const approvalMessageSentRef = useRef(false)
+
+  // Tool approval hook
+  const {
+    toolsNeedingApproval,
+    hasToolsNeedingApproval,
+    isApproving,
+    isApproved,
+    error: approvalError,
+    approveTools,
+  } = useToolApproval({ message, agentId })
+
+  // Show toast and send continue message on approval success
+  useEffect(() => {
+    if (isApproved && !approvalMessageSentRef.current) {
+      approvalMessageSentRef.current = true
+      toast.success("Tools approved", {
+        description: `${toolsNeedingApproval.length} tool${toolsNeedingApproval.length > 1 ? "s" : ""} approved successfully`,
+      })
+      // Send message to trigger agent to continue
+      if (onSendMessage) {
+        onSendMessage("Tools approved — continue.")
+      }
+    }
+  }, [isApproved, toolsNeedingApproval.length, onSendMessage])
+
+  useEffect(() => {
+    if (approvalError) {
+      toast.error("Failed to approve tools", {
+        description: approvalError,
+      })
+    }
+  }, [approvalError])
 
   const isUser = message.role === "user"
   const isSystem = message.role === "system"
@@ -24,7 +61,6 @@ export function MessageBubble({ message, onSendAnswer, conversationModeUi = "det
   // Check if this is a handover system message
   const isHandoverMessage = isSystem && message.message_metadata?.handover_type === "agent_handover"
   const forwardedToSessionId = message.message_metadata?.forwarded_to_session_id as string | undefined
-  const targetAgentName = message.message_metadata?.target_agent_name as string | undefined
 
   if (isSystem) {
     return (
@@ -200,10 +236,14 @@ export function MessageBubble({ message, onSendAnswer, conversationModeUi = "det
           </div>
 
           {/* Message Actions - Outside bubble, aligned right, within same width container */}
-          {!isUser && hasQuestions && (
+          {!isUser && (hasQuestions || hasToolsNeedingApproval) && (
             <MessageActions
               message={message}
-              onAnswerQuestions={() => setShowAnswerModal(true)}
+              onAnswerQuestions={hasQuestions ? () => setShowAnswerModal(true) : undefined}
+              hasToolsNeedingApproval={hasToolsNeedingApproval}
+              toolsNeedingApproval={toolsNeedingApproval}
+              isApprovingTools={isApproving}
+              onApproveTools={approveTools}
             />
           )}
         </div>

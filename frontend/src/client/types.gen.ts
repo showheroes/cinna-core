@@ -197,6 +197,9 @@ export type AgentPublic = {
     ui_color_preset: (string | null);
     show_on_dashboard: boolean;
     conversation_mode_ui: string;
+    agent_sdk_config?: ({
+    [key: string]: unknown;
+} | null);
     created_at: string;
     updated_at: string;
     owner_id: string;
@@ -217,6 +220,14 @@ export type AgentSchedulePublic = {
     next_execution: string;
     created_at: string;
     updated_at: string;
+};
+
+/**
+ * Schema for agent SDK configuration
+ */
+export type AgentSdkConfig = {
+    sdk_tools?: Array<(string)>;
+    allowed_tools?: Array<(string)>;
 };
 
 export type AgentsPublic = {
@@ -302,6 +313,13 @@ export type AIServiceCredentialsUpdate = {
     anthropic_api_key?: (string | null);
     openai_api_key?: (string | null);
     google_ai_api_key?: (string | null);
+};
+
+/**
+ * Schema for updating allowed tools list
+ */
+export type AllowedToolsUpdate = {
+    tools: Array<(string)>;
 };
 
 /**
@@ -805,6 +823,13 @@ export type OAuthRefreshResponse = {
 };
 
 /**
+ * Response for pending tools endpoint
+ */
+export type PendingToolsResponse = {
+    pending_tools: Array<(string)>;
+};
+
+/**
  * Type of plugin source.
  */
 export type PluginSourceType = 'local' | 'url';
@@ -1265,6 +1290,25 @@ export type AgentsExecuteHandoverData = {
 };
 
 export type AgentsExecuteHandoverResponse = (ExecuteHandoverResponse);
+
+export type AgentsGetSdkConfigData = {
+    id: string;
+};
+
+export type AgentsGetSdkConfigResponse = (AgentSdkConfig);
+
+export type AgentsAddAllowedToolsData = {
+    id: string;
+    requestBody: AllowedToolsUpdate;
+};
+
+export type AgentsAddAllowedToolsResponse = (AgentSdkConfig);
+
+export type AgentsGetPendingToolsData = {
+    id: string;
+};
+
+export type AgentsGetPendingToolsResponse = (PendingToolsResponse);
 
 export type CredentialsReadCredentialsData = {
     limit?: number;

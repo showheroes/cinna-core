@@ -1155,3 +1155,16 @@ class AgentEnvService:
             # If mode is not specified, return all active plugins
             logger.warning(f"Unknown mode '{mode}', returning all active plugins")
             return active_plugins
+
+    def get_allowed_tools(self) -> list[str]:
+        """
+        Get user-approved allowed tools from settings.json.
+
+        These tools are pre-authorized by the user and should be merged with
+        the pre-allowed tools list when initializing SDK sessions.
+
+        Returns:
+            List of tool names approved by the user
+        """
+        settings = self.get_plugins_settings()
+        return settings.get("allowed_tools", [])

@@ -23,10 +23,12 @@ interface MessageListProps {
   streamingEvents?: StreamEvent[]
   isStreaming?: boolean
   onSendAnswer?: (content: string, answersToMessageId: string) => void
+  onSendMessage?: (content: string) => void
   conversationModeUi?: string
+  agentId?: string
 }
 
-export function MessageList({ messages, isLoading, streamingEvents, isStreaming, onSendAnswer, conversationModeUi = "detailed" }: MessageListProps) {
+export function MessageList({ messages, isLoading, streamingEvents, isStreaming, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -92,7 +94,7 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming,
                   return !metadata?.streaming_in_progress
                 })
                 .map((message) => (
-                  <MessageBubble key={message.id} message={message} onSendAnswer={onSendAnswer} conversationModeUi={conversationModeUi} />
+                  <MessageBubble key={message.id} message={message} onSendAnswer={onSendAnswer} onSendMessage={onSendMessage} conversationModeUi={conversationModeUi} agentId={agentId} />
                 ))}
               {isStreaming && <StreamingMessage events={streamingEvents || []} conversationModeUi={conversationModeUi} />}
               <div ref={messagesEndRef} />

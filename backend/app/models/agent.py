@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship, SQLModel, Column
+from sqlalchemy import JSON
 
 from app.models.user import User
 from app.models.link_models import AgentCredentialLink
@@ -48,6 +49,7 @@ class Agent(AgentBase, table=True):
     ui_color_preset: str | None = Field(default="slate")
     show_on_dashboard: bool = Field(default=True)
     conversation_mode_ui: str = Field(default="detailed")  # "detailed" or "compact"
+    agent_sdk_config: dict = Field(default_factory=dict, sa_column=Column(JSON))  # SDK config: sdk_tools, allowed_tools
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -79,6 +81,7 @@ class AgentPublic(SQLModel):
     ui_color_preset: str | None
     show_on_dashboard: bool
     conversation_mode_ui: str
+    agent_sdk_config: dict | None = None
     created_at: datetime
     updated_at: datetime
     owner_id: uuid.UUID
@@ -112,3 +115,20 @@ class AgentCreateFlowRequest(SQLModel):
 class AgentCreateFlowResponse(SQLModel):
     agent_id: uuid.UUID
     message: str
+
+
+# SDK Config schemas
+class AgentSdkConfig(SQLModel):
+    """Schema for agent SDK configuration"""
+    sdk_tools: list[str] = []  # All tools discovered from agent-env
+    allowed_tools: list[str] = []  # Tools approved by user for automatic permission grant
+
+
+class AllowedToolsUpdate(SQLModel):
+    """Schema for updating allowed tools list"""
+    tools: list[str]  # Tools to add to allowed list
+
+
+class PendingToolsResponse(SQLModel):
+    """Response for pending tools endpoint"""
+    pending_tools: list[str]  # Tools that need approval (in sdk_tools but not in allowed_tools)

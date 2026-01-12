@@ -184,9 +184,20 @@ class ClaudeCodeSDKManager:
                 # Import SDK here to avoid import errors if SDK not installed
                 from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server
 
+                # Build pre-allowed tools list (always allowed, no user approval needed)
+                pre_allowed_tools = ["Read", "Edit", "Glob", "Grep", "Bash", "Write", "WebFetch", "WebSearch", "TodoWrite"]
+
+                # Get user-approved allowed tools from settings.json
+                user_allowed_tools = self.agent_env_service.get_allowed_tools()
+                logger.info(f"User-approved allowed tools from settings: {user_allowed_tools}")
+
+                # Merge pre-allowed tools with user-approved tools (no duplicates)
+                all_allowed_tools = list(set(pre_allowed_tools + user_allowed_tools))
+                logger.info(f"Merged allowed tools: {len(all_allowed_tools)} tools")
+
                 # Build options
                 options = ClaudeAgentOptions(
-                    allowed_tools=["Read", "Edit", "Glob", "Grep", "Bash", "Write", "WebFetch", "WebSearch", "TodoWrite"],
+                    allowed_tools=all_allowed_tools,
                     permission_mode=self.permission_mode,
                     cwd=self.workspace_dir,
                 )
@@ -323,6 +334,18 @@ class ClaudeCodeSDKManager:
                         "session_id": None,  # Will be set from ResultMessage
                         "content": "",
                     }
+
+                # Emit tools_init event with all available tools for backend tracking
+                # This allows backend to track which tools are available and manage approvals
+                yield {
+                    "type": "system",
+                    "subtype": "tools_init",
+                    "content": "",
+                    "data": {
+                        "tools": options.allowed_tools.copy() if options.allowed_tools else [],
+                    },
+                }
+                logger.info(f"Yielded tools_init event with {len(options.allowed_tools or [])} tools")
 
                 # Send the message
                 logger.info(f"Sending query to SDK client: {message[:50]}...")

@@ -1,8 +1,9 @@
 from uuid import UUID
 import asyncio
 import logging
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
-from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment, Session as ChatSession
+from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment, Session as ChatSession, AgentSdkConfig
 from app.models.environment import AgentEnvironmentCreate
 from app.services.environment_service import EnvironmentService
 from app.services.environment_lifecycle import EnvironmentLifecycleManager
@@ -478,3 +479,182 @@ class AgentService:
         except Exception as e:
             logger.error(f"Error executing handover: {str(e)}")
             return False, None, str(e)
+
+    # SDK Config Methods
+
+    @staticmethod
+    def get_sdk_config(session: Session, agent_id: UUID) -> AgentSdkConfig:
+        """
+        Get SDK configuration for an agent.
+
+        Returns AgentSdkConfig with sdk_tools and allowed_tools lists.
+        If agent_sdk_config is empty or None, returns empty lists.
+        """
+        agent = session.get(Agent, agent_id)
+        if not agent:
+            return AgentSdkConfig(sdk_tools=[], allowed_tools=[])
+
+        config = agent.agent_sdk_config or {}
+        return AgentSdkConfig(
+            sdk_tools=config.get("sdk_tools", []),
+            allowed_tools=config.get("allowed_tools", [])
+        )
+
+    @staticmethod
+    def add_allowed_tools(session: Session, agent_id: UUID, tools: list[str]) -> AgentSdkConfig:
+        """
+        Add tools to the allowed_tools list.
+
+        Merges new tools with existing allowed_tools (no duplicates).
+        Returns updated AgentSdkConfig.
+        """
+        agent = session.get(Agent, agent_id)
+        if not agent:
+            raise ValueError(f"Agent {agent_id} not found")
+
+        # Get current config or initialize
+        if not agent.agent_sdk_config:
+            agent.agent_sdk_config = {"sdk_tools": [], "allowed_tools": []}
+
+        # Get current allowed tools
+        current_allowed = set(agent.agent_sdk_config.get("allowed_tools", []))
+
+        # Add new tools
+        current_allowed.update(tools)
+
+        # Update config
+        agent.agent_sdk_config["allowed_tools"] = list(current_allowed)
+
+        # Mark as modified for SQLAlchemy to detect the change
+        flag_modified(agent, "agent_sdk_config")
+
+        session.add(agent)
+        session.commit()
+        session.refresh(agent)
+
+        return AgentSdkConfig(
+            sdk_tools=agent.agent_sdk_config.get("sdk_tools", []),
+            allowed_tools=agent.agent_sdk_config.get("allowed_tools", [])
+        )
+
+    @staticmethod
+    def get_pending_tools(session: Session, agent_id: UUID) -> list[str]:
+        """
+        Get tools that need approval.
+
+        Returns tools that are in sdk_tools but not in allowed_tools.
+        """
+        agent = session.get(Agent, agent_id)
+        if not agent:
+            return []
+
+        config = agent.agent_sdk_config or {}
+        sdk_tools = set(config.get("sdk_tools", []))
+        allowed_tools = set(config.get("allowed_tools", []))
+
+        # Pending = sdk_tools - allowed_tools
+        pending = sdk_tools - allowed_tools
+        return list(pending)
+
+    @staticmethod
+    def update_sdk_tools(session: Session, agent_id: UUID, tools: list[str]) -> AgentSdkConfig:
+        """
+        Update the sdk_tools list (incrementally - adds new tools, keeps existing).
+
+        Called when init message is received from agent-env to update discovered tools.
+        """
+        agent = session.get(Agent, agent_id)
+        if not agent:
+            raise ValueError(f"Agent {agent_id} not found")
+
+        # Get current config or initialize
+        if not agent.agent_sdk_config:
+            agent.agent_sdk_config = {"sdk_tools": [], "allowed_tools": []}
+
+        # Get current sdk_tools
+        current_sdk_tools = set(agent.agent_sdk_config.get("sdk_tools", []))
+
+        # Add new tools (incremental)
+        current_sdk_tools.update(tools)
+
+        # Update config
+        agent.agent_sdk_config["sdk_tools"] = list(current_sdk_tools)
+
+        # Mark as modified for SQLAlchemy to detect the change
+        flag_modified(agent, "agent_sdk_config")
+
+        session.add(agent)
+        session.commit()
+        session.refresh(agent)
+
+        return AgentSdkConfig(
+            sdk_tools=agent.agent_sdk_config.get("sdk_tools", []),
+            allowed_tools=agent.agent_sdk_config.get("allowed_tools", [])
+        )
+
+    @staticmethod
+    async def sync_allowed_tools_to_environment(session: Session, agent_id: UUID) -> bool:
+        """
+        Sync allowed_tools to agent's active environment.
+
+        This syncs only the settings.json (not plugin files) to update allowed_tools.
+        Called after approving tools via /allowed-tools endpoint.
+
+        Args:
+            session: Database session
+            agent_id: Agent UUID
+
+        Returns:
+            True if sync was successful, False otherwise
+        """
+        from app.services.llm_plugin_service import LLMPluginService
+
+        agent = session.get(Agent, agent_id)
+        if not agent:
+            logger.warning(f"Agent {agent_id} not found for allowed_tools sync")
+            return False
+
+        if not agent.active_environment_id:
+            logger.warning(f"Agent {agent_id} has no active environment, skipping allowed_tools sync")
+            return False
+
+        environment = session.get(AgentEnvironment, agent.active_environment_id)
+        if not environment:
+            logger.warning(f"Active environment {agent.active_environment_id} not found")
+            return False
+
+        if environment.status != "running":
+            logger.warning(f"Environment {environment.id} is not running (status: {environment.status})")
+            return False
+
+        try:
+            # Get allowed_tools from agent SDK config
+            allowed_tools = []
+            if agent.agent_sdk_config:
+                allowed_tools = agent.agent_sdk_config.get("allowed_tools", [])
+
+            # Prepare plugin data with allowed_tools
+            plugins_data = LLMPluginService.prepare_plugins_for_environment(
+                session=session,
+                agent_id=agent_id,
+                allowed_tools=allowed_tools
+            )
+
+            # Get lifecycle manager and adapter
+            lifecycle_manager = EnvironmentLifecycleManager()
+            adapter = lifecycle_manager.get_adapter(environment)
+
+            # Sync only settings (no plugin files needed for tool approval)
+            # We just send the settings_json update
+            await adapter.set_plugins({
+                "active_plugins": plugins_data.get("active_plugins", []),
+                "settings_json": plugins_data.get("settings_json", {}),
+                "plugin_files": {},  # No need to re-sync plugin files
+            })
+
+            logger.info(f"Synced allowed_tools to environment {environment.id} for agent {agent_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to sync allowed_tools to environment: {e}")
+            return False

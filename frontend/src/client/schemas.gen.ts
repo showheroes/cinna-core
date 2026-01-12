@@ -1338,6 +1338,18 @@ export const AgentPublicSchema = {
             type: 'string',
             title: 'Conversation Mode Ui'
         },
+        agent_sdk_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Sdk Config'
+        },
         created_at: {
             type: 'string',
             format: 'date-time',
@@ -1431,6 +1443,30 @@ export const AgentSchedulePublicSchema = {
     required: ['id', 'agent_id', 'cron_string', 'timezone', 'description', 'enabled', 'last_execution', 'next_execution', 'created_at', 'updated_at'],
     title: 'AgentSchedulePublic',
     description: 'Public response model for AgentSchedule.'
+} as const;
+
+export const AgentSdkConfigSchema = {
+    properties: {
+        sdk_tools: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Sdk Tools',
+            default: []
+        },
+        allowed_tools: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Allowed Tools',
+            default: []
+        }
+    },
+    type: 'object',
+    title: 'AgentSdkConfig',
+    description: 'Schema for agent SDK configuration'
 } as const;
 
 export const AgentUpdateSchema = {
@@ -1547,6 +1583,22 @@ export const AgentsPublicSchema = {
     type: 'object',
     required: ['data', 'count'],
     title: 'AgentsPublic'
+} as const;
+
+export const AllowedToolsUpdateSchema = {
+    properties: {
+        tools: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Tools'
+        }
+    },
+    type: 'object',
+    required: ['tools'],
+    title: 'AllowedToolsUpdate',
+    description: 'Schema for updating allowed tools list'
 } as const;
 
 export const ArticleContentSchema = {
@@ -3569,6 +3621,22 @@ export const OAuthRefreshResponseSchema = {
     type: 'object',
     required: ['message', 'expires_at'],
     title: 'OAuthRefreshResponse'
+} as const;
+
+export const PendingToolsResponseSchema = {
+    properties: {
+        pending_tools: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pending Tools'
+        }
+    },
+    type: 'object',
+    required: ['pending_tools'],
+    title: 'PendingToolsResponse',
+    description: 'Response for pending tools endpoint'
 } as const;
 
 export const PluginSourceTypeSchema = {

@@ -108,6 +108,14 @@ function ChatInterface() {
     [sendMessage]
   )
 
+  // Simple message send without linking to another message (for tool approval, etc.)
+  const handleSendSimpleMessage = useCallback(
+    async (content: string) => {
+      await sendMessage(content)
+    },
+    [sendMessage]
+  )
+
   // Send initial message if provided - wait for session and messages to load
   useEffect(() => {
     if (
@@ -335,7 +343,9 @@ function ChatInterface() {
           streamingEvents={streamingEvents}
           isStreaming={isStreaming}
           onSendAnswer={handleSendAnswer}
+          onSendMessage={handleSendSimpleMessage}
           conversationModeUi={session.mode === "building" ? "detailed" : (agent?.conversation_mode_ui || "detailed")}
+          agentId={session?.agent_id ?? undefined}
         />
         <EnvironmentPanel isOpen={envPanelOpen} environmentId={session?.environment_id} agentId={session?.agent_id ?? undefined} />
       </div>

@@ -27,6 +27,9 @@ from .agent import (
     AgentCredentialLinkRequest,
     AgentCreateFlowRequest,
     AgentCreateFlowResponse,
+    AgentSdkConfig,
+    AllowedToolsUpdate,
+    PendingToolsResponse,
 )
 from .credential import (
     Credential,
@@ -189,6 +192,9 @@ __all__ = [
     "AgentCredentialLinkRequest",
     "AgentCreateFlowRequest",
     "AgentCreateFlowResponse",
+    "AgentSdkConfig",
+    "AllowedToolsUpdate",
+    "PendingToolsResponse",
     # Credentials
     "Credential",
     "CredentialCreate",

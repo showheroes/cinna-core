@@ -20,6 +20,9 @@ from app.models import (
     AgentCredentialLinkRequest,
     AgentCreateFlowRequest,
     AgentCreateFlowResponse,
+    AgentSdkConfig,
+    AllowedToolsUpdate,
+    PendingToolsResponse,
     Message,
     Credential,
     CredentialPublic,
@@ -780,3 +783,88 @@ async def execute_handover(
         session_id=new_session_id,
         error=error
     )
+
+
+# SDK Config and Tools Management routes
+@router.get("/{id}/sdk-config", response_model=AgentSdkConfig)
+def get_sdk_config(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Any:
+    """
+    Get SDK configuration for an agent.
+
+    Returns the agent's SDK config including:
+    - sdk_tools: All tools discovered from agent-env
+    - allowed_tools: Tools approved by user for automatic permission grant
+    """
+    agent = session.get(Agent, id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not current_user.is_superuser and (agent.owner_id != current_user.id):
+        raise HTTPException(status_code=400, detail="Not enough permissions")
+
+    return AgentService.get_sdk_config(session=session, agent_id=id)
+
+
+@router.patch("/{id}/allowed-tools", response_model=AgentSdkConfig)
+async def add_allowed_tools(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    data: AllowedToolsUpdate,
+) -> Any:
+    """
+    Add tools to the allowed_tools list.
+
+    Merges the provided tools with existing allowed_tools (no duplicates).
+    Syncs the updated allowed_tools to agent's active environment.
+    Returns updated SDK config.
+    """
+    agent = session.get(Agent, id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not current_user.is_superuser and (agent.owner_id != current_user.id):
+        raise HTTPException(status_code=400, detail="Not enough permissions")
+
+    try:
+        sdk_config = AgentService.add_allowed_tools(
+            session=session,
+            agent_id=id,
+            tools=data.tools
+        )
+
+        # Sync allowed_tools to agent's active environment
+        await AgentService.sync_allowed_tools_to_environment(
+            session=session,
+            agent_id=id
+        )
+
+        return sdk_config
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{id}/pending-tools", response_model=PendingToolsResponse)
+def get_pending_tools(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Any:
+    """
+    Get tools that need approval.
+
+    Returns tools that are in sdk_tools but not in allowed_tools.
+    """
+    agent = session.get(Agent, id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not current_user.is_superuser and (agent.owner_id != current_user.id):
+        raise HTTPException(status_code=400, detail="Not enough permissions")
+
+    pending = AgentService.get_pending_tools(session=session, agent_id=id)
+    return PendingToolsResponse(pending_tools=pending)
