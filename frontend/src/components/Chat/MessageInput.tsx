@@ -11,6 +11,7 @@ import {
 import { Send, Square, Loader2, Plus, Paperclip } from "lucide-react"
 import { RotatingHints } from "@/components/Common/RotatingHints"
 import { FileUploadModal } from "./FileUploadModal"
+import { GettingStartedModal } from "@/components/Onboarding/GettingStartedModal"
 import { FileBadge } from "./FileBadge"
 import { FilesService } from "@/client"
 import type { FileUploadPublic } from "@/client"
@@ -35,6 +36,7 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
     const [attachedFiles, setAttachedFiles] = useState<FileUploadPublic[]>([])
     const [showFileModal, setShowFileModal] = useState(false)
     const [isDraggingOver, setIsDraggingOver] = useState(false)
+    const [showGettingStarted, setShowGettingStarted] = useState(false)
 
     const deleteMutation = useMutation({
       mutationFn: (fileId: string) => FilesService.deleteFile({ fileId }),
@@ -208,8 +210,17 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
             </div>
           </div>
         ) : (
-          <RotatingHints className="mt-2 max-w-7xl mx-auto" />
+          <RotatingHints
+            className="mt-2 max-w-7xl mx-auto"
+            onClick={() => setShowGettingStarted(true)}
+          />
         )}
+
+        {/* Getting Started Modal */}
+        <GettingStartedModal
+          open={showGettingStarted}
+          onOpenChange={setShowGettingStarted}
+        />
       </div>
     )
   }

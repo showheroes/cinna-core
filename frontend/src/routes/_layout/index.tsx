@@ -24,6 +24,7 @@ import { LatestSessions } from "@/components/Sessions/LatestSessions"
 import { FileUploadModal } from "@/components/Chat/FileUploadModal"
 import { FileBadge } from "@/components/Chat/FileBadge"
 import { ApiKeyOnboarding } from "@/components/Onboarding/ApiKeyOnboarding"
+import { GettingStartedModal } from "@/components/Onboarding/GettingStartedModal"
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
@@ -48,6 +49,7 @@ function Dashboard() {
   const [attachedFiles, setAttachedFiles] = useState<FileUploadPublic[]>([])
   const [showFileModal, setShowFileModal] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const [showGettingStarted, setShowGettingStarted] = useState(false)
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -342,6 +344,7 @@ function Dashboard() {
       <ApiKeyOnboarding
         onComplete={() => {
           queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
+          setShowGettingStarted(true)
         }}
       />
     )
@@ -455,7 +458,7 @@ function Dashboard() {
                   ))}
                 </div>
               ) : (
-                <RotatingHints />
+                <RotatingHints onClick={() => setShowGettingStarted(true)} />
               )}
 
               {/* Mode Switch, Attach Button, and Send Button */}
@@ -529,6 +532,12 @@ function Dashboard() {
             open={showFileModal}
             onOpenChange={setShowFileModal}
             onFileUploaded={handleFileUploaded}
+          />
+
+          {/* Getting Started Modal - shown once after API key onboarding */}
+          <GettingStartedModal
+            open={showGettingStarted}
+            onOpenChange={setShowGettingStarted}
           />
         </div>
       </div>

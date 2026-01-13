@@ -4,6 +4,7 @@ interface RotatingHintsProps {
   hints?: string[]
   interval?: number
   className?: string
+  onClick?: () => void
 }
 
 const defaultHints = [
@@ -33,6 +34,7 @@ export function RotatingHints({
   hints = defaultHints,
   interval = 8000,
   className = "",
+  onClick,
 }: RotatingHintsProps) {
   // Shuffle hints once when component loads or hints prop changes
   const shuffledHints = useMemo(() => shuffleArray(hints), [hints])
@@ -58,12 +60,14 @@ export function RotatingHints({
   }, [shuffledHints.length, interval])
 
   return (
-    <p
-      className={`text-xs text-muted-foreground/70 transition-opacity duration-[600ms] ${
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-xs text-muted-foreground/70 transition-all duration-[600ms] text-left hover:text-muted-foreground cursor-pointer ${
         isVisible ? "opacity-100" : "opacity-0"
       } ${className}`}
     >
       {shuffledHints[currentIndex]}
-    </p>
+    </button>
   )
 }
