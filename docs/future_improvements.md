@@ -2,10 +2,16 @@
 
 ## User Scenarios and Features
 
-### Prompt refining on the main screen
+### Costs tracking per user
 
-User can click 'magic button' and agent would consider current mode, selected agent if there is one (taking it's prompts),
-or if its a new agent, then consider recommendations on new agent building.
+Every time when via stream we receive any costs info in the message meta info,
+we should collect it that amount and make a record in the costs tracking to see when and how much user spent.
+That should be disconnected data (meaning if session / message is deleted, we still have records of costs).
+
+### Improved visibility of Workspace Content
+
+On the main dashboard, in the header, show the name of the Workspace (if its not Default)
+Show with icons how much agents / credentials are available in that workspace (or maybe what credentials are set).
 
 ### Improved sandboxing for Agent-Env
 
