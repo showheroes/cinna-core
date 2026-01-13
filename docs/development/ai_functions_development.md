@@ -32,6 +32,18 @@ AI Functions provide simple, fast LLM-powered utilities for text generation task
    - Returns JSON: `{success: true, sql: "..."}` or `{success: false, error: "..."}`
    - Used in: `backend/app/api/routes/workspace.py` (database viewer)
 
+4. **Prompt Refiner** (`backend/app/agents/prompt_refiner.py`)
+   - Refines user prompts to make them more effective for AI agents
+   - Takes context: user input, files attached flag, agent details (fetched by ID), session mode, new agent flag
+   - Returns JSON: `{success: true, refined_prompt: "..."}` or `{success: false, error: "..."}`
+   - Used in: `backend/app/api/routes/utils.py` (POST `/api/v1/utils/refine-prompt/`)
+   - **Frontend integration**: Sparkles button appears on hover over message input (Dashboard and Session pages)
+   - **Context-aware**: Adapts refinement based on:
+     - Agent's name, entrypoint prompt, and workflow prompt (fetched from DB)
+     - Session mode (building vs conversation)
+     - Whether user is creating a new agent
+     - Whether files are attached to the message
+
 ## Implementation Pattern
 
 All AI functions follow this simple pattern:
@@ -223,9 +235,10 @@ See existing implementations:
 - Simple text generation: `backend/app/agents/title_generator.py`
 - Template-based generation: `backend/app/agents/agent_generator.py`
 - Structured JSON output: `backend/app/agents/sql_generator.py`
+- Context-aware refinement: `backend/app/agents/prompt_refiner.py`
 - Prompt templates: `backend/app/agents/prompts/`
 - Service integration: `backend/app/services/ai_functions_service.py`
-- Usage in routes: `backend/app/api/routes/messages.py:155-175`, `backend/app/api/routes/workspace.py`
+- Usage in routes: `backend/app/api/routes/messages.py:155-175`, `backend/app/api/routes/workspace.py`, `backend/app/api/routes/utils.py`
 - Usage in services: `backend/app/services/agent_service.py:132-156`
 
 ## Future Enhancements
