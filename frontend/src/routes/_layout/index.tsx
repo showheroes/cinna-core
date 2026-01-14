@@ -7,7 +7,14 @@ import { AgentsService, SessionsService, FilesService, UsersService, UtilsServic
 import type { SessionCreate, FileUploadPublic } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Send, Bot, Paperclip, Plus, Sparkles } from "lucide-react"
+import { Send, Bot, Paperclip, Plus, Sparkles, Settings, MessageCircle, Wrench, AlertCircle } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,6 +52,13 @@ export const Route = createFileRoute("/_layout/")({
 
 const NEW_AGENT_ID = "__new_agent__"
 
+// SDK options for new agent configuration
+const SDK_OPTIONS = [
+  { value: "claude-code/anthropic", label: "Anthropic Claude", requiredKey: "anthropic" },
+  { value: "claude-code/minimax", label: "MiniMax M2", requiredKey: "minimax" },
+  { value: "google-adk-wr/openai-compatible", label: "OpenAI Compatible", requiredKey: "openai_compatible" },
+]
+
 function Dashboard() {
   const { setHeaderContent } = usePageHeader()
   const [selectedAgentId, setSelectedAgentId] = useState<string>("")
@@ -57,6 +71,9 @@ function Dashboard() {
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [showGettingStarted, setShowGettingStarted] = useState(false)
   const [isHoveringInput, setIsHoveringInput] = useState(false)
+  const [showSdkConfig, setShowSdkConfig] = useState(false)
+  const [sdkConversation, setSdkConversation] = useState("claude-code/anthropic")
+  const [sdkBuilding, setSdkBuilding] = useState("claude-code/anthropic")
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -73,6 +90,16 @@ function Dashboard() {
   })
 
   const hasAnthropicKey = credentialsStatus?.has_anthropic_api_key ?? false
+  const hasMinimaxKey = credentialsStatus?.has_minimax_api_key ?? false
+  const hasOpenaiCompatibleKey = credentialsStatus?.has_openai_compatible_api_key ?? false
+
+  // Check if user has required API key for a given SDK
+  const getKeyStatus = (sdk: string) => {
+    if (sdk === "claude-code/anthropic") return hasAnthropicKey
+    if (sdk === "claude-code/minimax") return hasMinimaxKey
+    if (sdk === "google-adk-wr/openai-compatible") return hasOpenaiCompatibleKey
+    return false
+  }
 
   const {
     data: agentsData,
@@ -247,7 +274,12 @@ function Dashboard() {
     if (selectedAgentId === NEW_AGENT_ID) {
       navigate({
         to: "/agent/creating",
-        search: { description: trimmedMessage, mode },
+        search: {
+          description: trimmedMessage,
+          mode,
+          sdkConversation,
+          sdkBuilding,
+        },
       })
       return
     }
@@ -331,9 +363,10 @@ function Dashboard() {
       return
     }
 
-    // Switching from "New Agent" to regular agent - restore previous mode
+    // Switching from "New Agent" to regular agent - restore previous mode and close SDK config
     if (selectedAgentId === NEW_AGENT_ID) {
       setMode(previousMode)
+      setShowSdkConfig(false)
     }
 
     if (selectedAgentId === agentId && inputMode === "automatic") {
@@ -519,40 +552,109 @@ function Dashboard() {
                 <RotatingHints onClick={() => setShowGettingStarted(true)} />
               )}
 
-              {/* Mode Switch, Attach Button, and Send Button */}
+              {/* Mode Switch or SDK Config Cog (for New Agent) */}
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {mode === "conversation" ? "Conversation" : "Building"}
-                  </span>
-                  <label className="flex cursor-pointer select-none items-center">
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        checked={mode === "building"}
-                        onChange={() => {
-                          const newMode = mode === "conversation" ? "building" : "conversation"
-                          setMode(newMode)
-                          // Update previousMode if not on "New Agent" so it's saved for later
-                          if (selectedAgentId !== NEW_AGENT_ID) {
-                            setPreviousMode(newMode)
-                          }
-                        }}
-                        className="sr-only"
-                      />
-                      <div
-                        className={`block h-6 w-11 rounded-full transition-colors ${
-                          mode === "building" ? "bg-orange-400" : "bg-gray-300 dark:bg-gray-600"
-                        }`}
-                      ></div>
-                      <div
-                        className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                          mode === "building" ? "translate-x-5" : ""
-                        }`}
-                      ></div>
-                    </div>
-                  </label>
-                </div>
+                {selectedAgentId === NEW_AGENT_ID ? (
+                  /* SDK Config Dropdown for New Agent */
+                  <DropdownMenu open={showSdkConfig} onOpenChange={setShowSdkConfig}>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className={`
+                          p-2 rounded-lg transition-all duration-200
+                          ${showSdkConfig
+                            ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white'
+                            : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground'}
+                        `}
+                      >
+                        <Settings className="h-5 w-5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="p-3 space-y-2">
+                      <div className="text-xs font-medium text-muted-foreground mb-2">Environment SDK</div>
+                      {/* Conversation Mode SDK */}
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <MessageCircle className="h-3.5 w-3.5 text-blue-500" />
+                          <span className="text-xs font-medium">Conversation</span>
+                        </div>
+                        <Select value={sdkConversation} onValueChange={setSdkConversation}>
+                          <SelectTrigger className="w-[140px] h-7 text-xs">
+                            <SelectValue placeholder="Select SDK" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SDK_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                                {!getKeyStatus(option.value) && " *"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {/* Building Mode SDK */}
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <Wrench className="h-3.5 w-3.5 text-orange-500" />
+                          <span className="text-xs font-medium">Building</span>
+                        </div>
+                        <Select value={sdkBuilding} onValueChange={setSdkBuilding}>
+                          <SelectTrigger className="w-[140px] h-7 text-xs">
+                            <SelectValue placeholder="Select SDK" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SDK_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                                {!getKeyStatus(option.value) && " *"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {(!getKeyStatus(sdkConversation) || !getKeyStatus(sdkBuilding)) && (
+                        <p className="text-xs text-destructive flex items-center gap-1 pt-1">
+                          <AlertCircle className="h-3 w-3" />
+                          * API key not configured
+                        </p>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  /* Mode Switch for regular agents */
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {mode === "conversation" ? "Conversation" : "Building"}
+                    </span>
+                    <label className="flex cursor-pointer select-none items-center">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={mode === "building"}
+                          onChange={() => {
+                            const newMode = mode === "conversation" ? "building" : "conversation"
+                            setMode(newMode)
+                            // Update previousMode if not on "New Agent" so it's saved for later
+                            if (selectedAgentId !== NEW_AGENT_ID) {
+                              setPreviousMode(newMode)
+                            }
+                          }}
+                          className="sr-only"
+                        />
+                        <div
+                          className={`block h-6 w-11 rounded-full transition-colors ${
+                            mode === "building" ? "bg-orange-400" : "bg-gray-300 dark:bg-gray-600"
+                          }`}
+                        ></div>
+                        <div
+                          className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                            mode === "building" ? "translate-x-5" : ""
+                          }`}
+                        ></div>
+                      </div>
+                    </label>
+                  </div>
+                )}
 
                 {/* Attach File Button */}
                 <DropdownMenu>

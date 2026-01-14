@@ -1,24 +1,83 @@
 # New Agent Creation Wizard
 
-## Overview
+## Purpose
 
-The New Agent Creation Wizard is a multi-step interface that guides users through creating an agent with environment setup and optional credential sharing. The wizard uses Server-Sent Events (SSE) streaming to provide real-time progress updates and allows users to select credentials to share with the agent before the first session starts.
+Multi-step wizard that guides users through creating an agent with environment setup, SDK configuration, and optional credential sharing, using SSE streaming for real-time progress updates.
+
+## Feature Overview
+
+**Flow:**
+1. User clicks "+ New Agent" badge on dashboard → switches to building mode
+2. User configures SDK providers via cog icon dropdown (optional)
+3. User enters agent description and sends
+4. Backend creates agent, generates configuration via LLM
+5. Backend builds and starts environment with selected SDKs
+6. Frontend handles credential sharing and session creation
+7. User redirected to new session
 
 ## Architecture
 
-### Backend Components
+```
+Dashboard UI → Agent Creation Route → Backend SSE → Environment Service → Agent-Env Container
+(SDK Config)   (creating.tsx)         (create-flow)  (with SDK params)    (SDK-specific config)
+```
 
-**Agent Model** (`backend/app/models/agent.py:83`)
-- `AgentCreateFlowRequest`: Request schema with `description`, `mode`, and `auto_create_session` fields
-- `auto_create_session` controls whether the flow stops after environment creation or continues to session creation
+**Configuration Flow:**
+- Dashboard: SDK selection via dropdown → passed as search params
+- Creating route: SDK params sent in SSE request body
+- Backend: SDK params passed to environment creation
+- Environment: SDK-specific settings files generated
 
-**Agent Service** (`backend/app/services/agent_service.py:113`)
+## SDK Pre-Configuration
+
+### Dashboard SDK Selector
+
+**Location:** `frontend/src/routes/_layout/index.tsx`
+
+When "+ New Agent" is selected:
+- Mode switch replaced with Settings (cog) icon
+- Cog opens dropdown with SDK configuration
+- User can select different SDKs for conversation and building modes
+- Selections passed to creation wizard via URL search params
+
+**State:**
+- `showSdkConfig`: Controls dropdown visibility
+- `sdkConversation`: Selected SDK for conversation mode (default: `claude-code/anthropic`)
+- `sdkBuilding`: Selected SDK for building mode (default: `claude-code/anthropic`)
+
+**SDK Options:** Defined in `SDK_OPTIONS` constant
+- `claude-code/anthropic` - Anthropic Claude
+- `claude-code/minimax` - MiniMax M2
+- `google-adk-wr/openai-compatible` - OpenAI Compatible
+
+**API Key Validation:** Uses `getKeyStatus()` helper with `aiCredentialsStatus` query to show warnings for unconfigured SDKs
+
+### Search Params
+
+**Route:** `frontend/src/routes/_layout/agent/creating.tsx`
+- `description`: Agent description text
+- `mode`: "conversation" | "building"
+- `sdkConversation`: Optional SDK for conversation mode
+- `sdkBuilding`: Optional SDK for building mode
+
+## Backend Components
+
+**Agent Model:** `backend/app/models/agent.py:107`
+- `AgentCreateFlowRequest`: Request schema with fields:
+  - `description`, `mode`, `auto_create_session`, `user_workspace_id`
+  - `agent_sdk_conversation`: SDK for conversation mode
+  - `agent_sdk_building`: SDK for building mode
+
+**Agent Service:** `backend/app/services/agent_service.py:119`
 - `create_agent_flow()`: Async generator that yields progress events
+- Accepts `agent_sdk_conversation` and `agent_sdk_building` parameters
+- Passes SDK params to `AgentEnvironmentCreate` for environment setup
 - Supports partial flows: when `auto_create_session=False`, stops after environment is ready
 - Returns `agent_id` and `environment_id` in events for frontend state management
 
-**Agent Routes** (`backend/app/api/routes/agents.py:93`)
+**Agent Routes:** `backend/app/api/routes/agents.py:150`
 - `POST /agents/create-flow`: SSE endpoint streaming creation progress
+  - Extracts SDK params from request and passes to service
 - `POST /agents/{id}/credentials`: Endpoint for sharing credentials with agent
 
 **SSE Event Schema**
@@ -30,8 +89,15 @@ The service yields events with these fields:
 
 ### Frontend Components
 
-**Creation Wizard Route** (`frontend/src/routes/_layout/agent/creating.tsx`)
-Main component managing the entire wizard flow with these responsibilities:
+**Dashboard:** `frontend/src/routes/_layout/index.tsx`
+- New Agent badge triggers building mode with SDK config UI
+- `handleAgentClick()`: Manages agent selection and SDK config visibility
+- `handleSend()`: Navigates to creation wizard with SDK params
+
+**Creation Wizard Route:** `frontend/src/routes/_layout/agent/creating.tsx`
+Main component managing the entire wizard flow:
+- Extracts `sdkConversation` and `sdkBuilding` from search params
+- Sends SDK params in SSE request body to backend
 - SSE event consumption and state updates
 - Credential selection UI
 - Post-environment flow orchestration (credential sharing, session creation)
@@ -48,6 +114,7 @@ The wizard maintains several pieces of state:
 - `CredentialsService.readCredentials()`: Fetch user's available credentials
 - `AgentsService.addCredentialToAgent()`: Share selected credentials
 - `SessionsService.createSession()`: Create session after credential sharing
+- `UsersService.getAiCredentialsStatus()`: Check available API keys for SDK validation
 
 ## Flow Architecture
 
@@ -217,9 +284,36 @@ When extending the wizard, test these scenarios:
 5. Session creation failures (should show error)
 6. Browser refresh during creation (SSE will fail - handle gracefully)
 7. Network interruptions (SSE timeout handling)
+8. SDK selection with missing API key (should show warning)
+9. Different SDK combinations for conversation vs building modes
+
+## File Locations Reference
+
+**Backend:**
+- Models: `backend/app/models/agent.py` (AgentCreateFlowRequest with SDK fields)
+- Service: `backend/app/services/agent_service.py:create_agent_flow()`
+- Routes: `backend/app/api/routes/agents.py` (create-flow endpoint)
+- Environment: `backend/app/models/environment.py` (AgentEnvironmentCreate with SDK fields)
+
+**Frontend:**
+- Dashboard: `frontend/src/routes/_layout/index.tsx` (SDK config dropdown, NEW_AGENT_ID handling)
+- Creation Wizard: `frontend/src/routes/_layout/agent/creating.tsx` (SSE consumption, SDK param extraction)
+- Client: Auto-generated from OpenAPI (`frontend/src/client/*`)
+
+**Related SDK Configuration:**
+- Environment Service: `backend/app/services/environment_service.py` (SDK validation, defaults)
+- Environment Lifecycle: `backend/app/services/environment_lifecycle.py` (SDK settings file generation)
+- User Settings: `frontend/src/components/UserSettings/AICredentials.tsx` (API key management)
 
 ## Related Documentation
 
 - Agent Environment Management: `docs/agent-sessions/agent_env_core.md`
 - Credentials System: `docs/agent-sessions/agent_env_credentials_management.md`
 - SSE Streaming: `docs/agent-sessions/frontend_backend_agentenv_streaming.md`
+- Multi-Agent SDK Management: `docs/agent-sessions/multi_agent_sdk_management.md`
+
+---
+
+**Document Version:** 1.1
+**Last Updated:** 2026-01-15
+**Status:** Fully Implemented (SDK Pre-Configuration Added)

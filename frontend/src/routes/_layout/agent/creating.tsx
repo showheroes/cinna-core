@@ -8,6 +8,8 @@ import useWorkspace from "@/hooks/useWorkspace"
 type SearchParams = {
   description: string
   mode: "conversation" | "building"
+  sdkConversation?: string
+  sdkBuilding?: string
 }
 
 export const Route = createFileRoute("/_layout/agent/creating")({
@@ -16,6 +18,8 @@ export const Route = createFileRoute("/_layout/agent/creating")({
     return {
       description: (search.description as string) || "",
       mode: (search.mode as "conversation" | "building") || "building",
+      sdkConversation: (search.sdkConversation as string) || undefined,
+      sdkBuilding: (search.sdkBuilding as string) || undefined,
     }
   },
 })
@@ -29,7 +33,7 @@ type Step = {
 
 function AgentCreating() {
   const navigate = useNavigate()
-  const { description, mode } = Route.useSearch()
+  const { description, mode, sdkConversation, sdkBuilding } = Route.useSearch()
   const { activeWorkspaceId } = useWorkspace()
   const [steps, setSteps] = useState<Step[]>([
     { id: "create_agent", label: "Creating agent", status: "pending" },
@@ -105,6 +109,8 @@ function AgentCreating() {
             mode,
             auto_create_session: false,  // We'll create session after credential sharing
             user_workspace_id: activeWorkspaceId || undefined,
+            agent_sdk_conversation: sdkConversation || undefined,
+            agent_sdk_building: sdkBuilding || undefined,
           }),
         })
 

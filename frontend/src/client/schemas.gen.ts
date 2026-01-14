@@ -844,6 +844,28 @@ export const AgentCreateFlowRequestSchema = {
                 }
             ],
             title: 'User Workspace Id'
+        },
+        agent_sdk_conversation: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Sdk Conversation'
+        },
+        agent_sdk_building: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Sdk Building'
         }
     },
     type: 'object',

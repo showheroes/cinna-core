@@ -71,6 +71,8 @@ export type AgentCreateFlowRequest = {
     mode?: string;
     auto_create_session?: boolean;
     user_workspace_id?: (string | null);
+    agent_sdk_conversation?: (string | null);
+    agent_sdk_building?: (string | null);
 };
 
 export type AgentCreateFlowResponse = {

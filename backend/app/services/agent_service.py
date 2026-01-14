@@ -117,7 +117,14 @@ class AgentService:
 
     @staticmethod
     async def create_agent_flow(
-        session: Session, user: User, description: str, mode: str, auto_create_session: bool = False, user_workspace_id: UUID | None = None
+        session: Session,
+        user: User,
+        description: str,
+        mode: str,
+        auto_create_session: bool = False,
+        user_workspace_id: UUID | None = None,
+        agent_sdk_conversation: str | None = None,
+        agent_sdk_building: str | None = None,
     ):
         """
         Create full agent flow: agent + environment + (optionally) session
@@ -126,6 +133,8 @@ class AgentService:
         Args:
             auto_create_session: If True, automatically create session after environment is ready.
                                If False, stop after environment is ready (for credential sharing).
+            agent_sdk_conversation: SDK to use for conversation mode (e.g., "claude-code/anthropic")
+            agent_sdk_building: SDK to use for building mode
         """
         agent = None
         environment = None
@@ -190,7 +199,9 @@ class AgentService:
                 env_version=settings.DEFAULT_AGENT_ENV_VERSION,
                 instance_name="Default",
                 type="docker",
-                config={}
+                config={},
+                agent_sdk_conversation=agent_sdk_conversation,
+                agent_sdk_building=agent_sdk_building,
             )
 
             environment = await EnvironmentService.create_environment(

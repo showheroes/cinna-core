@@ -109,6 +109,8 @@ class AgentCreateFlowRequest(SQLModel):
     mode: str = Field(default="building")  # "building" or "conversation"
     auto_create_session: bool = Field(default=False)  # If False, stop after environment is ready
     user_workspace_id: uuid.UUID | None = None
+    agent_sdk_conversation: str | None = None  # SDK for conversation mode (e.g., "claude-code/anthropic")
+    agent_sdk_building: str | None = None  # SDK for building mode
 
 
 # Response for agent creation flow initiation
