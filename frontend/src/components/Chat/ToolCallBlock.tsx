@@ -20,9 +20,10 @@ interface ToolCallBlockProps {
 
 export function ToolCallBlock({ toolName, toolInput, conversationModeUi = "detailed" }: ToolCallBlockProps) {
   const isCompact = conversationModeUi === "compact"
+  const toolNameLower = toolName.toLowerCase()
 
   // Special rendering for Read tool
-  if (toolName === "Read" && toolInput?.file_path) {
+  if (toolNameLower === "read" && toolInput?.file_path) {
     if (isCompact) {
       // Compact mode: just show filename
       const fileName = toolInput.file_path.split('/').pop() || toolInput.file_path
@@ -37,12 +38,12 @@ export function ToolCallBlock({ toolName, toolInput, conversationModeUi = "detai
   }
 
   // Special rendering for Write tool
-  if (toolName === "Write" && toolInput?.file_path && toolInput?.content) {
+  if (toolNameLower === "write" && toolInput?.file_path && toolInput?.content) {
     return <WriteToolBlock filePath={toolInput.file_path} content={toolInput.content} />
   }
 
   // Special rendering for Edit tool
-  if (toolName === "Edit" && toolInput?.file_path && toolInput?.old_string && toolInput?.new_string) {
+  if (toolNameLower === "edit" && toolInput?.file_path && toolInput?.old_string && toolInput?.new_string) {
     if (isCompact) {
       // Compact mode: just show filename
       const fileName = toolInput.file_path.split('/').pop() || toolInput.file_path
@@ -57,27 +58,27 @@ export function ToolCallBlock({ toolName, toolInput, conversationModeUi = "detai
   }
 
   // Special rendering for TodoWrite tool
-  if (toolName === "TodoWrite" && toolInput?.todos && Array.isArray(toolInput.todos)) {
+  if (toolNameLower === "todowrite" && toolInput?.todos && Array.isArray(toolInput.todos)) {
     return <TodoWriteToolBlock todos={toolInput.todos} />
   }
 
   // Special rendering for AskUserQuestion tool
-  if (toolName === "AskUserQuestion" && toolInput?.questions && Array.isArray(toolInput.questions)) {
+  if (toolNameLower === "askuserquestion" && toolInput?.questions && Array.isArray(toolInput.questions)) {
     return <AskUserQuestionToolBlock questions={toolInput.questions} />
   }
 
   // Special rendering for Glob tool
-  if (toolName === "Glob" && toolInput?.pattern) {
+  if (toolNameLower === "glob" && toolInput?.pattern) {
     return <GlobToolBlock pattern={toolInput.pattern} />
   }
 
   // Special rendering for WebSearch tool
-  if (toolName === "WebSearch" && toolInput?.query) {
+  if (toolNameLower === "websearch" && toolInput?.query) {
     return <WebSearchToolBlock query={toolInput.query} />
   }
 
   // Special rendering for Bash tool
-  if (toolName === "Bash" && toolInput?.command) {
+  if (toolNameLower === "bash" && toolInput?.command) {
     if (isCompact) {
       return <CompactBashBlock command={toolInput.command} />
     }
@@ -85,13 +86,13 @@ export function ToolCallBlock({ toolName, toolInput, conversationModeUi = "detai
   }
 
   // Special rendering for Knowledge Query tool
-  if (toolName === "mcp__knowledge__query_integration_knowledge" && toolInput?.query) {
+  if (toolNameLower === "mcp__knowledge__query_integration_knowledge" && toolInput?.query) {
     return <KnowledgeQueryToolBlock query={toolInput.query} articleIds={toolInput.article_ids} />
   }
 
   // Special rendering for Agent Handover tool
   if (
-    toolName === "mcp__handover__agent_handover" &&
+    toolNameLower === "mcp__handover__agent_handover" &&
     toolInput?.target_agent_id &&
     toolInput?.target_agent_name &&
     toolInput?.handover_message

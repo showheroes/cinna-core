@@ -14,10 +14,21 @@ For openai-compatible provider:
 - File structure: {"providers": {"openai-compatible": {"api_key": "...", "base_url": "...", "model": "..."}}}
 """
 
+import asyncio
 import json
 import logging
+import os
+import subprocess
+import uuid
+import warnings
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, Any, Dict
+
+# Suppress LiteLLM/Pydantic serialization warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 from .base import (
     BaseSDKAdapter,
@@ -26,8 +37,392 @@ from .base import (
     SDKConfig,
     AdapterRegistry,
 )
+from ..prompt_generator import PromptGenerator
+from .google_adk_wr_prompts import get_combined_tool_prompts
+from .sqlite_session_service import SQLiteSessionService, create_sqlite_session_service
 
 logger = logging.getLogger(__name__)
+
+# Store for tracking running bash processes (per-adapter instance)
+_bash_processes: dict[str, subprocess.Popen] = {}
+
+
+@dataclass
+class ADKRunningSession:
+    """Represents a running ADK streaming session with its asyncio task."""
+    session_id: str
+    task: Optional[asyncio.Task] = None
+    interrupt_requested: bool = False
+    started_at: datetime = field(default_factory=datetime.utcnow)
+
+
+class ADKSessionManager:
+    """
+    Manages running Google ADK sessions and their asyncio tasks.
+
+    This enables interruption of streaming by canceling the underlying asyncio task.
+    Supports multiple concurrent sessions running in parallel.
+    """
+
+    def __init__(self):
+        self._running_sessions: Dict[str, ADKRunningSession] = {}
+        self._lock = asyncio.Lock()
+
+    async def register_session(self, session_id: str) -> ADKRunningSession:
+        """
+        Register a new running session.
+
+        Args:
+            session_id: The ADK session ID
+
+        Returns:
+            ADKRunningSession instance for tracking
+        """
+        async with self._lock:
+            session = ADKRunningSession(
+                session_id=session_id,
+                started_at=datetime.utcnow()
+            )
+            self._running_sessions[session_id] = session
+            logger.info(f"Registered ADK running session: {session_id}")
+            return session
+
+    async def set_task(self, session_id: str, task: asyncio.Task):
+        """
+        Set the asyncio task for a running session.
+
+        Args:
+            session_id: The ADK session ID
+            task: The asyncio.Task running the streaming
+        """
+        async with self._lock:
+            if session_id in self._running_sessions:
+                self._running_sessions[session_id].task = task
+                logger.debug(f"Set task for session: {session_id}")
+
+    async def unregister_session(self, session_id: str):
+        """
+        Remove session when streaming completes.
+
+        Args:
+            session_id: The ADK session ID to remove
+        """
+        async with self._lock:
+            if session_id in self._running_sessions:
+                del self._running_sessions[session_id]
+                logger.info(f"Unregistered ADK running session: {session_id}")
+
+    async def request_interrupt(self, session_id: str) -> bool:
+        """
+        Request interrupt for a running session by canceling its asyncio task.
+
+        According to Google ADK documentation, interruption is done by
+        canceling the runner's asyncio task.
+
+        Args:
+            session_id: The ADK session ID to interrupt
+
+        Returns:
+            True if interrupt was requested/initiated, False if session not found
+        """
+        async with self._lock:
+            if session_id not in self._running_sessions:
+                logger.warning(f"Cannot interrupt ADK session: {session_id} not found or not running")
+                return False
+
+            session = self._running_sessions[session_id]
+            session.interrupt_requested = True
+
+            # Cancel the asyncio task if it exists and is running
+            if session.task is not None and not session.task.done():
+                session.task.cancel()
+                logger.info(f"Canceled asyncio task for ADK session: {session_id}")
+            else:
+                logger.warning(f"No active task to cancel for session: {session_id}")
+
+            return True
+
+    async def is_interrupt_requested(self, session_id: str) -> bool:
+        """
+        Check if interrupt was requested for this session.
+
+        Args:
+            session_id: The ADK session ID to check
+
+        Returns:
+            True if interrupt was requested
+        """
+        async with self._lock:
+            if session_id in self._running_sessions:
+                return self._running_sessions[session_id].interrupt_requested
+            return False
+
+    async def get_session(self, session_id: str) -> Optional[ADKRunningSession]:
+        """
+        Get a running session by ID.
+
+        Args:
+            session_id: The ADK session ID
+
+        Returns:
+            ADKRunningSession if found, None otherwise
+        """
+        async with self._lock:
+            return self._running_sessions.get(session_id)
+
+
+# Global singleton for tracking running ADK sessions
+_adk_session_manager = ADKSessionManager()
+
+
+def _get_workspace_dir(fallback_dir: str) -> str:
+    """
+    Get the workspace directory from CLAUDE_CODE_WORKSPACE env var.
+
+    Args:
+        fallback_dir: Fallback directory if env var is not set.
+
+    Returns:
+        Workspace directory path.
+    """
+    return os.environ.get("CLAUDE_CODE_WORKSPACE", fallback_dir)
+
+
+def _execute_bash_command(command: str, working_dir: str) -> dict:
+    """
+    Execute a bash command and return the initial status.
+    Used as a long-running function tool for Google ADK.
+
+    Args:
+        command: The bash command to execute.
+        working_dir: Fallback working directory for command execution.
+
+    Returns:
+        A dictionary with the process ticket-id and initial status.
+    """
+    ticket_id = str(uuid.uuid4())
+
+    # Use CLAUDE_CODE_WORKSPACE env var if set, otherwise fallback to working_dir
+    effective_working_dir = _get_workspace_dir(working_dir)
+
+    # Start the process
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=effective_working_dir,
+    )
+
+    # Store the process for later retrieval
+    _bash_processes[ticket_id] = process
+
+    return {
+        "status": "pending",
+        "ticket-id": ticket_id,
+        "command": command,
+        "message": f"Bash command started with ticket-id: {ticket_id}",
+    }
+
+
+def _get_bash_result(ticket_id: str) -> dict:
+    """Wait for bash process to complete and return results."""
+    if ticket_id not in _bash_processes:
+        return {"status": "error", "error": f"Unknown ticket-id: {ticket_id}"}
+
+    process = _bash_processes[ticket_id]
+    stdout, stderr = process.communicate()  # Wait for completion
+    return_code = process.returncode
+
+    # Clean up
+    del _bash_processes[ticket_id]
+
+    return {
+        "status": "completed",
+        "ticket-id": ticket_id,
+        "return_code": return_code,
+        "stdout": stdout,
+        "stderr": stderr,
+    }
+
+
+class AgentFactory:
+    """
+    Factory for creating Google ADK agents based on provider type.
+    Isolates agent creation logic for different providers (openai-compatible, gemini, vertex).
+    """
+
+    @staticmethod
+    def create_openai_compatible_agent(
+        model_name: str,
+        api_base: str,
+        api_key: str,
+        system_prompt: str,
+        working_dir: str,
+        session_service: SQLiteSessionService | None = None,
+    ):
+        """
+        Create an agent for OpenAI-compatible endpoints using LiteLLM.
+
+        Args:
+            model_name: Model name (e.g., "llama3.2:latest")
+            api_base: Base URL for the OpenAI-compatible API
+            api_key: API key for authentication
+            system_prompt: System instruction for the agent
+            working_dir: Working directory for tool execution
+            session_service: Optional session service for persistence. If None, creates SQLite service.
+
+        Returns:
+            Tuple of (agent, runner, session_service)
+        """
+        from google.adk.agents import Agent
+        from google.adk.models.lite_llm import LiteLlm
+        from google.adk.runners import Runner
+        from google.adk.tools import LongRunningFunctionTool, FunctionTool
+
+        # Set environment variables for LiteLLM/OpenAI compatibility
+        os.environ["OPENAI_API_BASE"] = api_base
+        os.environ["OPENAI_API_KEY"] = api_key
+
+        # Create Bash tool as a long-running function
+        def Bash(command: str) -> dict:
+            """
+            Execute a shell command in the workspace environment.
+
+            Use for: running Python scripts (uv run python scripts/...), installing packages
+            (uv pip install), listing directories (ls), git operations, and system commands.
+
+            Do NOT use for reading files - use the Read tool instead.
+
+            Args:
+                command (str): The bash command to execute. Quote paths with spaces.
+
+            Returns:
+                dict: Contains return_code, stdout, and stderr from command execution.
+            """
+            return _execute_bash_command(command, working_dir)
+
+        bash_tool = LongRunningFunctionTool(func=Bash)
+
+        # Create Read tool as a simple function tool
+        def Read(file_path: str) -> dict:
+            """
+            Read the contents of a file from the workspace filesystem.
+
+            Use this tool to examine existing scripts, configuration files, data files (CSV, JSON),
+            and documentation before making changes. Always read a file before modifying it.
+
+            Args:
+                file_path (str): Path to the file. Can be relative (./scripts/my_script.py)
+                    or absolute. Relative paths resolve from the workspace directory.
+
+            Returns:
+                dict: Contains status ('success' or 'error') and file content or error message.
+            """
+            import os as _os
+            full_path = file_path
+            # If path is relative, make it relative to workspace
+            # Use CLAUDE_CODE_WORKSPACE env var if set, otherwise fallback to working_dir
+            if not _os.path.isabs(file_path):
+                effective_workspace = _get_workspace_dir(working_dir)
+                full_path = _os.path.join(effective_workspace, file_path)
+
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                return {
+                    "status": "success",
+                    "file_path": file_path,
+                    "content": content,
+                }
+            except FileNotFoundError:
+                return {
+                    "status": "error",
+                    "error": f"File not found: {file_path}",
+                }
+            except PermissionError:
+                return {
+                    "status": "error",
+                    "error": f"Permission denied: {file_path}",
+                }
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "error": f"Failed to read file: {str(e)}",
+                }
+
+        read_tool = FunctionTool(func=Read)
+
+        # Create the agent
+        # Note: description is for multi-agent scenarios, instruction is the system prompt
+        # Keep description neutral to avoid biasing the model toward specific tool usage
+        agent = Agent(
+            model=LiteLlm(model=f"openai/{model_name}"),
+            name="workflow_agent",
+            description="A helpful assistant that follows instructions from the system prompt",
+            instruction=system_prompt,
+            tools=[bash_tool, read_tool],
+        )
+
+        # Create or use provided session service
+        if session_service is None:
+            session_service = create_sqlite_session_service()
+            logger.info("Created new SQLite session service for agent")
+
+        runner = Runner(
+            agent=agent,
+            app_name="google_adk_adapter",
+            session_service=session_service,
+        )
+
+        return agent, runner, session_service
+
+    @staticmethod
+    def create_gemini_agent(
+        model_name: str,
+        api_key: str,
+        system_prompt: str,
+        working_dir: str,
+    ):
+        """
+        Create an agent for Google Gemini.
+        Placeholder for future implementation.
+
+        Args:
+            model_name: Gemini model name (e.g., "gemini-1.5-pro")
+            api_key: Google API key
+            system_prompt: System instruction for the agent
+            working_dir: Working directory for tool execution
+
+        Returns:
+            Tuple of (agent, runner, session_service)
+        """
+        raise NotImplementedError("Gemini provider not yet implemented")
+
+    @staticmethod
+    def create_vertex_agent(
+        model_name: str,
+        project_id: str,
+        location: str,
+        system_prompt: str,
+        working_dir: str,
+    ):
+        """
+        Create an agent for Vertex AI.
+        Placeholder for future implementation.
+
+        Args:
+            model_name: Vertex model name
+            project_id: GCP project ID
+            location: GCP region
+            system_prompt: System instruction for the agent
+            working_dir: Working directory for tool execution
+
+        Returns:
+            Tuple of (agent, runner, session_service)
+        """
+        raise NotImplementedError("Vertex AI provider not yet implemented")
 
 
 @AdapterRegistry.register
@@ -49,12 +444,29 @@ class GoogleADKAdapter(BaseSDKAdapter):
     # Path to settings directory (inside container: /app/core/.google-adk/)
     SETTINGS_DIR = Path("/app/core/.google-adk")
 
+    # App name for session tracking
+    APP_NAME = "google_adk_adapter"
+
     def __init__(self, config: SDKConfig):
         super().__init__(config)
         logger.info(f"GoogleADKAdapter initialized with provider: {config.provider}")
 
-        # Loaded settings for openai-compatible provider
-        self._openai_compatible_settings: Optional[dict] = None
+        # Initialize prompt generator (same as ClaudeCodeAdapter)
+        self.prompt_generator = PromptGenerator(self.workspace_dir)
+
+        # Initialize SQLite session service for persistent session storage
+        # Database stored in /app/workspace/databases/adk_sessions.db
+        self._session_service: SQLiteSessionService | None = None
+        try:
+            self._session_service = create_sqlite_session_service()
+            logger.info("SQLite session service initialized for persistent sessions")
+        except Exception as e:
+            logger.warning(f"Failed to initialize SQLite session service: {e}. Will retry on first use.")
+
+        # Cache for created components
+        self._runner = None
+        self._agent = None
+        self._current_session_id: Optional[str] = None
 
     def _load_settings_for_mode(self, mode: str) -> Optional[dict]:
         """
@@ -110,63 +522,17 @@ class GoogleADKAdapter(BaseSDKAdapter):
 
         For gemini/vertex providers:
         TODO: Implement full Google ADK integration
-
-        Expected ADK message types to handle:
-        - TextPart: Text responses -> SDKEventType.ASSISTANT
-        - FunctionCall: Tool invocations -> SDKEventType.TOOL_USE
-        - FunctionResponse: Tool results -> SDKEventType.TOOL_RESULT
-        - ThoughtPart: Reasoning/thinking -> SDKEventType.THINKING
         """
-
         # Handle openai-compatible provider
         if self.config.provider == "openai-compatible":
-            # Load configuration from settings file
-            openai_config = self._get_openai_compatible_config(mode)
-            if not openai_config:
-                yield SDKEvent(
-                    type=SDKEventType.ERROR,
-                    content=(
-                        f"OpenAI Compatible provider not configured for {mode} mode. "
-                        f"Settings file not found at {self.SETTINGS_DIR}/{mode}_settings.json"
-                    ),
-                    error_type="ConfigurationError",
-                    metadata={
-                        "adapter_type": self.ADAPTER_TYPE,
-                        "provider": self.config.provider,
-                        "mode": mode,
-                    },
-                )
-                return
-
-            # Log that we have config (for debugging)
-            logger.info(
-                f"OpenAI Compatible config loaded for {mode} mode: "
-                f"base_url={openai_config.get('base_url')}, model={openai_config.get('model')}"
-            )
-
-            # TODO: Implement actual OpenAI-compatible client integration
-            # This is where you would:
-            # 1. Initialize OpenAI client with openai_config['base_url'] and openai_config['api_key']
-            # 2. Create chat completion request with openai_config['model']
-            # 3. Stream responses and convert to SDKEvent format
-
-            yield SDKEvent(
-                type=SDKEventType.ERROR,
-                content=(
-                    f"OpenAI Compatible adapter is configured but not yet fully implemented. "
-                    f"Configuration loaded: base_url={openai_config.get('base_url')}, "
-                    f"model={openai_config.get('model')}. "
-                    "Full implementation coming soon."
-                ),
-                error_type="NotImplementedError",
-                metadata={
-                    "adapter_type": self.ADAPTER_TYPE,
-                    "provider": self.config.provider,
-                    "mode": mode,
-                    "base_url": openai_config.get("base_url"),
-                    "model": openai_config.get("model"),
-                },
-            )
+            async for event in self._handle_openai_compatible(
+                message=message,
+                session_id=session_id,
+                backend_session_id=backend_session_id,
+                system_prompt=system_prompt,
+                mode=mode,
+            ):
+                yield event
             return
 
         # Handle gemini/vertex providers (not yet implemented)
@@ -187,100 +553,370 @@ class GoogleADKAdapter(BaseSDKAdapter):
             },
         )
 
+    async def _handle_openai_compatible(
+        self,
+        message: str,
+        session_id: Optional[str],
+        backend_session_id: Optional[str],
+        system_prompt: Optional[str],
+        mode: str,
+    ) -> AsyncIterator[SDKEvent]:
+        """
+        Handle OpenAI-compatible provider message streaming.
+
+        Uses Google ADK with LiteLLM for OpenAI-compatible endpoints.
+        """
+        from google.genai import types
+
+        # Load configuration from settings file
+        openai_config = self._get_openai_compatible_config(mode)
+        if not openai_config:
+            yield SDKEvent(
+                type=SDKEventType.ERROR,
+                content=(
+                    f"OpenAI Compatible provider not configured for {mode} mode. "
+                    f"Settings file not found at {self.SETTINGS_DIR}/{mode}_settings.json"
+                ),
+                error_type="ConfigurationError",
+                metadata={
+                    "adapter_type": self.ADAPTER_TYPE,
+                    "provider": self.config.provider,
+                    "mode": mode,
+                },
+            )
+            return
+
+        api_base = openai_config.get("base_url", "")
+        api_key = openai_config.get("api_key", "")
+        model_name = openai_config.get("model", "")
+
+        if not api_base or not model_name:
+            yield SDKEvent(
+                type=SDKEventType.ERROR,
+                content="OpenAI Compatible configuration is incomplete. Required: base_url, model.",
+                error_type="ConfigurationError",
+                metadata={"config": openai_config},
+            )
+            return
+
+        logger.info(
+            f"OpenAI Compatible config loaded for {mode} mode: "
+            f"base_url={api_base}, model={model_name}"
+        )
+
+        try:
+            # Generate system prompt using PromptGenerator (same as ClaudeCodeAdapter)
+            if system_prompt:
+                prompt = system_prompt
+                logger.info("Using explicit system_prompt override")
+            else:
+                try:
+                    generated_prompt = self.prompt_generator.generate_prompt(mode)
+                    # For conversation mode, generate_prompt returns a string
+                    # For building mode, it returns a dict with preset info
+                    if isinstance(generated_prompt, dict):
+                        # Building mode returns a dict, extract the append content
+                        prompt = generated_prompt.get("append", "")
+                        logger.info(f"Generated building mode prompt ({len(prompt)} chars)")
+                    else:
+                        prompt = generated_prompt or ""
+                        logger.info(f"Generated conversation mode prompt ({len(prompt)} chars)")
+                except ValueError as e:
+                    yield SDKEvent(
+                        type=SDKEventType.ERROR,
+                        content=str(e),
+                        error_type="ValueError",
+                    )
+                    return
+
+            # Prepend Google ADK WR tool prompts before the main prompt
+            # These prompts provide tool usage instructions specific to this adapter
+            tool_prompts = get_combined_tool_prompts()
+            if tool_prompts:
+                prompt = f"{tool_prompts}\n\n---\n\n{prompt}" if prompt else tool_prompts
+                logger.info(f"Prepended tool prompts ({len(tool_prompts)} chars) to system prompt")
+
+            # Ensure session service is initialized
+            if self._session_service is None:
+                try:
+                    self._session_service = create_sqlite_session_service()
+                    logger.info("SQLite session service initialized on first use")
+                except Exception as e:
+                    logger.error(f"Failed to initialize SQLite session service: {e}")
+                    yield SDKEvent(
+                        type=SDKEventType.ERROR,
+                        content=f"Failed to initialize session storage: {str(e)}",
+                        error_type="SessionStorageError",
+                    )
+                    return
+
+            self._agent, self._runner, _ = AgentFactory.create_openai_compatible_agent(
+                model_name=model_name,
+                api_base=api_base,
+                api_key=api_key,
+                system_prompt=prompt,
+                working_dir=self.workspace_dir,
+                session_service=self._session_service,
+            )
+
+            # Create or resume session
+            if session_id:
+                # Try to resume existing session from SQLite database
+                existing_session = await self._session_service.get_session(
+                    app_name=self.APP_NAME,
+                    user_id="agent_user",
+                    session_id=session_id,
+                )
+                if existing_session:
+                    self._current_session_id = session_id
+                    logger.info(f"Resuming existing session from database: {session_id}")
+                    yield SDKEvent(
+                        type=SDKEventType.SESSION_RESUMED,
+                        session_id=session_id,
+                        content="",
+                        metadata={"events_count": len(existing_session.events)},
+                    )
+                else:
+                    # Session not found in database, create with specified ID
+                    logger.info(f"Session {session_id} not found in database, creating new")
+                    session = await self._session_service.create_session(
+                        app_name=self.APP_NAME,
+                        user_id="agent_user",
+                        session_id=session_id,
+                    )
+                    self._current_session_id = session.id
+                    yield SDKEvent(
+                        type=SDKEventType.SESSION_CREATED,
+                        session_id=self._current_session_id,
+                        content="",
+                    )
+            else:
+                # Create new session
+                session = await self._session_service.create_session(
+                    app_name=self.APP_NAME,
+                    user_id="agent_user",
+                )
+                self._current_session_id = session.id
+                logger.info(f"Created new session: {self._current_session_id}")
+                yield SDKEvent(
+                    type=SDKEventType.SESSION_CREATED,
+                    session_id=self._current_session_id,
+                    content="",
+                )
+
+            # Emit tools_init event
+            yield SDKEvent(
+                type=SDKEventType.SYSTEM,
+                subtype="tools_init",
+                content="",
+                data={"tools": ["Bash", "Read"]},
+            )
+
+            # Send message to agent
+            content = types.Content(role="user", parts=[types.Part(text=message)])
+            logger.info(f"Sending message to agent: {message[:100]}...")
+
+            # Register session for interruption support
+            # Track the current asyncio task so it can be canceled on interrupt
+            await _adk_session_manager.register_session(self._current_session_id)
+            current_task = asyncio.current_task()
+            if current_task:
+                await _adk_session_manager.set_task(self._current_session_id, current_task)
+
+            streaming_interrupted = False
+            try:
+                # Process events from runner
+                # This async iteration can be interrupted by canceling the task
+                async for event in self._runner.run_async(
+                    user_id="agent_user",
+                    session_id=self._current_session_id,
+                    new_message=content,
+                ):
+                    # Check if interrupt was requested (for graceful handling)
+                    if await _adk_session_manager.is_interrupt_requested(self._current_session_id):
+                        logger.info(f"Interrupt flag detected for session: {self._current_session_id}")
+                        streaming_interrupted = True
+                        break
+
+                    # Process ADK event and yield SDKEvents
+                    async for sdk_event in self._process_adk_event(event):
+                        yield sdk_event
+
+            except asyncio.CancelledError:
+                # Session was interrupted via task cancellation
+                logger.info(f"ADK streaming interrupted via task cancellation: {self._current_session_id}")
+                streaming_interrupted = True
+                # Re-raise to allow proper cleanup, but we've marked the state
+
+            finally:
+                # Always unregister the session
+                await _adk_session_manager.unregister_session(self._current_session_id)
+
+            # Emit appropriate completion event
+            if streaming_interrupted:
+                yield SDKEvent(
+                    type=SDKEventType.INTERRUPTED,
+                    session_id=self._current_session_id,
+                    content="Streaming was interrupted by user request",
+                    metadata={"reason": "user_interrupt"},
+                )
+            else:
+                # Emit done event
+                yield SDKEvent(
+                    type=SDKEventType.DONE,
+                    session_id=self._current_session_id,
+                    content="",
+                )
+
+        except asyncio.CancelledError:
+            # Handle cancellation at the outer level
+            logger.info(f"ADK session cancelled: {self._current_session_id}")
+            yield SDKEvent(
+                type=SDKEventType.INTERRUPTED,
+                session_id=self._current_session_id,
+                content="Session was cancelled",
+                metadata={"reason": "cancelled"},
+            )
+
+        except ImportError as e:
+            logger.error(f"Google ADK or LiteLLM not available: {e}")
+            yield SDKEvent(
+                type=SDKEventType.ERROR,
+                content=f"Google ADK or LiteLLM not installed: {e}",
+                error_type="ImportError",
+            )
+
+        except Exception as e:
+            logger.error(f"Error in OpenAI-compatible handler: {e}", exc_info=True)
+            yield SDKEvent(
+                type=SDKEventType.ERROR,
+                content=f"Error processing message: {str(e)}",
+                error_type=type(e).__name__,
+                session_id=self._current_session_id,
+            )
+
+    async def _process_adk_event(self, event: Any) -> AsyncIterator[SDKEvent]:
+        """
+        Process a Google ADK event and yield corresponding SDKEvents.
+
+        Handles:
+        - Text responses -> SDKEventType.ASSISTANT
+        - Function calls -> SDKEventType.TOOL_USE
+        - Function responses -> handles long-running tool completion
+        """
+        if not event.content or not event.content.parts:
+            return
+
+        for part in event.content.parts:
+            # Handle function call (tool invocation)
+            if hasattr(part, "function_call") and part.function_call:
+                func_call = part.function_call
+                logger.info(f"Tool call: {func_call.name}({func_call.args})")
+
+                # Format tool input for display
+                tool_input_str = ""
+                if func_call.args:
+                    try:
+                        input_json = json.dumps(dict(func_call.args), indent=2)
+                        if len(input_json) > 200:
+                            input_json = input_json[:200] + "..."
+                        tool_input_str = f"\nInput: {input_json}"
+                    except Exception:
+                        tool_input_str = f"\nInput: {str(func_call.args)[:200]}"
+
+                yield SDKEvent(
+                    type=SDKEventType.TOOL_USE,
+                    tool_name=func_call.name,
+                    content=f"🔧 Using tool: {func_call.name}{tool_input_str}",
+                    session_id=self._current_session_id,
+                    metadata={"tool_input": dict(func_call.args) if func_call.args else {}},
+                )
+
+            # Handle function response (from long-running tool)
+            if hasattr(part, "function_response") and part.function_response:
+                func_resp = part.function_response
+                response_data = func_resp.response
+
+                # If this is a pending bash command, get the result
+                if (
+                    isinstance(response_data, dict)
+                    and response_data.get("status") == "pending"
+                    and "ticket-id" in response_data
+                ):
+                    ticket_id = response_data["ticket-id"]
+                    logger.info(f"Waiting for bash command (ticket: {ticket_id})...")
+
+                    # Get the actual result
+                    result = _get_bash_result(ticket_id)
+                    logger.info(f"Bash result: return_code={result.get('return_code')}")
+
+                    # Yield tool result event
+                    stdout = result.get("stdout", "")[:500]
+                    stderr = result.get("stderr", "")[:500]
+                    result_content = f"Return code: {result.get('return_code')}"
+                    if stdout:
+                        result_content += f"\nstdout: {stdout}"
+                    if stderr:
+                        result_content += f"\nstderr: {stderr}"
+
+                    yield SDKEvent(
+                        type=SDKEventType.TOOL_RESULT,
+                        content=result_content,
+                        session_id=self._current_session_id,
+                        metadata={"result": result},
+                    )
+
+                    # Send result back to agent and process continuation
+                    from google.genai import types
+                    updated_response = func_resp.model_copy(deep=True)
+                    updated_response.response = result
+
+                    async for resume_event in self._runner.run_async(
+                        user_id="agent_user",
+                        session_id=self._current_session_id,
+                        new_message=types.Content(
+                            role="user",
+                            parts=[types.Part(function_response=updated_response)],
+                        ),
+                    ):
+                        async for sdk_event in self._process_adk_event(resume_event):
+                            yield sdk_event
+
+            # Handle text response
+            if hasattr(part, "text") and part.text:
+                author = getattr(event, "author", "assistant")
+                logger.debug(f"Text from {author}: {part.text[:100]}...")
+
+                yield SDKEvent(
+                    type=SDKEventType.ASSISTANT,
+                    content=part.text,
+                    session_id=self._current_session_id,
+                    metadata={"author": author},
+                )
+
     async def interrupt_session(self, session_id: str) -> bool:
         """
         Interrupt an active Google ADK session.
 
-        TODO: Implement session interruption for Google ADK.
+        According to Google ADK documentation, streaming interruption is done by
+        canceling the runner's asyncio task. This method:
+        1. Sets an interrupt flag that the streaming loop checks
+        2. Cancels the asyncio task running the stream
+
+        Args:
+            session_id: The ADK session ID to interrupt
+
+        Returns:
+            True if interrupt was successfully requested, False if session not found
         """
-        logger.warning(f"GoogleADKAdapter.interrupt_session called but not implemented")
-        return False
+        logger.info(f"GoogleADKAdapter.interrupt_session called for {session_id}")
 
-    # =========================================================================
-    # Placeholder methods for future implementation
-    # =========================================================================
+        # Use the session manager to request interrupt and cancel the task
+        result = await _adk_session_manager.request_interrupt(session_id)
 
-    async def _initialize_adk_client(self):
-        """
-        Initialize Google ADK client.
+        if result:
+            logger.info(f"Successfully requested interrupt for ADK session: {session_id}")
+        else:
+            logger.warning(f"Failed to interrupt ADK session (not found or not running): {session_id}")
 
-        TODO: Implement ADK client initialization:
-        - Load credentials from environment
-        - Configure model based on provider (gemini, vertex)
-        - Set up tool definitions
-        """
-        pass
-
-    async def _create_adk_session(self):
-        """
-        Create a new ADK session.
-
-        TODO: Implement session creation:
-        - Generate session ID
-        - Configure session parameters
-        - Set system prompt
-        """
-        pass
-
-    async def _resume_adk_session(self, session_id: str):
-        """
-        Resume an existing ADK session.
-
-        TODO: Implement session resumption:
-        - Load session state
-        - Restore conversation history
-        """
-        pass
-
-    def _convert_adk_message_to_event(self, adk_message) -> Optional[SDKEvent]:
-        """
-        Convert Google ADK message to unified SDKEvent.
-
-        TODO: Implement message conversion for ADK types:
-
-        Example mapping (pseudo-code):
-        ```python
-        if isinstance(adk_message, TextPart):
-            return SDKEvent(
-                type=SDKEventType.ASSISTANT,
-                content=adk_message.text,
-            )
-        elif isinstance(adk_message, FunctionCall):
-            return SDKEvent(
-                type=SDKEventType.TOOL_USE,
-                tool_name=adk_message.name,
-                content=f"🔧 Using tool: {adk_message.name}",
-                metadata={"tool_input": adk_message.args},
-            )
-        elif isinstance(adk_message, ThoughtPart):
-            return SDKEvent(
-                type=SDKEventType.THINKING,
-                content=adk_message.thought,
-            )
-        ```
-        """
-        return None
-
-    def _get_adk_model_name(self) -> str:
-        """
-        Get the ADK model name based on provider and mode.
-
-        TODO: Implement model selection:
-        - gemini provider: "gemini-1.5-pro", "gemini-1.5-flash"
-        - vertex provider: "vertex-gemini-pro", etc.
-        """
-        provider_models = {
-            "gemini": "gemini-1.5-pro",
-            "vertex": "gemini-1.5-pro",  # Vertex uses same models
-        }
-        return provider_models.get(self.config.provider, "gemini-1.5-pro")
-
-    def _setup_adk_tools(self, mode: str) -> list:
-        """
-        Configure tools for ADK based on mode.
-
-        TODO: Define tool schemas for Google ADK format:
-        - Building mode: file operations, code execution, knowledge query
-        - Conversation mode: task execution, handover tool
-        """
-        return []
+        return result

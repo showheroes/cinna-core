@@ -1,7 +1,7 @@
 [project]
 name = "agent-environment"
 version = "1.0.0"
-description = "Agent runtime environment with Claude Code SDK support"
+description = "Agent runtime environment with Claude Code SDK / Google ADK support"
 requires-python = ">=3.11"
 
 dependencies = [
@@ -17,6 +17,8 @@ dependencies = [
     "google-auth-oauthlib>=1.2.2",
     "google-auth-httplib2>=0.3.0",
     "google-api-python-client>=2.187.0",
+    "google-adk>=1.18.0",
+    "litellm>=1.80.16",
 ]
 
 [build-system]
