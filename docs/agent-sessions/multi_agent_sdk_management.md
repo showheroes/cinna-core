@@ -2,12 +2,12 @@
 
 ## Purpose
 
-Enable users to select different AI SDK providers (Anthropic Claude or MiniMax M2) per agent environment, with automatic configuration, API key management, and user-level default preferences.
+Enable users to select different AI SDK providers (Anthropic Claude, MiniMax M2, or OpenAI Compatible endpoints) per agent environment, with automatic configuration, API key management, and user-level default preferences.
 
 ## Feature Overview
 
 **Flow:**
-1. User saves API keys (Anthropic, MiniMax) in User Settings
+1. User saves API keys/credentials in User Settings (Cloud AI Services or OpenAI Compatible)
 2. User optionally sets default SDK preferences for conversation and building modes
 3. User creates environment → SDK defaults populated from user preferences (can override per environment)
 4. Backend validates user has required API keys for selected SDKs
@@ -22,17 +22,20 @@ User Settings → Default SDK Prefs → Environment Creation → Env Generation 
 ```
 
 **Configuration Locations:**
-- **User API Keys:** `ai_service_credentials` table (encrypted)
+- **User API Keys:** `ai_credentials_encrypted` field in User table (encrypted JSON)
 - **User Default SDKs:** `user` table fields (`default_sdk_conversation`, `default_sdk_building`)
 - **Environment SDK Selection:** `agent_environment` table fields
-- **SDK Settings Files:** `{instance_dir}/app/core/.claude/` (auto-generated)
+- **SDK Settings Files:**
+  - Claude Code adapters: `{instance_dir}/app/core/.claude/`
+  - Google ADK adapters: `{instance_dir}/app/core/.google-adk/`
 
 ## Supported SDKs
 
-| SDK ID | Display Name | Required User Key | Default | Status |
-|--------|-------------|-------------------|---------|--------|
+| SDK ID | Display Name | Required User Credentials | Default | Status |
+|--------|-------------|---------------------------|---------|--------|
 | `claude-code/anthropic` | Anthropic Claude | `anthropic_api_key` | Yes | Implemented |
 | `claude-code/minimax` | MiniMax M2 | `minimax_api_key` | No | Implemented |
+| `google-adk-wr/openai-compatible` | OpenAI Compatible | `openai_compatible_api_key`, `openai_compatible_base_url`, `openai_compatible_model` | No | Skeleton (config ready) |
 | `google-adk-wr/gemini` | Google Gemini ADK | `google_api_key` | No | Placeholder |
 | `google-adk-wr/vertex` | Vertex AI ADK | `vertex_api_key` | No | Placeholder |
 
@@ -52,6 +55,16 @@ User Settings → Default SDK Prefs → Environment Creation → Env Generation 
 - `conversation_settings.json` - Used when agent is in conversation mode
 - Contains: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, model mappings
 
+### OpenAI Compatible SDK
+- Settings files generated in `/app/core/.google-adk/` folder
+- Supports any OpenAI-compatible endpoint (Ollama, vLLM, LiteLLM, self-hosted models)
+- Requires three credentials: API key, base URL, and model name
+
+**Settings File Structure:**
+- `building_settings.json` - Used when agent is in building mode
+- `conversation_settings.json` - Used when agent is in conversation mode
+- Contains: `providers.openai-compatible.api_key`, `providers.openai-compatible.base_url`, `providers.openai-compatible.model`
+
 ## Database Schema
 
 **Migrations:**
@@ -65,12 +78,14 @@ User Settings → Default SDK Prefs → Environment Creation → Env Generation 
 - `User` - Added `default_sdk_conversation`, `default_sdk_building` fields
 - `UserUpdateMe` - Added SDK preference fields for user updates
 - `UserPublic` - Exposes SDK defaults in API responses
-- SDK Constants: `SDK_ANTHROPIC`, `SDK_MINIMAX`, `VALID_SDK_OPTIONS`
+- SDK Constants: `SDK_ANTHROPIC`, `SDK_MINIMAX`, `SDK_OPENAI_COMPATIBLE`, `VALID_SDK_OPTIONS`
 
 **User AI Credentials:** `backend/app/models/user.py`
-- `AIServiceCredentials` - Added `minimax_api_key: str | None`
-- `AIServiceCredentialsUpdate` - Added `minimax_api_key: str | None`
-- `UserPublicWithAICredentials` - Added `has_minimax_api_key: bool`
+- `AIServiceCredentials` - Contains all credential fields:
+  - `anthropic_api_key`, `minimax_api_key`
+  - `openai_compatible_api_key`, `openai_compatible_base_url`, `openai_compatible_model`
+- `AIServiceCredentialsUpdate` - Same fields for partial updates
+- `UserPublicWithAICredentials` - Boolean flags: `has_anthropic_api_key`, `has_minimax_api_key`, `has_openai_compatible_api_key`
 
 **Environment:** `backend/app/models/environment.py`
 - `AgentEnvironment` - Added `agent_sdk_conversation`, `agent_sdk_building`
@@ -84,8 +99,9 @@ User Settings → Default SDK Prefs → Environment Creation → Env Generation 
 **User Settings:** `backend/app/api/routes/users.py`
 - `GET /api/v1/users/me` - Returns user with `default_sdk_conversation`, `default_sdk_building`
 - `PATCH /api/v1/users/me` - Updates user SDK defaults (validates against `VALID_SDK_OPTIONS`)
-- `GET /api/v1/users/me/ai-credentials/status` - Returns `has_minimax_api_key` flag + SDK defaults
-- `PATCH /api/v1/users/me/ai-credentials` - Accepts `minimax_api_key` for update
+- `GET /api/v1/users/me/ai-credentials/status` - Returns credential flags + SDK defaults
+- `GET /api/v1/users/me/ai-credentials` - Returns full credentials (for URL/model display)
+- `PATCH /api/v1/users/me/ai-credentials` - Accepts all credential fields for update
 
 **Environment Creation:** `backend/app/api/routes/agents.py`
 - `POST /api/v1/agents/{id}/environments` - Accepts `agent_sdk_conversation`, `agent_sdk_building`
@@ -93,22 +109,25 @@ User Settings → Default SDK Prefs → Environment Creation → Env Generation 
 ### Services
 
 **Environment Service:** `backend/app/services/environment_service.py`
-- SDK Constants: `SDK_ANTHROPIC`, `SDK_MINIMAX`, `DEFAULT_SDK`, `VALID_SDK_OPTIONS`
+- SDK Constants: `SDK_ANTHROPIC`, `SDK_MINIMAX`, `SDK_OPENAI_COMPATIBLE`, `DEFAULT_SDK`, `VALID_SDK_OPTIONS`
 - `SDK_API_KEY_MAP` - Maps SDK IDs to required API key field names
 - `create_environment()` - Uses user's default SDK preferences, validates values, checks API keys
+- `_create_environment_background()` - Passes all credentials to lifecycle manager
 
 **Environment Lifecycle:** `backend/app/services/environment_lifecycle.py`
-- `create_environment_instance()` - Accepts `minimax_api_key` parameter
-- `_update_environment_config()` - Fetches API keys, calls env generation
-- `_generate_env_file()` - Conditionally includes `ANTHROPIC_API_KEY`, calls settings generation
+- `create_environment_instance()` - Accepts all credential parameters including OpenAI Compatible
+- `_update_environment_config()` - Fetches API keys from user credentials, calls env generation
+- `_generate_env_file()` - Conditionally includes credentials, calls settings generation for each SDK type
 - `_generate_minimax_settings_files()` - Creates JSON settings in `app/core/.claude/`
-- `rebuild_environment()` - Regenerates settings files after core replacement
+- `_generate_openai_compatible_settings_files()` - Creates JSON settings in `app/core/.google-adk/`
+- `rebuild_environment()` - Regenerates settings files for both MiniMax and OpenAI Compatible after core replacement
 
 ### Configuration
 
 **SDK Constants:** `backend/app/services/environment_service.py`
 - `SDK_ANTHROPIC = "claude-code/anthropic"`
 - `SDK_MINIMAX = "claude-code/minimax"`
+- `SDK_OPENAI_COMPATIBLE = "google-adk-wr/openai-compatible"`
 - `VALID_SDK_OPTIONS` - List of allowed SDK values
 
 ## Frontend Implementation
@@ -116,11 +135,13 @@ User Settings → Default SDK Prefs → Environment Creation → Env Generation 
 ### Components
 
 **AI Credentials Settings:** `frontend/src/components/UserSettings/AICredentials.tsx`
-- Two-column layout: API credentials (left) + Default SDK Preferences (right)
-- Left card: Anthropic and MiniMax API key inputs with save/delete mutations
-- Right card: Dropdowns for default conversation and building mode SDKs
-- UI-level validation: Shows alert when selected SDK is missing required API key
+- Three-section layout:
+  - **Cloud AI Services card:** Anthropic and MiniMax API key inputs
+  - **Default SDK Preferences card:** Dropdowns for default conversation/building mode SDKs
+  - **OpenAI Compatible AI Service card:** Base URL, API key, and Model inputs
+- UI-level validation: Shows alert when selected SDK is missing required credentials
 - SDK options show "(API key required)" indicator when key not configured
+- OpenAI Compatible fields pre-populate with saved values on page load
 - Helper: `SDK_OPTIONS` array, `getSDKDisplayName()`, `hasRequiredKey()`
 
 **Add Environment Dialog:** `frontend/src/components/Environments/AddEnvironment.tsx`
@@ -128,22 +149,31 @@ User Settings → Default SDK Prefs → Environment Creation → Env Generation 
 - Defaults populated from user's SDK preferences
 - Validates user has required API keys before enabling create button
 - Shows warning if keys are missing with link to settings
+- Includes OpenAI Compatible option in dropdown
 
 **Environment Card:** `frontend/src/components/Environments/EnvironmentCard.tsx`
 - Displays SDK badges with icons: MessageCircle (conversation), Wrench (building)
-- Shows "Anthropic" or "MiniMax" labels
+- Shows "Anthropic", "MiniMax", or "OpenAI Compatible" labels
 - Helper: `getSDKDisplayName()` - Converts SDK ID to display name
 
 ### State Management
 
-**AI Credentials Query:** `useQuery(["aiCredentialsStatus"])`
-- Fetches `has_anthropic_api_key`, `has_minimax_api_key` flags
+**AI Credentials Status Query:** `useQuery(["aiCredentialsStatus"])`
+- Fetches boolean flags: `has_anthropic_api_key`, `has_minimax_api_key`, `has_openai_compatible_api_key`
 - Fetches `default_sdk_conversation`, `default_sdk_building` preferences
 - Used by AICredentials for SDK preference display and AddEnvironment for defaults
+
+**AI Credentials Query:** `useQuery(["aiCredentials"])`
+- Fetches full credentials including `openai_compatible_base_url`, `openai_compatible_model`
+- Used to pre-populate OpenAI Compatible form fields
 
 **SDK Update Mutation:** `useMutation` in AICredentials
 - Calls `UsersService.updateUserMe()` with SDK preference changes
 - Invalidates both `aiCredentialsStatus` and `currentUser` queries
+
+**OpenAI Compatible Mutation:** `useMutation` in AICredentials
+- Only sends non-empty fields to avoid overwriting existing values
+- Invalidates both `aiCredentialsStatus` and `aiCredentials` queries
 
 ## Agent-Env Implementation
 
@@ -160,7 +190,7 @@ The agent-env uses a pluggable adapter system to support multiple SDK providers:
 
 **Adapters:**
 - `ClaudeCodeAdapter` - Handles `claude-code/*` variants (anthropic, minimax)
-- `GoogleADKAdapter` - Placeholder for `google-adk-wr/*` variants (gemini, vertex)
+- `GoogleADKAdapter` - Handles `google-adk-wr/*` variants (openai-compatible, gemini, vertex)
 
 ### Environment Variables
 
@@ -217,22 +247,41 @@ class SDKEvent:
 4. If exists: set `options.settings = str(settings_file_path)`
 5. Falls back to default behavior (ANTHROPIC_API_KEY env var) if no settings file
 
-### Google ADK Adapter (Placeholder)
+### Google ADK Adapter
 
 **File:** `adapters/google_adk.py`
 
-**Status:** Not yet implemented. Returns "not implemented" error.
+**Supported Providers:**
+- `openai-compatible` - OpenAI-compatible endpoints (skeleton implemented)
+- `gemini` - Google Gemini via ADK (placeholder)
+- `vertex` - Vertex AI via ADK (placeholder)
 
-**Planned Support:**
-- `google-adk-wr/gemini` - Google Gemini via ADK
-- `google-adk-wr/vertex` - Vertex AI via ADK
+**OpenAI Compatible Configuration Loading:**
+- Settings file path: `/app/core/.google-adk/{mode}_settings.json`
+- `_load_settings_for_mode(mode)` - Reads JSON settings file
+- `_get_openai_compatible_config(mode)` - Extracts provider config (api_key, base_url, model)
+
+**OpenAI Compatible Settings File Format:**
+```json
+{
+  "providers": {
+    "openai-compatible": {
+      "api_key": "...",
+      "base_url": "https://openai.mycompany.com/api/v1",
+      "model": "llama3.2:latest"
+    }
+  }
+}
+```
+
+**Status:** Configuration loading implemented, actual LLM client integration pending.
 
 ## Security Features
 
 **Validation:**
 - SDK values validated against `VALID_SDK_OPTIONS` list
-- User must have required API key before environment creation
-- API keys stored encrypted in `ai_service_credentials` table
+- User must have required credentials before environment creation
+- API keys stored encrypted in `ai_credentials_encrypted` field (JSON blob)
 
 **Access Control:**
 - API keys only accessible to owning user
@@ -246,25 +295,26 @@ class SDKEvent:
 2. Validate SDK values in allowed list
 3. Check user has required API keys via `SDK_API_KEY_MAP`
 4. Create environment record with SDK fields
-5. Pass API keys to background task
+5. Pass all credentials (including OpenAI Compatible) to background task
 
 **Env Generation Flow:** `backend/app/services/environment_lifecycle.py:_generate_env_file()`
 1. Determine which SDKs are used (conversation, building)
 2. If Anthropic used: include `ANTHROPIC_API_KEY` in `.env`
 3. If MiniMax used: call `_generate_minimax_settings_files()`
-4. Write SDK identifiers to `.env` for reference
+4. If OpenAI Compatible used: call `_generate_openai_compatible_settings_files()`
+5. Write SDK identifiers to `.env` for reference
 
 **Rebuild Flow:** `backend/app/services/environment_lifecycle.py:rebuild_environment()`
-1. Core files replaced from template (deletes `.claude/` folder)
-2. After rebuild: regenerate settings files if MiniMax is used
-3. Fetch API key from user credentials
-4. Call `_generate_minimax_settings_files()`
+1. Core files replaced from template (deletes `.claude/` and `.google-adk/` folders)
+2. After rebuild: regenerate settings files for used SDKs
+3. Fetch credentials from user settings
+4. Call appropriate settings generation methods
 
 **Runtime Detection:** `sdk_manager.py:send_message_stream()`
-1. Build `ClaudeAgentOptions` with standard config
-2. Check for settings file at `/app/core/.claude/{mode}_settings.json`
-3. If exists: set `options.settings` property
-4. SDK uses settings file to override base URL and auth
+1. Build adapter options with standard config
+2. Check for settings file at appropriate path based on adapter type
+3. If exists: load settings and configure client
+4. Adapter uses settings to override base URL and auth
 
 ## File Locations Reference
 
@@ -277,7 +327,10 @@ class SDKEvent:
   - `backend/app/alembic/versions/c8d9e0f1a2b3_add_default_sdk_fields_to_user.py`
 
 **Frontend:**
-- Components: `frontend/src/components/UserSettings/AICredentials.tsx`, `frontend/src/components/Environments/AddEnvironment.tsx`, `frontend/src/components/Environments/EnvironmentCard.tsx`
+- Components:
+  - `frontend/src/components/UserSettings/AICredentials.tsx`
+  - `frontend/src/components/Environments/AddEnvironment.tsx`
+  - `frontend/src/components/Environments/EnvironmentCard.tsx`
 - Client: Auto-generated from OpenAPI (`frontend/src/client/*`)
 
 **Agent-Env:**
@@ -285,19 +338,23 @@ class SDKEvent:
 - Adapters: `backend/app/env-templates/python-env-advanced/app/core/server/adapters/`
   - `base.py` - `SDKEvent`, `SDKEventType`, `SDKConfig`, `BaseSDKAdapter`, `AdapterRegistry`
   - `claude_code.py` - `ClaudeCodeAdapter` for claude-code/* variants
-  - `google_adk.py` - `GoogleADKAdapter` placeholder for google-adk-wr/*
-- Settings Location: `/app/core/.claude/building_settings.json`, `/app/core/.claude/conversation_settings.json`
+  - `google_adk.py` - `GoogleADKAdapter` for google-adk-wr/* variants (includes openai-compatible)
+- Settings Locations:
+  - Claude Code: `/app/core/.claude/building_settings.json`, `/app/core/.claude/conversation_settings.json`
+  - Google ADK: `/app/core/.google-adk/building_settings.json`, `/app/core/.google-adk/conversation_settings.json`
 
 ## Constraints
 
 - SDK selection is **immutable** after environment creation
 - Empty SDK fields default to user's preferences, then `claude-code/anthropic` for backward compatibility
-- User must have valid API key before creating environment with that SDK
+- User must have valid credentials before creating environment with that SDK
 - MiniMax uses Anthropic-compatible API format (same client, different base URL)
+- OpenAI Compatible requires all three fields: API key, base URL, and model
 - Settings files are regenerated after environment rebuild
+- AI credentials stored as encrypted JSON - no database migration needed for new credential fields
 
 ---
 
-**Document Version:** 1.2
+**Document Version:** 1.3
 **Last Updated:** 2026-01-14
-**Status:** Fully Implemented (Phase 1-3 + Multi-Adapter Architecture with Google ADK placeholder)
+**Status:** Fully Implemented (Anthropic, MiniMax) + OpenAI Compatible (configuration ready, adapter skeleton)

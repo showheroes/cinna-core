@@ -27,6 +27,7 @@ import { Plus, AlertCircle } from "lucide-react"
 const SDK_OPTIONS = [
   { value: "claude-code/anthropic", label: "Anthropic Claude", requiredKey: "anthropic" },
   { value: "claude-code/minimax", label: "MiniMax M2", requiredKey: "minimax" },
+  { value: "google-adk-wr/openai-compatible", label: "OpenAI Compatible", requiredKey: "openai_compatible" },
 ]
 
 interface AddEnvironmentProps {
@@ -51,10 +52,12 @@ export function AddEnvironment({ agentId }: AddEnvironmentProps) {
   // Check if user has required API keys for selected SDKs
   const hasAnthropicKey = credentialsStatus?.has_anthropic_api_key ?? false
   const hasMinimaxKey = credentialsStatus?.has_minimax_api_key ?? false
+  const hasOpenaiCompatibleKey = credentialsStatus?.has_openai_compatible_api_key ?? false
 
   const getKeyStatus = (sdk: string) => {
     if (sdk === "claude-code/anthropic") return hasAnthropicKey
     if (sdk === "claude-code/minimax") return hasMinimaxKey
+    if (sdk === "google-adk-wr/openai-compatible") return hasOpenaiCompatibleKey
     return false
   }
 

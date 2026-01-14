@@ -343,6 +343,39 @@ export const AIServiceCredentialsSchema = {
                 }
             ],
             title: 'Minimax Api Key'
+        },
+        openai_compatible_api_key: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Openai Compatible Api Key'
+        },
+        openai_compatible_base_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Openai Compatible Base Url'
+        },
+        openai_compatible_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Openai Compatible Model'
         }
     },
     type: 'object',
@@ -395,6 +428,39 @@ export const AIServiceCredentialsUpdateSchema = {
                 }
             ],
             title: 'Minimax Api Key'
+        },
+        openai_compatible_api_key: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Openai Compatible Api Key'
+        },
+        openai_compatible_base_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Openai Compatible Base Url'
+        },
+        openai_compatible_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Openai Compatible Model'
         }
     },
     type: 'object',
@@ -4134,11 +4200,6 @@ export const SessionCreateSchema = {
             type: 'string',
             title: 'Mode',
             default: 'conversation'
-        },
-        agent_sdk: {
-            type: 'string',
-            title: 'Agent Sdk',
-            default: 'claude'
         }
     },
     type: 'object',
@@ -4190,10 +4251,6 @@ export const SessionPublicSchema = {
             type: 'string',
             title: 'Mode'
         },
-        agent_sdk: {
-            type: 'string',
-            title: 'Agent Sdk'
-        },
         status: {
             type: 'string',
             title: 'Status'
@@ -4230,7 +4287,7 @@ export const SessionPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'environment_id', 'user_id', 'user_workspace_id', 'title', 'mode', 'agent_sdk', 'status', 'interaction_status', 'pending_messages_count', 'created_at', 'updated_at', 'last_message_at'],
+    required: ['id', 'environment_id', 'user_id', 'user_workspace_id', 'title', 'mode', 'status', 'interaction_status', 'pending_messages_count', 'created_at', 'updated_at', 'last_message_at'],
     title: 'SessionPublic'
 } as const;
 
@@ -4277,10 +4334,6 @@ export const SessionPublicExtendedSchema = {
         mode: {
             type: 'string',
             title: 'Mode'
-        },
-        agent_sdk: {
-            type: 'string',
-            title: 'Agent Sdk'
         },
         status: {
             type: 'string',
@@ -4374,7 +4427,7 @@ export const SessionPublicExtendedSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'environment_id', 'user_id', 'user_workspace_id', 'title', 'mode', 'agent_sdk', 'status', 'interaction_status', 'pending_messages_count', 'created_at', 'updated_at', 'last_message_at'],
+    required: ['id', 'environment_id', 'user_id', 'user_workspace_id', 'title', 'mode', 'status', 'interaction_status', 'pending_messages_count', 'created_at', 'updated_at', 'last_message_at'],
     title: 'SessionPublicExtended',
     description: 'Session with external session metadata'
 } as const;
@@ -4424,17 +4477,6 @@ export const SessionUpdateSchema = {
                 }
             ],
             title: 'Mode'
-        },
-        agent_sdk: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Agent Sdk'
         }
     },
     type: 'object',
@@ -4758,6 +4800,11 @@ export const UserPublicWithAICredentialsSchema = {
         has_minimax_api_key: {
             type: 'boolean',
             title: 'Has Minimax Api Key',
+            default: false
+        },
+        has_openai_compatible_api_key: {
+            type: 'boolean',
+            title: 'Has Openai Compatible Api Key',
             default: false
         }
     },

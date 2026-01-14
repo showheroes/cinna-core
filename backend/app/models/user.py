@@ -7,7 +7,8 @@ from sqlmodel import Field, Relationship, SQLModel, Column, Text
 # SDK constants
 SDK_ANTHROPIC = "claude-code/anthropic"
 SDK_MINIMAX = "claude-code/minimax"
-VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX]
+SDK_OPENAI_COMPATIBLE = "google-adk-wr/openai-compatible"
+VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX, SDK_OPENAI_COMPATIBLE]
 
 
 # Shared properties
@@ -116,6 +117,10 @@ class AIServiceCredentials(SQLModel):
     openai_api_key: str | None = None  # For future use
     google_ai_api_key: str | None = None  # For future use
     minimax_api_key: str | None = None
+    # OpenAI Compatible provider credentials
+    openai_compatible_api_key: str | None = None
+    openai_compatible_base_url: str | None = None
+    openai_compatible_model: str | None = None
 
 
 class AIServiceCredentialsUpdate(SQLModel):
@@ -124,6 +129,10 @@ class AIServiceCredentialsUpdate(SQLModel):
     openai_api_key: str | None = None
     google_ai_api_key: str | None = None
     minimax_api_key: str | None = None
+    # OpenAI Compatible provider credentials
+    openai_compatible_api_key: str | None = None
+    openai_compatible_base_url: str | None = None
+    openai_compatible_model: str | None = None
 
 
 class UserPublicWithAICredentials(UserPublic):
@@ -132,3 +141,4 @@ class UserPublicWithAICredentials(UserPublic):
     has_openai_api_key: bool = False
     has_google_ai_api_key: bool = False
     has_minimax_api_key: bool = False
+    has_openai_compatible_api_key: bool = False

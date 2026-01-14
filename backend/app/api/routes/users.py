@@ -305,6 +305,7 @@ def get_ai_credentials_status(
         has_openai_api_key=bool(credentials and credentials.openai_api_key),
         has_google_ai_api_key=bool(credentials and credentials.google_ai_api_key),
         has_minimax_api_key=bool(credentials and credentials.minimax_api_key),
+        has_openai_compatible_api_key=bool(credentials and credentials.openai_compatible_api_key),
     )
 
 

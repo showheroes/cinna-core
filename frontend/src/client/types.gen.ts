@@ -309,6 +309,9 @@ export type AIServiceCredentials = {
     openai_api_key?: (string | null);
     google_ai_api_key?: (string | null);
     minimax_api_key?: (string | null);
+    openai_compatible_api_key?: (string | null);
+    openai_compatible_base_url?: (string | null);
+    openai_compatible_model?: (string | null);
 };
 
 /**
@@ -319,6 +322,9 @@ export type AIServiceCredentialsUpdate = {
     openai_api_key?: (string | null);
     google_ai_api_key?: (string | null);
     minimax_api_key?: (string | null);
+    openai_compatible_api_key?: (string | null);
+    openai_compatible_base_url?: (string | null);
+    openai_compatible_model?: (string | null);
 };
 
 /**
@@ -922,7 +928,6 @@ export type SessionCreate = {
     agent_id: string;
     title?: (string | null);
     mode?: string;
-    agent_sdk?: string;
 };
 
 export type SessionPublic = {
@@ -932,7 +937,6 @@ export type SessionPublic = {
     user_workspace_id: (string | null);
     title: (string | null);
     mode: string;
-    agent_sdk: string;
     status: string;
     interaction_status: string;
     pending_messages_count: number;
@@ -951,7 +955,6 @@ export type SessionPublicExtended = {
     user_workspace_id: (string | null);
     title: (string | null);
     mode: string;
-    agent_sdk: string;
     status: string;
     interaction_status: string;
     pending_messages_count: number;
@@ -975,7 +978,6 @@ export type SessionUpdate = {
     status?: (string | null);
     interaction_status?: (string | null);
     mode?: (string | null);
-    agent_sdk?: (string | null);
 };
 
 export type SetPassword = {
@@ -1066,6 +1068,7 @@ export type UserPublicWithAICredentials = {
     has_openai_api_key?: boolean;
     has_google_ai_api_key?: boolean;
     has_minimax_api_key?: boolean;
+    has_openai_compatible_api_key?: boolean;
 };
 
 export type UserRegister = {

@@ -12,6 +12,7 @@ import useCustomToast from "@/hooks/useCustomToast"
 const getSDKDisplayName = (sdk: string | null | undefined): string => {
   if (!sdk || sdk === "claude-code/anthropic") return "Anthropic"
   if (sdk === "claude-code/minimax") return "MiniMax"
+  if (sdk === "google-adk-wr/openai-compatible") return "OpenAI Compatible"
   return sdk
 }
 

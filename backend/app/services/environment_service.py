@@ -16,13 +16,15 @@ logger = logging.getLogger(__name__)
 # SDK Provider Constants
 SDK_ANTHROPIC = "claude-code/anthropic"
 SDK_MINIMAX = "claude-code/minimax"
+SDK_OPENAI_COMPATIBLE = "google-adk-wr/openai-compatible"
 DEFAULT_SDK = SDK_ANTHROPIC
-VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX]
+VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX, SDK_OPENAI_COMPATIBLE]
 
 # SDK to required API key mapping
 SDK_API_KEY_MAP = {
     SDK_ANTHROPIC: "anthropic_api_key",
     SDK_MINIMAX: "minimax_api_key",
+    SDK_OPENAI_COMPATIBLE: "openai_compatible_api_key",
 }
 
 
@@ -90,7 +92,10 @@ class EnvironmentService:
         agent_id: UUID,
         anthropic_api_key: str | None = None,
         auto_start: bool = False,
-        minimax_api_key: str | None = None
+        minimax_api_key: str | None = None,
+        openai_compatible_api_key: str | None = None,
+        openai_compatible_base_url: str | None = None,
+        openai_compatible_model: str | None = None
     ):
         """
         Background task to create environment instance.
@@ -102,6 +107,9 @@ class EnvironmentService:
             anthropic_api_key: User's Anthropic API key
             auto_start: If True, automatically start and activate after build
             minimax_api_key: User's MiniMax API key
+            openai_compatible_api_key: User's OpenAI Compatible API key
+            openai_compatible_base_url: User's OpenAI Compatible base URL
+            openai_compatible_model: User's OpenAI Compatible model
         """
         # Create new database session for background task
         with Session(engine) as session:
@@ -116,7 +124,9 @@ class EnvironmentService:
                 # Run creation process
                 lifecycle_manager = EnvironmentService.get_lifecycle_manager()
                 await lifecycle_manager.create_environment_instance(
-                    session, environment, agent, anthropic_api_key, minimax_api_key
+                    session, environment, agent,
+                    anthropic_api_key, minimax_api_key,
+                    openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model
                 )
 
                 # Auto-start if requested (typically for default agent environments)
@@ -266,6 +276,9 @@ class EnvironmentService:
         # Get API keys for the selected SDKs
         anthropic_api_key = ai_credentials.anthropic_api_key if ai_credentials else None
         minimax_api_key = ai_credentials.minimax_api_key if ai_credentials else None
+        openai_compatible_api_key = ai_credentials.openai_compatible_api_key if ai_credentials else None
+        openai_compatible_base_url = ai_credentials.openai_compatible_base_url if ai_credentials else None
+        openai_compatible_model = ai_credentials.openai_compatible_model if ai_credentials else None
 
         # Generate a memorable instance name if not provided
         instance_name = data.instance_name if data.instance_name != "Instance" else generate_environment_name()
@@ -289,7 +302,8 @@ class EnvironmentService:
         # This allows the API to return immediately while the build happens asynchronously
         asyncio.create_task(
             EnvironmentService._create_environment_background(
-                environment.id, agent_id, anthropic_api_key, auto_start, minimax_api_key
+                environment.id, agent_id, anthropic_api_key, auto_start, minimax_api_key,
+                openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model
             )
         )
 
