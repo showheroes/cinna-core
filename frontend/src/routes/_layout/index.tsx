@@ -579,7 +579,7 @@ function Dashboard() {
                           <span className="text-xs font-medium">Conversation</span>
                         </div>
                         <Select value={sdkConversation} onValueChange={setSdkConversation}>
-                          <SelectTrigger className="w-[140px] h-7 text-xs">
+                          <SelectTrigger className="w-[165px] h-7 text-xs">
                             <SelectValue placeholder="Select SDK" />
                           </SelectTrigger>
                           <SelectContent>
@@ -599,7 +599,7 @@ function Dashboard() {
                           <span className="text-xs font-medium">Building</span>
                         </div>
                         <Select value={sdkBuilding} onValueChange={setSdkBuilding}>
-                          <SelectTrigger className="w-[140px] h-7 text-xs">
+                          <SelectTrigger className="w-[165px] h-7 text-xs">
                             <SelectValue placeholder="Select SDK" />
                           </SelectTrigger>
                           <SelectContent>
