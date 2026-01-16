@@ -29,11 +29,11 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 
-interface AgentConfigurationTabProps {
+interface AgentInterfaceTabProps {
   agent: AgentPublic
 }
 
-export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
+export function AgentInterfaceTab({ agent }: AgentInterfaceTabProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()

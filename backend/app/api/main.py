@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
 from app.api.routes import (
+    a2a,
+    access_tokens,
     activities,
     agents,
     credentials,
@@ -32,6 +34,7 @@ api_router.include_router(users.router)
 api_router.include_router(utils.router)
 api_router.include_router(items.router)
 api_router.include_router(agents.router)
+api_router.include_router(access_tokens.router)
 api_router.include_router(credentials.router)
 api_router.include_router(oauth_credentials.router, prefix="/credentials", tags=["credentials"])
 api_router.include_router(ssh_keys.router)
@@ -46,6 +49,7 @@ api_router.include_router(knowledge.router)
 api_router.include_router(knowledge_sources.router)
 api_router.include_router(files.router)
 api_router.include_router(llm_plugins.router)
+api_router.include_router(a2a.router)
 
 
 if settings.ENVIRONMENT == "local":

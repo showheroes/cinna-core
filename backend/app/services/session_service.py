@@ -15,9 +15,20 @@ logger = logging.getLogger(__name__)
 class SessionService:
     @staticmethod
     def create_session(
-        db_session: DBSession, user_id: UUID, data: SessionCreate
+        db_session: DBSession,
+        user_id: UUID,
+        data: SessionCreate,
+        access_token_id: UUID | None = None,
     ) -> Session | None:
-        """Create session using agent's active environment"""
+        """
+        Create session using agent's active environment.
+
+        Args:
+            db_session: Database session
+            user_id: User ID creating the session
+            data: Session creation data
+            access_token_id: Optional access token ID (for A2A token-created sessions)
+        """
         # Get agent to find active environment
         agent = db_session.get(Agent, data.agent_id)
         if not agent or not agent.active_environment_id:
@@ -27,6 +38,7 @@ class SessionService:
             environment_id=agent.active_environment_id,
             user_id=user_id,
             user_workspace_id=agent.user_workspace_id,
+            access_token_id=access_token_id,
             title=data.title,
             mode=data.mode,
         )
@@ -84,6 +96,41 @@ class SessionService:
         return session
 
     @staticmethod
+    def update_interaction_status(
+        db_session: DBSession,
+        session_id: UUID,
+        interaction_status: str,
+        pending_messages_count: int | None = None
+    ) -> Session | None:
+        """
+        Update session interaction status and optionally pending messages count.
+
+        Valid interaction_status values:
+        - "": No interaction in progress
+        - "running": Streaming is currently happening
+        - "pending_stream": Messages waiting to be processed
+
+        Args:
+            db_session: Database session
+            session_id: Session UUID
+            interaction_status: New interaction status
+            pending_messages_count: Optional pending messages count (if None, not updated)
+        """
+        session = db_session.get(Session, session_id)
+        if not session:
+            return None
+
+        session.interaction_status = interaction_status
+        if pending_messages_count is not None:
+            session.pending_messages_count = pending_messages_count
+        session.updated_at = datetime.utcnow()
+
+        db_session.add(session)
+        db_session.commit()
+        db_session.refresh(session)
+        return session
+
+    @staticmethod
     def switch_mode(db_session: DBSession, session_id: UUID, new_mode: str) -> Session | None:
         """Switch session mode (building <-> conversation)"""
         session = db_session.get(Session, session_id)
@@ -118,6 +165,43 @@ class SessionService:
         # Get all sessions for these environments
         statement = select(Session).where(Session.environment_id.in_(env_ids))
         return list(db_session.exec(statement).all())
+
+    @staticmethod
+    def list_environment_sessions(
+        db_session: DBSession,
+        environment_id: UUID,
+        limit: int = 20,
+        offset: int = 0,
+        access_token_id: UUID | None = None,
+    ) -> list[Session]:
+        """
+        List sessions for an environment with pagination and optional filtering.
+
+        Args:
+            db_session: Database session
+            environment_id: Environment UUID to filter by
+            limit: Max number of sessions to return
+            offset: Offset for pagination
+            access_token_id: If provided, only return sessions created by this access token
+
+        Returns:
+            List of Session objects ordered by created_at descending
+        """
+        from sqlmodel import desc
+
+        query = (
+            select(Session)
+            .where(Session.environment_id == environment_id)
+            .order_by(desc(Session.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
+
+        # Filter by access token if provided
+        if access_token_id is not None:
+            query = query.where(Session.access_token_id == access_token_id)
+
+        return list(db_session.exec(query).all())
 
     @staticmethod
     def delete_session(db_session: DBSession, session_id: UUID) -> bool:
@@ -492,41 +576,54 @@ class SessionService:
 
     @staticmethod
     async def send_session_message(
-        session_id: UUID,
+        session_id: UUID | None,
         user_id: UUID,
         content: str,
         file_ids: list[UUID] | None = None,
         answers_to_message_id: UUID | None = None,
-        get_fresh_db_session: callable = None
+        get_fresh_db_session: callable = None,
+        initiate_streaming: bool = True,
+        agent_id: UUID | None = None,
+        access_token_id: UUID | None = None,
     ) -> dict[str, Any]:
         """
-        Send a message to a session and initiate streaming.
+        Send a message to a session and optionally initiate streaming.
 
         This method encapsulates the full flow of sending a message:
-        1. Validates session ownership and existence
-        2. Handles file attachments if present
-        3. Creates user message with sent_to_agent_status='pending'
-        4. Delegates to initiate_stream() for processing
+        1. Gets existing session or creates new one (if agent_id provided)
+        2. Validates session ownership and existence
+        3. Handles file attachments if present
+        4. Creates user message with sent_to_agent_status='pending'
+        5. Delegates to initiate_stream() for processing (if initiate_streaming=True)
 
         This is the centralized entry point for sending messages to sessions,
-        used by both API endpoints and internal services (like handover).
+        used by both API endpoints and internal services (like handover, A2A).
 
         Args:
-            session_id: Session UUID
+            session_id: Session UUID (can be None if agent_id is provided to create new session)
             user_id: User ID (for ownership validation)
             content: Message content
             file_ids: Optional list of file IDs to attach
             answers_to_message_id: Optional message ID being answered
             get_fresh_db_session: Callable that returns a fresh DB session (context manager)
                                  If None, uses default engine session
+            initiate_streaming: If True (default), calls initiate_stream() to start
+                               background streaming via WebSocket. If False, just creates
+                               the message and returns session info for manual streaming
+                               (used by A2A handler for SSE streaming).
+            agent_id: Optional agent ID for creating a new session (required if session_id is None)
+            access_token_id: Optional access token ID (for A2A token-created sessions)
 
         Returns:
             dict with status information:
             {
-                "action": "streaming" | "pending" | "no_pending_messages" | "error",
+                "action": "streaming" | "pending" | "no_pending_messages" | "error" | "message_created",
                 "message": str,
                 "pending_count": int,
-                "files_attached": int (if files present)
+                "files_attached": int (if files present),
+                "session_id": UUID (always included),
+                "environment_id": UUID (if initiate_streaming=False),
+                "external_session_id": str | None (if initiate_streaming=False)
             }
         """
         # Default get_fresh_db_session if not provided
@@ -534,13 +631,36 @@ class SessionService:
             get_fresh_db_session = lambda: DBSession(engine)
 
         with get_fresh_db_session() as db:
-            from app.models import Session as ChatSession, AgentEnvironment
+            from app.models import AgentEnvironment
             from app.services.message_service import MessageService
 
-            # Get session
-            chat_session = db.get(ChatSession, session_id)
-            if not chat_session:
-                return {"action": "error", "message": "Session not found"}
+            chat_session: Session | None = None
+            is_new_session = False
+
+            # Get existing session or create new one
+            if session_id:
+                chat_session = SessionService.get_session(db, session_id)
+                if not chat_session:
+                    return {"action": "error", "message": "Session not found"}
+            elif agent_id:
+                # Create new session for the agent
+                session_data = SessionCreate(
+                    agent_id=agent_id,
+                    mode="conversation",
+                )
+                chat_session = SessionService.create_session(
+                    db_session=db,
+                    user_id=user_id,
+                    data=session_data,
+                    access_token_id=access_token_id,
+                )
+                if not chat_session:
+                    return {"action": "error", "message": "Failed to create session"}
+                session_id = chat_session.id
+                is_new_session = True
+                logger.info(f"Created new session {session_id} for agent {agent_id}")
+            else:
+                return {"action": "error", "message": "Either session_id or agent_id must be provided"}
 
             # Validate ownership
             if chat_session.user_id != user_id:
@@ -581,6 +701,34 @@ class SessionService:
                 )
                 logger.info(f"Created user message for session {session_id}")
 
+            # If not initiating streaming, return session info for manual streaming
+            if not initiate_streaming:
+                # Auto-generate session title for new sessions
+                # This handles cases where initiate_stream won't be called (e.g., A2A SSE streaming)
+                # When initiate_streaming=True, title generation happens in initiate_stream instead
+                if is_new_session and (not chat_session.title or chat_session.title.strip() == ""):
+                    logger.info(f"[DEBUG] New session {session_id} has no title. Creating title generation task...")
+                    create_task_with_error_logging(
+                        SessionService.auto_generate_session_title(
+                            session_id=session_id,
+                            first_message_content=content,
+                            get_fresh_db_session=get_fresh_db_session
+                        ),
+                        task_name=f"auto_generate_title_session_{session_id}"
+                    )
+                external_session_id = chat_session.session_metadata.get("external_session_id") if chat_session.session_metadata else None
+                result = {
+                    "action": "message_created",
+                    "message": "Message created, ready for manual streaming",
+                    "pending_count": 1,
+                    "session_id": session_id,
+                    "environment_id": chat_session.environment_id,
+                    "external_session_id": external_session_id,
+                }
+                if has_files:
+                    result["files_attached"] = len(file_ids)
+                return result
+
         # Delegate to initiate_stream to decide when to stream
         # Note: We exit the DB session context before calling initiate_stream
         # because it will create its own fresh sessions
@@ -588,6 +736,9 @@ class SessionService:
             session_id=session_id,
             get_fresh_db_session=get_fresh_db_session
         )
+
+        # Always include session_id in result
+        result["session_id"] = session_id
 
         # Add files info to result if files were attached
         if has_files:
@@ -623,11 +774,10 @@ class SessionService:
             }
         """
         with get_fresh_db_session() as db:
-            from app.models import Session as ChatSession, AgentEnvironment, Agent
             from app.services.message_service import MessageService
 
-            # Get session
-            session = db.get(ChatSession, session_id)
+            # Get session via service
+            session = SessionService.get_session(db, session_id)
             if not session:
                 return {"action": "error", "message": "Session not found"}
 

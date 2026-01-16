@@ -468,6 +468,20 @@ export const AIServiceCredentialsUpdateSchema = {
     description: 'Update AI service credentials (partial update)'
 } as const;
 
+export const AccessTokenModeSchema = {
+    type: 'string',
+    enum: ['conversation', 'building'],
+    title: 'AccessTokenMode',
+    description: 'Access mode for the token - determines what operations are allowed.'
+} as const;
+
+export const AccessTokenScopeSchema = {
+    type: 'string',
+    enum: ['limited', 'general'],
+    title: 'AccessTokenScope',
+    description: 'Scope for the token - determines session visibility.'
+} as const;
+
 export const ActivitiesPublicExtendedSchema = {
     properties: {
         data: {
@@ -754,6 +768,212 @@ export const ActivityUpdateSchema = {
     },
     type: 'object',
     title: 'ActivityUpdate'
+} as const;
+
+export const AgentAccessTokenCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        mode: {
+            '$ref': '#/components/schemas/AccessTokenMode',
+            default: 'conversation'
+        },
+        scope: {
+            '$ref': '#/components/schemas/AccessTokenScope',
+            default: 'limited'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        }
+    },
+    type: 'object',
+    required: ['name', 'agent_id'],
+    title: 'AgentAccessTokenCreate'
+} as const;
+
+export const AgentAccessTokenCreatedSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        mode: {
+            '$ref': '#/components/schemas/AccessTokenMode',
+            default: 'conversation'
+        },
+        scope: {
+            '$ref': '#/components/schemas/AccessTokenScope',
+            default: 'limited'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        token_prefix: {
+            type: 'string',
+            title: 'Token Prefix'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        last_used_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Used At'
+        },
+        is_revoked: {
+            type: 'boolean',
+            title: 'Is Revoked'
+        },
+        token: {
+            type: 'string',
+            title: 'Token'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'agent_id', 'token_prefix', 'expires_at', 'created_at', 'last_used_at', 'is_revoked', 'token'],
+    title: 'AgentAccessTokenCreated',
+    description: 'Returned only on token creation - includes the actual token value.'
+} as const;
+
+export const AgentAccessTokenPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        mode: {
+            '$ref': '#/components/schemas/AccessTokenMode',
+            default: 'conversation'
+        },
+        scope: {
+            '$ref': '#/components/schemas/AccessTokenScope',
+            default: 'limited'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        token_prefix: {
+            type: 'string',
+            title: 'Token Prefix'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        last_used_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Used At'
+        },
+        is_revoked: {
+            type: 'boolean',
+            title: 'Is Revoked'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'agent_id', 'token_prefix', 'expires_at', 'created_at', 'last_used_at', 'is_revoked'],
+    title: 'AgentAccessTokenPublic'
+} as const;
+
+export const AgentAccessTokenUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        is_revoked: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Is Revoked'
+        }
+    },
+    type: 'object',
+    title: 'AgentAccessTokenUpdate'
+} as const;
+
+export const AgentAccessTokensPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AgentAccessTokenPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AgentAccessTokensPublic'
 } as const;
 
 export const AgentCreateSchema = {
@@ -1504,6 +1724,18 @@ export const AgentPublicSchema = {
             ],
             title: 'Agent Sdk Config'
         },
+        a2a_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'A2A Config'
+        },
         created_at: {
             type: 'string',
             format: 'date-time',
@@ -1714,6 +1946,18 @@ export const AgentUpdateSchema = {
                 }
             ],
             title: 'Conversation Mode Ui'
+        },
+        a2a_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'A2A Config'
         }
     },
     type: 'object',
@@ -4258,6 +4502,18 @@ export const SessionPublicSchema = {
             ],
             title: 'User Workspace Id'
         },
+        access_token_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Access Token Id'
+        },
         title: {
             anyOf: [
                 {
@@ -4309,7 +4565,7 @@ export const SessionPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'environment_id', 'user_id', 'user_workspace_id', 'title', 'mode', 'status', 'interaction_status', 'pending_messages_count', 'created_at', 'updated_at', 'last_message_at'],
+    required: ['id', 'environment_id', 'user_id', 'user_workspace_id', 'access_token_id', 'title', 'mode', 'status', 'interaction_status', 'pending_messages_count', 'created_at', 'updated_at', 'last_message_at'],
     title: 'SessionPublic'
 } as const;
 
@@ -4341,6 +4597,18 @@ export const SessionPublicExtendedSchema = {
                 }
             ],
             title: 'User Workspace Id'
+        },
+        access_token_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Access Token Id'
         },
         title: {
             anyOf: [
@@ -4449,7 +4717,7 @@ export const SessionPublicExtendedSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'environment_id', 'user_id', 'user_workspace_id', 'title', 'mode', 'status', 'interaction_status', 'pending_messages_count', 'created_at', 'updated_at', 'last_message_at'],
+    required: ['id', 'environment_id', 'user_id', 'user_workspace_id', 'access_token_id', 'title', 'mode', 'status', 'interaction_status', 'pending_messages_count', 'created_at', 'updated_at', 'last_message_at'],
     title: 'SessionPublicExtended',
     description: 'Session with external session metadata'
 } as const;

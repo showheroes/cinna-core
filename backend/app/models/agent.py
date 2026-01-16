@@ -31,6 +31,7 @@ class AgentUpdate(SQLModel):
     ui_color_preset: str | None = None
     show_on_dashboard: bool | None = None
     conversation_mode_ui: str | None = None
+    a2a_config: dict | None = None
 
 
 # Database model, database table inferred from class name
@@ -50,6 +51,7 @@ class Agent(AgentBase, table=True):
     show_on_dashboard: bool = Field(default=True)
     conversation_mode_ui: str = Field(default="detailed")  # "detailed" or "compact"
     agent_sdk_config: dict = Field(default_factory=dict, sa_column=Column(JSON))  # SDK config: sdk_tools, allowed_tools
+    a2a_config: dict = Field(default_factory=dict, sa_column=Column(JSON))  # A2A config: skills, version, generated_at
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -82,6 +84,7 @@ class AgentPublic(SQLModel):
     show_on_dashboard: bool
     conversation_mode_ui: str
     agent_sdk_config: dict | None = None
+    a2a_config: dict | None = None
     created_at: datetime
     updated_at: datetime
     owner_id: uuid.UUID

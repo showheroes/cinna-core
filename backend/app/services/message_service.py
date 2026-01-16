@@ -36,6 +36,7 @@ class MessageService:
         status: str = "",
         status_message: str | None = None,
         file_ids: list[UUID] | None = None,
+        sent_to_agent_status: str = "pending",
     ) -> SessionMessage:
         """Create message in session with auto-incremented sequence.
 
@@ -58,6 +59,7 @@ class MessageService:
             tool_questions_status=tool_questions_status,
             status=status,
             status_message=status_message,
+            sent_to_agent_status=sent_to_agent_status,
         )
         session.add(message)
 
@@ -261,6 +263,19 @@ class MessageService:
         messages = list(session.exec(statement).all())
         # Reverse to get chronological order
         return list(reversed(messages))
+
+    @staticmethod
+    def get_last_message(
+        session: Session, session_id: UUID
+    ) -> SessionMessage | None:
+        """Get the last message in a session by sequence number"""
+        statement = (
+            select(SessionMessage)
+            .where(SessionMessage.session_id == session_id)
+            .order_by(SessionMessage.sequence_number.desc())
+            .limit(1)
+        )
+        return session.exec(statement).first()
 
     @staticmethod
     def collect_pending_messages(session: Session, session_id: UUID) -> tuple[str | None, list[SessionMessage]]:
@@ -636,7 +651,13 @@ class MessageService:
                                 continue
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error from environment: {e.response.status_code} - {e.response.text}")
+            # For streaming responses, we need to read the content first
+            try:
+                await e.response.aread()
+                error_text = e.response.text
+            except Exception:
+                error_text = "(unable to read response)"
+            logger.error(f"HTTP error from environment: {e.response.status_code} - {error_text}")
             yield {
                 "type": "error",
                 "content": f"Environment returned error: {e.response.status_code}",

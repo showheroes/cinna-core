@@ -5,10 +5,11 @@ import { useState, useEffect } from "react"
 
 import { AgentsService } from "@/client"
 import { AgentPromptsTab } from "@/components/Agents/AgentPromptsTab"
+import { AgentIntegrationsTab } from "@/components/Agents/AgentIntegrationsTab"
 import { AgentCredentialsTab } from "@/components/Agents/AgentCredentialsTab"
 import { AgentPluginsTab } from "@/components/Agents/AgentPluginsTab"
 import { AgentEnvironmentsTab } from "@/components/Agents/AgentEnvironmentsTab"
-import { AgentConfigurationTab } from "@/components/Agents/AgentConfigurationTab"
+import { AgentInterfaceTab } from "@/components/Agents/AgentInterfaceTab"
 import EditAgent from "@/components/Agents/EditAgent"
 import DeleteAgent from "@/components/Agents/DeleteAgent"
 import PendingItems from "@/components/Pending/PendingItems"
@@ -100,10 +101,11 @@ function AgentDetail() {
 
   const tabs = [
     { value: "configuration", title: "Configuration", content: <AgentPromptsTab agent={agent} /> },
+    { value: "integrations", title: "Integrations", content: <AgentIntegrationsTab agent={agent} /> },
     { value: "credentials", title: "Credentials", content: <AgentCredentialsTab agentId={agent.id} /> },
     { value: "plugins", title: "Plugins", content: <AgentPluginsTab agentId={agent.id} /> },
     { value: "environments", title: "Environments", content: <AgentEnvironmentsTab agentId={agent.id} /> },
-    { value: "interface", title: "Interface", content: <AgentConfigurationTab agent={agent} /> },
+    { value: "interface", title: "Interface", content: <AgentInterfaceTab agent={agent} /> },
   ]
 
   return (

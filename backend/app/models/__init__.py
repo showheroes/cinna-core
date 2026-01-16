@@ -160,6 +160,17 @@ from .llm_plugin import (
     MarketplaceStatus,
     PluginSourceType,
 )
+from .agent_access_token import (
+    AgentAccessToken,
+    AgentAccessTokenCreate,
+    AgentAccessTokenUpdate,
+    AgentAccessTokenPublic,
+    AgentAccessTokenCreated,
+    AgentAccessTokensPublic,
+    AccessTokenMode,
+    AccessTokenScope,
+    A2ATokenPayload,
+)
 
 __all__ = [
     # Core
@@ -313,4 +324,14 @@ __all__ = [
     "AgentPluginLinksPublic",
     "MarketplaceStatus",
     "PluginSourceType",
+    # Agent Access Tokens
+    "AgentAccessToken",
+    "AgentAccessTokenCreate",
+    "AgentAccessTokenUpdate",
+    "AgentAccessTokenPublic",
+    "AgentAccessTokenCreated",
+    "AgentAccessTokensPublic",
+    "AccessTokenMode",
+    "AccessTokenScope",
+    "A2ATokenPayload",
 ]

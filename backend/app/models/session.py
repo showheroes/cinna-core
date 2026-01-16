@@ -15,6 +15,10 @@ class Session(SQLModel, table=True):
     user_workspace_id: uuid.UUID | None = Field(
         default=None, foreign_key="user_workspace.id", ondelete="CASCADE"
     )
+    # Track which access token created this session (for A2A scope enforcement)
+    access_token_id: uuid.UUID | None = Field(
+        default=None, foreign_key="agent_access_tokens.id", ondelete="SET NULL"
+    )
     title: str | None = None
     mode: str = "conversation"  # "building" | "conversation"
     status: str = "active"  # "active" | "paused" | "completed" | "error"
@@ -66,6 +70,7 @@ class SessionPublic(SQLModel):
     environment_id: uuid.UUID
     user_id: uuid.UUID
     user_workspace_id: uuid.UUID | None
+    access_token_id: uuid.UUID | None
     title: str | None
     mode: str
     status: str

@@ -1,6 +1,7 @@
 from uuid import UUID
 import asyncio
 import logging
+from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
 from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment, Session as ChatSession, AgentSdkConfig
@@ -9,10 +10,23 @@ from app.services.environment_service import EnvironmentService
 from app.services.environment_lifecycle import EnvironmentLifecycleManager
 from app.services.session_service import SessionService
 from app.services.ai_functions_service import AIFunctionsService
+from app.agents.skills_generator import generate_a2a_skills
 from app.core.config import settings
 from app.core.db import engine
 
 logger = logging.getLogger(__name__)
+
+
+def _increment_version(version: str) -> str:
+    """Increment the patch version of a semantic version string."""
+    try:
+        parts = version.split(".")
+        if len(parts) == 3:
+            major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+            return f"{major}.{minor}.{patch + 1}"
+    except (ValueError, IndexError):
+        pass
+    return "1.0.1"
 
 
 class AgentService:
@@ -63,6 +77,22 @@ class AgentService:
             return None
 
         update_dict = data.model_dump(exclude_unset=True)
+
+        # Regenerate A2A skills when workflow_prompt changes
+        if "workflow_prompt" in update_dict and update_dict["workflow_prompt"] != agent.workflow_prompt:
+            try:
+                new_skills = generate_a2a_skills(update_dict["workflow_prompt"])
+                current_version = agent.a2a_config.get("version", "1.0.0") if agent.a2a_config else "1.0.0"
+                agent.a2a_config = {
+                    "skills": new_skills,
+                    "version": _increment_version(current_version),
+                    "generated_at": datetime.utcnow().isoformat()
+                }
+                flag_modified(agent, "a2a_config")
+                logger.info(f"Regenerated A2A skills for agent {agent_id}: {len(new_skills)} skills")
+            except Exception as e:
+                logger.warning(f"Failed to generate A2A skills for agent {agent_id}: {e}")
+
         agent.sqlmodel_update(update_dict)
 
         session.add(agent)

@@ -8,4 +8,5 @@ node_modules/
 .env
 .idea/
 src_example/
+a2a-samples-main/
 backend/data/uploads/
