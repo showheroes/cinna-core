@@ -244,13 +244,13 @@ class A2ARequestHandler:
         context_id_str = str(session_id)
 
         # Yield initial working status
-        yield self._format_sse_event(request_id, {
-            "kind": "status-update",
-            "taskId": task_id_str,
-            "contextId": context_id_str,
-            "status": {"state": "working", "timestamp": datetime.utcnow().isoformat() + "Z"},
-            "final": False,
-        })
+        initial_event = A2AEventMapper._create_status_update(
+            task_id=task_id_str,
+            context_id=context_id_str,
+            state=TaskState.working,
+            final=False,
+        )
+        yield self._format_sse_event(request_id, initial_event)
 
         try:
             # Check if environment needs activation before streaming
@@ -258,20 +258,14 @@ class A2ARequestHandler:
             env_status = self.environment.status
             if env_status in ["suspended", "activating", "starting"]:
                 logger.info(f"Environment {self.environment.id} status is '{env_status}', notifying client...")
-                yield self._format_sse_event(request_id, {
-                    "kind": "status-update",
-                    "taskId": task_id_str,
-                    "contextId": context_id_str,
-                    "status": {
-                        "state": "working",
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "message": {
-                            "role": "agent",
-                            "parts": [{"kind": "text", "text": "Starting up the agent environment, this may take a moment..."}]
-                        }
-                    },
-                    "final": False,
-                })
+                activation_event = A2AEventMapper._create_status_update(
+                    task_id=task_id_str,
+                    context_id=context_id_str,
+                    state=TaskState.working,
+                    final=False,
+                    message="Starting up the agent environment, this may take a moment...",
+                )
+                yield self._format_sse_event(request_id, activation_event)
 
             # Ensure environment is ready for streaming (activates if suspended)
             # This is critical for A2A flow since we stream directly to agent-env
@@ -285,17 +279,14 @@ class A2ARequestHandler:
                 logger.info(f"Environment {environment.id} is ready for A2A streaming")
             except (ValueError, RuntimeError) as e:
                 logger.error(f"Environment not ready for streaming: {e}")
-                yield self._format_sse_event(request_id, {
-                    "kind": "status-update",
-                    "taskId": task_id_str,
-                    "contextId": context_id_str,
-                    "status": {
-                        "state": "failed",
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "message": {"role": "agent", "parts": [{"kind": "text", "text": f"Environment error: {str(e)}"}]}
-                    },
-                    "final": True,
-                })
+                error_event = A2AEventMapper._create_status_update(
+                    task_id=task_id_str,
+                    context_id=context_id_str,
+                    state=TaskState.failed,
+                    final=True,
+                    message=f"Environment error: {str(e)}",
+                )
+                yield self._format_sse_event(request_id, error_event)
                 return
 
             # Get environment base URL and auth using refreshed environment
@@ -320,13 +311,14 @@ class A2ARequestHandler:
 
         except Exception as e:
             logger.error(f"Error streaming message: {e}")
-            yield self._format_sse_event(request_id, {
-                "kind": "status-update",
-                "taskId": task_id_str,
-                "contextId": context_id_str,
-                "status": {"state": "failed", "timestamp": datetime.utcnow().isoformat() + "Z"},
-                "final": True,
-            })
+            error_event = A2AEventMapper._create_status_update(
+                task_id=task_id_str,
+                context_id=context_id_str,
+                state=TaskState.failed,
+                final=True,
+                message=f"Error: {str(e)}",
+            )
+            yield self._format_sse_event(request_id, error_event)
 
     async def handle_tasks_get(self, params: dict[str, Any]) -> Task | None:
         """
