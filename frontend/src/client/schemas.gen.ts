@@ -3472,6 +3472,55 @@ export const ExecuteHandoverResponseSchema = {
     description: 'Response from handover execution.'
 } as const;
 
+export const ExecuteTaskRequestSchema = {
+    properties: {
+        mode: {
+            type: 'string',
+            title: 'Mode',
+            default: 'conversation'
+        }
+    },
+    type: 'object',
+    title: 'ExecuteTaskRequest',
+    description: 'Request to execute a task (create session)'
+} as const;
+
+export const ExecuteTaskResponseSchema = {
+    properties: {
+        success: {
+            type: 'boolean',
+            title: 'Success'
+        },
+        session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Id'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['success'],
+    title: 'ExecuteTaskResponse',
+    description: 'Response from task execution'
+} as const;
+
 export const FileUploadPublicSchema = {
     properties: {
         id: {
@@ -3727,6 +3776,358 @@ export const HandoverConfigsPublicSchema = {
     required: ['data', 'count'],
     title: 'HandoverConfigsPublic',
     description: 'List of handover configurations.'
+} as const;
+
+export const InputTaskCreateSchema = {
+    properties: {
+        original_message: {
+            type: 'string',
+            maxLength: 10000,
+            minLength: 1,
+            title: 'Original Message'
+        },
+        selected_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Agent Id'
+        },
+        user_workspace_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Workspace Id'
+        }
+    },
+    type: 'object',
+    required: ['original_message'],
+    title: 'InputTaskCreate'
+} as const;
+
+export const InputTaskPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        original_message: {
+            type: 'string',
+            title: 'Original Message'
+        },
+        current_description: {
+            type: 'string',
+            title: 'Current Description'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        selected_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Agent Id'
+        },
+        session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Id'
+        },
+        user_workspace_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Workspace Id'
+        },
+        error_message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error Message'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        executed_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Executed At'
+        },
+        completed_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Completed At'
+        },
+        archived_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Archived At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
+    title: 'InputTaskPublic'
+} as const;
+
+export const InputTaskPublicExtendedSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        original_message: {
+            type: 'string',
+            title: 'Original Message'
+        },
+        current_description: {
+            type: 'string',
+            title: 'Current Description'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        selected_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Agent Id'
+        },
+        session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Id'
+        },
+        user_workspace_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Workspace Id'
+        },
+        error_message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error Message'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        executed_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Executed At'
+        },
+        completed_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Completed At'
+        },
+        archived_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Archived At'
+        },
+        agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Name'
+        },
+        refinement_history: {
+            items: {},
+            type: 'array',
+            title: 'Refinement History'
+        }
+    },
+    type: 'object',
+    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
+    title: 'InputTaskPublicExtended',
+    description: 'Extended response with agent name'
+} as const;
+
+export const InputTaskUpdateSchema = {
+    properties: {
+        current_description: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 10000,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Current Description'
+        },
+        selected_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Agent Id'
+        }
+    },
+    type: 'object',
+    title: 'InputTaskUpdate'
+} as const;
+
+export const InputTasksPublicExtendedSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/InputTaskPublicExtended'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'InputTasksPublicExtended'
 } as const;
 
 export const ItemCreateSchema = {
@@ -5125,6 +5526,67 @@ export const RefinePromptResponseSchema = {
     required: ['success'],
     title: 'RefinePromptResponse',
     description: 'Response from prompt refinement.'
+} as const;
+
+export const RefineTaskRequestSchema = {
+    properties: {
+        user_comment: {
+            type: 'string',
+            maxLength: 2000,
+            minLength: 1,
+            title: 'User Comment'
+        }
+    },
+    type: 'object',
+    required: ['user_comment'],
+    title: 'RefineTaskRequest',
+    description: 'Request to refine a task with AI assistance'
+} as const;
+
+export const RefineTaskResponseSchema = {
+    properties: {
+        success: {
+            type: 'boolean',
+            title: 'Success'
+        },
+        refined_description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Refined Description'
+        },
+        feedback_message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Feedback Message'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['success'],
+    title: 'RefineTaskResponse',
+    description: 'Response from task refinement'
 } as const;
 
 export const RefreshKnowledgeResponseSchema = {

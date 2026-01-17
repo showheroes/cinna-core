@@ -12,6 +12,7 @@ from app.api.routes import (
     environments,
     events,
     files,
+    input_tasks,
     items,
     knowledge,
     knowledge_sources,
@@ -55,6 +56,7 @@ api_router.include_router(knowledge.router)
 api_router.include_router(knowledge_sources.router)
 api_router.include_router(files.router)
 api_router.include_router(llm_plugins.router)
+api_router.include_router(input_tasks.router)
 api_router.include_router(a2a.router)
 
 

@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { A2aGetAgentCardData, A2aGetAgentCardResponse, A2aHandleJsonrpcData, A2aHandleJsonrpcResponse, A2aGetAgentCardWellKnownData, A2aGetAgentCardWellKnownResponse, AccessTokensListAccessTokensData, AccessTokensListAccessTokensResponse, AccessTokensCreateAccessTokenData, AccessTokensCreateAccessTokenResponse, AccessTokensGetAccessTokenData, AccessTokensGetAccessTokenResponse, AccessTokensUpdateAccessTokenData, AccessTokensUpdateAccessTokenResponse, AccessTokensDeleteAccessTokenData, AccessTokensDeleteAccessTokenResponse, ActivitiesCreateActivityData, ActivitiesCreateActivityResponse, ActivitiesListActivitiesData, ActivitiesListActivitiesResponse, ActivitiesDeleteAllActivitiesResponse, ActivitiesGetActivityStatsResponse, ActivitiesUpdateActivityData, ActivitiesUpdateActivityResponse, ActivitiesDeleteActivityData, ActivitiesDeleteActivityResponse, ActivitiesMarkActivitiesAsReadData, ActivitiesMarkActivitiesAsReadResponse, AgentsReadAgentsData, AgentsReadAgentsResponse, AgentsCreateAgentData, AgentsCreateAgentResponse, AgentsReadAgentData, AgentsReadAgentResponse, AgentsUpdateAgentData, AgentsUpdateAgentResponse, AgentsDeleteAgentData, AgentsDeleteAgentResponse, AgentsCreateAgentWithFlowData, AgentsCreateAgentWithFlowResponse, AgentsSyncAgentPromptsData, AgentsSyncAgentPromptsResponse, AgentsReadAgentCredentialsData, AgentsReadAgentCredentialsResponse, AgentsAddCredentialToAgentData, AgentsAddCredentialToAgentResponse, AgentsRemoveCredentialFromAgentData, AgentsRemoveCredentialFromAgentResponse, AgentsCreateAgentEnvironmentData, AgentsCreateAgentEnvironmentResponse, AgentsListAgentEnvironmentsData, AgentsListAgentEnvironmentsResponse, AgentsActivateEnvironmentData, AgentsActivateEnvironmentResponse, AgentsGenerateScheduleData, AgentsGenerateScheduleResponse, AgentsSaveScheduleData, AgentsSaveScheduleResponse, AgentsGetScheduleData, AgentsGetScheduleResponse, AgentsDeleteScheduleData, AgentsDeleteScheduleResponse, AgentsListHandoverConfigsData, AgentsListHandoverConfigsResponse, AgentsCreateHandoverConfigData, AgentsCreateHandoverConfigResponse, AgentsUpdateHandoverConfigData, AgentsUpdateHandoverConfigResponse, AgentsDeleteHandoverConfigData, AgentsDeleteHandoverConfigResponse, AgentsGenerateHandoverPromptEndpointData, AgentsGenerateHandoverPromptEndpointResponse, AgentsExecuteHandoverData, AgentsExecuteHandoverResponse, AgentsGetSdkConfigData, AgentsGetSdkConfigResponse, AgentsAddAllowedToolsData, AgentsAddAllowedToolsResponse, AgentsGetPendingToolsData, AgentsGetPendingToolsResponse, AgentSharesShareAgentData, AgentSharesShareAgentResponse, AgentSharesGetAgentSharesData, AgentSharesGetAgentSharesResponse, AgentSharesGetAgentClonesData, AgentSharesGetAgentClonesResponse, AgentSharesRevokeShareData, AgentSharesRevokeShareResponse, AgentSharesGetPendingSharesResponse, AgentSharesAcceptShareData, AgentSharesAcceptShareResponse, AgentSharesDeclineShareData, AgentSharesDeclineShareResponse, AgentSharesDetachCloneData, AgentSharesDetachCloneResponse, AgentSharesPushUpdatesToClonesData, AgentSharesPushUpdatesToClonesResponse, AgentSharesApplyUpdateData, AgentSharesApplyUpdateResponse, AgentSharesGetUpdateStatusData, AgentSharesGetUpdateStatusResponse, AgentSharesSetUpdateModeData, AgentSharesSetUpdateModeResponse, AiCredentialsListAiCredentialsResponse, AiCredentialsCreateAiCredentialData, AiCredentialsCreateAiCredentialResponse, AiCredentialsGetAiCredentialData, AiCredentialsGetAiCredentialResponse, AiCredentialsUpdateAiCredentialData, AiCredentialsUpdateAiCredentialResponse, AiCredentialsDeleteAiCredentialData, AiCredentialsDeleteAiCredentialResponse, AiCredentialsSetAiCredentialDefaultData, AiCredentialsSetAiCredentialDefaultResponse, CredentialsShareCredentialData, CredentialsShareCredentialResponse, CredentialsGetCredentialSharesData, CredentialsGetCredentialSharesResponse, CredentialsRevokeCredentialShareData, CredentialsRevokeCredentialShareResponse, CredentialsGetCredentialsSharedWithMeResponse, CredentialsUpdateCredentialSharingData, CredentialsUpdateCredentialSharingResponse, CredentialsReadCredentialsData, CredentialsReadCredentialsResponse, CredentialsCreateCredentialData, CredentialsCreateCredentialResponse, CredentialsReadCredentialData, CredentialsReadCredentialResponse, CredentialsUpdateCredentialData, CredentialsUpdateCredentialResponse, CredentialsDeleteCredentialData, CredentialsDeleteCredentialResponse, CredentialsReadCredentialWithDataData, CredentialsReadCredentialWithDataResponse, CredentialsOauthAuthorizeData, CredentialsOauthAuthorizeResponse, CredentialsOauthCallbackData, CredentialsOauthCallbackResponse, CredentialsGetOauthMetadataData, CredentialsGetOauthMetadataResponse, CredentialsRefreshOauthTokenData, CredentialsRefreshOauthTokenResponse, EnvironmentsGetEnvironmentData, EnvironmentsGetEnvironmentResponse, EnvironmentsUpdateEnvironmentData, EnvironmentsUpdateEnvironmentResponse, EnvironmentsDeleteEnvironmentData, EnvironmentsDeleteEnvironmentResponse, EnvironmentsStartEnvironmentData, EnvironmentsStartEnvironmentResponse, EnvironmentsStopEnvironmentData, EnvironmentsStopEnvironmentResponse, EnvironmentsSuspendEnvironmentData, EnvironmentsSuspendEnvironmentResponse, EnvironmentsRestartEnvironmentData, EnvironmentsRestartEnvironmentResponse, EnvironmentsRebuildEnvironmentData, EnvironmentsRebuildEnvironmentResponse, EnvironmentsGetEnvironmentStatusData, EnvironmentsGetEnvironmentStatusResponse, EnvironmentsCheckEnvironmentHealthData, EnvironmentsCheckEnvironmentHealthResponse, EnvironmentsGetEnvironmentLogsData, EnvironmentsGetEnvironmentLogsResponse, EventsBroadcastEventData, EventsBroadcastEventResponse, EventsGetConnectionStatsResponse, EventsTestEventResponse, FilesUploadFileData, FilesUploadFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesDownloadFileData, FilesDownloadFileResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, KnowledgeQueryKnowledgeData, KnowledgeQueryKnowledgeResponse, KnowledgeSourcesListKnowledgeSourcesData, KnowledgeSourcesListKnowledgeSourcesResponse, KnowledgeSourcesCreateKnowledgeSourceData, KnowledgeSourcesCreateKnowledgeSourceResponse, KnowledgeSourcesGetKnowledgeSourceData, KnowledgeSourcesGetKnowledgeSourceResponse, KnowledgeSourcesUpdateKnowledgeSourceData, KnowledgeSourcesUpdateKnowledgeSourceResponse, KnowledgeSourcesDeleteKnowledgeSourceData, KnowledgeSourcesDeleteKnowledgeSourceResponse, KnowledgeSourcesEnableKnowledgeSourceData, KnowledgeSourcesEnableKnowledgeSourceResponse, KnowledgeSourcesDisableKnowledgeSourceData, KnowledgeSourcesDisableKnowledgeSourceResponse, KnowledgeSourcesCheckKnowledgeSourceAccessData, KnowledgeSourcesCheckKnowledgeSourceAccessResponse, KnowledgeSourcesRefreshKnowledgeSourceData, KnowledgeSourcesRefreshKnowledgeSourceResponse, KnowledgeSourcesListKnowledgeArticlesData, KnowledgeSourcesListKnowledgeArticlesResponse, KnowledgeSourcesListDiscoverableSourcesData, KnowledgeSourcesListDiscoverableSourcesResponse, KnowledgeSourcesEnableDiscoverableSourceData, KnowledgeSourcesEnableDiscoverableSourceResponse, KnowledgeSourcesDisableDiscoverableSourceData, KnowledgeSourcesDisableDiscoverableSourceResponse, LlmPluginsCreateMarketplaceData, LlmPluginsCreateMarketplaceResponse, LlmPluginsListMarketplacesData, LlmPluginsListMarketplacesResponse, LlmPluginsGetMarketplaceData, LlmPluginsGetMarketplaceResponse, LlmPluginsUpdateMarketplaceData, LlmPluginsUpdateMarketplaceResponse, LlmPluginsDeleteMarketplaceData, LlmPluginsDeleteMarketplaceResponse, LlmPluginsSyncMarketplaceData, LlmPluginsSyncMarketplaceResponse, LlmPluginsDiscoverPluginsData, LlmPluginsDiscoverPluginsResponse, LlmPluginsGetPluginData, LlmPluginsGetPluginResponse, LlmPluginsListAgentPluginsData, LlmPluginsListAgentPluginsResponse, LlmPluginsInstallAgentPluginData, LlmPluginsInstallAgentPluginResponse, LlmPluginsUninstallAgentPluginData, LlmPluginsUninstallAgentPluginResponse, LlmPluginsUpdateAgentPluginData, LlmPluginsUpdateAgentPluginResponse, LlmPluginsUpgradeAgentPluginData, LlmPluginsUpgradeAgentPluginResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, MessagesGetMessagesData, MessagesGetMessagesResponse, MessagesSendMessageStreamData, MessagesSendMessageStreamResponse, MessagesInterruptMessageData, MessagesInterruptMessageResponse, MessagesGetStreamingStatusData, MessagesGetStreamingStatusResponse, OauthGetOauthConfigResponse, OauthGoogleAuthorizeResponse, OauthGoogleCallbackData, OauthGoogleCallbackResponse, OauthLinkGoogleAccountEndpointData, OauthLinkGoogleAccountEndpointResponse, OauthUnlinkGoogleAccountEndpointResponse, PrivateCreateUserData, PrivateCreateUserResponse, SessionsCreateSessionData, SessionsCreateSessionResponse, SessionsListSessionsData, SessionsListSessionsResponse, SessionsGetSessionData, SessionsGetSessionResponse, SessionsUpdateSessionData, SessionsUpdateSessionResponse, SessionsDeleteSessionData, SessionsDeleteSessionResponse, SessionsSwitchSessionModeData, SessionsSwitchSessionModeResponse, SessionsResetSdkSessionData, SessionsResetSdkSessionResponse, SshKeysReadSshKeysResponse, SshKeysImportSshKeyData, SshKeysImportSshKeyResponse, SshKeysReadSshKeyData, SshKeysReadSshKeyResponse, SshKeysUpdateSshKeyData, SshKeysUpdateSshKeyResponse, SshKeysDeleteSshKeyData, SshKeysDeleteSshKeyResponse, SshKeysGenerateSshKeyData, SshKeysGenerateSshKeyResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersSetPasswordMeData, UsersSetPasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UsersGetAiCredentialsStatusResponse, UsersGetAiCredentialsResponse, UsersDeleteAiCredentialsResponse, UsersUpdateAiCredentialsData, UsersUpdateAiCredentialsResponse, UserWorkspacesReadWorkspacesData, UserWorkspacesReadWorkspacesResponse, UserWorkspacesCreateWorkspaceData, UserWorkspacesCreateWorkspaceResponse, UserWorkspacesReadWorkspaceData, UserWorkspacesReadWorkspaceResponse, UserWorkspacesUpdateWorkspaceData, UserWorkspacesUpdateWorkspaceResponse, UserWorkspacesDeleteWorkspaceData, UserWorkspacesDeleteWorkspaceResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsRefinePromptData, UtilsRefinePromptResponse, WorkspaceGetWorkspaceTreeData, WorkspaceGetWorkspaceTreeResponse, WorkspaceDownloadWorkspaceItemData, WorkspaceDownloadWorkspaceItemResponse, WorkspaceViewWorkspaceFileData, WorkspaceViewWorkspaceFileResponse, WorkspaceGetDatabaseTablesData, WorkspaceGetDatabaseTablesResponse, WorkspaceGetDatabaseSchemaData, WorkspaceGetDatabaseSchemaResponse, WorkspaceExecuteDatabaseQueryData, WorkspaceExecuteDatabaseQueryResponse, WorkspaceGenerateSqlQueryData, WorkspaceGenerateSqlQueryResponse } from './types.gen';
+import type { A2aGetAgentCardData, A2aGetAgentCardResponse, A2aHandleJsonrpcData, A2aHandleJsonrpcResponse, A2aGetAgentCardWellKnownData, A2aGetAgentCardWellKnownResponse, AccessTokensListAccessTokensData, AccessTokensListAccessTokensResponse, AccessTokensCreateAccessTokenData, AccessTokensCreateAccessTokenResponse, AccessTokensGetAccessTokenData, AccessTokensGetAccessTokenResponse, AccessTokensUpdateAccessTokenData, AccessTokensUpdateAccessTokenResponse, AccessTokensDeleteAccessTokenData, AccessTokensDeleteAccessTokenResponse, ActivitiesCreateActivityData, ActivitiesCreateActivityResponse, ActivitiesListActivitiesData, ActivitiesListActivitiesResponse, ActivitiesDeleteAllActivitiesResponse, ActivitiesGetActivityStatsResponse, ActivitiesUpdateActivityData, ActivitiesUpdateActivityResponse, ActivitiesDeleteActivityData, ActivitiesDeleteActivityResponse, ActivitiesMarkActivitiesAsReadData, ActivitiesMarkActivitiesAsReadResponse, AgentsReadAgentsData, AgentsReadAgentsResponse, AgentsCreateAgentData, AgentsCreateAgentResponse, AgentsReadAgentData, AgentsReadAgentResponse, AgentsUpdateAgentData, AgentsUpdateAgentResponse, AgentsDeleteAgentData, AgentsDeleteAgentResponse, AgentsCreateAgentWithFlowData, AgentsCreateAgentWithFlowResponse, AgentsSyncAgentPromptsData, AgentsSyncAgentPromptsResponse, AgentsReadAgentCredentialsData, AgentsReadAgentCredentialsResponse, AgentsAddCredentialToAgentData, AgentsAddCredentialToAgentResponse, AgentsRemoveCredentialFromAgentData, AgentsRemoveCredentialFromAgentResponse, AgentsCreateAgentEnvironmentData, AgentsCreateAgentEnvironmentResponse, AgentsListAgentEnvironmentsData, AgentsListAgentEnvironmentsResponse, AgentsActivateEnvironmentData, AgentsActivateEnvironmentResponse, AgentsGenerateScheduleData, AgentsGenerateScheduleResponse, AgentsSaveScheduleData, AgentsSaveScheduleResponse, AgentsGetScheduleData, AgentsGetScheduleResponse, AgentsDeleteScheduleData, AgentsDeleteScheduleResponse, AgentsListHandoverConfigsData, AgentsListHandoverConfigsResponse, AgentsCreateHandoverConfigData, AgentsCreateHandoverConfigResponse, AgentsUpdateHandoverConfigData, AgentsUpdateHandoverConfigResponse, AgentsDeleteHandoverConfigData, AgentsDeleteHandoverConfigResponse, AgentsGenerateHandoverPromptEndpointData, AgentsGenerateHandoverPromptEndpointResponse, AgentsExecuteHandoverData, AgentsExecuteHandoverResponse, AgentsGetSdkConfigData, AgentsGetSdkConfigResponse, AgentsAddAllowedToolsData, AgentsAddAllowedToolsResponse, AgentsGetPendingToolsData, AgentsGetPendingToolsResponse, AgentSharesShareAgentData, AgentSharesShareAgentResponse, AgentSharesGetAgentSharesData, AgentSharesGetAgentSharesResponse, AgentSharesGetAgentClonesData, AgentSharesGetAgentClonesResponse, AgentSharesRevokeShareData, AgentSharesRevokeShareResponse, AgentSharesGetPendingSharesResponse, AgentSharesAcceptShareData, AgentSharesAcceptShareResponse, AgentSharesDeclineShareData, AgentSharesDeclineShareResponse, AgentSharesDetachCloneData, AgentSharesDetachCloneResponse, AgentSharesPushUpdatesToClonesData, AgentSharesPushUpdatesToClonesResponse, AgentSharesApplyUpdateData, AgentSharesApplyUpdateResponse, AgentSharesGetUpdateStatusData, AgentSharesGetUpdateStatusResponse, AgentSharesSetUpdateModeData, AgentSharesSetUpdateModeResponse, AiCredentialsListAiCredentialsResponse, AiCredentialsCreateAiCredentialData, AiCredentialsCreateAiCredentialResponse, AiCredentialsGetAiCredentialData, AiCredentialsGetAiCredentialResponse, AiCredentialsUpdateAiCredentialData, AiCredentialsUpdateAiCredentialResponse, AiCredentialsDeleteAiCredentialData, AiCredentialsDeleteAiCredentialResponse, AiCredentialsSetAiCredentialDefaultData, AiCredentialsSetAiCredentialDefaultResponse, CredentialsShareCredentialData, CredentialsShareCredentialResponse, CredentialsGetCredentialSharesData, CredentialsGetCredentialSharesResponse, CredentialsRevokeCredentialShareData, CredentialsRevokeCredentialShareResponse, CredentialsGetCredentialsSharedWithMeResponse, CredentialsUpdateCredentialSharingData, CredentialsUpdateCredentialSharingResponse, CredentialsReadCredentialsData, CredentialsReadCredentialsResponse, CredentialsCreateCredentialData, CredentialsCreateCredentialResponse, CredentialsReadCredentialData, CredentialsReadCredentialResponse, CredentialsUpdateCredentialData, CredentialsUpdateCredentialResponse, CredentialsDeleteCredentialData, CredentialsDeleteCredentialResponse, CredentialsReadCredentialWithDataData, CredentialsReadCredentialWithDataResponse, CredentialsOauthAuthorizeData, CredentialsOauthAuthorizeResponse, CredentialsOauthCallbackData, CredentialsOauthCallbackResponse, CredentialsGetOauthMetadataData, CredentialsGetOauthMetadataResponse, CredentialsRefreshOauthTokenData, CredentialsRefreshOauthTokenResponse, EnvironmentsGetEnvironmentData, EnvironmentsGetEnvironmentResponse, EnvironmentsUpdateEnvironmentData, EnvironmentsUpdateEnvironmentResponse, EnvironmentsDeleteEnvironmentData, EnvironmentsDeleteEnvironmentResponse, EnvironmentsStartEnvironmentData, EnvironmentsStartEnvironmentResponse, EnvironmentsStopEnvironmentData, EnvironmentsStopEnvironmentResponse, EnvironmentsSuspendEnvironmentData, EnvironmentsSuspendEnvironmentResponse, EnvironmentsRestartEnvironmentData, EnvironmentsRestartEnvironmentResponse, EnvironmentsRebuildEnvironmentData, EnvironmentsRebuildEnvironmentResponse, EnvironmentsGetEnvironmentStatusData, EnvironmentsGetEnvironmentStatusResponse, EnvironmentsCheckEnvironmentHealthData, EnvironmentsCheckEnvironmentHealthResponse, EnvironmentsGetEnvironmentLogsData, EnvironmentsGetEnvironmentLogsResponse, EventsBroadcastEventData, EventsBroadcastEventResponse, EventsGetConnectionStatsResponse, EventsTestEventResponse, FilesUploadFileData, FilesUploadFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesDownloadFileData, FilesDownloadFileResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, KnowledgeQueryKnowledgeData, KnowledgeQueryKnowledgeResponse, KnowledgeSourcesListKnowledgeSourcesData, KnowledgeSourcesListKnowledgeSourcesResponse, KnowledgeSourcesCreateKnowledgeSourceData, KnowledgeSourcesCreateKnowledgeSourceResponse, KnowledgeSourcesGetKnowledgeSourceData, KnowledgeSourcesGetKnowledgeSourceResponse, KnowledgeSourcesUpdateKnowledgeSourceData, KnowledgeSourcesUpdateKnowledgeSourceResponse, KnowledgeSourcesDeleteKnowledgeSourceData, KnowledgeSourcesDeleteKnowledgeSourceResponse, KnowledgeSourcesEnableKnowledgeSourceData, KnowledgeSourcesEnableKnowledgeSourceResponse, KnowledgeSourcesDisableKnowledgeSourceData, KnowledgeSourcesDisableKnowledgeSourceResponse, KnowledgeSourcesCheckKnowledgeSourceAccessData, KnowledgeSourcesCheckKnowledgeSourceAccessResponse, KnowledgeSourcesRefreshKnowledgeSourceData, KnowledgeSourcesRefreshKnowledgeSourceResponse, KnowledgeSourcesListKnowledgeArticlesData, KnowledgeSourcesListKnowledgeArticlesResponse, KnowledgeSourcesListDiscoverableSourcesData, KnowledgeSourcesListDiscoverableSourcesResponse, KnowledgeSourcesEnableDiscoverableSourceData, KnowledgeSourcesEnableDiscoverableSourceResponse, KnowledgeSourcesDisableDiscoverableSourceData, KnowledgeSourcesDisableDiscoverableSourceResponse, LlmPluginsCreateMarketplaceData, LlmPluginsCreateMarketplaceResponse, LlmPluginsListMarketplacesData, LlmPluginsListMarketplacesResponse, LlmPluginsGetMarketplaceData, LlmPluginsGetMarketplaceResponse, LlmPluginsUpdateMarketplaceData, LlmPluginsUpdateMarketplaceResponse, LlmPluginsDeleteMarketplaceData, LlmPluginsDeleteMarketplaceResponse, LlmPluginsSyncMarketplaceData, LlmPluginsSyncMarketplaceResponse, LlmPluginsDiscoverPluginsData, LlmPluginsDiscoverPluginsResponse, LlmPluginsGetPluginData, LlmPluginsGetPluginResponse, LlmPluginsListAgentPluginsData, LlmPluginsListAgentPluginsResponse, LlmPluginsInstallAgentPluginData, LlmPluginsInstallAgentPluginResponse, LlmPluginsUninstallAgentPluginData, LlmPluginsUninstallAgentPluginResponse, LlmPluginsUpdateAgentPluginData, LlmPluginsUpdateAgentPluginResponse, LlmPluginsUpgradeAgentPluginData, LlmPluginsUpgradeAgentPluginResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, MessagesGetMessagesData, MessagesGetMessagesResponse, MessagesSendMessageStreamData, MessagesSendMessageStreamResponse, MessagesInterruptMessageData, MessagesInterruptMessageResponse, MessagesGetStreamingStatusData, MessagesGetStreamingStatusResponse, OauthGetOauthConfigResponse, OauthGoogleAuthorizeResponse, OauthGoogleCallbackData, OauthGoogleCallbackResponse, OauthLinkGoogleAccountEndpointData, OauthLinkGoogleAccountEndpointResponse, OauthUnlinkGoogleAccountEndpointResponse, PrivateCreateUserData, PrivateCreateUserResponse, SessionsCreateSessionData, SessionsCreateSessionResponse, SessionsListSessionsData, SessionsListSessionsResponse, SessionsGetSessionData, SessionsGetSessionResponse, SessionsUpdateSessionData, SessionsUpdateSessionResponse, SessionsDeleteSessionData, SessionsDeleteSessionResponse, SessionsSwitchSessionModeData, SessionsSwitchSessionModeResponse, SessionsResetSdkSessionData, SessionsResetSdkSessionResponse, SshKeysReadSshKeysResponse, SshKeysImportSshKeyData, SshKeysImportSshKeyResponse, SshKeysReadSshKeyData, SshKeysReadSshKeyResponse, SshKeysUpdateSshKeyData, SshKeysUpdateSshKeyResponse, SshKeysDeleteSshKeyData, SshKeysDeleteSshKeyResponse, SshKeysGenerateSshKeyData, SshKeysGenerateSshKeyResponse, TasksCreateTaskData, TasksCreateTaskResponse, TasksListTasksData, TasksListTasksResponse, TasksGetTaskData, TasksGetTaskResponse, TasksUpdateTaskData, TasksUpdateTaskResponse, TasksDeleteTaskData, TasksDeleteTaskResponse, TasksRefineTaskData, TasksRefineTaskResponse, TasksExecuteTaskData, TasksExecuteTaskResponse, TasksArchiveTaskData, TasksArchiveTaskResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersSetPasswordMeData, UsersSetPasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UsersGetAiCredentialsStatusResponse, UsersGetAiCredentialsResponse, UsersDeleteAiCredentialsResponse, UsersUpdateAiCredentialsData, UsersUpdateAiCredentialsResponse, UserWorkspacesReadWorkspacesData, UserWorkspacesReadWorkspacesResponse, UserWorkspacesCreateWorkspaceData, UserWorkspacesCreateWorkspaceResponse, UserWorkspacesReadWorkspaceData, UserWorkspacesReadWorkspaceResponse, UserWorkspacesUpdateWorkspaceData, UserWorkspacesUpdateWorkspaceResponse, UserWorkspacesDeleteWorkspaceData, UserWorkspacesDeleteWorkspaceResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsRefinePromptData, UtilsRefinePromptResponse, WorkspaceGetWorkspaceTreeData, WorkspaceGetWorkspaceTreeResponse, WorkspaceDownloadWorkspaceItemData, WorkspaceDownloadWorkspaceItemResponse, WorkspaceViewWorkspaceFileData, WorkspaceViewWorkspaceFileResponse, WorkspaceGetDatabaseTablesData, WorkspaceGetDatabaseTablesResponse, WorkspaceGetDatabaseSchemaData, WorkspaceGetDatabaseSchemaResponse, WorkspaceExecuteDatabaseQueryData, WorkspaceExecuteDatabaseQueryResponse, WorkspaceGenerateSqlQueryData, WorkspaceGenerateSqlQueryResponse } from './types.gen';
 
 export class A2AService {
     /**
@@ -3615,6 +3615,209 @@ export class SshKeysService {
     }
 }
 
+export class TasksService {
+    /**
+     * Create Task
+     * Create a new input task.
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns InputTaskPublic Successful Response
+     * @throws ApiError
+     */
+    public static createTask(data: TasksCreateTaskData): CancelablePromise<TasksCreateTaskResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/tasks/',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Tasks
+     * List user's input tasks.
+     *
+     * Args:
+     * skip: Number of records to skip
+     * limit: Number of records to return
+     * status: Filter by status. Can be:
+     * - "active": NEW, REFINING, READY, RUNNING, PENDING_INPUT
+     * - "completed": COMPLETED
+     * - "archived": ARCHIVED
+     * - "all": No filter
+     * - Specific status name (e.g., "new", "running")
+     * user_workspace_id: Optional workspace filter
+     * - None (not provided): returns all tasks
+     * - Empty string (""): filters for default workspace (NULL)
+     * - UUID string: filters for that workspace
+     * @param data The data for the request.
+     * @param data.skip
+     * @param data.limit
+     * @param data.status
+     * @param data.userWorkspaceId
+     * @returns InputTasksPublicExtended Successful Response
+     * @throws ApiError
+     */
+    public static listTasks(data: TasksListTasksData = {}): CancelablePromise<TasksListTasksResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/tasks/',
+            query: {
+                skip: data.skip,
+                limit: data.limit,
+                status: data.status,
+                user_workspace_id: data.userWorkspaceId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Task
+     * Get a single input task with details.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns InputTaskPublicExtended Successful Response
+     * @throws ApiError
+     */
+    public static getTask(data: TasksGetTaskData): CancelablePromise<TasksGetTaskResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/tasks/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Task
+     * Update an input task.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns InputTaskPublic Successful Response
+     * @throws ApiError
+     */
+    public static updateTask(data: TasksUpdateTaskData): CancelablePromise<TasksUpdateTaskResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/tasks/{id}',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Task
+     * Delete an input task.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static deleteTask(data: TasksDeleteTaskData): CancelablePromise<TasksDeleteTaskResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/tasks/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Refine Task
+     * Refine a task description with AI assistance.
+     *
+     * Uses AI to improve the task description based on user's feedback or comments.
+     * Appends the conversation to refinement_history.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns RefineTaskResponse Successful Response
+     * @throws ApiError
+     */
+    public static refineTask(data: TasksRefineTaskData): CancelablePromise<TasksRefineTaskResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/tasks/{id}/refine',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Execute Task
+     * Execute a task by creating a session and sending the task description as the initial message.
+     *
+     * Requires a selected_agent_id to be set on the task.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns ExecuteTaskResponse Successful Response
+     * @throws ApiError
+     */
+    public static executeTask(data: TasksExecuteTaskData): CancelablePromise<TasksExecuteTaskResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/tasks/{id}/execute',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Archive Task
+     * Archive a completed or error task.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns InputTaskPublic Successful Response
+     * @throws ApiError
+     */
+    public static archiveTask(data: TasksArchiveTaskData): CancelablePromise<TasksArchiveTaskResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/tasks/{id}/archive',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
 export class UsersService {
     /**
      * Read Users
@@ -3834,6 +4037,7 @@ export class UsersService {
     /**
      * Get Ai Credentials Status
      * Get AI credentials status (which keys are set, without revealing the keys).
+     * Checks the ai_credential table for default credentials of each type.
      * @returns UserPublicWithAICredentials Successful Response
      * @throws ApiError
      */
@@ -3874,7 +4078,8 @@ export class UsersService {
     /**
      * Update Ai Credentials
      * Update AI service credentials (partial update).
-     * Only updates the fields provided.
+     * Creates AICredential records and sets them as defaults.
+     * Also syncs to user profile for backward compatibility.
      * @param data The data for the request.
      * @param data.requestBody
      * @returns Message Successful Response

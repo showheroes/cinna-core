@@ -19,6 +19,7 @@ from app.agents import (
     generate_handover_prompt as generate_handover_prompt_from_agents,
     generate_sql_query,
     refine_prompt,
+    refine_task as refine_task_from_agents,
 )
 from app.agents.schedule_generator import generate_agent_schedule
 from app.agents.provider_manager import get_provider_manager
@@ -291,4 +292,58 @@ class AIFunctionsService:
             return {
                 "success": False,
                 "error": f"Failed to refine prompt: {str(e)}"
+            }
+
+    @staticmethod
+    def refine_task(
+        db: Session,
+        current_description: str,
+        user_comment: str,
+        agent_id: UUID | None,
+        owner_id: UUID,
+        refinement_history: list[dict] | None = None,
+    ) -> dict:
+        """
+        Refine a task description based on user feedback.
+
+        Args:
+            db: Database session
+            current_description: The current task description
+            user_comment: User's refinement request or feedback
+            agent_id: ID of the selected agent (if any)
+            owner_id: ID of the user (to verify agent ownership)
+            refinement_history: Previous refinement conversation history
+
+        Returns:
+            dict with keys:
+                - success: bool
+                - refined_description: The improved description (if success)
+                - feedback_message: Brief message about changes or questions
+                - error: Error message (if not success)
+        """
+        try:
+            # Fetch agent workflow prompt if agent_id is provided
+            agent_workflow_prompt = None
+
+            if agent_id:
+                agent = db.get(Agent, agent_id)
+                if agent and agent.owner_id == owner_id:
+                    agent_workflow_prompt = agent.workflow_prompt
+
+            result = refine_task_from_agents(
+                current_description=current_description,
+                agent_workflow_prompt=agent_workflow_prompt,
+                user_comment=user_comment,
+                refinement_history=refinement_history,
+            )
+            logger.info(
+                f"Refined task: {result.get('success')} - "
+                f"{result.get('refined_description', '')[:50] if result.get('success') else result.get('error')}"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Failed to refine task: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to refine task: {str(e)}"
             }

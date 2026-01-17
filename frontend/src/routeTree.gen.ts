@@ -15,6 +15,7 @@ import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
+import { Route as LayoutTasksRouteImport } from './routes/_layout/tasks'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutSessionsRouteImport } from './routes/_layout/sessions'
 import { Route as LayoutKnowledgeSourcesRouteImport } from './routes/_layout/knowledge-sources'
@@ -23,6 +24,7 @@ import { Route as LayoutCredentialsRouteImport } from './routes/_layout/credenti
 import { Route as LayoutAgentsRouteImport } from './routes/_layout/agents'
 import { Route as LayoutActivitiesRouteImport } from './routes/_layout/activities'
 import { Route as CredentialsOauthCallbackRouteImport } from './routes/credentials/oauth/callback'
+import { Route as LayoutTaskTaskIdRouteImport } from './routes/_layout/task/$taskId'
 import { Route as LayoutSessionSessionIdRouteImport } from './routes/_layout/session/$sessionId'
 import { Route as LayoutKnowledgeSourceSourceIdRouteImport } from './routes/_layout/knowledge-source/$sourceId'
 import { Route as LayoutCredentialCredentialIdRouteImport } from './routes/_layout/credential/$credentialId'
@@ -63,6 +65,11 @@ const LayoutRoute = LayoutRouteImport.update({
 const LayoutIndexRoute = LayoutIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutTasksRoute = LayoutTasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutSettingsRoute = LayoutSettingsRouteImport.update({
@@ -106,6 +113,11 @@ const CredentialsOauthCallbackRoute =
     path: '/credentials/oauth/callback',
     getParentRoute: () => rootRouteImport,
   } as any)
+const LayoutTaskTaskIdRoute = LayoutTaskTaskIdRouteImport.update({
+  id: '/task/$taskId',
+  path: '/task/$taskId',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutSessionSessionIdRoute = LayoutSessionSessionIdRouteImport.update({
   id: '/session/$sessionId',
   path: '/session/$sessionId',
@@ -186,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/sessions': typeof LayoutSessionsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/tasks': typeof LayoutTasksRoute
   '/': typeof LayoutIndexRoute
   '/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/admin/users': typeof LayoutAdminUsersRoute
@@ -194,6 +207,7 @@ export interface FileRoutesByFullPath {
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
   '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
@@ -213,6 +227,7 @@ export interface FileRoutesByTo {
   '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/sessions': typeof LayoutSessionsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/tasks': typeof LayoutTasksRoute
   '/': typeof LayoutIndexRoute
   '/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/admin/users': typeof LayoutAdminUsersRoute
@@ -221,6 +236,7 @@ export interface FileRoutesByTo {
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
   '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
@@ -242,6 +258,7 @@ export interface FileRoutesById {
   '/_layout/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/_layout/sessions': typeof LayoutSessionsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
+  '/_layout/tasks': typeof LayoutTasksRoute
   '/_layout/': typeof LayoutIndexRoute
   '/_layout/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/_layout/admin/users': typeof LayoutAdminUsersRoute
@@ -250,6 +267,7 @@ export interface FileRoutesById {
   '/_layout/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/_layout/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/_layout/session/$sessionId': typeof LayoutSessionSessionIdRoute
+  '/_layout/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/_layout/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
   '/_layout/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
@@ -271,6 +289,7 @@ export interface FileRouteTypes {
     | '/knowledge-sources'
     | '/sessions'
     | '/settings'
+    | '/tasks'
     | '/'
     | '/admin/marketplaces'
     | '/admin/users'
@@ -279,6 +298,7 @@ export interface FileRouteTypes {
     | '/credential/$credentialId'
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
+    | '/task/$taskId'
     | '/credentials/oauth/callback'
     | '/admin/marketplace/$marketplaceId'
     | '/agent/$agentId/conversations'
@@ -298,6 +318,7 @@ export interface FileRouteTypes {
     | '/knowledge-sources'
     | '/sessions'
     | '/settings'
+    | '/tasks'
     | '/'
     | '/admin/marketplaces'
     | '/admin/users'
@@ -306,6 +327,7 @@ export interface FileRouteTypes {
     | '/credential/$credentialId'
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
+    | '/task/$taskId'
     | '/credentials/oauth/callback'
     | '/admin/marketplace/$marketplaceId'
     | '/agent/$agentId/conversations'
@@ -326,6 +348,7 @@ export interface FileRouteTypes {
     | '/_layout/knowledge-sources'
     | '/_layout/sessions'
     | '/_layout/settings'
+    | '/_layout/tasks'
     | '/_layout/'
     | '/_layout/admin/marketplaces'
     | '/_layout/admin/users'
@@ -334,6 +357,7 @@ export interface FileRouteTypes {
     | '/_layout/credential/$credentialId'
     | '/_layout/knowledge-source/$sourceId'
     | '/_layout/session/$sessionId'
+    | '/_layout/task/$taskId'
     | '/credentials/oauth/callback'
     | '/_layout/admin/marketplace/$marketplaceId'
     | '/_layout/agent/$agentId/conversations'
@@ -395,6 +419,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/tasks': {
+      id: '/_layout/tasks'
+      path: '/tasks'
+      fullPath: '/tasks'
+      preLoaderRoute: typeof LayoutTasksRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/settings': {
       id: '/_layout/settings'
       path: '/settings'
@@ -450,6 +481,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/credentials/oauth/callback'
       preLoaderRoute: typeof CredentialsOauthCallbackRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_layout/task/$taskId': {
+      id: '/_layout/task/$taskId'
+      path: '/task/$taskId'
+      fullPath: '/task/$taskId'
+      preLoaderRoute: typeof LayoutTaskTaskIdRouteImport
+      parentRoute: typeof LayoutRoute
     }
     '/_layout/session/$sessionId': {
       id: '/_layout/session/$sessionId'
@@ -557,6 +595,7 @@ interface LayoutRouteChildren {
   LayoutKnowledgeSourcesRoute: typeof LayoutKnowledgeSourcesRoute
   LayoutSessionsRoute: typeof LayoutSessionsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
+  LayoutTasksRoute: typeof LayoutTasksRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutAdminMarketplacesRoute: typeof LayoutAdminMarketplacesRoute
   LayoutAdminUsersRoute: typeof LayoutAdminUsersRoute
@@ -565,6 +604,7 @@ interface LayoutRouteChildren {
   LayoutCredentialCredentialIdRoute: typeof LayoutCredentialCredentialIdRoute
   LayoutKnowledgeSourceSourceIdRoute: typeof LayoutKnowledgeSourceSourceIdRoute
   LayoutSessionSessionIdRoute: typeof LayoutSessionSessionIdRoute
+  LayoutTaskTaskIdRoute: typeof LayoutTaskTaskIdRoute
   LayoutAdminMarketplaceMarketplaceIdRoute: typeof LayoutAdminMarketplaceMarketplaceIdRoute
   LayoutEnvironmentEnvIdDatabaseRoute: typeof LayoutEnvironmentEnvIdDatabaseRoute
   LayoutEnvironmentEnvIdFileRoute: typeof LayoutEnvironmentEnvIdFileRoute
@@ -579,6 +619,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutKnowledgeSourcesRoute: LayoutKnowledgeSourcesRoute,
   LayoutSessionsRoute: LayoutSessionsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
+  LayoutTasksRoute: LayoutTasksRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutAdminMarketplacesRoute: LayoutAdminMarketplacesRoute,
   LayoutAdminUsersRoute: LayoutAdminUsersRoute,
@@ -587,6 +628,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutCredentialCredentialIdRoute: LayoutCredentialCredentialIdRoute,
   LayoutKnowledgeSourceSourceIdRoute: LayoutKnowledgeSourceSourceIdRoute,
   LayoutSessionSessionIdRoute: LayoutSessionSessionIdRoute,
+  LayoutTaskTaskIdRoute: LayoutTaskTaskIdRoute,
   LayoutAdminMarketplaceMarketplaceIdRoute:
     LayoutAdminMarketplaceMarketplaceIdRoute,
   LayoutEnvironmentEnvIdDatabaseRoute: LayoutEnvironmentEnvIdDatabaseRoute,

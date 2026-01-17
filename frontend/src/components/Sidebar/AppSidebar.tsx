@@ -1,5 +1,5 @@
 import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
-import { Bot, Home, Key, MessageSquare, Bell, BookOpen } from "lucide-react"
+import { Bot, Home, Key, MessageSquare, Bell, BookOpen, ClipboardList } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
@@ -31,6 +31,7 @@ const itemsBeforeActivities: Item[] = [
 ]
 
 const itemsAfterActivities: Item[] = [
+  { icon: ClipboardList, title: "Tasks", path: "/tasks" },
   { icon: Bot, title: "Agents", path: "/agents" },
   { icon: MessageSquare, title: "Sessions", path: "/sessions" },
   { icon: Key, title: "Credentials", path: "/credentials" },

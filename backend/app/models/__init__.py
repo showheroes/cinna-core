@@ -214,6 +214,21 @@ from .agent_access_token import (
     AccessTokenScope,
     A2ATokenPayload,
 )
+from .input_task import (
+    InputTask,
+    InputTaskCreate,
+    InputTaskUpdate,
+    InputTaskPublic,
+    InputTaskPublicExtended,
+    InputTasksPublic,
+    InputTasksPublicExtended,
+    InputTaskStatus,
+    RefinementHistoryItem,
+    RefineTaskRequest,
+    RefineTaskResponse,
+    ExecuteTaskRequest,
+    ExecuteTaskResponse,
+)
 
 __all__ = [
     # Core
@@ -416,4 +431,18 @@ __all__ = [
     "AccessTokenMode",
     "AccessTokenScope",
     "A2ATokenPayload",
+    # Input Tasks
+    "InputTask",
+    "InputTaskCreate",
+    "InputTaskUpdate",
+    "InputTaskPublic",
+    "InputTaskPublicExtended",
+    "InputTasksPublic",
+    "InputTasksPublicExtended",
+    "InputTaskStatus",
+    "RefinementHistoryItem",
+    "RefineTaskRequest",
+    "RefineTaskResponse",
+    "ExecuteTaskRequest",
+    "ExecuteTaskResponse",
 ]

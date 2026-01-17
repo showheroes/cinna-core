@@ -771,6 +771,22 @@ export type ExecuteHandoverResponse = {
 };
 
 /**
+ * Request to execute a task (create session)
+ */
+export type ExecuteTaskRequest = {
+    mode?: string;
+};
+
+/**
+ * Response from task execution
+ */
+export type ExecuteTaskResponse = {
+    success: boolean;
+    session_id?: (string | null);
+    error?: (string | null);
+};
+
+/**
  * Response schema for file upload
  */
 export type FileUploadPublic = {
@@ -852,6 +868,61 @@ export type HandoverConfigUpdate = {
 
 export type HTTPValidationError = {
     detail?: Array<ValidationError>;
+};
+
+export type InputTaskCreate = {
+    original_message: string;
+    selected_agent_id?: (string | null);
+    user_workspace_id?: (string | null);
+};
+
+export type InputTaskPublic = {
+    id: string;
+    owner_id: string;
+    original_message: string;
+    current_description: string;
+    status: string;
+    selected_agent_id: (string | null);
+    session_id: (string | null);
+    user_workspace_id: (string | null);
+    error_message: (string | null);
+    created_at: string;
+    updated_at: string;
+    executed_at: (string | null);
+    completed_at: (string | null);
+    archived_at: (string | null);
+};
+
+/**
+ * Extended response with agent name
+ */
+export type InputTaskPublicExtended = {
+    id: string;
+    owner_id: string;
+    original_message: string;
+    current_description: string;
+    status: string;
+    selected_agent_id: (string | null);
+    session_id: (string | null);
+    user_workspace_id: (string | null);
+    error_message: (string | null);
+    created_at: string;
+    updated_at: string;
+    executed_at: (string | null);
+    completed_at: (string | null);
+    archived_at: (string | null);
+    agent_name?: (string | null);
+    refinement_history?: Array<unknown>;
+};
+
+export type InputTasksPublicExtended = {
+    data: Array<InputTaskPublicExtended>;
+    count: number;
+};
+
+export type InputTaskUpdate = {
+    current_description?: (string | null);
+    selected_agent_id?: (string | null);
 };
 
 export type ItemCreate = {
@@ -1175,6 +1246,23 @@ export type RefinePromptRequest = {
 export type RefinePromptResponse = {
     success: boolean;
     refined_prompt?: (string | null);
+    error?: (string | null);
+};
+
+/**
+ * Request to refine a task with AI assistance
+ */
+export type RefineTaskRequest = {
+    user_comment: string;
+};
+
+/**
+ * Response from task refinement
+ */
+export type RefineTaskResponse = {
+    success: boolean;
+    refined_description?: (string | null);
+    feedback_message?: (string | null);
     error?: (string | null);
 };
 
@@ -2416,6 +2504,60 @@ export type SshKeysGenerateSshKeyData = {
 };
 
 export type SshKeysGenerateSshKeyResponse = (SSHKeyPublic);
+
+export type TasksCreateTaskData = {
+    requestBody: InputTaskCreate;
+};
+
+export type TasksCreateTaskResponse = (InputTaskPublic);
+
+export type TasksListTasksData = {
+    limit?: number;
+    skip?: number;
+    status?: (string | null);
+    userWorkspaceId?: (string | null);
+};
+
+export type TasksListTasksResponse = (InputTasksPublicExtended);
+
+export type TasksGetTaskData = {
+    id: string;
+};
+
+export type TasksGetTaskResponse = (InputTaskPublicExtended);
+
+export type TasksUpdateTaskData = {
+    id: string;
+    requestBody: InputTaskUpdate;
+};
+
+export type TasksUpdateTaskResponse = (InputTaskPublic);
+
+export type TasksDeleteTaskData = {
+    id: string;
+};
+
+export type TasksDeleteTaskResponse = (Message);
+
+export type TasksRefineTaskData = {
+    id: string;
+    requestBody: RefineTaskRequest;
+};
+
+export type TasksRefineTaskResponse = (RefineTaskResponse);
+
+export type TasksExecuteTaskData = {
+    id: string;
+    requestBody: ExecuteTaskRequest;
+};
+
+export type TasksExecuteTaskResponse = (ExecuteTaskResponse);
+
+export type TasksArchiveTaskData = {
+    id: string;
+};
+
+export type TasksArchiveTaskResponse = (InputTaskPublic);
 
 export type UsersReadUsersData = {
     limit?: number;
