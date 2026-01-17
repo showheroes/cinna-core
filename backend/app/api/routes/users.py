@@ -31,7 +31,13 @@ from app.models.user import (
     UserPublicWithAICredentials,
     VALID_SDK_OPTIONS,
 )
+from app.models.ai_credential import (
+    AICredentialType,
+    AICredentialCreate,
+    AICredentialUpdate,
+)
 from app.services.auth_service import AuthService
+from app.services.ai_credentials_service import ai_credentials_service
 from app.utils import generate_new_account_email, send_email
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -290,22 +296,33 @@ def delete_user(
 # AI Service Credentials endpoints
 @router.get("/me/ai-credentials/status", response_model=UserPublicWithAICredentials)
 def get_ai_credentials_status(
+    session: SessionDep,
     current_user: CurrentUser,
 ) -> UserPublicWithAICredentials:
     """
     Get AI credentials status (which keys are set, without revealing the keys).
+    Checks the ai_credential table for default credentials of each type.
     """
-    credentials = crud.get_user_ai_credentials(user=current_user)
+    # Check for default credentials in ai_credential table
+    anthropic_default = ai_credentials_service.get_default_for_type(
+        session, current_user.id, AICredentialType.ANTHROPIC
+    )
+    minimax_default = ai_credentials_service.get_default_for_type(
+        session, current_user.id, AICredentialType.MINIMAX
+    )
+    openai_compat_default = ai_credentials_service.get_default_for_type(
+        session, current_user.id, AICredentialType.OPENAI_COMPATIBLE
+    )
 
     return UserPublicWithAICredentials(
         **current_user.model_dump(),
         has_google_account=bool(current_user.google_id),
         has_password=bool(current_user.hashed_password),
-        has_anthropic_api_key=bool(credentials and credentials.anthropic_api_key),
-        has_openai_api_key=bool(credentials and credentials.openai_api_key),
-        has_google_ai_api_key=bool(credentials and credentials.google_ai_api_key),
-        has_minimax_api_key=bool(credentials and credentials.minimax_api_key),
-        has_openai_compatible_api_key=bool(credentials and credentials.openai_compatible_api_key),
+        has_anthropic_api_key=anthropic_default is not None,
+        has_openai_api_key=False,  # Not yet supported in AICredential model
+        has_google_ai_api_key=False,  # Not yet supported in AICredential model
+        has_minimax_api_key=minimax_default is not None,
+        has_openai_compatible_api_key=openai_compat_default is not None,
     )
 
 
@@ -332,11 +349,89 @@ def update_ai_credentials(
 ) -> Message:
     """
     Update AI service credentials (partial update).
-    Only updates the fields provided.
+    Creates AICredential records and sets them as defaults.
+    Also syncs to user profile for backward compatibility.
     """
-    crud.update_user_ai_credentials(
-        session=session, user=current_user, credentials_update=credentials_in
-    )
+    # Handle Anthropic API key
+    if credentials_in.anthropic_api_key:
+        existing = ai_credentials_service.get_default_for_type(
+            session, current_user.id, AICredentialType.ANTHROPIC
+        )
+        if existing:
+            # Update existing credential
+            ai_credentials_service.update_credential(
+                session,
+                existing.id,
+                current_user.id,
+                AICredentialUpdate(api_key=credentials_in.anthropic_api_key),
+            )
+        else:
+            # Create new credential and set as default
+            new_cred = ai_credentials_service.create_credential(
+                session,
+                current_user.id,
+                AICredentialCreate(
+                    name="Anthropic API Key",
+                    type=AICredentialType.ANTHROPIC,
+                    api_key=credentials_in.anthropic_api_key,
+                ),
+            )
+            ai_credentials_service.set_default(session, new_cred.id, current_user.id)
+
+    # Handle MiniMax API key
+    if credentials_in.minimax_api_key:
+        existing = ai_credentials_service.get_default_for_type(
+            session, current_user.id, AICredentialType.MINIMAX
+        )
+        if existing:
+            ai_credentials_service.update_credential(
+                session,
+                existing.id,
+                current_user.id,
+                AICredentialUpdate(api_key=credentials_in.minimax_api_key),
+            )
+        else:
+            new_cred = ai_credentials_service.create_credential(
+                session,
+                current_user.id,
+                AICredentialCreate(
+                    name="MiniMax API Key",
+                    type=AICredentialType.MINIMAX,
+                    api_key=credentials_in.minimax_api_key,
+                ),
+            )
+            ai_credentials_service.set_default(session, new_cred.id, current_user.id)
+
+    # Handle OpenAI Compatible credentials
+    if credentials_in.openai_compatible_api_key:
+        existing = ai_credentials_service.get_default_for_type(
+            session, current_user.id, AICredentialType.OPENAI_COMPATIBLE
+        )
+        if existing:
+            ai_credentials_service.update_credential(
+                session,
+                existing.id,
+                current_user.id,
+                AICredentialUpdate(
+                    api_key=credentials_in.openai_compatible_api_key,
+                    base_url=credentials_in.openai_compatible_base_url,
+                    model=credentials_in.openai_compatible_model,
+                ),
+            )
+        else:
+            new_cred = ai_credentials_service.create_credential(
+                session,
+                current_user.id,
+                AICredentialCreate(
+                    name="OpenAI Compatible API",
+                    type=AICredentialType.OPENAI_COMPATIBLE,
+                    api_key=credentials_in.openai_compatible_api_key,
+                    base_url=credentials_in.openai_compatible_base_url,
+                    model=credentials_in.openai_compatible_model,
+                ),
+            )
+            ai_credentials_service.set_default(session, new_cred.id, current_user.id)
+
     return Message(message="AI credentials updated successfully")
 
 
