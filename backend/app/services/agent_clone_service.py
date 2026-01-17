@@ -231,16 +231,18 @@ class AgentCloneService:
         """
         Copy workspace files from original environment to clone.
 
-        Copies:
-        - app/core/scripts/ (all agent scripts)
-        - app/core/docs/ (WORKFLOW_PROMPT.md, ENTRYPOINT_PROMPT.md)
-        - app/core/knowledge/ (integration docs if any)
+        Copies (Original Agent ownership - synced from parent to clones):
+        - app/workspace/scripts/ (all agent scripts)
+        - app/workspace/docs/ (WORKFLOW_PROMPT.md, ENTRYPOINT_PROMPT.md)
+        - app/workspace/knowledge/ (integration docs if any)
+        - app/workspace/files/ (generated reports, CSV files, SQLite DBs, local caches)
+        - app/workspace/uploads/ (user-uploaded files)
+        - app/workspace/workspace_requirements.txt (agent-installed Python packages)
 
-        Does NOT copy:
-        - User data files
-        - Databases
-        - Logs
-        - Credentials (handled separately)
+        Does NOT copy (Environment Runtime - not synced):
+        - app/workspace/logs/ (session logs)
+        - app/workspace/databases/ (runtime SQLite DBs)
+        - app/workspace/credentials/ (handled separately via dynamic sync)
         """
         # Get workspace paths
         instances_dir = Path(settings.ENV_INSTANCES_DIR)
@@ -255,11 +257,18 @@ class AgentCloneService:
             logger.warning(f"Clone workspace not found: {clone_workspace}")
             return
 
-        # Directories to copy (relative to app/core/)
+        # Directories to copy (Original Agent ownership)
         dirs_to_copy = [
-            ("app/core/scripts", "app/core/scripts"),
-            ("app/core/docs", "app/core/docs"),
-            ("app/core/knowledge", "app/core/knowledge"),
+            ("app/workspace/scripts", "app/workspace/scripts"),
+            ("app/workspace/docs", "app/workspace/docs"),
+            ("app/workspace/knowledge", "app/workspace/knowledge"),
+            ("app/workspace/files", "app/workspace/files"),  # Reports, caches, CSVs
+            ("app/workspace/uploads", "app/workspace/uploads"),  # User-uploaded files
+        ]
+
+        # Single files to copy
+        files_to_copy = [
+            ("app/workspace/workspace_requirements.txt", "app/workspace/workspace_requirements.txt"),
         ]
 
         for src_rel, dst_rel in dirs_to_copy:
@@ -271,6 +280,19 @@ class AgentCloneService:
                     if dst.exists():
                         shutil.rmtree(dst)
                     shutil.copytree(src, dst)
+                    logger.info(f"Copied {src_rel} to clone workspace")
+                except Exception as e:
+                    logger.error(f"Failed to copy {src_rel}: {e}")
+
+        for src_rel, dst_rel in files_to_copy:
+            src = original_workspace / src_rel
+            dst = clone_workspace / dst_rel
+
+            if src.exists():
+                try:
+                    # Ensure destination directory exists
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
                     logger.info(f"Copied {src_rel} to clone workspace")
                 except Exception as e:
                     logger.error(f"Failed to copy {src_rel}: {e}")

@@ -1332,3 +1332,94 @@ SDK_ADAPTER_CONVERSATION={sdk_conversation}
             subject=str(user_id),
             expires_delta=access_token_expires
         )
+
+    async def copy_workspace_between_environments(
+        self,
+        source_env: AgentEnvironment,
+        target_env: AgentEnvironment
+    ) -> bool:
+        """
+        Copy workspace from source to target environment.
+
+        Used when switching environments for the same agent to maintain workspace state.
+        This ensures the same agent state across environments.
+
+        Copies (all workspace data):
+        - app/workspace/scripts/ (agent scripts)
+        - app/workspace/docs/ (WORKFLOW_PROMPT.md, ENTRYPOINT_PROMPT.md)
+        - app/workspace/knowledge/ (integration docs)
+        - app/workspace/files/ (reports, caches, CSVs)
+        - app/workspace/uploads/ (user-uploaded files)
+        - app/workspace/credentials/ (integration credentials)
+        - app/workspace/plugins/ (LLM plugins)
+        - app/workspace/workspace_requirements.txt (Python packages)
+
+        Does NOT copy (Environment Runtime - environment-specific):
+        - app/workspace/logs/ (session logs)
+        - app/workspace/databases/ (runtime SQLite DBs, session state)
+
+        Args:
+            source_env: Source environment to copy from
+            target_env: Target environment to copy to
+
+        Returns:
+            True if copy successful
+        """
+        source_dir = self.instances_dir / str(source_env.id)
+        target_dir = self.instances_dir / str(target_env.id)
+
+        if not source_dir.exists():
+            logger.warning(f"Source environment directory not found: {source_dir}")
+            return False
+
+        if not target_dir.exists():
+            logger.warning(f"Target environment directory not found: {target_dir}")
+            return False
+
+        # Directories to copy (workspace data - synced between environments)
+        dirs_to_copy = [
+            "app/workspace/scripts",
+            "app/workspace/docs",
+            "app/workspace/knowledge",
+            "app/workspace/files",
+            "app/workspace/uploads",
+            "app/workspace/credentials",
+            "app/workspace/plugins",
+        ]
+
+        # Single files to copy
+        files_to_copy = [
+            "app/workspace/workspace_requirements.txt",
+        ]
+
+        def _copy_sync():
+            """Synchronous copy operation to run in thread pool."""
+            for dir_rel in dirs_to_copy:
+                src = source_dir / dir_rel
+                dst = target_dir / dir_rel
+
+                if src.exists():
+                    try:
+                        if dst.exists():
+                            shutil.rmtree(dst)
+                        shutil.copytree(src, dst)
+                        logger.info(f"Copied {dir_rel} to target environment")
+                    except Exception as e:
+                        logger.error(f"Failed to copy {dir_rel}: {e}")
+
+            for file_rel in files_to_copy:
+                src = source_dir / file_rel
+                dst = target_dir / file_rel
+
+                if src.exists():
+                    try:
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dst)
+                        logger.info(f"Copied {file_rel} to target environment")
+                    except Exception as e:
+                        logger.error(f"Failed to copy {file_rel}: {e}")
+
+        # Run blocking I/O operation in thread pool executor
+        await asyncio.to_thread(_copy_sync)
+        logger.info(f"Workspace copied from environment {source_env.id} to {target_env.id}")
+        return True

@@ -159,6 +159,78 @@ class EnvironmentService:
                 pass
 
     @staticmethod
+    def _find_source_environment_for_workspace_copy(
+        session: "Session",
+        agent_id: UUID,
+        target_env_id: UUID,
+        all_envs: list[AgentEnvironment]
+    ) -> AgentEnvironment | None:
+        """
+        Find the best source environment to copy workspace from.
+
+        Priority:
+        1. Current active environment (if set and different from target)
+        2. Most recently used suspended environment
+        3. Environment from the most recent session for this agent
+
+        Args:
+            session: Database session
+            agent_id: Agent ID
+            target_env_id: Target environment ID (to exclude from search)
+            all_envs: List of all environments for this agent
+
+        Returns:
+            Source environment to copy from, or None if no suitable source found
+        """
+        from app.models.session import Session as SessionModel
+
+        agent = session.get(Agent, agent_id)
+        if not agent:
+            return None
+
+        # 1. Check current active environment
+        if agent.active_environment_id and agent.active_environment_id != target_env_id:
+            active_env = session.get(AgentEnvironment, agent.active_environment_id)
+            if active_env:
+                logger.info(f"Using active environment {active_env.id} as workspace source")
+                return active_env
+
+        # 2. Look for suspended environments (most recently updated)
+        suspended_envs = [
+            env for env in all_envs
+            if env.status == "suspended" and env.id != target_env_id
+        ]
+        if suspended_envs:
+            # Sort by updated_at descending to get most recent
+            suspended_envs.sort(key=lambda e: e.updated_at or e.created_at, reverse=True)
+            source_env = suspended_envs[0]
+            logger.info(f"Using most recent suspended environment {source_env.id} as workspace source")
+            return source_env
+
+        # 3. Find the most recent session for this agent and use its environment
+        # Get all environment IDs for this agent (excluding target)
+        env_ids = [env.id for env in all_envs if env.id != target_env_id]
+        if env_ids:
+            # Query for most recent session across all agent's environments
+            stmt = (
+                select(SessionModel)
+                .where(SessionModel.environment_id.in_(env_ids))
+                .order_by(SessionModel.updated_at.desc())
+                .limit(1)
+            )
+            recent_session = session.exec(stmt).first()
+            if recent_session:
+                source_env = session.get(AgentEnvironment, recent_session.environment_id)
+                if source_env:
+                    logger.info(
+                        f"Using environment {source_env.id} from most recent session as workspace source"
+                    )
+                    return source_env
+
+        logger.info("No suitable source environment found for workspace copy")
+        return None
+
+    @staticmethod
     async def _activate_environment_background(
         agent_id: UUID,
         env_id: UUID
@@ -168,9 +240,11 @@ class EnvironmentService:
         Uses its own database session to avoid conflicts.
 
         Steps:
-        1. Stop all other running environments
-        2. Start target environment
-        3. Update is_active flags
+        1. Find best source environment for workspace copy
+        2. Copy workspace from source to target (if found)
+        3. Stop all other running environments
+        4. Start target environment
+        5. Update is_active flags
 
         Args:
             agent_id: Agent ID
@@ -189,6 +263,22 @@ class EnvironmentService:
                 # Get all environments for this agent
                 all_envs = EnvironmentService.list_agent_environments(session, agent_id)
                 lifecycle_manager = EnvironmentService.get_lifecycle_manager()
+
+                # Find best source environment for workspace copy
+                source_env = EnvironmentService._find_source_environment_for_workspace_copy(
+                    session, agent_id, env_id, all_envs
+                )
+
+                # Copy workspace from source to target (if found)
+                if source_env:
+                    logger.info(f"Copying workspace from environment {source_env.id} to {target_env.id}")
+                    try:
+                        await lifecycle_manager.copy_workspace_between_environments(
+                            source_env, target_env
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to copy workspace between environments: {e}")
+                        # Continue with activation even if copy fails
 
                 # Stop all other environments first
                 for env in all_envs:
