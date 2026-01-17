@@ -293,8 +293,12 @@ Access tokens are managed in the agent's **Integrations** tab alongside the A2A 
 2. Task ID parsed and scope validated via `_parse_and_validate_session_id()`
 3. Session created (if new) + message created via `SessionService.send_session_message()`
 4. For new sessions, title generation triggered via `SessionService.auto_generate_session_title()`
-5. Streaming handled by `MessageService.stream_message_with_events()` (SSE) or `SessionService.initiate_stream()` (sync)
-6. Internal events mapped to A2A format via `A2AEventMapper.map_stream_event()`
+5. **Environment activation check** via `SessionService.ensure_environment_ready_for_streaming()`
+   - If environment is suspended: activates synchronously and waits for completion
+   - If environment is already running: proceeds immediately
+   - If environment is in error or other non-ready state: returns error
+6. Streaming handled by `MessageService.stream_message_with_events()` (SSE) or `SessionService.initiate_stream()` (sync)
+7. Internal events mapped to A2A format via `A2AEventMapper.map_stream_event()`
 
 ### Task State Resolution
 - Gets session via `SessionService.get_session()`
@@ -313,9 +317,12 @@ The `message/stream` JSON-RPC method returns Server-Sent Events (SSE) that compl
 3. `SessionService.send_session_message()` creates session (if new) and message (with `initiate_streaming=False`)
 4. For new sessions, title generation triggered in background
 5. Yields initial `working` status update (`final=false`)
-6. Iterates over `MessageService.stream_message_with_events()` events
-7. Each internal event mapped via `A2AEventMapper.map_stream_event()`
-8. Final `done` event mapped to `completed` or `canceled` status (`final=true`)
+6. **Environment activation via `SessionService.ensure_environment_ready_for_streaming()`**
+   - Activates suspended environments synchronously (waits for container to start)
+   - Returns error if environment cannot be activated
+7. Iterates over `MessageService.stream_message_with_events()` events
+8. Each internal event mapped via `A2AEventMapper.map_stream_event()`
+9. Final `done` event mapped to `completed` or `canceled` status (`final=true`)
 
 **Internal Event to A2A TaskState Mapping:**
 

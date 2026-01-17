@@ -101,6 +101,20 @@ class A2ARequestHandler:
         task_id = message_data.get("taskId") or message_data.get("task_id")
         session_id = self._parse_and_validate_session_id(task_id)
 
+        # For existing sessions, ensure environment is ready before sending
+        # (For new sessions, we check after creation)
+        if session_id is not None:
+            try:
+                await SessionService.ensure_environment_ready_for_streaming(
+                    session_id=session_id,
+                    get_fresh_db_session=self.get_db_session,
+                    timeout_seconds=120
+                )
+                logger.info(f"Environment is ready for A2A message/send (existing session)")
+            except (ValueError, RuntimeError) as e:
+                logger.error(f"Environment not ready for message/send: {e}")
+                raise ValueError(f"Environment error: {str(e)}")
+
         # Send message using SessionService (creates session if session_id is None)
         result = await SessionService.send_session_message(
             session_id=session_id,
@@ -118,6 +132,26 @@ class A2ARequestHandler:
 
         # Get the session_id from result (may be newly created)
         session_id = result.get("session_id", session_id)
+
+        # For new sessions, ensure environment is ready now
+        # (session was just created, so we need to check environment status)
+        if result.get("action") in ["pending", "message_created"]:
+            try:
+                await SessionService.ensure_environment_ready_for_streaming(
+                    session_id=session_id,
+                    get_fresh_db_session=self.get_db_session,
+                    timeout_seconds=120
+                )
+                logger.info(f"Environment is ready for A2A message/send (new session)")
+
+                # Re-initiate streaming now that environment is ready
+                result = await SessionService.initiate_stream(
+                    session_id=session_id,
+                    get_fresh_db_session=self.get_db_session
+                )
+            except (ValueError, RuntimeError) as e:
+                logger.error(f"Environment not ready for message/send: {e}")
+                raise ValueError(f"Environment error: {str(e)}")
 
         # Wait for completion if streaming started
         if result.get("action") == "streaming":
@@ -219,14 +253,59 @@ class A2ARequestHandler:
         })
 
         try:
-            # Get environment base URL and auth using the same methods as UI flow
-            env_base_url = MessageService.get_environment_url(self.environment)
-            auth_headers = MessageService.get_auth_headers(self.environment)
+            # Check if environment needs activation before streaming
+            # If so, notify the client that we're starting up the environment
+            env_status = self.environment.status
+            if env_status in ["suspended", "activating", "starting"]:
+                logger.info(f"Environment {self.environment.id} status is '{env_status}', notifying client...")
+                yield self._format_sse_event(request_id, {
+                    "kind": "status-update",
+                    "taskId": task_id_str,
+                    "contextId": context_id_str,
+                    "status": {
+                        "state": "working",
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "message": {
+                            "role": "agent",
+                            "parts": [{"kind": "text", "text": "Starting up the agent environment, this may take a moment..."}]
+                        }
+                    },
+                    "final": False,
+                })
+
+            # Ensure environment is ready for streaming (activates if suspended)
+            # This is critical for A2A flow since we stream directly to agent-env
+            # Unlike UI flow which uses WebSocket events for async notification
+            try:
+                environment, agent = await SessionService.ensure_environment_ready_for_streaming(
+                    session_id=session_id,
+                    get_fresh_db_session=self.get_db_session,
+                    timeout_seconds=120
+                )
+                logger.info(f"Environment {environment.id} is ready for A2A streaming")
+            except (ValueError, RuntimeError) as e:
+                logger.error(f"Environment not ready for streaming: {e}")
+                yield self._format_sse_event(request_id, {
+                    "kind": "status-update",
+                    "taskId": task_id_str,
+                    "contextId": context_id_str,
+                    "status": {
+                        "state": "failed",
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "message": {"role": "agent", "parts": [{"kind": "text", "text": f"Environment error: {str(e)}"}]}
+                    },
+                    "final": True,
+                })
+                return
+
+            # Get environment base URL and auth using refreshed environment
+            env_base_url = MessageService.get_environment_url(environment)
+            auth_headers = MessageService.get_auth_headers(environment)
 
             # Stream from environment via SSE (instead of background WebSocket)
             async for event in MessageService.stream_message_with_events(
                 session_id=session_id,
-                environment_id=self.environment.id,
+                environment_id=environment.id,
                 base_url=env_base_url,
                 auth_headers=auth_headers,
                 user_message_content=content,
