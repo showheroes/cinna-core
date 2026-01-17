@@ -4,7 +4,7 @@ import { ArrowLeft, EllipsisVertical, Share2 } from "lucide-react"
 import { useState, useEffect } from "react"
 
 import { AgentsService } from "@/client"
-import { AgentPromptsTab } from "@/components/Agents/AgentPromptsTab"
+import { AgentConfigTab } from "@/components/Agents/AgentConfigTab"
 import { AgentIntegrationsTab } from "@/components/Agents/AgentIntegrationsTab"
 import { AgentCredentialsTab } from "@/components/Agents/AgentCredentialsTab"
 import { AgentPluginsTab } from "@/components/Agents/AgentPluginsTab"
@@ -117,7 +117,7 @@ function AgentDetail() {
   const isUserModeClone = agent.is_clone && agent.clone_mode === "user"
 
   const allTabs = [
-    { value: "configuration", title: "Configuration", content: <AgentPromptsTab agent={agent} readOnly={isUserModeClone} /> },
+    { value: "configuration", title: "Configuration", content: <AgentConfigTab agent={agent} readOnly={isUserModeClone} /> },
     { value: "integrations", title: "Integrations", content: <AgentIntegrationsTab agent={agent} /> },
     { value: "credentials", title: "Credentials", content: <AgentCredentialsTab agentId={agent.id} /> },
     { value: "plugins", title: "Plugins", content: <AgentPluginsTab agentId={agent.id} /> },

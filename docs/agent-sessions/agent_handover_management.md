@@ -140,7 +140,7 @@ The AI generates an **initial draft** that users can refine based on their speci
 
 **Primary Component**: `frontend/src/components/Agents/AgentHandovers.tsx`
 
-Located in the **Agent Configuration Tab** (`AgentPromptsTab.tsx`), below the Workflow Prompt section.
+Located in the **Agent Configuration Tab** (`AgentConfigTab.tsx`), below the Workflow Prompt section.
 
 ### UI Flow
 
@@ -422,7 +422,7 @@ Python's `contextvars.ContextVar` does not propagate to new async tasks created 
 
 **Components**:
 - `frontend/src/components/Agents/AgentHandovers.tsx` - Main handover UI component
-- `frontend/src/components/Agents/AgentPromptsTab.tsx` - Integration point
+- `frontend/src/components/Agents/AgentConfigTab.tsx` - Integration point
 
 **Generated Client**:
 - `frontend/src/client/sdk.gen.ts` - AgentsService methods

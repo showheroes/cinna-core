@@ -525,6 +525,11 @@ class SessionService:
                 )
                 logger.info(f"[DEBUG] Generated title: {title}")
 
+                # Only update if we got a valid title
+                if not title:
+                    logger.warning(f"[DEBUG] Generated title is empty, skipping update")
+                    return
+
                 # Update session with generated title
                 logger.info(f"[DEBUG] Updating session {session_id} with title: {title}")
                 with get_fresh_db_session() as db:
@@ -533,7 +538,10 @@ class SessionService:
                         session_id=session_id,
                         data=SessionUpdate(title=title)
                     )
-                    logger.info(f"[DEBUG] Session updated successfully. New title: {updated_session.title}")
+                    if updated_session:
+                        logger.info(f"[DEBUG] Session updated successfully. New title: {updated_session.title}")
+                    else:
+                        logger.warning(f"[DEBUG] Session {session_id} not found when updating title")
                 logger.info(f"Generated session title asynchronously: {title}")
             else:
                 # If no LLM available, set truncated message immediately
@@ -549,30 +557,16 @@ class SessionService:
                         session_id=session_id,
                         data=SessionUpdate(title=fallback_title)
                     )
-                    logger.info(f"[DEBUG] Session updated with fallback title. New title: {updated_session.title}")
+                    if updated_session:
+                        logger.info(f"[DEBUG] Session updated with fallback title. New title: {updated_session.title}")
+                    else:
+                        logger.warning(f"[DEBUG] Session {session_id} not found when updating fallback title")
                 logger.info(f"Set fallback session title (no LLM): {fallback_title}")
 
         except Exception as e:
+            # If title generation fails, don't update the title at all - just log and return
             logger.error(f"[DEBUG] Exception in auto_generate_session_title: {e}", exc_info=True)
-            logger.warning(f"Failed to generate session title asynchronously: {e}")
-            # Fallback to truncated message if LLM fails
-            fallback_title = first_message_content[:100]
-            if len(first_message_content) > 100:
-                fallback_title += "..."
-
-            logger.info(f"[DEBUG] Using error fallback title: {fallback_title}")
-            try:
-                with get_fresh_db_session() as db:
-                    updated_session = SessionService.update_session(
-                        db_session=db,
-                        session_id=session_id,
-                        data=SessionUpdate(title=fallback_title)
-                    )
-                    logger.info(f"[DEBUG] Session updated with error fallback. New title: {updated_session.title}")
-                logger.info(f"Set fallback session title after error: {fallback_title}")
-            except Exception as fallback_error:
-                logger.error(f"[DEBUG] Failed to set fallback title: {fallback_error}", exc_info=True)
-                logger.error(f"Failed to set fallback title: {fallback_error}", exc_info=True)
+            logger.warning(f"Failed to generate session title asynchronously, leaving title unchanged: {e}")
 
     @staticmethod
     async def send_session_message(
