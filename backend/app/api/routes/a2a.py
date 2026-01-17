@@ -179,8 +179,11 @@ async def get_agent_card(
     # Check if A2A is enabled for this agent
     a2a_enabled = agent.a2a_config.get("enabled", False) if agent.a2a_config else False
 
-    # Get base URL from request
+    # Get base URL from request, respecting X-Forwarded-Proto for reverse proxy setups
     base_url = str(request.base_url).rstrip("/")
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    if forwarded_proto == "https" and base_url.startswith("http://"):
+        base_url = "https://" + base_url[7:]
 
     # If not authenticated
     if not auth or not auth.is_authenticated():

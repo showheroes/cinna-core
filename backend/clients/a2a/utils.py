@@ -82,7 +82,7 @@ def load_config(env_file: Path | None = None) -> tuple[str, str]:
         print("  A2A_ACCESS_TOKEN=your-jwt-token")
         sys.exit(1)
 
-    load_dotenv(env_file)
+    load_dotenv(env_file, override=True)
 
     agent_url = os.getenv("A2A_AGENT_URL")
     access_token = os.getenv("A2A_ACCESS_TOKEN")
@@ -94,6 +94,9 @@ def load_config(env_file: Path | None = None) -> tuple[str, str]:
     if not access_token:
         print("Error: A2A_ACCESS_TOKEN not set in .env file")
         sys.exit(1)
+
+    print(f"Loaded config from: {env_file}")
+    print(f"Agent URL: {agent_url}")
 
     return agent_url, access_token
 
@@ -212,7 +215,10 @@ class A2AConnection:
         # Step 1: Fetch public card (without authentication)
         print(f"\nFetching public agent card from: {agent_card_url}")
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0, connect=10.0),
+                follow_redirects=True,
+            ) as client:
                 response = await client.get(agent_card_url)
                 response.raise_for_status()
 
@@ -251,6 +257,7 @@ class A2AConnection:
         self.httpx_client = httpx.AsyncClient(
             headers={"Authorization": f"Bearer {self.access_token}"},
             timeout=httpx.Timeout(60.0, connect=10.0),
+            follow_redirects=True,
         )
 
         try:
@@ -271,8 +278,32 @@ class A2AConnection:
             else:
                 print("Skills: (none)")
 
+            # Check if agent supports streaming
+            supports_streaming = False
+            if self.agent_card.capabilities and self.agent_card.capabilities.streaming:
+                supports_streaming = True
+            print(f"Streaming: {supports_streaming}")
+
+            # Use the URL from the agent card (may differ from original due to redirects)
+            # This ensures we use the correct URL (e.g., HTTPS) for subsequent requests
+            card_url = self.agent_card.url.rstrip("/")
+            if card_url != self.agent_url:
+                print(f"Using agent card URL: {card_url}")
+                self.agent_url = card_url
+                # Recreate httpx client with correct base URL to avoid redirect issues
+                # (301/302 redirects convert POST to GET, breaking SSE streaming)
+                await self.httpx_client.aclose()
+                self.httpx_client = httpx.AsyncClient(
+                    headers={"Authorization": f"Bearer {self.access_token}"},
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                    follow_redirects=True,
+                )
+
             # Initialize A2A client using ClientFactory
-            config = ClientConfig(httpx_client=self.httpx_client)
+            config = ClientConfig(
+                httpx_client=self.httpx_client,
+                streaming=supports_streaming,
+            )
             factory = ClientFactory(config=config)
             self.a2a_client = factory.create(self.agent_card)
             return True
