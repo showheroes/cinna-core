@@ -3,12 +3,16 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { A2aGetAgentCardData, A2aGetAgentCardResponse, A2aHandleJsonrpcData, A2aHandleJsonrpcResponse, A2aGetAgentCardWellKnownData, A2aGetAgentCardWellKnownResponse, AccessTokensListAccessTokensData, AccessTokensListAccessTokensResponse, AccessTokensCreateAccessTokenData, AccessTokensCreateAccessTokenResponse, AccessTokensGetAccessTokenData, AccessTokensGetAccessTokenResponse, AccessTokensUpdateAccessTokenData, AccessTokensUpdateAccessTokenResponse, AccessTokensDeleteAccessTokenData, AccessTokensDeleteAccessTokenResponse, ActivitiesCreateActivityData, ActivitiesCreateActivityResponse, ActivitiesListActivitiesData, ActivitiesListActivitiesResponse, ActivitiesDeleteAllActivitiesResponse, ActivitiesGetActivityStatsResponse, ActivitiesUpdateActivityData, ActivitiesUpdateActivityResponse, ActivitiesDeleteActivityData, ActivitiesDeleteActivityResponse, ActivitiesMarkActivitiesAsReadData, ActivitiesMarkActivitiesAsReadResponse, AgentsReadAgentsData, AgentsReadAgentsResponse, AgentsCreateAgentData, AgentsCreateAgentResponse, AgentsReadAgentData, AgentsReadAgentResponse, AgentsUpdateAgentData, AgentsUpdateAgentResponse, AgentsDeleteAgentData, AgentsDeleteAgentResponse, AgentsCreateAgentWithFlowData, AgentsCreateAgentWithFlowResponse, AgentsSyncAgentPromptsData, AgentsSyncAgentPromptsResponse, AgentsReadAgentCredentialsData, AgentsReadAgentCredentialsResponse, AgentsAddCredentialToAgentData, AgentsAddCredentialToAgentResponse, AgentsRemoveCredentialFromAgentData, AgentsRemoveCredentialFromAgentResponse, AgentsCreateAgentEnvironmentData, AgentsCreateAgentEnvironmentResponse, AgentsListAgentEnvironmentsData, AgentsListAgentEnvironmentsResponse, AgentsActivateEnvironmentData, AgentsActivateEnvironmentResponse, AgentsGenerateScheduleData, AgentsGenerateScheduleResponse, AgentsSaveScheduleData, AgentsSaveScheduleResponse, AgentsGetScheduleData, AgentsGetScheduleResponse, AgentsDeleteScheduleData, AgentsDeleteScheduleResponse, AgentsListHandoverConfigsData, AgentsListHandoverConfigsResponse, AgentsCreateHandoverConfigData, AgentsCreateHandoverConfigResponse, AgentsUpdateHandoverConfigData, AgentsUpdateHandoverConfigResponse, AgentsDeleteHandoverConfigData, AgentsDeleteHandoverConfigResponse, AgentsGenerateHandoverPromptEndpointData, AgentsGenerateHandoverPromptEndpointResponse, AgentsExecuteHandoverData, AgentsExecuteHandoverResponse, AgentsGetSdkConfigData, AgentsGetSdkConfigResponse, AgentsAddAllowedToolsData, AgentsAddAllowedToolsResponse, AgentsGetPendingToolsData, AgentsGetPendingToolsResponse, CredentialsReadCredentialsData, CredentialsReadCredentialsResponse, CredentialsCreateCredentialData, CredentialsCreateCredentialResponse, CredentialsReadCredentialData, CredentialsReadCredentialResponse, CredentialsUpdateCredentialData, CredentialsUpdateCredentialResponse, CredentialsDeleteCredentialData, CredentialsDeleteCredentialResponse, CredentialsReadCredentialWithDataData, CredentialsReadCredentialWithDataResponse, CredentialsOauthAuthorizeData, CredentialsOauthAuthorizeResponse, CredentialsOauthCallbackData, CredentialsOauthCallbackResponse, CredentialsGetOauthMetadataData, CredentialsGetOauthMetadataResponse, CredentialsRefreshOauthTokenData, CredentialsRefreshOauthTokenResponse, EnvironmentsGetEnvironmentData, EnvironmentsGetEnvironmentResponse, EnvironmentsUpdateEnvironmentData, EnvironmentsUpdateEnvironmentResponse, EnvironmentsDeleteEnvironmentData, EnvironmentsDeleteEnvironmentResponse, EnvironmentsStartEnvironmentData, EnvironmentsStartEnvironmentResponse, EnvironmentsStopEnvironmentData, EnvironmentsStopEnvironmentResponse, EnvironmentsSuspendEnvironmentData, EnvironmentsSuspendEnvironmentResponse, EnvironmentsRestartEnvironmentData, EnvironmentsRestartEnvironmentResponse, EnvironmentsRebuildEnvironmentData, EnvironmentsRebuildEnvironmentResponse, EnvironmentsGetEnvironmentStatusData, EnvironmentsGetEnvironmentStatusResponse, EnvironmentsCheckEnvironmentHealthData, EnvironmentsCheckEnvironmentHealthResponse, EnvironmentsGetEnvironmentLogsData, EnvironmentsGetEnvironmentLogsResponse, EventsBroadcastEventData, EventsBroadcastEventResponse, EventsGetConnectionStatsResponse, EventsTestEventResponse, FilesUploadFileData, FilesUploadFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesDownloadFileData, FilesDownloadFileResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, KnowledgeQueryKnowledgeData, KnowledgeQueryKnowledgeResponse, KnowledgeSourcesListKnowledgeSourcesData, KnowledgeSourcesListKnowledgeSourcesResponse, KnowledgeSourcesCreateKnowledgeSourceData, KnowledgeSourcesCreateKnowledgeSourceResponse, KnowledgeSourcesGetKnowledgeSourceData, KnowledgeSourcesGetKnowledgeSourceResponse, KnowledgeSourcesUpdateKnowledgeSourceData, KnowledgeSourcesUpdateKnowledgeSourceResponse, KnowledgeSourcesDeleteKnowledgeSourceData, KnowledgeSourcesDeleteKnowledgeSourceResponse, KnowledgeSourcesEnableKnowledgeSourceData, KnowledgeSourcesEnableKnowledgeSourceResponse, KnowledgeSourcesDisableKnowledgeSourceData, KnowledgeSourcesDisableKnowledgeSourceResponse, KnowledgeSourcesCheckKnowledgeSourceAccessData, KnowledgeSourcesCheckKnowledgeSourceAccessResponse, KnowledgeSourcesRefreshKnowledgeSourceData, KnowledgeSourcesRefreshKnowledgeSourceResponse, KnowledgeSourcesListKnowledgeArticlesData, KnowledgeSourcesListKnowledgeArticlesResponse, KnowledgeSourcesListDiscoverableSourcesData, KnowledgeSourcesListDiscoverableSourcesResponse, KnowledgeSourcesEnableDiscoverableSourceData, KnowledgeSourcesEnableDiscoverableSourceResponse, KnowledgeSourcesDisableDiscoverableSourceData, KnowledgeSourcesDisableDiscoverableSourceResponse, LlmPluginsCreateMarketplaceData, LlmPluginsCreateMarketplaceResponse, LlmPluginsListMarketplacesData, LlmPluginsListMarketplacesResponse, LlmPluginsGetMarketplaceData, LlmPluginsGetMarketplaceResponse, LlmPluginsUpdateMarketplaceData, LlmPluginsUpdateMarketplaceResponse, LlmPluginsDeleteMarketplaceData, LlmPluginsDeleteMarketplaceResponse, LlmPluginsSyncMarketplaceData, LlmPluginsSyncMarketplaceResponse, LlmPluginsDiscoverPluginsData, LlmPluginsDiscoverPluginsResponse, LlmPluginsGetPluginData, LlmPluginsGetPluginResponse, LlmPluginsListAgentPluginsData, LlmPluginsListAgentPluginsResponse, LlmPluginsInstallAgentPluginData, LlmPluginsInstallAgentPluginResponse, LlmPluginsUninstallAgentPluginData, LlmPluginsUninstallAgentPluginResponse, LlmPluginsUpdateAgentPluginData, LlmPluginsUpdateAgentPluginResponse, LlmPluginsUpgradeAgentPluginData, LlmPluginsUpgradeAgentPluginResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, MessagesGetMessagesData, MessagesGetMessagesResponse, MessagesSendMessageStreamData, MessagesSendMessageStreamResponse, MessagesInterruptMessageData, MessagesInterruptMessageResponse, MessagesGetStreamingStatusData, MessagesGetStreamingStatusResponse, OauthGetOauthConfigResponse, OauthGoogleAuthorizeResponse, OauthGoogleCallbackData, OauthGoogleCallbackResponse, OauthLinkGoogleAccountEndpointData, OauthLinkGoogleAccountEndpointResponse, OauthUnlinkGoogleAccountEndpointResponse, PrivateCreateUserData, PrivateCreateUserResponse, SessionsCreateSessionData, SessionsCreateSessionResponse, SessionsListSessionsData, SessionsListSessionsResponse, SessionsGetSessionData, SessionsGetSessionResponse, SessionsUpdateSessionData, SessionsUpdateSessionResponse, SessionsDeleteSessionData, SessionsDeleteSessionResponse, SessionsSwitchSessionModeData, SessionsSwitchSessionModeResponse, SessionsResetSdkSessionData, SessionsResetSdkSessionResponse, SshKeysReadSshKeysResponse, SshKeysImportSshKeyData, SshKeysImportSshKeyResponse, SshKeysReadSshKeyData, SshKeysReadSshKeyResponse, SshKeysUpdateSshKeyData, SshKeysUpdateSshKeyResponse, SshKeysDeleteSshKeyData, SshKeysDeleteSshKeyResponse, SshKeysGenerateSshKeyData, SshKeysGenerateSshKeyResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersSetPasswordMeData, UsersSetPasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UsersGetAiCredentialsStatusResponse, UsersGetAiCredentialsResponse, UsersDeleteAiCredentialsResponse, UsersUpdateAiCredentialsData, UsersUpdateAiCredentialsResponse, UserWorkspacesReadWorkspacesData, UserWorkspacesReadWorkspacesResponse, UserWorkspacesCreateWorkspaceData, UserWorkspacesCreateWorkspaceResponse, UserWorkspacesReadWorkspaceData, UserWorkspacesReadWorkspaceResponse, UserWorkspacesUpdateWorkspaceData, UserWorkspacesUpdateWorkspaceResponse, UserWorkspacesDeleteWorkspaceData, UserWorkspacesDeleteWorkspaceResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsRefinePromptData, UtilsRefinePromptResponse, WorkspaceGetWorkspaceTreeData, WorkspaceGetWorkspaceTreeResponse, WorkspaceDownloadWorkspaceItemData, WorkspaceDownloadWorkspaceItemResponse, WorkspaceViewWorkspaceFileData, WorkspaceViewWorkspaceFileResponse, WorkspaceGetDatabaseTablesData, WorkspaceGetDatabaseTablesResponse, WorkspaceGetDatabaseSchemaData, WorkspaceGetDatabaseSchemaResponse, WorkspaceExecuteDatabaseQueryData, WorkspaceExecuteDatabaseQueryResponse, WorkspaceGenerateSqlQueryData, WorkspaceGenerateSqlQueryResponse } from './types.gen';
+import type { A2aGetAgentCardData, A2aGetAgentCardResponse, A2aHandleJsonrpcData, A2aHandleJsonrpcResponse, A2aGetAgentCardWellKnownData, A2aGetAgentCardWellKnownResponse, AccessTokensListAccessTokensData, AccessTokensListAccessTokensResponse, AccessTokensCreateAccessTokenData, AccessTokensCreateAccessTokenResponse, AccessTokensGetAccessTokenData, AccessTokensGetAccessTokenResponse, AccessTokensUpdateAccessTokenData, AccessTokensUpdateAccessTokenResponse, AccessTokensDeleteAccessTokenData, AccessTokensDeleteAccessTokenResponse, ActivitiesCreateActivityData, ActivitiesCreateActivityResponse, ActivitiesListActivitiesData, ActivitiesListActivitiesResponse, ActivitiesDeleteAllActivitiesResponse, ActivitiesGetActivityStatsResponse, ActivitiesUpdateActivityData, ActivitiesUpdateActivityResponse, ActivitiesDeleteActivityData, ActivitiesDeleteActivityResponse, ActivitiesMarkActivitiesAsReadData, ActivitiesMarkActivitiesAsReadResponse, AgentsReadAgentsData, AgentsReadAgentsResponse, AgentsCreateAgentData, AgentsCreateAgentResponse, AgentsReadAgentData, AgentsReadAgentResponse, AgentsUpdateAgentData, AgentsUpdateAgentResponse, AgentsDeleteAgentData, AgentsDeleteAgentResponse, AgentsCreateAgentWithFlowData, AgentsCreateAgentWithFlowResponse, AgentsSyncAgentPromptsData, AgentsSyncAgentPromptsResponse, AgentsReadAgentCredentialsData, AgentsReadAgentCredentialsResponse, AgentsAddCredentialToAgentData, AgentsAddCredentialToAgentResponse, AgentsRemoveCredentialFromAgentData, AgentsRemoveCredentialFromAgentResponse, AgentsCreateAgentEnvironmentData, AgentsCreateAgentEnvironmentResponse, AgentsListAgentEnvironmentsData, AgentsListAgentEnvironmentsResponse, AgentsActivateEnvironmentData, AgentsActivateEnvironmentResponse, AgentsGenerateScheduleData, AgentsGenerateScheduleResponse, AgentsSaveScheduleData, AgentsSaveScheduleResponse, AgentsGetScheduleData, AgentsGetScheduleResponse, AgentsDeleteScheduleData, AgentsDeleteScheduleResponse, AgentsListHandoverConfigsData, AgentsListHandoverConfigsResponse, AgentsCreateHandoverConfigData, AgentsCreateHandoverConfigResponse, AgentsUpdateHandoverConfigData, AgentsUpdateHandoverConfigResponse, AgentsDeleteHandoverConfigData, AgentsDeleteHandoverConfigResponse, AgentsGenerateHandoverPromptEndpointData, AgentsGenerateHandoverPromptEndpointResponse, AgentsExecuteHandoverData, AgentsExecuteHandoverResponse, AgentsGetSdkConfigData, AgentsGetSdkConfigResponse, AgentsAddAllowedToolsData, AgentsAddAllowedToolsResponse, AgentsGetPendingToolsData, AgentsGetPendingToolsResponse, AgentSharesShareAgentData, AgentSharesShareAgentResponse, AgentSharesGetAgentSharesData, AgentSharesGetAgentSharesResponse, AgentSharesGetAgentClonesData, AgentSharesGetAgentClonesResponse, AgentSharesRevokeShareData, AgentSharesRevokeShareResponse, AgentSharesGetPendingSharesResponse, AgentSharesAcceptShareData, AgentSharesAcceptShareResponse, AgentSharesDeclineShareData, AgentSharesDeclineShareResponse, AgentSharesDetachCloneData, AgentSharesDetachCloneResponse, AgentSharesPushUpdatesToClonesData, AgentSharesPushUpdatesToClonesResponse, AgentSharesApplyUpdateData, AgentSharesApplyUpdateResponse, AgentSharesGetUpdateStatusData, AgentSharesGetUpdateStatusResponse, AgentSharesSetUpdateModeData, AgentSharesSetUpdateModeResponse, AiCredentialsListAiCredentialsResponse, AiCredentialsCreateAiCredentialData, AiCredentialsCreateAiCredentialResponse, AiCredentialsGetAiCredentialData, AiCredentialsGetAiCredentialResponse, AiCredentialsUpdateAiCredentialData, AiCredentialsUpdateAiCredentialResponse, AiCredentialsDeleteAiCredentialData, AiCredentialsDeleteAiCredentialResponse, AiCredentialsSetAiCredentialDefaultData, AiCredentialsSetAiCredentialDefaultResponse, CredentialsShareCredentialData, CredentialsShareCredentialResponse, CredentialsGetCredentialSharesData, CredentialsGetCredentialSharesResponse, CredentialsRevokeCredentialShareData, CredentialsRevokeCredentialShareResponse, CredentialsGetCredentialsSharedWithMeResponse, CredentialsUpdateCredentialSharingData, CredentialsUpdateCredentialSharingResponse, CredentialsReadCredentialsData, CredentialsReadCredentialsResponse, CredentialsCreateCredentialData, CredentialsCreateCredentialResponse, CredentialsReadCredentialData, CredentialsReadCredentialResponse, CredentialsUpdateCredentialData, CredentialsUpdateCredentialResponse, CredentialsDeleteCredentialData, CredentialsDeleteCredentialResponse, CredentialsReadCredentialWithDataData, CredentialsReadCredentialWithDataResponse, CredentialsOauthAuthorizeData, CredentialsOauthAuthorizeResponse, CredentialsOauthCallbackData, CredentialsOauthCallbackResponse, CredentialsGetOauthMetadataData, CredentialsGetOauthMetadataResponse, CredentialsRefreshOauthTokenData, CredentialsRefreshOauthTokenResponse, EnvironmentsGetEnvironmentData, EnvironmentsGetEnvironmentResponse, EnvironmentsUpdateEnvironmentData, EnvironmentsUpdateEnvironmentResponse, EnvironmentsDeleteEnvironmentData, EnvironmentsDeleteEnvironmentResponse, EnvironmentsStartEnvironmentData, EnvironmentsStartEnvironmentResponse, EnvironmentsStopEnvironmentData, EnvironmentsStopEnvironmentResponse, EnvironmentsSuspendEnvironmentData, EnvironmentsSuspendEnvironmentResponse, EnvironmentsRestartEnvironmentData, EnvironmentsRestartEnvironmentResponse, EnvironmentsRebuildEnvironmentData, EnvironmentsRebuildEnvironmentResponse, EnvironmentsGetEnvironmentStatusData, EnvironmentsGetEnvironmentStatusResponse, EnvironmentsCheckEnvironmentHealthData, EnvironmentsCheckEnvironmentHealthResponse, EnvironmentsGetEnvironmentLogsData, EnvironmentsGetEnvironmentLogsResponse, EventsBroadcastEventData, EventsBroadcastEventResponse, EventsGetConnectionStatsResponse, EventsTestEventResponse, FilesUploadFileData, FilesUploadFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesDownloadFileData, FilesDownloadFileResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, KnowledgeQueryKnowledgeData, KnowledgeQueryKnowledgeResponse, KnowledgeSourcesListKnowledgeSourcesData, KnowledgeSourcesListKnowledgeSourcesResponse, KnowledgeSourcesCreateKnowledgeSourceData, KnowledgeSourcesCreateKnowledgeSourceResponse, KnowledgeSourcesGetKnowledgeSourceData, KnowledgeSourcesGetKnowledgeSourceResponse, KnowledgeSourcesUpdateKnowledgeSourceData, KnowledgeSourcesUpdateKnowledgeSourceResponse, KnowledgeSourcesDeleteKnowledgeSourceData, KnowledgeSourcesDeleteKnowledgeSourceResponse, KnowledgeSourcesEnableKnowledgeSourceData, KnowledgeSourcesEnableKnowledgeSourceResponse, KnowledgeSourcesDisableKnowledgeSourceData, KnowledgeSourcesDisableKnowledgeSourceResponse, KnowledgeSourcesCheckKnowledgeSourceAccessData, KnowledgeSourcesCheckKnowledgeSourceAccessResponse, KnowledgeSourcesRefreshKnowledgeSourceData, KnowledgeSourcesRefreshKnowledgeSourceResponse, KnowledgeSourcesListKnowledgeArticlesData, KnowledgeSourcesListKnowledgeArticlesResponse, KnowledgeSourcesListDiscoverableSourcesData, KnowledgeSourcesListDiscoverableSourcesResponse, KnowledgeSourcesEnableDiscoverableSourceData, KnowledgeSourcesEnableDiscoverableSourceResponse, KnowledgeSourcesDisableDiscoverableSourceData, KnowledgeSourcesDisableDiscoverableSourceResponse, LlmPluginsCreateMarketplaceData, LlmPluginsCreateMarketplaceResponse, LlmPluginsListMarketplacesData, LlmPluginsListMarketplacesResponse, LlmPluginsGetMarketplaceData, LlmPluginsGetMarketplaceResponse, LlmPluginsUpdateMarketplaceData, LlmPluginsUpdateMarketplaceResponse, LlmPluginsDeleteMarketplaceData, LlmPluginsDeleteMarketplaceResponse, LlmPluginsSyncMarketplaceData, LlmPluginsSyncMarketplaceResponse, LlmPluginsDiscoverPluginsData, LlmPluginsDiscoverPluginsResponse, LlmPluginsGetPluginData, LlmPluginsGetPluginResponse, LlmPluginsListAgentPluginsData, LlmPluginsListAgentPluginsResponse, LlmPluginsInstallAgentPluginData, LlmPluginsInstallAgentPluginResponse, LlmPluginsUninstallAgentPluginData, LlmPluginsUninstallAgentPluginResponse, LlmPluginsUpdateAgentPluginData, LlmPluginsUpdateAgentPluginResponse, LlmPluginsUpgradeAgentPluginData, LlmPluginsUpgradeAgentPluginResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, MessagesGetMessagesData, MessagesGetMessagesResponse, MessagesSendMessageStreamData, MessagesSendMessageStreamResponse, MessagesInterruptMessageData, MessagesInterruptMessageResponse, MessagesGetStreamingStatusData, MessagesGetStreamingStatusResponse, OauthGetOauthConfigResponse, OauthGoogleAuthorizeResponse, OauthGoogleCallbackData, OauthGoogleCallbackResponse, OauthLinkGoogleAccountEndpointData, OauthLinkGoogleAccountEndpointResponse, OauthUnlinkGoogleAccountEndpointResponse, PrivateCreateUserData, PrivateCreateUserResponse, SessionsCreateSessionData, SessionsCreateSessionResponse, SessionsListSessionsData, SessionsListSessionsResponse, SessionsGetSessionData, SessionsGetSessionResponse, SessionsUpdateSessionData, SessionsUpdateSessionResponse, SessionsDeleteSessionData, SessionsDeleteSessionResponse, SessionsSwitchSessionModeData, SessionsSwitchSessionModeResponse, SessionsResetSdkSessionData, SessionsResetSdkSessionResponse, SshKeysReadSshKeysResponse, SshKeysImportSshKeyData, SshKeysImportSshKeyResponse, SshKeysReadSshKeyData, SshKeysReadSshKeyResponse, SshKeysUpdateSshKeyData, SshKeysUpdateSshKeyResponse, SshKeysDeleteSshKeyData, SshKeysDeleteSshKeyResponse, SshKeysGenerateSshKeyData, SshKeysGenerateSshKeyResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersSetPasswordMeData, UsersSetPasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UsersGetAiCredentialsStatusResponse, UsersGetAiCredentialsResponse, UsersDeleteAiCredentialsResponse, UsersUpdateAiCredentialsData, UsersUpdateAiCredentialsResponse, UserWorkspacesReadWorkspacesData, UserWorkspacesReadWorkspacesResponse, UserWorkspacesCreateWorkspaceData, UserWorkspacesCreateWorkspaceResponse, UserWorkspacesReadWorkspaceData, UserWorkspacesReadWorkspaceResponse, UserWorkspacesUpdateWorkspaceData, UserWorkspacesUpdateWorkspaceResponse, UserWorkspacesDeleteWorkspaceData, UserWorkspacesDeleteWorkspaceResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsRefinePromptData, UtilsRefinePromptResponse, WorkspaceGetWorkspaceTreeData, WorkspaceGetWorkspaceTreeResponse, WorkspaceDownloadWorkspaceItemData, WorkspaceDownloadWorkspaceItemResponse, WorkspaceViewWorkspaceFileData, WorkspaceViewWorkspaceFileResponse, WorkspaceGetDatabaseTablesData, WorkspaceGetDatabaseTablesResponse, WorkspaceGetDatabaseSchemaData, WorkspaceGetDatabaseSchemaResponse, WorkspaceExecuteDatabaseQueryData, WorkspaceExecuteDatabaseQueryResponse, WorkspaceGenerateSqlQueryData, WorkspaceGenerateSqlQueryResponse } from './types.gen';
 
 export class A2AService {
     /**
      * Get Agent Card
      * Return A2A AgentCard for the specified agent.
+     *
+     * Access levels:
+     * - No authentication: Returns minimal public card (name only) if A2A is enabled
+     * - Authenticated: Returns full extended card with all details
      *
      * The AgentCard provides discovery information including
      * agent capabilities, skills, and endpoint URLs.
@@ -414,6 +418,8 @@ export class AgentsService {
     /**
      * Read Agent
      * Get agent by ID with environment details.
+     *
+     * For clones: includes parent agent info and update status.
      * @param data The data for the request.
      * @param data.id
      * @returns AgentPublic Successful Response
@@ -435,6 +441,11 @@ export class AgentsService {
     /**
      * Update Agent
      * Update an agent.
+     *
+     * For "user" mode clones: Only interface settings can be modified
+     * (ui_color_preset, show_on_dashboard, conversation_mode_ui, update_mode).
+     * For "builder" mode clones: Full modification allowed.
+     * For non-clones: Normal owner access.
      * @param data The data for the request.
      * @param data.id
      * @param data.requestBody
@@ -459,6 +470,11 @@ export class AgentsService {
     /**
      * Delete Agent
      * Delete an agent and cleanup all associated resources (environments, containers).
+     *
+     * If this agent has clones (is a parent), all clones are detached first
+     * (they become independent agents).
+     * Clone owners can delete their own clones.
+     * If deleting a clone, the corresponding share record is updated to 'deleted' status.
      * @param data The data for the request.
      * @param data.id
      * @returns Message Successful Response
@@ -974,7 +990,533 @@ export class AgentsService {
     }
 }
 
+export class AgentSharesService {
+    /**
+     * Share Agent
+     * Share an agent with another user (by email).
+     *
+     * Creates a pending share that the recipient can accept or decline.
+     *
+     * - Agent must not be a clone
+     * - Target user must exist
+     * - Cannot share with yourself
+     * @param data The data for the request.
+     * @param data.agentId
+     * @param data.requestBody
+     * @returns AgentSharePublic Successful Response
+     * @throws ApiError
+     */
+    public static shareAgent(data: AgentSharesShareAgentData): CancelablePromise<AgentSharesShareAgentResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/agents/{agent_id}/shares',
+            path: {
+                agent_id: data.agentId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Agent Shares
+     * Get all shares for an agent you own.
+     * @param data The data for the request.
+     * @param data.agentId
+     * @returns AgentSharesPublic Successful Response
+     * @throws ApiError
+     */
+    public static getAgentShares(data: AgentSharesGetAgentSharesData): CancelablePromise<AgentSharesGetAgentSharesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agents/{agent_id}/shares',
+            path: {
+                agent_id: data.agentId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Agent Clones
+     * Get all clones of an agent you own.
+     * @param data The data for the request.
+     * @param data.agentId
+     * @returns AgentPublic Successful Response
+     * @throws ApiError
+     */
+    public static getAgentClones(data: AgentSharesGetAgentClonesData): CancelablePromise<AgentSharesGetAgentClonesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agents/{agent_id}/clones',
+            path: {
+                agent_id: data.agentId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Revoke Share
+     * Revoke a share or remove a share record.
+     *
+     * action=delete: Delete the clone and all its data
+     * action=detach: Clone becomes independent (user keeps it)
+     * action=remove: Remove share record from database (only for terminal states: deleted, declined, revoked)
+     * @param data The data for the request.
+     * @param data.agentId
+     * @param data.shareId
+     * @param data.action What to do with the clone
+     * @returns RevokeResponse Successful Response
+     * @throws ApiError
+     */
+    public static revokeShare(data: AgentSharesRevokeShareData): CancelablePromise<AgentSharesRevokeShareResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/agents/{agent_id}/shares/{share_id}',
+            path: {
+                agent_id: data.agentId,
+                share_id: data.shareId
+            },
+            query: {
+                action: data.action
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Pending Shares
+     * Get all pending shares for the current user.
+     *
+     * These are agents shared with you that you haven't accepted yet.
+     * @returns PendingSharesPublic Successful Response
+     * @throws ApiError
+     */
+    public static getPendingShares(): CancelablePromise<AgentSharesGetPendingSharesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/shares/pending'
+        });
+    }
+    
+    /**
+     * Accept Share
+     * Accept a pending share and create your clone.
+     *
+     * Optionally provide credential values for non-shareable credentials.
+     * @param data The data for the request.
+     * @param data.shareId
+     * @param data.requestBody
+     * @returns AgentPublic Successful Response
+     * @throws ApiError
+     */
+    public static acceptShare(data: AgentSharesAcceptShareData): CancelablePromise<AgentSharesAcceptShareResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/shares/{share_id}/accept',
+            path: {
+                share_id: data.shareId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Decline Share
+     * Decline a pending share.
+     * @param data The data for the request.
+     * @param data.shareId
+     * @returns DeclineResponse Successful Response
+     * @throws ApiError
+     */
+    public static declineShare(data: AgentSharesDeclineShareData): CancelablePromise<AgentSharesDeclineShareResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/shares/{share_id}/decline',
+            path: {
+                share_id: data.shareId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Detach Clone
+     * Detach your clone from its parent.
+     *
+     * The clone becomes an independent agent that you fully own.
+     * You can then modify it freely and even share it with others.
+     * @param data The data for the request.
+     * @param data.agentId
+     * @returns AgentPublic Successful Response
+     * @throws ApiError
+     */
+    public static detachClone(data: AgentSharesDetachCloneData): CancelablePromise<AgentSharesDetachCloneResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/agents/{agent_id}/detach',
+            path: {
+                agent_id: data.agentId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Push Updates To Clones
+     * Push updates to all clones of an agent.
+     *
+     * Queues updates for all clones. Automatic mode clones will receive
+     * updates immediately. Manual mode clones will show "Update Available".
+     *
+     * Returns count of clones updated.
+     * @param data The data for the request.
+     * @param data.agentId
+     * @returns PushUpdatesResponse Successful Response
+     * @throws ApiError
+     */
+    public static pushUpdatesToClones(data: AgentSharesPushUpdatesToClonesData): CancelablePromise<AgentSharesPushUpdatesToClonesResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/agents/{agent_id}/shares/push-updates',
+            path: {
+                agent_id: data.agentId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Apply Update
+     * Apply pending update from parent to your clone.
+     *
+     * Syncs scripts, prompts, and knowledge from parent.
+     * Your sessions and files are preserved.
+     * @param data The data for the request.
+     * @param data.agentId
+     * @returns AgentPublic Successful Response
+     * @throws ApiError
+     */
+    public static applyUpdate(data: AgentSharesApplyUpdateData): CancelablePromise<AgentSharesApplyUpdateResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/agents/{agent_id}/apply-update',
+            path: {
+                agent_id: data.agentId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Update Status
+     * Get update status for a clone.
+     *
+     * Returns information about pending updates and last sync time.
+     * @param data The data for the request.
+     * @param data.agentId
+     * @returns UpdateStatusResponse Successful Response
+     * @throws ApiError
+     */
+    public static getUpdateStatus(data: AgentSharesGetUpdateStatusData): CancelablePromise<AgentSharesGetUpdateStatusResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agents/{agent_id}/update-status',
+            path: {
+                agent_id: data.agentId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Set Update Mode
+     * Set update mode for your clone.
+     *
+     * automatic: Updates applied automatically
+     * manual: Updates require manual approval
+     * @param data The data for the request.
+     * @param data.agentId
+     * @param data.requestBody
+     * @returns AgentPublic Successful Response
+     * @throws ApiError
+     */
+    public static setUpdateMode(data: AgentSharesSetUpdateModeData): CancelablePromise<AgentSharesSetUpdateModeResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/agents/{agent_id}/update-mode',
+            path: {
+                agent_id: data.agentId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class AiCredentialsService {
+    /**
+     * List Ai Credentials
+     * List all AI credentials for the current user.
+     * @returns AICredentialsPublic Successful Response
+     * @throws ApiError
+     */
+    public static listAiCredentials(): CancelablePromise<AiCredentialsListAiCredentialsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/ai-credentials/'
+        });
+    }
+    
+    /**
+     * Create Ai Credential
+     * Create a new AI credential.
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns AICredentialPublic Successful Response
+     * @throws ApiError
+     */
+    public static createAiCredential(data: AiCredentialsCreateAiCredentialData): CancelablePromise<AiCredentialsCreateAiCredentialResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/ai-credentials/',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Ai Credential
+     * Get a single AI credential by ID.
+     * @param data The data for the request.
+     * @param data.credentialId
+     * @returns AICredentialPublic Successful Response
+     * @throws ApiError
+     */
+    public static getAiCredential(data: AiCredentialsGetAiCredentialData): CancelablePromise<AiCredentialsGetAiCredentialResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/ai-credentials/{credential_id}',
+            path: {
+                credential_id: data.credentialId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Ai Credential
+     * Update an existing AI credential.
+     * @param data The data for the request.
+     * @param data.credentialId
+     * @param data.requestBody
+     * @returns AICredentialPublic Successful Response
+     * @throws ApiError
+     */
+    public static updateAiCredential(data: AiCredentialsUpdateAiCredentialData): CancelablePromise<AiCredentialsUpdateAiCredentialResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/ai-credentials/{credential_id}',
+            path: {
+                credential_id: data.credentialId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Ai Credential
+     * Delete an AI credential.
+     * @param data The data for the request.
+     * @param data.credentialId
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static deleteAiCredential(data: AiCredentialsDeleteAiCredentialData): CancelablePromise<AiCredentialsDeleteAiCredentialResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/ai-credentials/{credential_id}',
+            path: {
+                credential_id: data.credentialId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Set Ai Credential Default
+     * Set an AI credential as the default for its type.
+     * This also syncs the credential to the user's profile for backward compatibility.
+     * @param data The data for the request.
+     * @param data.credentialId
+     * @returns AICredentialPublic Successful Response
+     * @throws ApiError
+     */
+    public static setAiCredentialDefault(data: AiCredentialsSetAiCredentialDefaultData): CancelablePromise<AiCredentialsSetAiCredentialDefaultResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/ai-credentials/{credential_id}/set-default',
+            path: {
+                credential_id: data.credentialId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
 export class CredentialsService {
+    /**
+     * Share Credential
+     * Share a credential with another user (by email).
+     *
+     * - Credential must have allow_sharing=true
+     * - Target user must exist
+     * - Cannot share with yourself
+     * @param data The data for the request.
+     * @param data.credentialId
+     * @param data.requestBody
+     * @returns CredentialSharePublic Successful Response
+     * @throws ApiError
+     */
+    public static shareCredential(data: CredentialsShareCredentialData): CancelablePromise<CredentialsShareCredentialResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/credentials/{credential_id}/shares',
+            path: {
+                credential_id: data.credentialId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Credential Shares
+     * Get all shares for a credential you own.
+     * @param data The data for the request.
+     * @param data.credentialId
+     * @returns CredentialSharesPublic Successful Response
+     * @throws ApiError
+     */
+    public static getCredentialShares(data: CredentialsGetCredentialSharesData): CancelablePromise<CredentialsGetCredentialSharesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/credentials/{credential_id}/shares',
+            path: {
+                credential_id: data.credentialId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Revoke Credential Share
+     * Revoke a credential share.
+     * @param data The data for the request.
+     * @param data.credentialId
+     * @param data.shareId
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static revokeCredentialShare(data: CredentialsRevokeCredentialShareData): CancelablePromise<CredentialsRevokeCredentialShareResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/credentials/{credential_id}/shares/{share_id}',
+            path: {
+                credential_id: data.credentialId,
+                share_id: data.shareId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Credentials Shared With Me
+     * Get all credentials shared with the current user.
+     * These are credentials owned by others that you have read access to.
+     * @returns SharedCredentialsPublic Successful Response
+     * @throws ApiError
+     */
+    public static getCredentialsSharedWithMe(): CancelablePromise<CredentialsGetCredentialsSharedWithMeResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/credentials/shared-with-me'
+        });
+    }
+    
+    /**
+     * Update Credential Sharing
+     * Enable or disable sharing for a credential.
+     *
+     * WARNING: Disabling sharing revokes ALL existing shares immediately.
+     * @param data The data for the request.
+     * @param data.credentialId
+     * @param data.requestBody
+     * @returns CredentialPublic Successful Response
+     * @throws ApiError
+     */
+    public static updateCredentialSharing(data: CredentialsUpdateCredentialSharingData): CancelablePromise<CredentialsUpdateCredentialSharingResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/credentials/{credential_id}/sharing',
+            path: {
+                credential_id: data.credentialId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
     /**
      * Read Credentials
      * Retrieve credentials (without decrypted data).
@@ -1026,6 +1568,9 @@ export class CredentialsService {
     /**
      * Read Credential
      * Get credential by ID (without decrypted data).
+     *
+     * Returns credential if user owns it OR has it shared with them.
+     * For shared credentials, is_shared=True and owner_email is set.
      * @param data The data for the request.
      * @param data.id
      * @returns CredentialPublic Successful Response

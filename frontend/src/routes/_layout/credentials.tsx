@@ -6,6 +6,7 @@ import { useEffect } from "react"
 import { CredentialsService } from "@/client"
 import AddCredential from "@/components/Credentials/AddCredential"
 import { CredentialCard } from "@/components/Credentials/CredentialCard"
+import { SharedWithMeCredentials } from "@/components/Credentials/SharedWithMeCredentials"
 import PendingItems from "@/components/Pending/PendingItems"
 import useWorkspace from "@/hooks/useWorkspace"
 import { usePageHeader } from "@/routes/_layout"
@@ -95,8 +96,15 @@ function Credentials() {
 
   return (
     <div className="p-6 md:p-8 overflow-y-auto">
-      <div className="mx-auto max-w-7xl">
-        <CredentialsGrid key={activeWorkspaceId ?? 'default'} />
+      <div className="mx-auto max-w-7xl space-y-8">
+        {/* My Credentials */}
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold">My Credentials</h2>
+          <CredentialsGrid key={activeWorkspaceId ?? 'default'} />
+        </div>
+
+        {/* Shared With Me */}
+        <SharedWithMeCredentials />
       </div>
     </div>
   )

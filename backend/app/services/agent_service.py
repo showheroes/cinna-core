@@ -31,6 +31,57 @@ def _increment_version(version: str) -> str:
 
 class AgentService:
     @staticmethod
+    def list_agents(
+        session: Session,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        workspace_filter: UUID | None = None,
+        apply_workspace_filter: bool = False,
+    ) -> tuple[list[Agent], int]:
+        """
+        List agents for a user.
+
+        All users (including superusers) only see their own agents.
+
+        Args:
+            session: Database session
+            user_id: User ID to filter agents by owner
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            workspace_filter: Workspace UUID to filter by (None means default workspace)
+            apply_workspace_filter: Whether to apply the workspace filter
+
+        Returns:
+            Tuple of (list of agents, total count)
+        """
+        from sqlalchemy import func, or_
+
+        count_statement = (
+            select(func.count())
+            .select_from(Agent)
+            .where(Agent.owner_id == user_id)
+        )
+        statement = (
+            select(Agent)
+            .where(Agent.owner_id == user_id)
+        )
+
+        if apply_workspace_filter:
+            # Include agents matching workspace OR clones (clones have user_workspace_id=None)
+            workspace_condition = or_(
+                Agent.user_workspace_id == workspace_filter,
+                Agent.is_clone == True
+            )
+            count_statement = count_statement.where(workspace_condition)
+            statement = statement.where(workspace_condition)
+
+        count = session.exec(count_statement).one()
+        agents = session.exec(statement.offset(skip).limit(limit)).all()
+
+        return list(agents), count
+
+    @staticmethod
     async def create_agent(session: Session, user_id: UUID, data: AgentCreate, user: User) -> Agent:
         """Create new agent with default environment"""
         agent = Agent.model_validate(data, update={"owner_id": user_id})

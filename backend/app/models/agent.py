@@ -1,11 +1,27 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 from sqlmodel import Field, Relationship, SQLModel, Column
 from sqlalchemy import JSON
 
 from app.models.user import User
 from app.models.link_models import AgentCredentialLink
+
+if TYPE_CHECKING:
+    from app.models.agent_share import AgentShare
+
+
+# Clone-related constants
+class CloneMode:
+    """Sharing mode for cloned agents"""
+    USER = "user"  # Read-only config, no building mode
+    BUILDER = "builder"  # Editable config, building mode allowed
+
+
+class UpdateMode:
+    """Update mode for cloned agents"""
+    AUTOMATIC = "automatic"  # Updates applied automatically
+    MANUAL = "manual"  # User decides when to apply updates
 
 
 # Shared properties
@@ -32,6 +48,8 @@ class AgentUpdate(SQLModel):
     show_on_dashboard: bool | None = None
     conversation_mode_ui: str | None = None
     a2a_config: dict | None = None
+    # Clone owners can update these
+    update_mode: str | None = None  # "automatic" | "manual"
 
 
 # Database model, database table inferred from class name
@@ -55,6 +73,17 @@ class Agent(AgentBase, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
+    # Clone relationship fields
+    is_clone: bool = Field(default=False)
+    parent_agent_id: uuid.UUID | None = Field(default=None, foreign_key="agent.id")
+    clone_mode: str | None = Field(default=None)  # "user" | "builder"
+    last_sync_at: datetime | None = Field(default=None)
+
+    # Update preferences (for clones)
+    update_mode: str = Field(default="automatic")  # "automatic" | "manual"
+    pending_update: bool = Field(default=False)
+    pending_update_at: datetime | None = Field(default=None)
+
     owner: User | None = Relationship(back_populates="agents")
     credentials: List["app.models.credential.Credential"] = Relationship(
         back_populates="agents", link_model=AgentCredentialLink
@@ -69,6 +98,13 @@ class Agent(AgentBase, table=True):
             "cascade": "all, delete-orphan"
         }
     )
+
+    # Clone relationships (self-referential)
+    parent_agent: Optional["Agent"] = Relationship(
+        back_populates="clones",
+        sa_relationship_kwargs={"remote_side": "Agent.id"}
+    )
+    clones: List["Agent"] = Relationship(back_populates="parent_agent")
 
 
 # Properties to return via API, id is always required
@@ -89,6 +125,15 @@ class AgentPublic(SQLModel):
     updated_at: datetime
     owner_id: uuid.UUID
     user_workspace_id: uuid.UUID | None
+
+    # Clone info for UI
+    is_clone: bool = False
+    clone_mode: str | None = None
+    update_mode: str = "automatic"
+    pending_update: bool = False
+    parent_agent_id: uuid.UUID | None = None
+    parent_agent_name: str | None = None  # Resolved from parent_agent
+    shared_by_email: str | None = None  # Resolved from share record
 
 
 class AgentsPublic(SQLModel):

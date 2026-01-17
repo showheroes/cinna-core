@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlmodel import func, select
+from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
 
@@ -44,6 +44,8 @@ from app.models import (
     GenerateHandoverPromptResponse,
     ExecuteHandoverRequest,
     ExecuteHandoverResponse,
+    AgentShare,
+    User,
 )
 from app.services.environment_service import EnvironmentService
 from app.services.agent_service import AgentService
@@ -55,6 +57,54 @@ from app.services.session_service import SessionService
 from app.models.session import SessionCreate
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+def _agent_to_public_with_clone_info(session, agent: Agent) -> AgentPublic:
+    """Convert Agent to AgentPublic with resolved clone information."""
+    parent_agent_name = None
+    shared_by_email = None
+
+    if agent.is_clone and agent.parent_agent_id:
+        parent = session.get(Agent, agent.parent_agent_id)
+        if parent:
+            parent_agent_name = parent.name
+
+            # Get the share record to find who shared it
+            stmt = select(AgentShare).where(
+                AgentShare.cloned_agent_id == agent.id
+            )
+            share = session.exec(stmt).first()
+            if share:
+                shared_by_user = session.get(User, share.shared_by_user_id)
+                if shared_by_user:
+                    shared_by_email = shared_by_user.email
+
+    return AgentPublic(
+        id=agent.id,
+        name=agent.name,
+        description=agent.description,
+        workflow_prompt=agent.workflow_prompt,
+        entrypoint_prompt=agent.entrypoint_prompt,
+        is_active=agent.is_active,
+        active_environment_id=agent.active_environment_id,
+        ui_color_preset=agent.ui_color_preset,
+        show_on_dashboard=agent.show_on_dashboard,
+        conversation_mode_ui=agent.conversation_mode_ui,
+        agent_sdk_config=agent.agent_sdk_config,
+        a2a_config=agent.a2a_config,
+        created_at=agent.created_at,
+        updated_at=agent.updated_at,
+        owner_id=agent.owner_id,
+        user_workspace_id=agent.user_workspace_id,
+        # Clone info
+        is_clone=agent.is_clone,
+        clone_mode=agent.clone_mode,
+        update_mode=agent.update_mode,
+        pending_update=agent.pending_update,
+        parent_agent_id=agent.parent_agent_id,
+        parent_agent_name=parent_agent_name,
+        shared_by_email=shared_by_email
+    )
 
 
 @router.get("/", response_model=AgentsPublic)
@@ -90,48 +140,36 @@ def read_agents(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid workspace ID format")
 
-    if current_user.is_superuser:
-        count_statement = select(func.count()).select_from(Agent)
-        statement = select(Agent)
+    # Use service to list agents
+    agents, count = AgentService.list_agents(
+        session=session,
+        user_id=current_user.id,
+        skip=skip,
+        limit=limit,
+        workspace_filter=workspace_filter,
+        apply_workspace_filter=apply_filter,
+    )
 
-        if apply_filter:
-            count_statement = count_statement.where(Agent.user_workspace_id == workspace_filter)
-            statement = statement.where(Agent.user_workspace_id == workspace_filter)
-
-        count = session.exec(count_statement).one()
-        agents = session.exec(statement.offset(skip).limit(limit)).all()
-    else:
-        count_statement = (
-            select(func.count())
-            .select_from(Agent)
-            .where(Agent.owner_id == current_user.id)
-        )
-        statement = (
-            select(Agent)
-            .where(Agent.owner_id == current_user.id)
-        )
-
-        if apply_filter:
-            count_statement = count_statement.where(Agent.user_workspace_id == workspace_filter)
-            statement = statement.where(Agent.user_workspace_id == workspace_filter)
-
-        count = session.exec(count_statement).one()
-        agents = session.exec(statement.offset(skip).limit(limit)).all()
-
-    return AgentsPublic(data=agents, count=count)
+    # Convert to public format with clone info
+    agents_public = [_agent_to_public_with_clone_info(session, a) for a in agents]
+    return AgentsPublic(data=agents_public, count=count)
 
 
 @router.get("/{id}", response_model=AgentPublic)
 def read_agent(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
     """
     Get agent by ID with environment details.
+
+    For clones: includes parent agent info and update status.
     """
     agent = AgentService.get_agent_with_environment(session=session, agent_id=id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     if not current_user.is_superuser and (agent.owner_id != current_user.id):
         raise HTTPException(status_code=400, detail="Not enough permissions")
-    return agent
+
+    # Return with clone info resolved
+    return _agent_to_public_with_clone_info(session, agent)
 
 
 @router.post("/", response_model=AgentPublic)
@@ -190,6 +228,11 @@ def update_agent(
 ) -> Any:
     """
     Update an agent.
+
+    For "user" mode clones: Only interface settings can be modified
+    (ui_color_preset, show_on_dashboard, conversation_mode_ui, update_mode).
+    For "builder" mode clones: Full modification allowed.
+    For non-clones: Normal owner access.
     """
     agent = session.get(Agent, id)
     if not agent:
@@ -197,12 +240,31 @@ def update_agent(
     if not current_user.is_superuser and (agent.owner_id != current_user.id):
         raise HTTPException(status_code=400, detail="Not enough permissions")
 
+    # Clone restrictions for "user" mode
+    if agent.is_clone and agent.clone_mode == "user":
+        # Only allow interface settings and update_mode for user mode clones
+        allowed_fields = {
+            "ui_color_preset",
+            "show_on_dashboard",
+            "conversation_mode_ui",
+            "update_mode",
+            "is_active"
+        }
+        update_dict = agent_in.model_dump(exclude_unset=True)
+
+        for field in update_dict.keys():
+            if field not in allowed_fields:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"User mode clones cannot modify '{field}'. Only interface settings allowed."
+                )
+
     updated_agent = AgentService.update_agent(
         session=session, agent_id=id, data=agent_in
     )
     if not updated_agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return updated_agent
+    return _agent_to_public_with_clone_info(session, updated_agent)
 
 
 @router.post("/{id}/sync-prompts", response_model=Message)
@@ -264,12 +326,44 @@ async def delete_agent(
 ) -> Message:
     """
     Delete an agent and cleanup all associated resources (environments, containers).
+
+    If this agent has clones (is a parent), all clones are detached first
+    (they become independent agents).
+    Clone owners can delete their own clones.
+    If deleting a clone, the corresponding share record is updated to 'deleted' status.
     """
     agent = session.get(Agent, id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     if not current_user.is_superuser and (agent.owner_id != current_user.id):
         raise HTTPException(status_code=400, detail="Not enough permissions")
+
+    # If this agent is a clone, update the share record status to 'deleted'
+    if agent.is_clone:
+        stmt = select(AgentShare).where(AgentShare.cloned_agent_id == id)
+        share = session.exec(stmt).first()
+        if share:
+            share.status = "deleted"
+            share.cloned_agent_id = None  # Clear the reference since clone is being deleted
+            session.add(share)
+            logger.info(f"Updated share {share.id} status to 'deleted' for deleted clone {id}")
+            session.commit()
+
+    # If this agent has clones (is a parent), detach them first
+    if not agent.is_clone:
+        stmt = select(Agent).where(Agent.parent_agent_id == id)
+        clones = session.exec(stmt).all()
+        for clone in clones:
+            clone.is_clone = False
+            clone.parent_agent_id = None
+            clone.clone_mode = None
+            clone.pending_update = False
+            clone.pending_update_at = None
+            session.add(clone)
+            logger.info(f"Detached clone {clone.id} from deleted parent {id}")
+
+        if clones:
+            session.commit()
 
     success = await AgentService.delete_agent(session=session, agent_id=id)
     if not success:

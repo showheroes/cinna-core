@@ -895,6 +895,7 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
             "name": credential.name,
             "type": credential.type,
             "notes": credential.notes,
+            "allow_sharing": credential.allow_sharing,
             "owner_id": credential.owner_id,
             "user_workspace_id": credential.user_workspace_id,
             "credential_data": credential_data
@@ -928,6 +929,8 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         """
         Link a credential to an agent with authorization checks.
 
+        Users can link credentials they own OR credentials shared with them.
+
         Args:
             session: Database session
             agent_id: Agent ID
@@ -938,6 +941,8 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         Raises:
             ValueError: If agent or credential not found, or permission denied
         """
+        from app.services.credential_share_service import CredentialShareService
+
         # Verify agent exists and user owns it
         agent = session.get(Agent, agent_id)
         if not agent:
@@ -945,12 +950,11 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         if not is_superuser and agent.owner_id != owner_id:
             raise ValueError("Not enough permissions to access this agent")
 
-        # Verify credential exists and user owns it
-        # Credentials are always private - only owner can access
+        # Verify credential exists and user can access it (owns it OR has share)
         credential = session.get(Credential, credential_id)
         if not credential:
             raise ValueError("Credential not found")
-        if credential.owner_id != owner_id:
+        if not CredentialShareService.can_user_access_credential(session, credential_id, owner_id):
             raise ValueError("Not enough permissions to access this credential")
 
         # Link credential to agent

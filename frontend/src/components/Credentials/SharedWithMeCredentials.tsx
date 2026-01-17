@@ -1,7 +1,9 @@
+import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Key, Mail, Database, AtSign, Share2, Users } from "lucide-react"
+import { Key, Mail, Database, AtSign, Users } from "lucide-react"
 
-import type { CredentialPublic } from "@/client"
+import { CredentialsService } from "@/client"
+import type { SharedCredentialPublic } from "@/client"
 import {
   Card,
   CardContent,
@@ -16,10 +18,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-
-interface CredentialCardProps {
-  credential: CredentialPublic
-}
 
 function getCredentialIcon(type: string) {
   switch (type) {
@@ -66,9 +64,7 @@ function getCredentialTypeLabel(type: string): string {
   }
 }
 
-export function CredentialCard({ credential }: CredentialCardProps) {
-  const shareCount = credential.share_count ?? 0
-
+function SharedCredentialCard({ credential }: { credential: SharedCredentialPublic }) {
   return (
     <Link
       to="/credential/$credentialId"
@@ -78,7 +74,7 @@ export function CredentialCard({ credential }: CredentialCardProps) {
       <Card className="relative transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer h-full flex flex-col gap-0">
         <CardHeader className="pb-2">
           <div className="flex items-start gap-3">
-            <div className="rounded-lg bg-primary/10 p-2 text-primary">
+            <div className="rounded-lg bg-blue-500/10 p-2 text-blue-500">
               {getCredentialIcon(credential.type)}
             </div>
             <div className="flex-1 min-w-0">
@@ -99,35 +95,66 @@ export function CredentialCard({ credential }: CredentialCardProps) {
             <Badge variant="secondary">
               {getCredentialTypeLabel(credential.type)}
             </Badge>
-            {credential.allow_sharing && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant="outline" className="gap-1">
-                      {shareCount > 0 ? (
-                        <>
-                          <Users className="h-3 w-3" />
-                          {shareCount}
-                        </>
-                      ) : (
-                        <>
-                          <Share2 className="h-3 w-3" />
-                          Shareable
-                        </>
-                      )}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {shareCount > 0
-                      ? `Shared with ${shareCount} user${shareCount > 1 ? "s" : ""}`
-                      : "This credential can be shared with others"}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="outline" className="gap-1 bg-blue-50 text-blue-700 border-blue-200">
+                    <Users className="h-3 w-3" />
+                    Shared
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Shared by {credential.owner_email}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(credential.shared_at).toLocaleDateString()}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            Shared by {credential.owner_email}
           </div>
         </CardContent>
       </Card>
     </Link>
+  )
+}
+
+export function SharedWithMeCredentials() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["credentials-shared-with-me"],
+    queryFn: () => CredentialsService.getCredentialsSharedWithMe(),
+  })
+
+  if (isLoading) {
+    return null // Don't show loading state to avoid layout shift
+  }
+
+  if (error) {
+    return null // Don't show errors, fail silently
+  }
+
+  const credentials = data?.data || []
+
+  if (credentials.length === 0) {
+    return null // Don't show section if no shared credentials
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Users className="h-5 w-5 text-blue-500" />
+        <h2 className="text-lg font-semibold">Shared with Me</h2>
+        <Badge variant="secondary" className="ml-1">
+          {credentials.length}
+        </Badge>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 auto-rows-fr">
+        {credentials.map((credential) => (
+          <SharedCredentialCard key={credential.id} credential={credential} />
+        ))}
+      </div>
+    </div>
   )
 }

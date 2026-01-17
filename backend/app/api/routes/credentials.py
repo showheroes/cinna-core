@@ -15,8 +15,36 @@ from app.models import (
     Message,
 )
 from app.services.credentials_service import CredentialsService
+from app.services.credential_share_service import CredentialShareService
 
 router = APIRouter(prefix="/credentials", tags=["credentials"])
+
+
+def _credential_to_public(
+    session,
+    credential: Credential,
+    is_shared: bool = False,
+    owner_email: str | None = None
+) -> CredentialPublic:
+    """Convert a Credential model to CredentialPublic with share_count."""
+    share_count = 0
+    if not is_shared:
+        # Only show share_count to owners
+        share_count = CredentialShareService.get_share_count_for_credential(
+            session=session, credential_id=credential.id
+        )
+    return CredentialPublic(
+        id=credential.id,
+        name=credential.name,
+        type=credential.type,
+        notes=credential.notes,
+        allow_sharing=credential.allow_sharing,
+        owner_id=credential.owner_id,
+        user_workspace_id=credential.user_workspace_id,
+        share_count=share_count,
+        is_shared=is_shared,
+        owner_email=owner_email
+    )
 
 
 @router.get("/", response_model=CredentialsPublic)
@@ -70,7 +98,10 @@ def read_credentials(
     count = session.exec(count_statement).one()
     credentials = session.exec(statement.offset(skip).limit(limit)).all()
 
-    return CredentialsPublic(data=credentials, count=count)
+    # Convert to public models with share_count
+    credentials_public = [_credential_to_public(session, c) for c in credentials]
+
+    return CredentialsPublic(data=credentials_public, count=count)
 
 
 @router.get("/{id}", response_model=CredentialPublic)
@@ -79,14 +110,27 @@ def read_credential(
 ) -> Any:
     """
     Get credential by ID (without decrypted data).
+
+    Returns credential if user owns it OR has it shared with them.
+    For shared credentials, is_shared=True and owner_email is set.
     """
+    from app.models.user import User
+
     credential = session.get(Credential, id)
     if not credential:
         raise HTTPException(status_code=404, detail="Credential not found")
-    # Credentials are always private - only owner can access
-    if credential.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions")
-    return credential
+
+    # Check if user owns the credential
+    if credential.owner_id == current_user.id:
+        return _credential_to_public(session, credential, is_shared=False)
+
+    # Check if credential is shared with user
+    if CredentialShareService.can_user_access_credential(session, id, current_user.id):
+        owner = session.get(User, credential.owner_id)
+        owner_email = owner.email if owner else None
+        return _credential_to_public(session, credential, is_shared=True, owner_email=owner_email)
+
+    raise HTTPException(status_code=400, detail="Not enough permissions")
 
 
 @router.get("/{id}/with-data", response_model=CredentialWithData)
@@ -103,6 +147,11 @@ def read_credential_with_data(
             owner_id=current_user.id,
             is_superuser=current_user.is_superuser
         )
+        # Add share_count
+        share_count = CredentialShareService.get_share_count_for_credential(
+            session=session, credential_id=id
+        )
+        credential_data_dict["share_count"] = share_count
         return CredentialWithData(**credential_data_dict)
     except ValueError as e:
         # Service raises ValueError for not found or permission errors
@@ -122,7 +171,7 @@ def create_credential(
         credential_in=credential_in,
         owner_id=current_user.id
     )
-    return credential
+    return _credential_to_public(session, credential)
 
 
 @router.put("/{id}", response_model=CredentialPublic)
@@ -147,7 +196,7 @@ async def update_credential(
             owner_id=current_user.id,
             is_superuser=current_user.is_superuser
         )
-        return credential
+        return _credential_to_public(session, credential)
     except ValueError as e:
         # Service raises ValueError for not found or permission errors
         status_code = 404 if "not found" in str(e).lower() else 400

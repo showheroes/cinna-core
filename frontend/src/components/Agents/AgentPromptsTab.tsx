@@ -41,9 +41,10 @@ type WorkflowFormData = z.infer<typeof workflowFormSchema>
 
 interface AgentPromptsTabProps {
   agent: AgentPublic
+  readOnly?: boolean
 }
 
-export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
+export function AgentPromptsTab({ agent, readOnly = false }: AgentPromptsTabProps) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -183,6 +184,7 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
                           className="min-h-[80px]"
                           {...field}
                           value={field.value || ""}
+                          disabled={readOnly}
                         />
                       </FormControl>
                       <FormMessage />
@@ -190,7 +192,7 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
                   )}
                 />
 
-                {entrypointForm.formState.isDirty && (
+                {!readOnly && entrypointForm.formState.isDirty && (
                   <div className="flex justify-end gap-2">
                     <Button
                       type="button"
@@ -213,49 +215,51 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
           </CardContent>
         </Card>
 
-        {/* Scheduler Card */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between">
-              <div className="space-y-1.5">
-                <CardTitle>Scheduler</CardTitle>
-                <CardDescription>
-                  Schedule execution time for this agent with entrypoint prompt as
-                  starting message
-                </CardDescription>
-              </div>
-              <label className="flex cursor-pointer select-none items-center ml-4 mt-1">
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={schedulerEnabled}
-                    onChange={(e) => handleSchedulerToggle(e.target.checked)}
-                    className="sr-only"
-                  />
-                  <div
-                    className={`block h-6 w-11 rounded-full transition-colors ${
-                      schedulerEnabled ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"
-                    }`}
-                  ></div>
-                  <div
-                    className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                      schedulerEnabled ? "translate-x-5" : ""
-                    }`}
-                  ></div>
+        {/* Scheduler Card - hidden for read-only mode */}
+        {!readOnly && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between">
+                <div className="space-y-1.5">
+                  <CardTitle>Scheduler</CardTitle>
+                  <CardDescription>
+                    Schedule execution time for this agent with entrypoint prompt as
+                    starting message
+                  </CardDescription>
                 </div>
-              </label>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <SmartScheduler
-              agentId={agent.id}
-              currentSchedule={schedule ?? undefined}
-              onScheduleUpdate={() => refetchSchedule()}
-              enabled={schedulerEnabled}
-              onToggle={handleSchedulerToggle}
-            />
-          </CardContent>
-        </Card>
+                <label className="flex cursor-pointer select-none items-center ml-4 mt-1">
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={schedulerEnabled}
+                      onChange={(e) => handleSchedulerToggle(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div
+                      className={`block h-6 w-11 rounded-full transition-colors ${
+                        schedulerEnabled ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"
+                      }`}
+                    ></div>
+                    <div
+                      className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                        schedulerEnabled ? "translate-x-5" : ""
+                      }`}
+                    ></div>
+                  </div>
+                </label>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <SmartScheduler
+                agentId={agent.id}
+                currentSchedule={schedule ?? undefined}
+                onScheduleUpdate={() => refetchSchedule()}
+                enabled={schedulerEnabled}
+                onToggle={handleSchedulerToggle}
+              />
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Bottom Row: Workflow Prompt (full width) */}
@@ -284,6 +288,7 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
                         className="min-h-[300px]"
                         {...field}
                         value={field.value || ""}
+                        disabled={readOnly}
                       />
                     </FormControl>
                     <FormMessage />
@@ -291,7 +296,7 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
                 )}
               />
 
-              {workflowForm.formState.isDirty && (
+              {!readOnly && workflowForm.formState.isDirty && (
                 <div className="flex justify-end gap-2">
                   <Button
                     type="button"
@@ -315,7 +320,7 @@ export function AgentPromptsTab({ agent }: AgentPromptsTabProps) {
       </Card>
 
       {/* Handover to Agents Section */}
-      <AgentHandovers agent={agent} />
+      <AgentHandovers agent={agent} readOnly={readOnly} />
     </div>
   )
 }

@@ -1,0 +1,528 @@
+import { useState } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { Share2, Info, Link2Off, Plus, Trash2, Send, Loader2, User, Wrench, RotateCcw } from "lucide-react"
+
+import type { AgentPublic, AgentSharePublic } from "@/client"
+import { AgentSharesService } from "@/client"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog"
+
+import { RevokeShareDialog } from "./ShareManagement/RevokeShareDialog"
+import { UpdateModeToggle, DetachDialog } from "./CloneManagement"
+
+interface AgentSharingTabProps {
+  agent: AgentPublic
+}
+
+export function AgentSharingTab({ agent }: AgentSharingTabProps) {
+  const [detachDialogOpen, setDetachDialogOpen] = useState(false)
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [revokeShare, setRevokeShare] = useState<AgentSharePublic | null>(null)
+  const [removeShare, setRemoveShare] = useState<AgentSharePublic | null>(null)
+  const [reshareShare, setReshareShare] = useState<AgentSharePublic | null>(null)
+  const [newShareEmail, setNewShareEmail] = useState("")
+  const [newShareMode, setNewShareMode] = useState<"user" | "builder">("user")
+
+  const queryClient = useQueryClient()
+
+  // Fetch shares for owners
+  const { data: shares } = useQuery({
+    queryKey: ["agentShares", agent.id],
+    queryFn: () => AgentSharesService.getAgentShares({ agentId: agent.id }),
+    enabled: !agent.is_clone,
+  })
+
+  // Create share mutation
+  const shareMutation = useMutation({
+    mutationFn: () =>
+      AgentSharesService.shareAgent({
+        agentId: agent.id,
+        requestBody: {
+          shared_with_email: newShareEmail,
+          share_mode: newShareMode,
+        },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agentShares", agent.id] })
+      setNewShareEmail("")
+      setNewShareMode("user")
+      setShowAddForm(false)
+    },
+  })
+
+  // Push updates mutation
+  const pushMutation = useMutation({
+    mutationFn: () => AgentSharesService.pushUpdatesToClones({ agentId: agent.id }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agentShares", agent.id] })
+    },
+  })
+
+  // Remove share record mutation (for deleted/declined/revoked shares cleanup)
+  const removeShareMutation = useMutation({
+    mutationFn: (shareId: string) =>
+      AgentSharesService.revokeShare({ agentId: agent.id, shareId, action: "remove" }),
+    onSuccess: () => {
+      setRemoveShare(null)
+      queryClient.invalidateQueries({ queryKey: ["agentShares", agent.id] })
+    },
+  })
+
+  // Re-share mutation (for revoked shares)
+  const reshareMutation = useMutation({
+    mutationFn: (data: { email: string; mode: string }) =>
+      AgentSharesService.shareAgent({
+        agentId: agent.id,
+        requestBody: {
+          shared_with_email: data.email,
+          share_mode: data.mode,
+        },
+      }),
+    onSuccess: () => {
+      setReshareShare(null)
+      queryClient.invalidateQueries({ queryKey: ["agentShares", agent.id] })
+    },
+  })
+
+  const handleAddShare = (e: React.FormEvent) => {
+    e.preventDefault()
+    shareMutation.mutate()
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "pending":
+        return <Badge variant="outline">Pending</Badge>
+      case "accepted":
+        return <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Accepted</Badge>
+      case "declined":
+        return <Badge variant="secondary">Declined</Badge>
+      case "revoked":
+        return <Badge variant="destructive">Revoked</Badge>
+      case "deleted":
+        return <Badge className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">Deleted</Badge>
+      default:
+        return <Badge>{status}</Badge>
+    }
+  }
+
+  const allShares = shares?.data || []
+
+  // If this is a clone, show clone settings
+  if (agent.is_clone) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Link2Off className="h-5 w-5" />
+              Clone Settings
+            </CardTitle>
+            <CardDescription>
+              This agent is a clone shared by {agent.shared_by_email || "another user"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Update mode toggle */}
+            <UpdateModeToggle
+              agentId={agent.id}
+              currentMode={agent.update_mode || "manual"}
+            />
+
+            {/* Detach section */}
+            <div className="pt-4 border-t">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-medium">Detach from Parent</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Make this agent independent. You'll have full control but won't receive updates.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setDetachDialogOpen(true)}
+                >
+                  <Link2Off className="h-4 w-4 mr-2" />
+                  Detach
+                </Button>
+              </div>
+            </div>
+
+            {/* Parent info */}
+            {agent.parent_agent_name && (
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  Parent agent: <strong>{agent.parent_agent_name}</strong>
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Read-only notice for user mode */}
+        {agent.clone_mode === "user" && (
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertDescription>
+              You have <strong>User Access</strong> to this clone.
+              Configuration tabs are read-only. You can use the agent in conversation mode.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Detach dialog */}
+        <DetachDialog
+          open={detachDialogOpen}
+          onOpenChange={setDetachDialogOpen}
+          agentId={agent.id}
+          onDetached={() => {}}
+        />
+      </div>
+    )
+  }
+
+  // For non-clones (owners), show share management
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between">
+            <div className="space-y-1.5">
+              <CardTitle className="flex items-center gap-2">
+                <Share2 className="h-5 w-5" />
+                Share Agent
+              </CardTitle>
+              <CardDescription>
+                Share this agent with other users. They'll receive a clone they can use.
+              </CardDescription>
+            </div>
+            <Button onClick={() => setShowAddForm(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Share agent
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Shares table */}
+          {allShares.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No shares yet. Click "Share agent" to share this agent with other users.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Access</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Shared</TableHead>
+                  <TableHead className="w-[140px]">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {allShares.map((share) => (
+                  <TableRow key={share.id}>
+                    <TableCell className="font-medium">
+                      {share.shared_with_email}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {share.share_mode === "builder" ? (
+                          <Wrench className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                        ) : (
+                          <User className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        )}
+                        {share.share_mode === "builder" ? "Builder" : "User"}
+                      </div>
+                    </TableCell>
+                    <TableCell>{getStatusBadge(share.status)}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {new Date(share.shared_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {share.status === "accepted" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => pushMutation.mutate()}
+                            disabled={pushMutation.isPending}
+                            title="Push updates to all clones"
+                          >
+                            {pushMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Send className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
+                        {share.status !== "revoked" && share.status !== "deleted" && share.status !== "declined" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setRevokeShare(share)}
+                            title="Revoke access"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
+                        {share.status === "revoked" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setReshareShare(share)}
+                            title="Re-share with this user"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {(share.status === "deleted" || share.status === "declined" || share.status === "revoked") && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setRemoveShare(share)}
+                            title="Remove from list"
+                          >
+                            <Trash2 className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+
+          {/* Push updates success message */}
+          {pushMutation.isSuccess && (
+            <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
+              <Info className="h-4 w-4 text-green-600 dark:text-green-400" />
+              <AlertDescription className="text-green-800 dark:text-green-200">
+                Updates pushed! Automatic clones will update immediately.
+                Manual clones will see "Update Available".
+              </AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Information about sharing */}
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertDescription>
+          <strong>How sharing works:</strong>
+          <ul className="list-disc list-inside mt-2 space-y-1">
+            <li>Recipients get a clone they can customize (if Builder mode) or use (if User mode)</li>
+            <li>You can push updates to all clones when you make changes</li>
+            <li>Clones can choose automatic or manual updates</li>
+            <li>You can revoke access at any time (delete clone or let them keep it)</li>
+          </ul>
+        </AlertDescription>
+      </Alert>
+
+      {/* Add share dialog */}
+      <Dialog open={showAddForm} onOpenChange={setShowAddForm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Share Agent</DialogTitle>
+            <DialogDescription>
+              Share this agent with another user. They'll receive a clone they can use.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAddShare} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">User Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="user@example.com"
+                value={newShareEmail}
+                onChange={(e) => setNewShareEmail(e.target.value)}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                The user must have an existing account.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <Label>Access Level</Label>
+              <RadioGroup value={newShareMode} onValueChange={(v) => setNewShareMode(v as "user" | "builder")}>
+                <div className="flex items-start space-x-3 p-3 border rounded-lg">
+                  <RadioGroupItem value="user" id="share-user" className="mt-1" />
+                  <div>
+                    <Label htmlFor="share-user" className="font-medium cursor-pointer">User Access</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Can use the agent in conversation mode. Configuration is read-only.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start space-x-3 p-3 border rounded-lg">
+                  <RadioGroupItem value="builder" id="share-builder" className="mt-1" />
+                  <div>
+                    <Label htmlFor="share-builder" className="font-medium cursor-pointer">Builder Access</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Full access to modify prompts, scripts, and configuration.
+                    </p>
+                  </div>
+                </div>
+              </RadioGroup>
+            </div>
+
+            {shareMutation.error && (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  {(shareMutation.error as Error).message || "Failed to share agent"}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setShowAddForm(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={shareMutation.isPending || !newShareEmail}>
+                {shareMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Sharing...
+                  </>
+                ) : (
+                  "Share"
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Revoke dialog */}
+      {revokeShare && (
+        <RevokeShareDialog
+          open={!!revokeShare}
+          onOpenChange={(open) => !open && setRevokeShare(null)}
+          share={revokeShare}
+          agentId={agent.id}
+          onRevoked={() => {
+            setRevokeShare(null)
+            queryClient.invalidateQueries({ queryKey: ["agentShares", agent.id] })
+          }}
+        />
+      )}
+
+      {/* Remove share confirmation dialog */}
+      <Dialog open={!!removeShare} onOpenChange={(open) => !open && setRemoveShare(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Share Record</DialogTitle>
+            <DialogDescription>
+              Remove the share record for {removeShare?.shared_with_email}?
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This will permanently remove the share record from your list.
+            This action cannot be undone.
+          </p>
+          {removeShareMutation.error && (
+            <Alert variant="destructive">
+              <AlertDescription>
+                {(removeShareMutation.error as Error).message || "Failed to remove share"}
+              </AlertDescription>
+            </Alert>
+          )}
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setRemoveShare(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => removeShare && removeShareMutation.mutate(removeShare.id)}
+              disabled={removeShareMutation.isPending}
+            >
+              {removeShareMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Removing...
+                </>
+              ) : (
+                "Remove"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Re-share confirmation dialog */}
+      <Dialog open={!!reshareShare} onOpenChange={(open) => !open && setReshareShare(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Re-share Agent</DialogTitle>
+            <DialogDescription>
+              Re-share this agent with {reshareShare?.shared_with_email}?
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This will send a new share invitation to the user.
+            They will need to accept it to receive a new clone.
+          </p>
+          {reshareMutation.error && (
+            <Alert variant="destructive">
+              <AlertDescription>
+                {(reshareMutation.error as Error).message || "Failed to re-share agent"}
+              </AlertDescription>
+            </Alert>
+          )}
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setReshareShare(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => reshareShare && reshareMutation.mutate({
+                email: reshareShare.shared_with_email,
+                mode: reshareShare.share_mode
+              })}
+              disabled={reshareMutation.isPending}
+            >
+              {reshareMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Sharing...
+                </>
+              ) : (
+                "Re-share"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

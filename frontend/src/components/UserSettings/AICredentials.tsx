@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Trash2, AlertCircle, MessageCircle, Wrench } from "lucide-react"
-import { UsersService } from "@/client"
+import { Trash2, AlertCircle, MessageCircle, Wrench, Plus, Pencil, Star, Key } from "lucide-react"
+import { UsersService, AiCredentialsService, AICredentialPublic, AICredentialType } from "@/client"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -14,156 +13,83 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import useCustomToast from "@/hooks/useCustomToast"
+import { AICredentialDialog } from "./AICredentialDialog"
 
 // SDK options
 const SDK_OPTIONS = [
-  { id: "claude-code/anthropic", name: "Anthropic Claude", requiredKey: "anthropic" },
-  { id: "claude-code/minimax", name: "MiniMax M2", requiredKey: "minimax" },
-  { id: "google-adk-wr/openai-compatible", name: "OpenAI Compatible", requiredKey: "openai_compatible" },
+  { id: "claude-code/anthropic", name: "Anthropic Claude", requiredType: "anthropic" as AICredentialType },
+  { id: "claude-code/minimax", name: "MiniMax M2", requiredType: "minimax" as AICredentialType },
+  { id: "google-adk-wr/openai-compatible", name: "OpenAI Compatible", requiredType: "openai_compatible" as AICredentialType },
 ]
+
+// Type display names
+const TYPE_DISPLAY_NAMES: Record<AICredentialType, string> = {
+  anthropic: "Anthropic",
+  minimax: "MiniMax",
+  openai_compatible: "OpenAI Compatible",
+}
 
 function getSDKDisplayName(sdkId: string | null | undefined): string {
   const sdk = SDK_OPTIONS.find(s => s.id === sdkId)
   return sdk?.name || "Anthropic Claude"
 }
 
+function getTypeDisplayName(type: AICredentialType): string {
+  return TYPE_DISPLAY_NAMES[type] || type
+}
+
 export function AICredentialsSettings() {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
-  const [anthropicKey, setAnthropicKey] = useState("")
-  const [minimaxKey, setMinimaxKey] = useState("")
-  // OpenAI Compatible credentials
-  const [openaiCompatibleKey, setOpenaiCompatibleKey] = useState("")
-  const [openaiCompatibleUrl, setOpenaiCompatibleUrl] = useState("")
-  const [openaiCompatibleModel, setOpenaiCompatibleModel] = useState("")
 
-  // Get current status
+  // Dialog state
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingCredential, setEditingCredential] = useState<AICredentialPublic | null>(null)
+
+  // Get current status (for SDK preferences and has_* flags)
   const { data: status } = useQuery({
     queryKey: ["aiCredentialsStatus"],
     queryFn: () => UsersService.getAiCredentialsStatus(),
   })
 
-  // Get full credentials (for non-secret values like URL and model)
-  const { data: credentials } = useQuery({
-    queryKey: ["aiCredentials"],
-    queryFn: () => UsersService.getAiCredentials(),
+  // Get list of named credentials
+  const { data: credentialsList, isLoading: isLoadingCredentials } = useQuery({
+    queryKey: ["aiCredentialsList"],
+    queryFn: () => AiCredentialsService.listAiCredentials(),
   })
 
-  // Initialize OpenAI Compatible fields when credentials are loaded
-  useEffect(() => {
-    if (credentials) {
-      setOpenaiCompatibleUrl(credentials.openai_compatible_base_url || "")
-      setOpenaiCompatibleModel(credentials.openai_compatible_model || "")
-    }
-  }, [credentials])
-
-  // Update Anthropic mutation
-  const updateAnthropicMutation = useMutation({
-    mutationFn: (key: string) =>
-      UsersService.updateAiCredentials({
-        requestBody: { anthropic_api_key: key }
-      }),
+  // Delete credential mutation
+  const deleteMutation = useMutation({
+    mutationFn: (credentialId: string) =>
+      AiCredentialsService.deleteAiCredential({ credentialId }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["aiCredentialsList"] })
       queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
-      setAnthropicKey("")
-      showSuccessToast("Anthropic API key updated successfully")
+      showSuccessToast("AI credential deleted successfully")
     },
     onError: () => {
-      showErrorToast("Failed to update Anthropic API key")
+      showErrorToast("Failed to delete AI credential")
     },
   })
 
-  // Update MiniMax mutation
-  const updateMinimaxMutation = useMutation({
-    mutationFn: (key: string) =>
-      UsersService.updateAiCredentials({
-        requestBody: { minimax_api_key: key }
-      }),
+  // Set default mutation
+  const setDefaultMutation = useMutation({
+    mutationFn: (credentialId: string) =>
+      AiCredentialsService.setAiCredentialDefault({ credentialId }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["aiCredentialsList"] })
       queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
-      setMinimaxKey("")
-      showSuccessToast("MiniMax API key updated successfully")
+      showSuccessToast("Default credential updated")
     },
     onError: () => {
-      showErrorToast("Failed to update MiniMax API key")
-    },
-  })
-
-  // Delete Anthropic mutation
-  const deleteAnthropicMutation = useMutation({
-    mutationFn: () =>
-      UsersService.updateAiCredentials({
-        requestBody: { anthropic_api_key: "" }
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
-      showSuccessToast("Anthropic API key deleted successfully")
-    },
-    onError: () => {
-      showErrorToast("Failed to delete Anthropic API key")
-    },
-  })
-
-  // Delete MiniMax mutation
-  const deleteMinimaxMutation = useMutation({
-    mutationFn: () =>
-      UsersService.updateAiCredentials({
-        requestBody: { minimax_api_key: "" }
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
-      showSuccessToast("MiniMax API key deleted successfully")
-    },
-    onError: () => {
-      showErrorToast("Failed to delete MiniMax API key")
-    },
-  })
-
-  // Update OpenAI Compatible mutation - only sends fields that have changed
-  const updateOpenaiCompatibleMutation = useMutation({
-    mutationFn: (data: { api_key?: string; base_url?: string; model?: string }) => {
-      // Build request body with only non-empty fields to avoid overwriting existing values
-      const requestBody: Record<string, string> = {}
-      if (data.api_key) {
-        requestBody.openai_compatible_api_key = data.api_key
-      }
-      if (data.base_url) {
-        requestBody.openai_compatible_base_url = data.base_url
-      }
-      if (data.model) {
-        requestBody.openai_compatible_model = data.model
-      }
-      return UsersService.updateAiCredentials({ requestBody })
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
-      queryClient.invalidateQueries({ queryKey: ["aiCredentials"] })
-      setOpenaiCompatibleKey("")
-      showSuccessToast("OpenAI Compatible credentials updated successfully")
-    },
-    onError: () => {
-      showErrorToast("Failed to update OpenAI Compatible credentials")
-    },
-  })
-
-  // Delete OpenAI Compatible mutation
-  const deleteOpenaiCompatibleMutation = useMutation({
-    mutationFn: () =>
-      UsersService.updateAiCredentials({
-        requestBody: {
-          openai_compatible_api_key: "",
-          openai_compatible_base_url: "",
-          openai_compatible_model: "",
-        }
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
-      queryClient.invalidateQueries({ queryKey: ["aiCredentials"] })
-      showSuccessToast("OpenAI Compatible credentials deleted successfully")
-    },
-    onError: () => {
-      showErrorToast("Failed to delete OpenAI Compatible credentials")
+      showErrorToast("Failed to set default credential")
     },
   })
 
@@ -181,14 +107,16 @@ export function AICredentialsSettings() {
     },
   })
 
+  // Check if we have a default credential for a given type
+  const hasDefaultForType = (type: AICredentialType): boolean => {
+    return credentialsList?.data.some(c => c.type === type && c.is_default) ?? false
+  }
+
   // Check if required API key is available for a given SDK
   const hasRequiredKey = (sdkId: string): boolean => {
     const sdk = SDK_OPTIONS.find(s => s.id === sdkId)
     if (!sdk) return false
-    if (sdk.requiredKey === "anthropic") return status?.has_anthropic_api_key ?? false
-    if (sdk.requiredKey === "minimax") return status?.has_minimax_api_key ?? false
-    if (sdk.requiredKey === "openai_compatible") return status?.has_openai_compatible_api_key ?? false
-    return false
+    return hasDefaultForType(sdk.requiredType)
   }
 
   // Get missing key warning for selected SDKs
@@ -207,109 +135,138 @@ export function AICredentialsSettings() {
     }
 
     if (warnings.length === 0) return null
-    return `Missing API key for: ${warnings.join(", ")}`
+    return `Missing default credential for: ${warnings.join(", ")}`
   }
 
   const missingKeyWarning = getMissingKeyWarning()
 
+  const handleAddCredential = () => {
+    setEditingCredential(null)
+    setDialogOpen(true)
+  }
+
+  const handleEditCredential = (credential: AICredentialPublic) => {
+    setEditingCredential(credential)
+    setDialogOpen(true)
+  }
+
+  const credentials = credentialsList?.data || []
+
   return (
     <div className="space-y-6">
-      {/* Top Row - Cloud Services and SDK Preferences */}
+      {/* Top Row - Credentials List and SDK Preferences */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Cloud AI Services Card */}
+        {/* Named Credentials Card */}
         <Card>
           <CardHeader>
-            <CardTitle>Cloud AI Services</CardTitle>
-            <CardDescription>
-              Manage your API keys for cloud AI services. These are used by your agents.
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>AI Credentials</CardTitle>
+                <CardDescription>
+                  Manage named API credentials for AI providers.
+                </CardDescription>
+              </div>
+              <Button onClick={handleAddCredential} size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Add
+              </Button>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Anthropic API Key */}
-            <div className="space-y-2">
-              <Label htmlFor="anthropic-key">Anthropic API Key</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="anthropic-key"
-                  type="password"
-                  placeholder={status?.has_anthropic_api_key ? "••••••••••••••••" : "sk-ant-..."}
-                  value={anthropicKey}
-                  onChange={(e) => setAnthropicKey(e.target.value)}
-                />
-                {anthropicKey && (
-                  <Button
-                    onClick={() => updateAnthropicMutation.mutate(anthropicKey)}
-                    disabled={updateAnthropicMutation.isPending}
-                  >
-                    {status?.has_anthropic_api_key ? "Update" : "Save"}
-                  </Button>
-                )}
-                {status?.has_anthropic_api_key && (
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    onClick={() => deleteAnthropicMutation.mutate()}
-                    disabled={deleteAnthropicMutation.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
+          <CardContent>
+            {isLoadingCredentials ? (
+              <p className="text-sm text-muted-foreground">Loading credentials...</p>
+            ) : credentials.length === 0 ? (
+              <div className="text-sm text-muted-foreground py-6 text-center">
+                <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No credentials yet</p>
+                <p className="text-xs mt-1">Add your first AI credential to get started</p>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Get your API key from{" "}
-                <a
-                  href="https://console.anthropic.com/settings/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  Anthropic Console
-                </a>
-              </p>
-            </div>
-
-            {/* MiniMax API Key */}
-            <div className="space-y-2">
-              <Label htmlFor="minimax-key">MiniMax API Key</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="minimax-key"
-                  type="password"
-                  placeholder={status?.has_minimax_api_key ? "••••••••••••••••" : "Enter MiniMax API key"}
-                  value={minimaxKey}
-                  onChange={(e) => setMinimaxKey(e.target.value)}
-                />
-                {minimaxKey && (
-                  <Button
-                    onClick={() => updateMinimaxMutation.mutate(minimaxKey)}
-                    disabled={updateMinimaxMutation.isPending}
+            ) : (
+              <div className="space-y-1.5">
+                {credentials.map((cred) => (
+                  <div
+                    key={cred.id}
+                    className="flex items-center justify-between px-3 py-2 border rounded-lg"
                   >
-                    {status?.has_minimax_api_key ? "Update" : "Save"}
-                  </Button>
-                )}
-                {status?.has_minimax_api_key && (
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    onClick={() => deleteMinimaxMutation.mutate()}
-                    disabled={deleteMinimaxMutation.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
+                    {/* Left: name and default badge */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-medium text-sm truncate">{cred.name}</span>
+                      {cred.is_default && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Star className="h-3.5 w-3.5 text-amber-500 shrink-0 fill-amber-500" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              Default credential
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </div>
+                    {/* Right: type info and actions */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="text-xs text-muted-foreground cursor-help">
+                              {getTypeDisplayName(cred.type)}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            {cred.type === "openai_compatible" && cred.base_url ? (
+                              <div>
+                                <div>{cred.base_url}</div>
+                                {cred.model && <div>Model: {cred.model}</div>}
+                              </div>
+                            ) : (
+                              getTypeDisplayName(cred.type)
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      {!cred.is_default && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => setDefaultMutation.mutate(cred.id)}
+                                disabled={setDefaultMutation.isPending}
+                              >
+                                <Star className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              Set as default
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handleEditCredential(cred)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => deleteMutation.mutate(cred.id)}
+                        disabled={deleteMutation.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <p className="text-sm text-muted-foreground">
-                Get your API key from{" "}
-                <a
-                  href="https://platform.minimax.io/user-center/basic-information/interface-key"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  MiniMax Platform
-                </a>
-              </p>
-            </div>
+            )}
           </CardContent>
         </Card>
 
@@ -357,7 +314,7 @@ export function AICredentialsSettings() {
                   {SDK_OPTIONS.map((sdk) => (
                     <SelectItem key={sdk.id} value={sdk.id}>
                       {sdk.name}
-                      {!hasRequiredKey(sdk.id) && " (API key required)"}
+                      {!hasRequiredKey(sdk.id) && " (no default)"}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -391,104 +348,30 @@ export function AICredentialsSettings() {
                   {SDK_OPTIONS.map((sdk) => (
                     <SelectItem key={sdk.id} value={sdk.id}>
                       {sdk.name}
-                      {!hasRequiredKey(sdk.id) && " (API key required)"}
+                      {!hasRequiredKey(sdk.id) && " (no default)"}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Info about defaults */}
+            <div className="text-xs text-muted-foreground pt-2 border-t">
+              <p>
+                When you set a credential as default, it will be automatically used for new environments
+                with the matching SDK type.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Bottom Row - OpenAI Compatible AI Service */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>OpenAI Compatible AI Service</CardTitle>
-            <CardDescription>
-              Configure an OpenAI-compatible endpoint (e.g., Ollama, vLLM, or self-hosted models).
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Base URL */}
-            <div className="space-y-2">
-              <Label htmlFor="openai-compatible-url">Base URL</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="openai-compatible-url"
-                  type="text"
-                  placeholder="https://openai.mycompany.com/api/v1"
-                  value={openaiCompatibleUrl}
-                  onChange={(e) => setOpenaiCompatibleUrl(e.target.value)}
-                />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                OpenAI-compatible API endpoint URL
-              </p>
-            </div>
-
-            {/* API Key */}
-            <div className="space-y-2">
-              <Label htmlFor="openai-compatible-key">API Key</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="openai-compatible-key"
-                  type="password"
-                  placeholder={status?.has_openai_compatible_api_key ? "••••••••••••••••" : "Enter API key"}
-                  value={openaiCompatibleKey}
-                  onChange={(e) => setOpenaiCompatibleKey(e.target.value)}
-                />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Authentication token for the API
-              </p>
-            </div>
-
-            {/* Model */}
-            <div className="space-y-2">
-              <Label htmlFor="openai-compatible-model">Model</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="openai-compatible-model"
-                  type="text"
-                  placeholder="llama3.2:latest"
-                  value={openaiCompatibleModel}
-                  onChange={(e) => setOpenaiCompatibleModel(e.target.value)}
-                />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Model identifier (e.g., llama3.2:latest, gpt-4)
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              {(openaiCompatibleKey || openaiCompatibleUrl || openaiCompatibleModel) && (
-                <Button
-                  onClick={() => updateOpenaiCompatibleMutation.mutate({
-                    api_key: openaiCompatibleKey || undefined,
-                    base_url: openaiCompatibleUrl || undefined,
-                    model: openaiCompatibleModel || undefined,
-                  })}
-                  disabled={updateOpenaiCompatibleMutation.isPending}
-                >
-                  {status?.has_openai_compatible_api_key ? "Update" : "Save"}
-                </Button>
-              )}
-              {status?.has_openai_compatible_api_key && (
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  onClick={() => deleteOpenaiCompatibleMutation.mutate()}
-                  disabled={deleteOpenaiCompatibleMutation.isPending}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Add/Edit Credential Dialog */}
+      <AICredentialDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        credential={editingCredential}
+      />
     </div>
   )
 }

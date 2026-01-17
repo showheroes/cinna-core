@@ -27,9 +27,10 @@ import { getColorPreset } from "@/utils/colorPresets"
 
 interface AgentHandoversProps {
   agent: AgentPublic
+  readOnly?: boolean
 }
 
-export function AgentHandovers({ agent }: AgentHandoversProps) {
+export function AgentHandovers({ agent, readOnly = false }: AgentHandoversProps) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { activeWorkspaceId } = useWorkspace()
 
@@ -208,7 +209,7 @@ export function AgentHandovers({ agent }: AgentHandoversProps) {
               specific context
             </CardDescription>
           </div>
-          {availableAgents.length > 0 && (
+          {!readOnly && availableAgents.length > 0 && (
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <DialogTrigger asChild>
                 <Button size="sm">
@@ -266,61 +267,64 @@ export function AgentHandovers({ agent }: AgentHandoversProps) {
                   </div>
                   <span className="font-medium">{handover.target_agent_name}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="flex cursor-pointer select-none items-center">
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        checked={handover.enabled}
-                        onChange={(e) =>
-                          handleToggleEnabled(handover.id, e.target.checked)
-                        }
-                        className="sr-only"
-                      />
-                      <div
-                        className={`block h-6 w-11 rounded-full transition-colors ${
-                          handover.enabled
-                            ? "bg-emerald-500"
-                            : "bg-gray-300 dark:bg-gray-600"
-                        }`}
-                      ></div>
-                      <div
-                        className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                          handover.enabled ? "translate-x-5" : ""
-                        }`}
-                      ></div>
-                    </div>
-                  </label>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleGenerate(handover)}
-                    disabled={generatePromptMutation.isPending || !handover.enabled}
-                  >
-                    <Sparkles className="h-4 w-4 mr-1" />
-                    Generate
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDelete(handover.id)}
-                    disabled={deleteHandoverMutation.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                {!readOnly && (
+                  <div className="flex items-center gap-2">
+                    <label className="flex cursor-pointer select-none items-center">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={handover.enabled}
+                          onChange={(e) =>
+                            handleToggleEnabled(handover.id, e.target.checked)
+                          }
+                          className="sr-only"
+                        />
+                        <div
+                          className={`block h-6 w-11 rounded-full transition-colors ${
+                            handover.enabled
+                              ? "bg-emerald-500"
+                              : "bg-gray-300 dark:bg-gray-600"
+                          }`}
+                        ></div>
+                        <div
+                          className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                            handover.enabled ? "translate-x-5" : ""
+                          }`}
+                        ></div>
+                      </div>
+                    </label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleGenerate(handover)}
+                      disabled={generatePromptMutation.isPending || !handover.enabled}
+                    >
+                      <Sparkles className="h-4 w-4 mr-1" />
+                      Generate
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDelete(handover.id)}
+                      disabled={deleteHandoverMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
 
-              {handover.enabled && (
+              {(handover.enabled || readOnly) && (
                 <>
                   <Textarea
                     placeholder="Enter handover prompt..."
                     className="min-h-[100px]"
                     value={getPromptValue(handover)}
                     onChange={(e) => handlePromptChange(handover.id, e.target.value)}
+                    disabled={readOnly}
                   />
 
-                  {dirtyPrompts.has(handover.id) && (
+                  {!readOnly && dirtyPrompts.has(handover.id) && (
                     <div className="flex justify-end">
                       <Button
                         onClick={() => handleSavePrompt(handover.id)}

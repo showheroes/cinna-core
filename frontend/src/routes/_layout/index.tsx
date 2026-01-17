@@ -192,7 +192,7 @@ function Dashboard() {
 
   const agents = useMemo(() => agentsData?.data || [], [agentsData?.data])
   const agentsWithActiveEnv = useMemo(
-    () => agents.filter((a) => a.active_environment_id && a.show_on_dashboard),
+    () => agents.filter((a) => a.active_environment_id && (a.show_on_dashboard || a.is_clone)),
     [agents]
   )
 

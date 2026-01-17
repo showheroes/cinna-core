@@ -5,7 +5,10 @@ from app.api.routes import (
     access_tokens,
     activities,
     agents,
+    agent_shares,
+    ai_credentials,
     credentials,
+    credential_shares,
     environments,
     events,
     files,
@@ -34,8 +37,11 @@ api_router.include_router(users.router)
 api_router.include_router(utils.router)
 api_router.include_router(items.router)
 api_router.include_router(agents.router)
+api_router.include_router(agent_shares.router)
 api_router.include_router(access_tokens.router)
+api_router.include_router(credential_shares.router)  # Must be before credentials.router for /shared-with-me
 api_router.include_router(credentials.router)
+api_router.include_router(ai_credentials.router)
 api_router.include_router(oauth_credentials.router, prefix="/credentials", tags=["credentials"])
 api_router.include_router(ssh_keys.router)
 api_router.include_router(environments.router)

@@ -1,10 +1,13 @@
 import uuid
 from enum import Enum
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 from sqlmodel import Field, Relationship, SQLModel, Column, Text
 
 from app.models.user import User
 from app.models.link_models import AgentCredentialLink
+
+if TYPE_CHECKING:
+    pass  # For future imports if needed
 
 
 # Credential types enum
@@ -25,6 +28,7 @@ class CredentialBase(SQLModel):
     name: str = Field(min_length=1, max_length=255)
     type: CredentialType
     notes: str | None = Field(default=None)
+    allow_sharing: bool = Field(default=False)  # Whether this credential can be shared with other users
 
 
 # Type-specific credential data models (for validation)
@@ -70,6 +74,7 @@ class CredentialUpdate(SQLModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     notes: str | None = None
     credential_data: dict | None = None
+    allow_sharing: bool | None = None  # Update sharing permission
 
 
 # Database model
@@ -83,9 +88,22 @@ class Credential(CredentialBase, table=True):
     user_workspace_id: uuid.UUID | None = Field(
         default=None, foreign_key="user_workspace.id", ondelete="CASCADE"
     )
+
+    # Placeholder fields (for clones when original credential is not shareable)
+    is_placeholder: bool = Field(default=False)
+    placeholder_source_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="credential.id"
+    )
+
     owner: User | None = Relationship(back_populates="credentials")
     agents: List["app.models.agent.Agent"] = Relationship(
         back_populates="credentials", link_model=AgentCredentialLink
+    )
+
+    # Relationship to source (for placeholders)
+    placeholder_source: Optional["Credential"] = Relationship(
+        sa_relationship_kwargs={"remote_side": "Credential.id"}
     )
 
 
@@ -94,6 +112,13 @@ class CredentialPublic(CredentialBase):
     id: uuid.UUID
     owner_id: uuid.UUID
     user_workspace_id: uuid.UUID | None
+    share_count: int = 0  # Number of users this credential is shared with
+    is_shared: bool = False  # True if this credential is shared with the user (not owned)
+    owner_email: str | None = None  # Email of the owner (only set for shared credentials)
+    # Placeholder fields for clones
+    is_placeholder: bool = False
+    placeholder_source_id: uuid.UUID | None = None
+    status: str | None = None  # "complete" | "incomplete" for UI (computed field)
 
 
 # Properties to return via API with decrypted data

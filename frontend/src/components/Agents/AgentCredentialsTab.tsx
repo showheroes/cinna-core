@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Plus, ExternalLink, Unlink } from "lucide-react"
-import { useState } from "react"
+import { Plus, ExternalLink, Unlink, Users } from "lucide-react"
+import { useState, useMemo } from "react"
 
 import { AgentsService, CredentialsService } from "@/client"
 import { Badge } from "@/components/ui/badge"
@@ -90,8 +90,8 @@ export function AgentCredentialsTab({ agentId }: AgentCredentialsTabProps) {
     queryFn: () => AgentsService.readAgentCredentials({ id: agentId }),
   })
 
-  // Fetch all user credentials for the add dialog
-  const { data: allCredentialsData } = useQuery({
+  // Fetch user's own credentials for the add dialog
+  const { data: ownedCredentialsData } = useQuery({
     queryKey: ["credentials", activeWorkspaceId],
     queryFn: ({ queryKey }) => {
       const [, workspaceId] = queryKey
@@ -104,8 +104,34 @@ export function AgentCredentialsTab({ agentId }: AgentCredentialsTabProps) {
     enabled: isAddDialogOpen,
   })
 
+  // Fetch credentials shared with the user
+  const { data: sharedCredentialsData } = useQuery({
+    queryKey: ["credentials-shared-with-me"],
+    queryFn: () => CredentialsService.getCredentialsSharedWithMe(),
+    enabled: isAddDialogOpen,
+  })
+
   const agentCredentials = agentCredentialsData?.data || []
-  const allCredentials = allCredentialsData?.data || []
+  const ownedCredentials = ownedCredentialsData?.data || []
+  const sharedCredentials = sharedCredentialsData?.data || []
+
+  // Combine owned and shared credentials, marking which are shared
+  const allCredentials = useMemo(() => {
+    const owned = ownedCredentials.map((cred) => ({
+      ...cred,
+      isSharedWithMe: false,
+      ownerEmail: undefined as string | undefined,
+    }))
+    const shared = sharedCredentials.map((cred) => ({
+      id: cred.id,
+      name: cred.name,
+      type: cred.type,
+      notes: cred.notes,
+      isSharedWithMe: true,
+      ownerEmail: cred.owner_email,
+    }))
+    return [...owned, ...shared]
+  }, [ownedCredentials, sharedCredentials])
 
   // Filter out credentials that are already linked
   const availableCredentials = allCredentials.filter(
@@ -220,7 +246,15 @@ export function AgentCredentialsTab({ agentId }: AgentCredentialsTabProps) {
                     <SelectContent>
                       {availableCredentials.map((credential) => (
                         <SelectItem key={credential.id} value={credential.id}>
-                          {credential.name} ({credential.type})
+                          <div className="flex items-center gap-2">
+                            <span>{credential.name} ({getCredentialTypeLabel(credential.type)})</span>
+                            {credential.isSharedWithMe && (
+                              <span className="text-xs text-blue-600 flex items-center gap-1">
+                                <Users className="h-3 w-3" />
+                                from {credential.ownerEmail}
+                              </span>
+                            )}
+                          </div>
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -278,14 +312,27 @@ export function AgentCredentialsTab({ agentId }: AgentCredentialsTabProps) {
               {agentCredentials.map((credential) => (
                 <TableRow key={credential.id}>
                   <TableCell className="font-medium">
-                    <Link
-                      to="/credential/$credentialId"
-                      params={{ credentialId: credential.id }}
-                      className="inline-flex items-center gap-1 hover:text-primary transition-colors"
-                    >
-                      {credential.name}
-                      <ExternalLink className="h-3 w-3" />
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to="/credential/$credentialId"
+                        params={{ credentialId: credential.id }}
+                        className="inline-flex items-center gap-1 hover:text-primary transition-colors"
+                      >
+                        {credential.name}
+                        <ExternalLink className="h-3 w-3" />
+                      </Link>
+                      {credential.is_shared && (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                          <Users className="h-3 w-3 mr-1" />
+                          Shared
+                        </Badge>
+                      )}
+                    </div>
+                    {credential.is_shared && credential.owner_email && (
+                      <span className="text-xs text-muted-foreground">
+                        from {credential.owner_email}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">

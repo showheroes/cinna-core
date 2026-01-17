@@ -30,6 +30,8 @@ from .agent import (
     AgentSdkConfig,
     AllowedToolsUpdate,
     PendingToolsResponse,
+    CloneMode,
+    UpdateMode,
 )
 from .credential import (
     Credential,
@@ -43,6 +45,37 @@ from .credential import (
     GmailOAuthData,
     ApiTokenData,
     CredentialWithData,
+)
+from .ai_credential import (
+    AICredential,
+    AICredentialCreate,
+    AICredentialUpdate,
+    AICredentialPublic,
+    AICredentialsPublic,
+    AICredentialType,
+    AICredentialData,
+)
+from .credential_share import (
+    CredentialShare,
+    CredentialShareBase,
+    CredentialSharePublic,
+    CredentialShareCreate,
+    CredentialSharesPublic,
+    SharedCredentialPublic,
+    SharedCredentialsPublic,
+)
+from .agent_share import (
+    AgentShare,
+    AgentShareBase,
+    AgentSharePublic,
+    AgentShareCreate,
+    AgentShareUpdate,
+    AgentSharesPublic,
+    PendingSharePublic,
+    PendingSharesPublic,
+    CredentialRequirement,
+    ShareStatus,
+    ShareMode,
 )
 from .item import (
     Item,
@@ -206,6 +239,8 @@ __all__ = [
     "AgentSdkConfig",
     "AllowedToolsUpdate",
     "PendingToolsResponse",
+    "CloneMode",
+    "UpdateMode",
     # Credentials
     "Credential",
     "CredentialCreate",
@@ -218,6 +253,34 @@ __all__ = [
     "GmailOAuthData",
     "ApiTokenData",
     "CredentialWithData",
+    # AI Credentials
+    "AICredential",
+    "AICredentialCreate",
+    "AICredentialUpdate",
+    "AICredentialPublic",
+    "AICredentialsPublic",
+    "AICredentialType",
+    "AICredentialData",
+    # Credential Shares
+    "CredentialShare",
+    "CredentialShareBase",
+    "CredentialSharePublic",
+    "CredentialShareCreate",
+    "CredentialSharesPublic",
+    "SharedCredentialPublic",
+    "SharedCredentialsPublic",
+    # Agent Shares
+    "AgentShare",
+    "AgentShareBase",
+    "AgentSharePublic",
+    "AgentShareCreate",
+    "AgentShareUpdate",
+    "AgentSharesPublic",
+    "PendingSharePublic",
+    "PendingSharesPublic",
+    "CredentialRequirement",
+    "ShareStatus",
+    "ShareMode",
     # Items
     "Item",
     "ItemCreate",
