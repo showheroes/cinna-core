@@ -1,8 +1,8 @@
 import { useState } from "react"
-import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
 
-import { TasksService, AgentsService } from "@/client"
+import { TasksService } from "@/client"
 import type { InputTaskCreate } from "@/client"
 import {
   Dialog,
@@ -15,13 +15,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import useWorkspace from "@/hooks/useWorkspace"
 
@@ -39,27 +32,12 @@ export function CreateTaskDialog({
   const queryClient = useQueryClient()
   const { activeWorkspaceId } = useWorkspace()
   const [message, setMessage] = useState("")
-  const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>(undefined)
-
-  const { data: agentsData } = useQuery({
-    queryKey: ["agents", activeWorkspaceId],
-    queryFn: ({ queryKey }) => {
-      const [, workspaceId] = queryKey
-      return AgentsService.readAgents({
-        skip: 0,
-        limit: 100,
-        userWorkspaceId: workspaceId ?? "",
-      })
-    },
-    enabled: open,
-  })
 
   const createMutation = useMutation({
     mutationFn: (data: InputTaskCreate) => TasksService.createTask({ requestBody: data }),
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       setMessage("")
-      setSelectedAgentId(undefined)
       onOpenChange(false)
       onCreated?.(task.id)
     },
@@ -71,12 +49,9 @@ export function CreateTaskDialog({
 
     createMutation.mutate({
       original_message: message.trim(),
-      selected_agent_id: selectedAgentId || undefined,
       user_workspace_id: activeWorkspaceId || undefined,
     })
   }
-
-  const agents = agentsData?.data || []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -101,25 +76,6 @@ export function CreateTaskDialog({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="agent">Agent (Optional)</Label>
-            <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select an agent to handle this task" />
-              </SelectTrigger>
-              <SelectContent>
-                {agents.map((agent) => (
-                  <SelectItem key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              You can select or change the agent later during refinement.
-            </p>
-          </div>
-
           {createMutation.error && (
             <Alert variant="destructive">
               <AlertDescription>
@@ -129,13 +85,6 @@ export function CreateTaskDialog({
           )}
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancel
-            </Button>
             <Button
               type="submit"
               disabled={!message.trim() || createMutation.isPending}
