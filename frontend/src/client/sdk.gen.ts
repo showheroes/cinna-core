@@ -3644,7 +3644,7 @@ export class TasksService {
      * skip: Number of records to skip
      * limit: Number of records to return
      * status: Filter by status. Can be:
-     * - "active": NEW, REFINING, READY, RUNNING, PENDING_INPUT
+     * - "active": NEW, REFINING, RUNNING, PENDING_INPUT, ERROR
      * - "completed": COMPLETED
      * - "archived": ARCHIVED
      * - "all": No filter

@@ -124,7 +124,23 @@ def on_startup():
         handler=SessionService.handle_environment_activated
     )
 
-    logger.info("Registered backend event handlers (EnvironmentService, ActivityService, SessionService)")
+    # Input task service handlers for task status sync from sessions
+    from app.services.input_task_service import InputTaskService
+
+    event_service.register_handler(
+        event_type=EventType.STREAM_STARTED,
+        handler=InputTaskService.handle_stream_started
+    )
+    event_service.register_handler(
+        event_type=EventType.STREAM_COMPLETED,
+        handler=InputTaskService.handle_stream_completed
+    )
+    event_service.register_handler(
+        event_type=EventType.STREAM_ERROR,
+        handler=InputTaskService.handle_stream_error
+    )
+
+    logger.info("Registered backend event handlers (EnvironmentService, ActivityService, SessionService, InputTaskService)")
 
     logger.info("Application startup complete")
 

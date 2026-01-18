@@ -1,16 +1,22 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { Plus, MessageSquare, Play } from "lucide-react"
+import { Plus, MessageSquare, Play, Sparkles, Circle, CheckCircle2, List, Archive, Loader2, MoreVertical, Trash2 } from "lucide-react"
 
 import { TasksService, AgentsService } from "@/client"
 import type { InputTaskPublicExtended } from "@/client"
-import PendingItems from "@/components/Pending/PendingItems"
 import { usePageHeader } from "@/routes/_layout"
 import { TaskStatusBadge } from "@/components/Tasks/TaskStatusBadge"
 import { CreateTaskDialog } from "@/components/Tasks/CreateTaskDialog"
 import { RelativeTime } from "@/components/Common/RelativeTime"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import useWorkspace from "@/hooks/useWorkspace"
 import { getColorPreset } from "@/utils/colorPresets"
@@ -24,13 +30,80 @@ type StatusFilter = "active" | "completed" | "archived" | "all"
 function TasksList() {
   const { setHeaderContent } = usePageHeader()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { activeWorkspaceId } = useWorkspace()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
+  const autoRefineMutation = useMutation({
+    mutationFn: (taskId: string) =>
+      TasksService.refineTask({
+        id: taskId,
+        requestBody: { user_comment: "Please analyze and refine this task automatically." },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+    },
+  })
+
+  const executeMutation = useMutation({
+    mutationFn: (taskId: string) =>
+      TasksService.executeTask({
+        id: taskId,
+        requestBody: {},
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      if (data.session_id) {
+        navigate({
+          to: "/session/$sessionId",
+          params: { sessionId: data.session_id },
+          search: { initialMessage: undefined, fileIds: undefined },
+        })
+      }
+    },
+  })
+
+  const handleAutoRefine = (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
+    autoRefineMutation.mutate(taskId)
+  }
+
+  const handleExecute = (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
+    executeMutation.mutate(taskId)
+  }
+
+  const archiveMutation = useMutation({
+    mutationFn: (taskId: string) => TasksService.archiveTask({ id: taskId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (taskId: string) => TasksService.deleteTask({ id: taskId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+    },
+  })
+
+  const handleArchive = (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
+    archiveMutation.mutate(taskId)
+  }
+
+  const handleDelete = (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
+    if (confirm("Are you sure you want to delete this task?")) {
+      deleteMutation.mutate(taskId)
+    }
+  }
+
   const {
     data: tasksData,
     isLoading,
+    isFetching,
     error,
   } = useQuery({
     queryKey: ["tasks", statusFilter, activeWorkspaceId],
@@ -53,6 +126,27 @@ function TasksList() {
         userWorkspaceId: workspaceId ?? "",
       })
     },
+  })
+
+  // Fetch counts for filters
+  const { data: activeCount } = useQuery({
+    queryKey: ["tasks", "active", activeWorkspaceId, "count"],
+    queryFn: () =>
+      TasksService.listTasks({
+        status: "active",
+        userWorkspaceId: activeWorkspaceId ?? "",
+      }),
+    select: (data) => data.count,
+  })
+
+  const { data: completedCount } = useQuery({
+    queryKey: ["tasks", "completed", activeWorkspaceId, "count"],
+    queryFn: () =>
+      TasksService.listTasks({
+        status: "completed",
+        userWorkspaceId: activeWorkspaceId ?? "",
+      }),
+    select: (data) => data.count,
   })
 
   useEffect(() => {
@@ -103,10 +197,6 @@ function TasksList() {
     return agent ? getColorPreset(agent.ui_color_preset) : null
   }
 
-  if (isLoading) {
-    return <PendingItems />
-  }
-
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
@@ -120,43 +210,75 @@ function TasksList() {
   return (
     <div className="p-6 md:p-8 overflow-y-auto h-full" key={activeWorkspaceId ?? "default"}>
       <div className="mx-auto max-w-7xl">
-        <div className="flex gap-6">
+        <div className="flex gap-6 items-start">
           {/* Filters sidebar */}
           <div className="w-48 flex-shrink-0">
-            <div className="sticky top-6 space-y-4">
-              <div className="space-y-2">
-                {(["active", "completed", "archived", "all"] as StatusFilter[]).map(
-                  (filter) => (
-                    <button
-                      key={filter}
-                      onClick={() => setStatusFilter(filter)}
-                      className={cn(
-                        "w-full text-left px-3 py-2 text-sm rounded-md transition-all capitalize",
-                        statusFilter === filter
-                          ? "ring-2 ring-primary text-primary font-medium"
-                          : "hover:bg-muted"
-                      )}
-                    >
-                      {filter}
-                    </button>
-                  )
-                )}
-              </div>
+            <div className="space-y-1">
+                {([
+                  { key: "active" as StatusFilter, label: "Active", icon: Circle, count: activeCount },
+                  { key: "completed" as StatusFilter, label: "Completed", icon: CheckCircle2, count: completedCount },
+                  { key: "all" as StatusFilter, label: "All", icon: List, count: (activeCount ?? 0) + (completedCount ?? 0) },
+                ]).map((filter) => (
+                  <button
+                    key={filter.key}
+                    onClick={() => setStatusFilter(filter.key)}
+                    className={cn(
+                      "w-full flex items-center justify-between px-3 py-2 text-sm rounded-md transition-all",
+                      statusFilter === filter.key
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <filter.icon className="h-4 w-4" />
+                      {filter.label}
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {filter.count ?? 0}
+                    </span>
+                  </button>
+                ))}
+
+                <div className="border-t my-2" />
+
+                <button
+                  onClick={() => setStatusFilter("archived")}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-all",
+                    statusFilter === "archived"
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "hover:bg-muted"
+                  )}
+                >
+                  <Archive className="h-4 w-4" />
+                  Archived
+                </button>
             </div>
           </div>
 
           {/* Tasks list */}
-          <div className="flex-1">
-            {tasks.length === 0 ? (
+          <div className="flex-1 relative">
+            {/* Loading overlay */}
+            {isFetching && (
+              <div className="absolute inset-0 bg-background/50 backdrop-blur-[1px] z-10 flex items-center justify-center rounded-lg">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {tasks.length === 0 && !isLoading ? (
               <div className="text-center py-12 border-2 border-dashed rounded-lg">
-                <p className="text-muted-foreground mb-4">No tasks yet</p>
-                <Button onClick={() => setCreateDialogOpen(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create your first task
-                </Button>
+                <p className="text-muted-foreground mb-4">
+                  {statusFilter === "archived" ? "No archived tasks" : "No tasks yet"}
+                </p>
+                {statusFilter !== "archived" && (
+                  <Button onClick={() => setCreateDialogOpen(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create your first task
+                  </Button>
+                )}
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 min-h-[100px]">
                 {tasks.map((task) => {
                   const colorPreset = getAgentColorPreset(task.selected_agent_id)
 
@@ -165,10 +287,11 @@ function TasksList() {
                       key={task.id}
                       onClick={() => handleTaskClick(task)}
                       className={cn(
-                        "p-4 rounded-lg border bg-card cursor-pointer transition-all hover:bg-muted/50"
+                        "p-4 rounded-lg border bg-card/70 cursor-pointer transition-all hover:bg-muted/50"
                       )}
                     >
-                      <div className="flex items-start justify-between gap-4">
+                      <div className="flex justify-between gap-4">
+                        {/* Left: content */}
                         <div className="flex-1 min-w-0 space-y-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <TaskStatusBadge status={task.status} />
@@ -190,25 +313,77 @@ function TasksList() {
                           <div className="flex items-center gap-4 text-xs text-muted-foreground">
                             <RelativeTime timestamp={task.created_at} />
                             {task.refinement_history &&
-                              task.refinement_history.length > 0 && (
+                              (task.refinement_history as Array<{ role: string }>).filter((m) => m.role === "user").length > 0 && (
                                 <span className="flex items-center gap-1">
                                   <MessageSquare className="h-3 w-3" />
-                                  {task.refinement_history.length} refinements
+                                  {(task.refinement_history as Array<{ role: string }>).filter((m) => m.role === "user").length} refinements
                                 </span>
                               )}
                           </div>
                         </div>
 
-                        {task.session_id && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => handleGoToSession(e, task.session_id!)}
-                          >
-                            <Play className="h-4 w-4 mr-1" />
-                            Go to Session
-                          </Button>
-                        )}
+                        {/* Right: dropdown at top, buttons at bottom */}
+                        <div className="flex flex-col items-end justify-between flex-shrink-0">
+                          {/* Dropdown menu */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={(e) => handleArchive(e as unknown as React.MouseEvent, task.id)}>
+                                <Archive className="h-4 w-4 mr-2" />
+                                Archive
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => handleDelete(e as unknown as React.MouseEvent, task.id)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-2">
+                            {task.status !== "completed" && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={(e) => handleAutoRefine(e, task.id)}
+                                disabled={autoRefineMutation.isPending}
+                                className="h-8 w-8 hover:text-amber-500 hover:bg-amber-500/10 transition-colors [&:hover_svg]:drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]"
+                                title="Auto-Refine"
+                              >
+                                <Sparkles className={cn(
+                                  "h-4 w-4 transition-all",
+                                  autoRefineMutation.isPending && "animate-pulse text-amber-500"
+                                )} />
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              onClick={(e) => handleExecute(e, task.id)}
+                              disabled={executeMutation.isPending || !task.selected_agent_id}
+                              title={!task.selected_agent_id ? "Select an agent first" : "Execute task"}
+                            >
+                              <Play className="h-4 w-4 mr-1" />
+                              Execute
+                            </Button>
+                            {task.session_id && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => handleGoToSession(e, task.session_id!)}
+                              >
+                                Go to Session
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )

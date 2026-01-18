@@ -28,10 +28,10 @@ import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 
 const itemsBeforeActivities: Item[] = [
   { icon: Home, title: "Dashboard", path: "/" },
+  { icon: ClipboardList, title: "Tasks", path: "/tasks" },
 ]
 
 const itemsAfterActivities: Item[] = [
-  { icon: ClipboardList, title: "Tasks", path: "/tasks" },
   { icon: Bot, title: "Agents", path: "/agents" },
   { icon: MessageSquare, title: "Sessions", path: "/sessions" },
   { icon: Key, title: "Credentials", path: "/credentials" },

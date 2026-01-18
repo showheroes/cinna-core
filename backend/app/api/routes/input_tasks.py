@@ -73,7 +73,7 @@ def list_tasks(
         skip: Number of records to skip
         limit: Number of records to return
         status: Filter by status. Can be:
-            - "active": NEW, REFINING, READY, RUNNING, PENDING_INPUT
+            - "active": NEW, REFINING, RUNNING, PENDING_INPUT, ERROR
             - "completed": COMPLETED
             - "archived": ARCHIVED
             - "all": No filter
@@ -90,7 +90,6 @@ def list_tasks(
             status_filter = [
                 InputTaskStatus.NEW,
                 InputTaskStatus.REFINING,
-                InputTaskStatus.READY,
                 InputTaskStatus.RUNNING,
                 InputTaskStatus.PENDING_INPUT,
                 InputTaskStatus.ERROR,
@@ -256,6 +255,7 @@ def refine_task(
         agent_id=task.selected_agent_id,
         owner_id=current_user.id,
         refinement_history=task.refinement_history,
+        user_selected_text=refine_in.user_selected_text,
     )
 
     if not result.get("success"):
@@ -277,10 +277,7 @@ def refine_task(
         db_session=session, task=task, role="ai", content=feedback_message
     )
 
-    # Set status to ready (user can refine more or execute)
-    InputTaskService.update_status(
-        db_session=session, task=task, status=InputTaskStatus.READY
-    )
+    # Status stays as REFINING - user can continue refining or execute
 
     return RefineTaskResponse(
         success=True,
@@ -372,13 +369,6 @@ def archive_task(
     # Verify ownership
     if not current_user.is_superuser and task.owner_id != current_user.id:
         raise HTTPException(status_code=400, detail="Not enough permissions")
-
-    # Only allow archiving completed or error tasks
-    if task.status not in [InputTaskStatus.COMPLETED, InputTaskStatus.ERROR]:
-        raise HTTPException(
-            status_code=400,
-            detail="Only completed or error tasks can be archived",
-        )
 
     updated_task = InputTaskService.update_status(
         db_session=session, task=task, status=InputTaskStatus.ARCHIVED

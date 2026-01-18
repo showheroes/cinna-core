@@ -15,7 +15,6 @@ class InputTaskStatus:
     """Status values for input tasks"""
     NEW = "new"  # Just created, needs refinement
     REFINING = "refining"  # Currently being refined with AI
-    READY = "ready"  # Ready to be executed
     RUNNING = "running"  # Session created and running
     PENDING_INPUT = "pending_input"  # Session waiting for user input
     COMPLETED = "completed"  # Session completed successfully
@@ -114,6 +113,7 @@ class InputTasksPublicExtended(SQLModel):
 class RefineTaskRequest(SQLModel):
     """Request to refine a task with AI assistance"""
     user_comment: str = Field(min_length=1, max_length=2000)
+    user_selected_text: str | None = Field(default=None, max_length=5000)
 
 
 class RefineTaskResponse(SQLModel):

@@ -39,12 +39,31 @@ Task (1) ─────────────> (N) Session
 |--------|-------------|-------------|
 | `new` | Task created, not yet refined | Refine or Execute |
 | `refining` | User actively refining | Continue or Execute |
-| `ready` | Refinement complete | Execute |
 | `running` | Session active, agent working | Monitor |
 | `pending_input` | Agent needs user input | Go to session |
 | `completed` | Agent finished successfully | Archive |
 | `error` | Agent encountered error | Review, retry, Archive |
 | `archived` | User archived task | - |
+
+### Session-to-Task Status Sync
+
+When a task has connected sessions (via `source_task_id`), the task status automatically syncs based on session states:
+
+**Computation Logic (priority order):**
+- If ANY session has `status='error'` → task = `ERROR`
+- If ANY session has unanswered `tool_questions_status='unanswered'` → task = `PENDING_INPUT`
+- If ANY session is active with `interaction_status='running'` → task = `RUNNING`
+- If ALL sessions are `completed` → task = `COMPLETED`
+- Otherwise → task = `RUNNING` (active but not streaming)
+
+**Status Protection:**
+- Only tasks in execution phase (`running`, `pending_input`, `completed`, `error`) are synced
+- Tasks in `new`, `refining`, or `archived` status are NOT overridden by session events
+
+**Event Handlers:**
+- `STREAM_STARTED` → syncs task to `RUNNING`
+- `STREAM_COMPLETED` → computes and syncs status from all sessions
+- `STREAM_ERROR` → syncs task to `ERROR`
 
 ### Refinement History Structure
 
@@ -264,6 +283,11 @@ Stored as JSON array in `InputTask.refinement_history`:
 
 ---
 
-**Document Version:** 2.0
+**Document Version:** 2.1
 **Last Updated:** 2026-01-18
 **Status:** Implementation Complete
+
+**Changes in v2.1:**
+- Removed `ready` status from lifecycle (redundant with `refining`)
+- Added session-to-task status sync via event handlers
+- Task status now automatically updates based on connected session states

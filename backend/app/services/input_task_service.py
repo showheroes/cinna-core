@@ -4,7 +4,7 @@ Input Task Service - handles task creation, retrieval, updates, and status manag
 from uuid import UUID
 from datetime import datetime
 import logging
-from typing import Optional
+from typing import Any, Optional
 from sqlmodel import Session as DBSession, select
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -14,7 +14,10 @@ from app.models import (
     InputTaskUpdate,
     InputTaskStatus,
     Agent,
+    Session,
+    SessionMessage,
 )
+from app.core.db import engine
 
 logger = logging.getLogger(__name__)
 
@@ -250,3 +253,251 @@ class InputTaskService:
         """Delete a task"""
         db_session.delete(task)
         db_session.commit()
+
+    # Status sync methods - compute and sync task status from connected sessions
+
+    @staticmethod
+    def compute_status_from_sessions(db_session: DBSession, task_id: UUID) -> str | None:
+        """
+        Compute task status from all connected sessions.
+
+        Status computation logic (priority order):
+        - If ANY session has status='error' → ERROR
+        - If ANY session has unanswered tool_questions → PENDING_INPUT
+        - If ANY session is active with interaction_status='running' → RUNNING
+        - If ALL sessions are completed → COMPLETED
+        - Otherwise → RUNNING (active but not streaming)
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+
+        Returns:
+            Computed status string, or None if no sessions connected
+        """
+        # Query all sessions connected to this task
+        sessions = db_session.exec(
+            select(Session).where(Session.source_task_id == task_id)
+        ).all()
+
+        if not sessions:
+            return None
+
+        has_error = False
+        has_pending_input = False
+        has_running = False
+        all_completed = True
+
+        for session in sessions:
+            # Check for error status
+            if session.status == "error":
+                has_error = True
+                continue
+
+            # Check if session is not completed
+            if session.status != "completed":
+                all_completed = False
+
+            # Check for running interaction
+            if session.interaction_status == "running":
+                has_running = True
+
+            # Check for unanswered tool questions in this session
+            unanswered_count = db_session.exec(
+                select(SessionMessage)
+                .where(SessionMessage.session_id == session.id)
+                .where(SessionMessage.tool_questions_status == "unanswered")
+            ).first()
+
+            if unanswered_count:
+                has_pending_input = True
+
+        # Apply priority: error > pending_input > running > completed
+        if has_error:
+            return InputTaskStatus.ERROR
+        if has_pending_input:
+            return InputTaskStatus.PENDING_INPUT
+        if has_running:
+            return InputTaskStatus.RUNNING
+        if all_completed:
+            return InputTaskStatus.COMPLETED
+
+        # Default: session exists but not streaming
+        return InputTaskStatus.RUNNING
+
+    @staticmethod
+    def sync_task_status_from_sessions(
+        db_session: DBSession,
+        task_id: UUID,
+        force_status: str | None = None,
+    ) -> InputTask | None:
+        """
+        Sync task status from connected sessions.
+
+        Only syncs for tasks in execution phase (running, pending_input, completed, error).
+        Does NOT override: new, refining, archived statuses.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+            force_status: Optional status to force (skips computation)
+
+        Returns:
+            Updated task or None if task not found or status unchanged
+        """
+        task = db_session.get(InputTask, task_id)
+        if not task:
+            return None
+
+        # Only sync for tasks in execution phase
+        execution_statuses = [
+            InputTaskStatus.RUNNING,
+            InputTaskStatus.PENDING_INPUT,
+            InputTaskStatus.COMPLETED,
+            InputTaskStatus.ERROR,
+        ]
+
+        if task.status not in execution_statuses:
+            # Task is in new, refining, or archived - don't override
+            return None
+
+        # Compute or use forced status
+        new_status = force_status or InputTaskService.compute_status_from_sessions(
+            db_session, task_id
+        )
+
+        if not new_status or new_status == task.status:
+            # No change needed
+            return None
+
+        # Update task status
+        return InputTaskService.update_status(
+            db_session=db_session,
+            task=task,
+            status=new_status,
+        )
+
+    # Event handlers for streaming lifecycle events
+
+    @staticmethod
+    async def handle_stream_started(event_data: dict[str, Any]) -> None:
+        """
+        React to STREAM_STARTED events and sync task status to RUNNING.
+
+        Args:
+            event_data: Full event dict with type, model_id, meta, user_id, timestamp
+        """
+        try:
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+
+            if not session_id:
+                logger.debug("STREAM_STARTED event missing session_id, skipping task sync")
+                return
+
+            with DBSession(engine) as db:
+                # Get session to find source_task_id
+                session = db.get(Session, UUID(session_id))
+                if not session or not session.source_task_id:
+                    return  # Session not linked to a task
+
+                task = db.get(InputTask, session.source_task_id)
+                if not task:
+                    return
+
+                # Only update if task is in execution phase
+                if task.status in [
+                    InputTaskStatus.RUNNING,
+                    InputTaskStatus.PENDING_INPUT,
+                    InputTaskStatus.COMPLETED,
+                    InputTaskStatus.ERROR,
+                ]:
+                    InputTaskService.update_status(
+                        db_session=db,
+                        task=task,
+                        status=InputTaskStatus.RUNNING,
+                    )
+                    logger.info(f"Task {task.id} status synced to RUNNING (STREAM_STARTED)")
+
+        except Exception as e:
+            logger.error(f"Error handling STREAM_STARTED for task sync: {e}", exc_info=True)
+
+    @staticmethod
+    async def handle_stream_completed(event_data: dict[str, Any]) -> None:
+        """
+        React to STREAM_COMPLETED events and compute task status from sessions.
+
+        Args:
+            event_data: Full event dict with type, model_id, meta, user_id, timestamp
+        """
+        try:
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+
+            if not session_id:
+                logger.debug("STREAM_COMPLETED event missing session_id, skipping task sync")
+                return
+
+            with DBSession(engine) as db:
+                # Get session to find source_task_id
+                session = db.get(Session, UUID(session_id))
+                if not session or not session.source_task_id:
+                    return  # Session not linked to a task
+
+                updated_task = InputTaskService.sync_task_status_from_sessions(
+                    db_session=db,
+                    task_id=session.source_task_id,
+                )
+
+                if updated_task:
+                    logger.info(
+                        f"Task {updated_task.id} status synced to {updated_task.status} (STREAM_COMPLETED)"
+                    )
+
+        except Exception as e:
+            logger.error(f"Error handling STREAM_COMPLETED for task sync: {e}", exc_info=True)
+
+    @staticmethod
+    async def handle_stream_error(event_data: dict[str, Any]) -> None:
+        """
+        React to STREAM_ERROR events and sync task status to ERROR.
+
+        Args:
+            event_data: Full event dict with type, model_id, meta, user_id, timestamp
+        """
+        try:
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+            error_message = meta.get("error_message", "Unknown error")
+
+            if not session_id:
+                logger.debug("STREAM_ERROR event missing session_id, skipping task sync")
+                return
+
+            with DBSession(engine) as db:
+                # Get session to find source_task_id
+                session = db.get(Session, UUID(session_id))
+                if not session or not session.source_task_id:
+                    return  # Session not linked to a task
+
+                task = db.get(InputTask, session.source_task_id)
+                if not task:
+                    return
+
+                # Only update if task is in execution phase
+                if task.status in [
+                    InputTaskStatus.RUNNING,
+                    InputTaskStatus.PENDING_INPUT,
+                    InputTaskStatus.COMPLETED,
+                    InputTaskStatus.ERROR,
+                ]:
+                    InputTaskService.update_status(
+                        db_session=db,
+                        task=task,
+                        status=InputTaskStatus.ERROR,
+                        error_message=error_message,
+                    )
+                    logger.info(f"Task {task.id} status synced to ERROR (STREAM_ERROR)")
+
+        except Exception as e:
+            logger.error(f"Error handling STREAM_ERROR for task sync: {e}", exc_info=True)

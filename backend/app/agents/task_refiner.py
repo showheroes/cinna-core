@@ -27,6 +27,7 @@ def refine_task(
     agent_workflow_prompt: str | None,
     user_comment: str,
     refinement_history: list[dict] | None = None,
+    user_selected_text: str | None = None,
 ) -> dict:
     """
     Refine a task description based on user feedback.
@@ -36,6 +37,7 @@ def refine_task(
         agent_workflow_prompt: The selected agent's workflow prompt (for context)
         user_comment: User's refinement request or feedback
         refinement_history: Previous refinement conversation history
+        user_selected_text: Optional text selected by user from the task body
 
     Returns:
         dict with keys:
@@ -74,13 +76,25 @@ Consider the agent's capabilities when refining the task description.
 {chr(10).join(history_items)}
 """
 
+    # Build user selected text context
+    selected_text_context = ""
+    if user_selected_text:
+        selected_text_context = f"""
+## User-Selected Text Reference
+The user has highlighted the following specific text from the task description that their feedback relates to:
+---
+{user_selected_text}
+---
+Pay special attention to this section when processing the user's feedback.
+"""
+
     # Build the full prompt
     prompt = f"""{system_prompt}
 {agent_context}
 {history_context}
 ## Current Task Description
 {current_description}
-
+{selected_text_context}
 ## User's Request/Feedback
 {user_comment}
 

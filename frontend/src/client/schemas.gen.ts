@@ -5535,6 +5535,18 @@ export const RefineTaskRequestSchema = {
             maxLength: 2000,
             minLength: 1,
             title: 'User Comment'
+        },
+        user_selected_text: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 5000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Selected Text'
         }
     },
     type: 'object',

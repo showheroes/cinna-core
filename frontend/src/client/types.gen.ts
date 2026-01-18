@@ -1254,6 +1254,7 @@ export type RefinePromptResponse = {
  */
 export type RefineTaskRequest = {
     user_comment: string;
+    user_selected_text?: (string | null);
 };
 
 /**

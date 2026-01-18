@@ -13,7 +13,6 @@ import {
 type TaskStatus =
   | "new"
   | "refining"
-  | "ready"
   | "running"
   | "pending_input"
   | "completed"
@@ -39,11 +38,6 @@ const statusConfig: Record<
     icon: <Edit className="h-3 w-3" />,
     className: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
   },
-  ready: {
-    label: "Ready",
-    icon: <CheckCircle2 className="h-3 w-3" />,
-    className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  },
   running: {
     label: "Running",
     icon: <Play className="h-3 w-3" />,
@@ -57,7 +51,7 @@ const statusConfig: Record<
   completed: {
     label: "Completed",
     icon: <CheckCircle2 className="h-3 w-3" />,
-    className: "bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400",
+    className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
   },
   error: {
     label: "Error",

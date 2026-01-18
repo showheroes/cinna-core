@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect, useState, KeyboardEvent, useRef } from "react"
+import { useEffect, useState, KeyboardEvent, useRef, useCallback } from "react"
 import {
   Play,
   ArrowLeft,
@@ -11,6 +11,8 @@ import {
   EllipsisVertical,
   Trash2,
   Bot,
+  X,
+  TextSelect,
 } from "lucide-react"
 
 import { TasksService, AgentsService } from "@/client"
@@ -66,7 +68,9 @@ function TaskDetail() {
   const [refinementComment, setRefinementComment] = useState("")
   const [chatHistoryOpen, setChatHistoryOpen] = useState(false)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const [selectedText, setSelectedText] = useState<string | null>(null)
   const refinementInputRef = useRef<HTMLTextAreaElement>(null)
+  const taskBodyRef = useRef<HTMLDivElement>(null)
 
   const {
     data: task,
@@ -145,10 +149,13 @@ function TaskDetail() {
   })
 
   const refineMutation = useMutation({
-    mutationFn: (userComment: string) =>
+    mutationFn: (params: { userComment: string; userSelectedText: string | null }) =>
       TasksService.refineTask({
         id: taskId,
-        requestBody: { user_comment: userComment },
+        requestBody: {
+          user_comment: params.userComment,
+          user_selected_text: params.userSelectedText,
+        },
       }),
     onSuccess: (result) => {
       if (result.success && result.refined_description) {
@@ -156,6 +163,8 @@ function TaskDetail() {
         setEditedDescription(result.refined_description)
       }
       setRefinementComment("")
+      setSelectedText(null)
+      window.getSelection()?.removeAllRanges()
     },
     onError: (error) => {
       showErrorToast((error as Error).message || "Failed to refine task")
@@ -241,6 +250,46 @@ function TaskDetail() {
     }
   }, [task])
 
+  // Clear selected text when task description changes
+  useEffect(() => {
+    setSelectedText(null)
+  }, [task?.current_description])
+
+  // Handle text selection in the task body
+  const handleTextSelection = useCallback(() => {
+    if (isEditing) return
+
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed) return
+
+    const text = selection.toString().trim()
+    if (text && taskBodyRef.current?.contains(selection.anchorNode)) {
+      setSelectedText(text)
+      // Focus the refinement input after selection
+      setTimeout(() => {
+        refinementInputRef.current?.focus()
+      }, 0)
+    }
+  }, [isEditing])
+
+  // Handle clicks outside task body and input area to clear selection
+  const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+
+    // Don't clear if clicking on the task body, refinement input, or selected text indicator
+    if (
+      taskBodyRef.current?.contains(target) ||
+      refinementInputRef.current?.contains(target) ||
+      target.closest('[data-selected-text-indicator]')
+    ) {
+      return
+    }
+
+    // Clear selection
+    setSelectedText(null)
+    window.getSelection()?.removeAllRanges()
+  }, [])
+
   const handleSaveDescription = () => {
     if (editedDescription !== task?.current_description) {
       updateMutation.mutate({ current_description: editedDescription })
@@ -260,7 +309,10 @@ function TaskDetail() {
 
   const handleRefinementSubmit = () => {
     if (!refinementComment.trim() || refineMutation.isPending) return
-    refineMutation.mutate(refinementComment.trim())
+    refineMutation.mutate({
+      userComment: refinementComment.trim(),
+      userSelectedText: selectedText,
+    })
   }
 
   const handleRefinementKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -300,7 +352,7 @@ function TaskDetail() {
   const latestAiReply = [...refinementHistory].reverse().find(item => item.role === "ai")
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" onClick={handleContainerClick}>
       {/* Main content - centered task text */}
       <div className="flex-1 overflow-auto flex items-start justify-center p-6">
         <div className="w-full max-w-3xl">
@@ -340,7 +392,11 @@ function TaskDetail() {
               />
             </div>
           ) : (
-            <div className="prose prose-lg dark:prose-invert max-w-none">
+            <div
+              ref={taskBodyRef}
+              onMouseUp={handleTextSelection}
+              className="prose prose-lg dark:prose-invert max-w-none selection:bg-amber-200 dark:selection:bg-amber-700"
+            >
               <MarkdownRenderer
                 content={task.current_description}
                 className="text-base leading-relaxed"
@@ -355,7 +411,7 @@ function TaskDetail() {
         {/* Chat history overlay - game console style, 1/3 width aligned left */}
         {chatHistoryOpen && refinementHistory.length > 0 && (
           <div
-            className="absolute bottom-full left-4 w-1/3 bg-slate-900/90 backdrop-blur-sm border border-slate-700 rounded-t-lg max-h-[50vh] overflow-y-auto"
+            className="absolute bottom-full left-4 w-1/3 bg-slate-100/95 dark:bg-slate-900/90 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-t-lg max-h-[50vh] overflow-y-auto"
             onClick={() => setChatHistoryOpen(false)}
           >
             <div className="p-3 space-y-2">
@@ -373,13 +429,37 @@ function TaskDetail() {
                       "max-w-[85%] rounded-lg px-2.5 py-1.5",
                       item.role === "user"
                         ? "bg-primary text-primary-foreground"
-                        : "bg-slate-800 text-slate-200"
+                        : "bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
                     )}
                   >
                     <p className="text-xs whitespace-pre-wrap">{item.content}</p>
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Selected text indicator */}
+        {selectedText && (
+          <div
+            data-selected-text-indicator
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 max-w-2xl"
+          >
+            <div className="flex items-center gap-2 bg-amber-100 dark:bg-amber-900/70 text-amber-800 dark:text-amber-200 rounded-lg px-3 py-2 shadow-md border border-amber-300 dark:border-amber-700">
+              <TextSelect className="h-4 w-4 shrink-0" />
+              <span className="text-xs truncate max-w-md italic">
+                "{selectedText.length > 100 ? selectedText.slice(0, 100) + "..." : selectedText}"
+              </span>
+              <button
+                onClick={() => {
+                  setSelectedText(null)
+                  window.getSelection()?.removeAllRanges()
+                }}
+                className="shrink-0 p-0.5 rounded hover:bg-amber-200 dark:hover:bg-amber-800 transition-colors"
+              >
+                <X className="h-3 w-3" />
+              </button>
             </div>
           </div>
         )}

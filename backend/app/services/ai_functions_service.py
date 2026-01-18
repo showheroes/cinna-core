@@ -302,6 +302,7 @@ class AIFunctionsService:
         agent_id: UUID | None,
         owner_id: UUID,
         refinement_history: list[dict] | None = None,
+        user_selected_text: str | None = None,
     ) -> dict:
         """
         Refine a task description based on user feedback.
@@ -313,6 +314,7 @@ class AIFunctionsService:
             agent_id: ID of the selected agent (if any)
             owner_id: ID of the user (to verify agent ownership)
             refinement_history: Previous refinement conversation history
+            user_selected_text: Optional text selected by user from the task body
 
         Returns:
             dict with keys:
@@ -335,6 +337,7 @@ class AIFunctionsService:
                 agent_workflow_prompt=agent_workflow_prompt,
                 user_comment=user_comment,
                 refinement_history=refinement_history,
+                user_selected_text=user_selected_text,
             )
             logger.info(
                 f"Refined task: {result.get('success')} - "
