@@ -130,13 +130,20 @@ def list_tasks(
         limit=limit,
     )
 
-    data = [
-        InputTaskPublicExtended(
-            **task.model_dump(),
-            agent_name=agent_name,
+    data = []
+    for task, agent_name in results:
+        # Get sessions info for this task
+        sessions_count, latest_session_id = SessionService.get_task_sessions_info(
+            db_session=session, task_id=task.id
         )
-        for task, agent_name in results
-    ]
+        data.append(
+            InputTaskPublicExtended(
+                **task.model_dump(),
+                agent_name=agent_name,
+                sessions_count=sessions_count,
+                latest_session_id=latest_session_id,
+            )
+        )
 
     return InputTasksPublicExtended(data=data, count=count)
 
@@ -156,9 +163,16 @@ def get_task(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> A
     if not current_user.is_superuser and task.owner_id != current_user.id:
         raise HTTPException(status_code=400, detail="Not enough permissions")
 
+    # Get sessions info for this task
+    sessions_count, latest_session_id = SessionService.get_task_sessions_info(
+        db_session=session, task_id=id
+    )
+
     return InputTaskPublicExtended(
         **task.model_dump(),
         agent_name=agent_name,
+        sessions_count=sessions_count,
+        latest_session_id=latest_session_id,
     )
 
 

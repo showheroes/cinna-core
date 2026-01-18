@@ -1,13 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { Plus, MessageSquare, Play, Sparkles, Circle, CheckCircle2, List, Archive, Loader2, MoreVertical, Trash2 } from "lucide-react"
+import { Plus, MessageSquare, Play, Sparkles, Circle, CheckCircle2, List, Archive, Loader2, MoreVertical, Trash2, Layers } from "lucide-react"
 
 import { TasksService, AgentsService } from "@/client"
 import type { InputTaskPublicExtended } from "@/client"
 import { usePageHeader } from "@/routes/_layout"
 import { TaskStatusBadge } from "@/components/Tasks/TaskStatusBadge"
 import { CreateTaskDialog } from "@/components/Tasks/CreateTaskDialog"
+import { TaskSessionsModal } from "@/components/Tasks/TaskSessionsModal"
 import { RelativeTime } from "@/components/Common/RelativeTime"
 import { Button } from "@/components/ui/button"
 import {
@@ -34,6 +35,7 @@ function TasksList() {
   const { activeWorkspaceId } = useWorkspace()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [sessionsModalTaskId, setSessionsModalTaskId] = useState<string | null>(null)
 
   const autoRefineMutation = useMutation({
     mutationFn: (taskId: string) =>
@@ -47,18 +49,18 @@ function TasksList() {
   })
 
   const executeMutation = useMutation({
-    mutationFn: (taskId: string) =>
+    mutationFn: (params: { taskId: string; description: string }) =>
       TasksService.executeTask({
-        id: taskId,
+        id: params.taskId,
         requestBody: {},
       }),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       if (data.session_id) {
         navigate({
           to: "/session/$sessionId",
           params: { sessionId: data.session_id },
-          search: { initialMessage: undefined, fileIds: undefined },
+          search: { initialMessage: variables.description, fileIds: undefined },
         })
       }
     },
@@ -69,9 +71,9 @@ function TasksList() {
     autoRefineMutation.mutate(taskId)
   }
 
-  const handleExecute = (e: React.MouseEvent, taskId: string) => {
+  const handleExecute = (e: React.MouseEvent, taskId: string, description: string) => {
     e.stopPropagation()
-    executeMutation.mutate(taskId)
+    executeMutation.mutate({ taskId, description })
   }
 
   const archiveMutation = useMutation({
@@ -181,6 +183,11 @@ function TasksList() {
       params: { sessionId },
       search: { initialMessage: undefined, fileIds: undefined },
     })
+  }
+
+  const handleOpenSessionsModal = (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
+    setSessionsModalTaskId(taskId)
   }
 
   const handleCreated = (taskId: string) => {
@@ -364,24 +371,35 @@ function TasksList() {
                                 )} />
                               </Button>
                             )}
+                            {(task.sessions_count ?? 0) > 1 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => handleOpenSessionsModal(e, task.id)}
+                                className="text-muted-foreground"
+                              >
+                                <Layers className="h-3.5 w-3.5 mr-1" />
+                                {task.sessions_count} sessions
+                              </Button>
+                            )}
+                            {task.latest_session_id && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => handleGoToSession(e, task.latest_session_id!)}
+                              >
+                                Go to Session
+                              </Button>
+                            )}
                             <Button
                               size="sm"
-                              onClick={(e) => handleExecute(e, task.id)}
+                              onClick={(e) => handleExecute(e, task.id, task.current_description)}
                               disabled={executeMutation.isPending || !task.selected_agent_id}
                               title={!task.selected_agent_id ? "Select an agent first" : "Execute task"}
                             >
                               <Play className="h-4 w-4 mr-1" />
                               Execute
                             </Button>
-                            {task.session_id && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => handleGoToSession(e, task.session_id!)}
-                              >
-                                Go to Session
-                              </Button>
-                            )}
                           </div>
                         </div>
                       </div>
@@ -399,6 +417,16 @@ function TasksList() {
         onOpenChange={setCreateDialogOpen}
         onCreated={handleCreated}
       />
+
+      {sessionsModalTaskId && (
+        <TaskSessionsModal
+          taskId={sessionsModalTaskId}
+          open={!!sessionsModalTaskId}
+          onOpenChange={(open) => {
+            if (!open) setSessionsModalTaskId(null)
+          }}
+        />
+      )}
     </div>
   )
 }

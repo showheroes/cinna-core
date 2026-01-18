@@ -14,12 +14,15 @@ import {
   X,
   TextSelect,
   Sparkles,
+  Layers,
+  ExternalLink,
 } from "lucide-react"
 
 import { TasksService, AgentsService } from "@/client"
 import PendingItems from "@/components/Pending/PendingItems"
 import { usePageHeader } from "@/routes/_layout"
 import type { RefinementHistoryItem } from "@/components/Tasks/RefinementChat"
+import { TaskSessionsModal } from "@/components/Tasks/TaskSessionsModal"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -70,6 +73,7 @@ function TaskDetail() {
   const [chatHistoryOpen, setChatHistoryOpen] = useState(false)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const [selectedText, setSelectedText] = useState<string | null>(null)
+  const [sessionsModalOpen, setSessionsModalOpen] = useState(false)
   const refinementInputRef = useRef<HTMLTextAreaElement>(null)
   const taskBodyRef = useRef<HTMLDivElement>(null)
 
@@ -551,6 +555,37 @@ function TaskDetail() {
               </Button>
             )}
 
+            {/* Go to Session button - when sessions exist */}
+            {sessions.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // Navigate to the latest session (first in list since ordered by created_at desc)
+                  navigate({
+                    to: "/session/$sessionId",
+                    params: { sessionId: sessions[0].id },
+                    search: { initialMessage: undefined, fileIds: undefined },
+                  })
+                }}
+                className="h-full w-[80px] flex-col gap-1"
+              >
+                <ExternalLink className="h-5 w-5" />
+                <span className="text-xs">Session</span>
+              </Button>
+            )}
+
+            {/* Sessions count button - when multiple sessions exist */}
+            {sessions.length > 1 && (
+              <Button
+                variant="ghost"
+                onClick={() => setSessionsModalOpen(true)}
+                className="h-full w-[80px] flex-col gap-1 text-muted-foreground"
+              >
+                <Layers className="h-5 w-5" />
+                <span className="text-xs">{sessions.length} sessions</span>
+              </Button>
+            )}
+
             {/* Execute button - big square prominent */}
             <Button
               onClick={() => executeMutation.mutate()}
@@ -628,6 +663,13 @@ function TaskDetail() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Sessions modal */}
+      <TaskSessionsModal
+        taskId={taskId}
+        open={sessionsModalOpen}
+        onOpenChange={setSessionsModalOpen}
+      />
     </div>
   )
 }

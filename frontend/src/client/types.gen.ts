@@ -897,7 +897,7 @@ export type InputTaskPublic = {
 };
 
 /**
- * Extended response with agent name
+ * Extended response with agent name and sessions count
  */
 export type InputTaskPublicExtended = {
     id: string;
@@ -916,6 +916,8 @@ export type InputTaskPublicExtended = {
     archived_at: (string | null);
     agent_name?: (string | null);
     refinement_history?: Array<unknown>;
+    sessions_count?: number;
+    latest_session_id?: (string | null);
 };
 
 export type InputTasksPublicExtended = {

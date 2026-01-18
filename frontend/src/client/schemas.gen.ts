@@ -4104,12 +4104,29 @@ export const InputTaskPublicExtendedSchema = {
             items: {},
             type: 'array',
             title: 'Refinement History'
+        },
+        sessions_count: {
+            type: 'integer',
+            title: 'Sessions Count',
+            default: 0
+        },
+        latest_session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Latest Session Id'
         }
     },
     type: 'object',
     required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
     title: 'InputTaskPublicExtended',
-    description: 'Extended response with agent name'
+    description: 'Extended response with agent name and sessions count'
 } as const;
 
 export const InputTaskUpdateSchema = {

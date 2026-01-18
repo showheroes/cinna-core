@@ -94,9 +94,11 @@ class InputTaskPublic(SQLModel):
 
 
 class InputTaskPublicExtended(InputTaskPublic):
-    """Extended response with agent name"""
+    """Extended response with agent name and sessions count"""
     agent_name: str | None = None
     refinement_history: list = Field(default_factory=list)
+    sessions_count: int = 0
+    latest_session_id: uuid.UUID | None = None
 
 
 class InputTasksPublic(SQLModel):

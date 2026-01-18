@@ -238,6 +238,41 @@ class SessionService:
         return list(db_session.exec(query).all())
 
     @staticmethod
+    def get_task_sessions_info(
+        db_session: DBSession,
+        task_id: UUID,
+    ) -> tuple[int, UUID | None]:
+        """
+        Get sessions count and latest session ID for a task.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID to filter by
+
+        Returns:
+            Tuple of (count, latest_session_id)
+        """
+        from sqlmodel import desc, func
+
+        # Get count
+        count_query = (
+            select(func.count(Session.id))
+            .where(Session.source_task_id == task_id)
+        )
+        count = db_session.exec(count_query).one() or 0
+
+        # Get latest session ID
+        latest_query = (
+            select(Session.id)
+            .where(Session.source_task_id == task_id)
+            .order_by(desc(Session.created_at))
+            .limit(1)
+        )
+        latest_session_id = db_session.exec(latest_query).first()
+
+        return count, latest_session_id
+
+    @staticmethod
     def delete_session(db_session: DBSession, session_id: UUID) -> bool:
         """Delete session"""
         session = db_session.get(Session, session_id)
