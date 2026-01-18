@@ -13,6 +13,7 @@ import {
   Bot,
   X,
   TextSelect,
+  Sparkles,
 } from "lucide-react"
 
 import { TasksService, AgentsService } from "@/client"
@@ -168,6 +169,23 @@ function TaskDetail() {
     },
     onError: (error) => {
       showErrorToast((error as Error).message || "Failed to refine task")
+    },
+  })
+
+  const autoRefineMutation = useMutation({
+    mutationFn: () =>
+      TasksService.refineTask({
+        id: taskId,
+        requestBody: { user_comment: "Please analyze and refine this task automatically." },
+      }),
+    onSuccess: (result) => {
+      if (result.success && result.refined_description) {
+        queryClient.invalidateQueries({ queryKey: ["task", taskId] })
+        setEditedDescription(result.refined_description)
+      }
+    },
+    onError: (error) => {
+      showErrorToast((error as Error).message || "Failed to auto-refine task")
     },
   })
 
@@ -498,22 +516,40 @@ function TaskDetail() {
 
           {/* Right section - Big square buttons */}
           <div className="flex items-stretch gap-2 shrink-0">
-            {/* Send message button - big square */}
-            <Button
-              variant="outline"
-              onClick={handleRefinementSubmit}
-              disabled={!refinementComment.trim() || refineMutation.isPending}
-              className="h-full w-[80px] flex-col gap-1"
-            >
-              {refineMutation.isPending ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <>
-                  <Send className="h-5 w-5" />
-                  <span className="text-xs">Send</span>
-                </>
-              )}
-            </Button>
+            {/* Send/Refine button - show Refine when input empty and no chat history */}
+            {refinementHistory.length === 0 && !refinementComment.trim() ? (
+              <Button
+                variant="outline"
+                onClick={() => autoRefineMutation.mutate()}
+                disabled={autoRefineMutation.isPending}
+                className="h-full w-[80px] flex-col gap-1 hover:text-amber-500 hover:border-amber-500/50 hover:bg-amber-500/10 transition-colors [&:hover_svg]:drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]"
+              >
+                {autoRefineMutation.isPending ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
+                ) : (
+                  <>
+                    <Sparkles className="h-5 w-5 text-amber-500" />
+                    <span className="text-xs">Refine</span>
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={handleRefinementSubmit}
+                disabled={!refinementComment.trim() || refineMutation.isPending}
+                className="h-full w-[80px] flex-col gap-1"
+              >
+                {refineMutation.isPending ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <Send className="h-5 w-5" />
+                    <span className="text-xs">Send</span>
+                  </>
+                )}
+              </Button>
+            )}
 
             {/* Execute button - big square prominent */}
             <Button
