@@ -37,23 +37,25 @@ class AgentEnvService:
         self.credentials_dir = self.workspace_dir / "credentials"
         self.plugins_dir = self.workspace_dir / "plugins"
 
-    def get_agent_prompts(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_agent_prompts(self) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
         Get current agent prompts from docs files.
 
         Returns:
-            Tuple of (workflow_prompt, entrypoint_prompt)
-            Either value can be None if file doesn't exist or is empty
+            Tuple of (workflow_prompt, entrypoint_prompt, refiner_prompt)
+            Any value can be None if file doesn't exist or is empty
         """
         workflow_prompt = self._read_prompt_file("WORKFLOW_PROMPT.md")
         entrypoint_prompt = self._read_prompt_file("ENTRYPOINT_PROMPT.md")
+        refiner_prompt = self._read_prompt_file("REFINER_PROMPT.md")
 
-        return workflow_prompt, entrypoint_prompt
+        return workflow_prompt, entrypoint_prompt, refiner_prompt
 
     def update_agent_prompts(
         self,
         workflow_prompt: Optional[str] = None,
-        entrypoint_prompt: Optional[str] = None
+        entrypoint_prompt: Optional[str] = None,
+        refiner_prompt: Optional[str] = None
     ) -> list[str]:
         """
         Update agent prompts in docs files.
@@ -61,6 +63,7 @@ class AgentEnvService:
         Args:
             workflow_prompt: New content for WORKFLOW_PROMPT.md (None to skip)
             entrypoint_prompt: New content for ENTRYPOINT_PROMPT.md (None to skip)
+            refiner_prompt: New content for REFINER_PROMPT.md (None to skip)
 
         Returns:
             List of updated filenames
@@ -82,6 +85,11 @@ class AgentEnvService:
             self._write_prompt_file("ENTRYPOINT_PROMPT.md", entrypoint_prompt)
             updated_files.append("ENTRYPOINT_PROMPT.md")
             logger.info(f"Updated ENTRYPOINT_PROMPT.md ({len(entrypoint_prompt)} chars)")
+
+        if refiner_prompt is not None:
+            self._write_prompt_file("REFINER_PROMPT.md", refiner_prompt)
+            updated_files.append("REFINER_PROMPT.md")
+            logger.info(f"Updated REFINER_PROMPT.md ({len(refiner_prompt)} chars)")
 
         return updated_files
 
@@ -189,6 +197,7 @@ class AgentEnvService:
             "has_docs_dir": self.docs_dir.exists(),
             "has_workflow_prompt": (self.docs_dir / "WORKFLOW_PROMPT.md").exists(),
             "has_entrypoint_prompt": (self.docs_dir / "ENTRYPOINT_PROMPT.md").exists(),
+            "has_refiner_prompt": (self.docs_dir / "REFINER_PROMPT.md").exists(),
         }
 
     def update_credentials(

@@ -28,6 +28,7 @@ def refine_task(
     user_comment: str,
     refinement_history: list[dict] | None = None,
     user_selected_text: str | None = None,
+    agent_refiner_prompt: str | None = None,
 ) -> dict:
     """
     Refine a task description based on user feedback.
@@ -38,6 +39,7 @@ def refine_task(
         user_comment: User's refinement request or feedback
         refinement_history: Previous refinement conversation history
         user_selected_text: Optional text selected by user from the task body
+        agent_refiner_prompt: Agent-specific instructions for refining task descriptions
 
     Returns:
         dict with keys:
@@ -60,6 +62,17 @@ This task will be executed by an agent with the following capabilities:
 {agent_workflow_prompt}
 
 Consider the agent's capabilities when refining the task description.
+"""
+
+    # Build agent-specific refinement instructions if available
+    refiner_context = ""
+    if agent_refiner_prompt:
+        refiner_context = f"""
+## Agent-Specific Refinement Instructions
+Follow these guidelines when refining tasks for this agent:
+{agent_refiner_prompt}
+
+Apply these instructions to fill in defaults, validate mandatory fields, and enhance the task description accordingly.
 """
 
     # Build history context
@@ -91,6 +104,7 @@ Pay special attention to this section when processing the user's feedback.
     # Build the full prompt
     prompt = f"""{system_prompt}
 {agent_context}
+{refiner_context}
 {history_context}
 ## Current Task Description
 {current_description}

@@ -129,6 +129,7 @@ export type AgentCreate = {
     name: string;
     workflow_prompt?: (string | null);
     entrypoint_prompt?: (string | null);
+    refiner_prompt?: (string | null);
     description?: (string | null);
     user_workspace_id?: (string | null);
 };
@@ -271,6 +272,7 @@ export type AgentPublic = {
     description: (string | null);
     workflow_prompt: (string | null);
     entrypoint_prompt: (string | null);
+    refiner_prompt: (string | null);
     is_active: boolean;
     active_environment_id: (string | null);
     ui_color_preset: (string | null);
@@ -364,6 +366,7 @@ export type AgentUpdate = {
     description?: (string | null);
     workflow_prompt?: (string | null);
     entrypoint_prompt?: (string | null);
+    refiner_prompt?: (string | null);
     is_active?: (boolean | null);
     ui_color_preset?: (string | null);
     show_on_dashboard?: (boolean | null);

@@ -101,6 +101,7 @@ Your workspace is organized as follows:
 - **`./docs/`** - Documentation and agent configuration
   - **`WORKFLOW_PROMPT.md`** - Describes the workflow's purpose, capabilities, and execution guidelines
   - **`ENTRYPOINT_PROMPT.md`** - Defines how this workflow should be invoked (trigger messages for scheduled/interactive modes)
+  - **`REFINER_PROMPT.md`** - Instructions for refining incoming task descriptions (default values, mandatory fields, enhancement guidelines)
   - **IMPORTANT**: Update these files as you develop the workflow to reflect its actual capabilities
 
 - **`./credentials/`** - Credentials and API keys shared with this agent
@@ -763,12 +764,63 @@ When a user asks you to build a workflow, here's how the three components work t
 - Define what the workflow does in its primary use case
 - **IMPORTANT**: Keep it updated as the workflow evolves - if you add new capabilities, the entrypoint might need to reflect that
 
+### REFINER_PROMPT.md (Task Refinement Instructions)
+
+This file defines **instructions for refining incoming task descriptions** before they're executed by the agent.
+
+**Purpose**:
+- Describe what default values to use for common parameters
+- List mandatory fields that must be clarified by users
+- Explain how to enhance vague requests into detailed instructions
+- Include examples of good vs. bad task descriptions
+
+**When to Create/Update**:
+- When you finalize the workflow's expected inputs
+- When you identify common parameters with sensible defaults
+- When you find users often forget to specify certain details
+- When the workflow has specific requirements that should be enforced
+
+**Content Guidelines**:
+
+```markdown
+## Default Values
+- Date range: Last 7 days (unless specified)
+- Output format: Summary table with key metrics
+- Priority: Normal (unless urgent mentioned)
+
+## Mandatory Clarifications
+- Target system/data source must be specified
+- Required output format (report, email, notification)
+- If a specific date is needed, it must be provided
+
+## Enhancement Guidelines
+- Add specific metric names when user mentions "performance"
+- Include comparison period when user asks for "trends"
+- Default to including visualizations for data-heavy reports
+
+## Examples
+Good: "Generate a sales report for last quarter with regional breakdown"
+Bad: "Generate a report" (missing: report type, time period, breakdown)
+```
+
+**Key Points**:
+- Keep it practical and specific to your workflow
+- Focus on the most common task variations
+- Provide clear defaults for optional parameters
+- Identify what must always be specified by the user
+
+**Update `./docs/REFINER_PROMPT.md` when you**:
+- Add new capabilities that require specific parameters
+- Notice common gaps in user task descriptions
+- Want to standardize how certain requests are interpreted
+- Define sensible defaults for your workflow domain
+
 ## Remember
 
 - **Always use `uv`** for package installation and management
 - **Scripts go in `./scripts/`** - never in the root or other directories
 - **Output files go in `./files/`** - keep the workspace organized
 - **Update `./scripts/README.md`** - EVERY time you create/modify/remove a script
-- **Update `./docs/` files** - Keep WORKFLOW_PROMPT.md and ENTRYPOINT_PROMPT.md current as capabilities evolve
+- **Update `./docs/` files** - Keep WORKFLOW_PROMPT.md, ENTRYPOINT_PROMPT.md, and REFINER_PROMPT.md current as capabilities evolve
 - **Write robust, reusable code** - these scripts will be used repeatedly
 - **Document your work** - clear comments and docstrings are essential

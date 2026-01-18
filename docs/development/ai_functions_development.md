@@ -62,6 +62,18 @@ AI_FUNCTIONS_PROVIDERS=gemini
      - Whether user is creating a new agent
      - Whether files are attached to the message
 
+5. **Task Refiner** (`backend/app/agents/task_refiner.py`)
+   - Refines task descriptions based on user feedback for task queue execution
+   - Takes context: current description, agent workflow prompt, agent refiner prompt, user comment, refinement history, selected text
+   - Returns JSON: `{success: true, refined_description: "...", feedback_message: "..."}` or `{success: false, error: "..."}`
+   - Used in: `backend/app/api/routes/tasks.py` (POST `/api/v1/tasks/refine-task`)
+   - **Agent-aware refinement**: Uses agent's `refiner_prompt` for context-specific task enhancement:
+     - Default values for common parameters
+     - Mandatory fields that must be clarified
+     - Enhancement guidelines for vague requests
+   - **Interactive refinement**: Supports multi-turn refinement with history tracking
+   - **Selective editing**: Can focus on user-selected text portions of the task description
+
 ## Implementation Pattern
 
 All AI functions follow this simple pattern using the provider manager:
@@ -379,9 +391,10 @@ See existing implementations:
 - Template-based generation: `backend/app/agents/agent_generator.py`
 - Structured JSON output: `backend/app/agents/sql_generator.py`
 - Context-aware refinement: `backend/app/agents/prompt_refiner.py`
+- Task description refinement: `backend/app/agents/task_refiner.py`
 - Prompt templates: `backend/app/agents/prompts/`
 - Service integration: `backend/app/services/ai_functions_service.py`
-- Usage in routes: `backend/app/api/routes/messages.py:155-175`, `backend/app/api/routes/workspace.py`, `backend/app/api/routes/utils.py`
+- Usage in routes: `backend/app/api/routes/messages.py:155-175`, `backend/app/api/routes/workspace.py`, `backend/app/api/routes/utils.py`, `backend/app/api/routes/tasks.py`
 - Usage in services: `backend/app/services/agent_service.py:132-156`
 
 ## Future Enhancements

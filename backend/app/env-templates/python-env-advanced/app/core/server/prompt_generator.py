@@ -138,6 +138,35 @@ class PromptGenerator:
             logger.debug(f"docs/ENTRYPOINT_PROMPT.md not found at {entrypoint_prompt_path}")
             return None
 
+    def _load_refiner_prompt(self) -> Optional[str]:
+        """
+        Load docs/REFINER_PROMPT.md file from workspace if it exists and is not empty.
+
+        This file defines instructions for refining incoming task descriptions before execution.
+        It describes default values, mandatory fields, and enhancement guidelines.
+
+        Returns:
+            Content of docs/REFINER_PROMPT.md if exists and not empty, None otherwise
+        """
+        refiner_prompt_path = self.workspace_dir / "docs" / "REFINER_PROMPT.md"
+
+        if refiner_prompt_path.exists():
+            try:
+                with open(refiner_prompt_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content:
+                        logger.info(f"Loaded docs/REFINER_PROMPT.md ({len(content)} chars)")
+                        return content
+                    else:
+                        logger.debug("docs/REFINER_PROMPT.md is empty")
+                        return None
+            except Exception as e:
+                logger.error(f"Failed to load docs/REFINER_PROMPT.md: {e}")
+                return None
+        else:
+            logger.debug(f"docs/REFINER_PROMPT.md not found at {refiner_prompt_path}")
+            return None
+
     def _load_credentials_readme(self) -> Optional[str]:
         """
         Load credentials/README.md file from workspace if it exists and is not empty.
@@ -260,6 +289,7 @@ class PromptGenerator:
         - scripts/README.md (if exists)
         - docs/WORKFLOW_PROMPT.md (if exists)
         - docs/ENTRYPOINT_PROMPT.md (if exists)
+        - docs/REFINER_PROMPT.md (if exists)
         - credentials/README.md (if exists)
 
         Returns:
@@ -312,6 +342,19 @@ class PromptGenerator:
                 f"examples of how to trigger this workflow in conversation mode."
             )
             logger.info("Included docs/ENTRYPOINT_PROMPT.md in building mode prompt")
+
+        # Append refiner prompt if it exists
+        refiner_prompt = self._load_refiner_prompt()
+        if refiner_prompt:
+            building_prompt += (
+                f"\n\n---\n\n## Current Task Refinement Configuration\n\n"
+                f"The following is the current contents of `./docs/REFINER_PROMPT.md` which defines "
+                f"instructions for refining incoming task descriptions:\n\n"
+                f"```markdown\n{refiner_prompt}\n```\n\n"
+                f"**Important**: As you develop the workflow, you should update this file to define "
+                f"default values, mandatory fields, and enhancement guidelines for task descriptions."
+            )
+            logger.info("Included docs/REFINER_PROMPT.md in building mode prompt")
 
         # Append credentials README if it exists
         credentials_readme = self._load_credentials_readme()

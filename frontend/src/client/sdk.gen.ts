@@ -519,7 +519,7 @@ export class AgentsService {
      * Sync Agent Prompts
      * Sync agent prompts to active environment.
      *
-     * When user manually edits workflow_prompt or entrypoint_prompt in the backend,
+     * When user manually edits workflow_prompt, entrypoint_prompt, or refiner_prompt in the backend,
      * this endpoint pushes those changes to the active environment's docs files.
      * @param data The data for the request.
      * @param data.id

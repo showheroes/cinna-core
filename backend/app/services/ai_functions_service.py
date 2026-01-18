@@ -324,17 +324,20 @@ class AIFunctionsService:
                 - error: Error message (if not success)
         """
         try:
-            # Fetch agent workflow prompt if agent_id is provided
+            # Fetch agent workflow prompt and refiner prompt if agent_id is provided
             agent_workflow_prompt = None
+            agent_refiner_prompt = None
 
             if agent_id:
                 agent = db.get(Agent, agent_id)
                 if agent and agent.owner_id == owner_id:
                     agent_workflow_prompt = agent.workflow_prompt
+                    agent_refiner_prompt = agent.refiner_prompt
 
             result = refine_task_from_agents(
                 current_description=current_description,
                 agent_workflow_prompt=agent_workflow_prompt,
+                agent_refiner_prompt=agent_refiner_prompt,
                 user_comment=user_comment,
                 refinement_history=refinement_history,
                 user_selected_text=user_selected_text,

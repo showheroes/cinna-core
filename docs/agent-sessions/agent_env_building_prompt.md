@@ -23,6 +23,7 @@ The building agent should follow a clear, step-by-step process:
 5. **Update Scripts README** - IMMEDIATELY document each script
 6. **Update Workflow Prompt** - Document orchestration and decision logic
 7. **Define Entrypoint** - Create human-like trigger message
+8. **Define Refiner Prompt** - Document task refinement guidelines (default values, mandatory fields)
 
 ### 2. Single-Purpose Scripts Principle
 
@@ -218,13 +219,18 @@ The building mode system prompt is composed of multiple layers:
    - Loaded at runtime and included in building mode prompt
    - Agent defines concise command to start the workflow
 
-6. **credentials/README.md** (Dynamic Context)
+6. **docs/REFINER_PROMPT.md** (Dynamic Context)
+   - Instructions for refining incoming task descriptions
+   - Loaded at runtime and included in building mode prompt
+   - Agent defines default values, mandatory fields, and enhancement guidelines
+
+7. **credentials/README.md** (Dynamic Context)
    - Documentation of credentials shared with the agent
    - Redacted sensitive data (shows structure, hides values)
    - Loaded at runtime if file exists and is not empty
    - Provides agent with awareness of available credentials for script development
 
-7. **knowledge/** (Integration Knowledge Base)
+8. **knowledge/** (Integration Knowledge Base)
    - Directory containing integration-specific documentation organized by topic
    - Only topic folder names are included in the prompt (minimal footprint)
    - Agent reads specific files on-demand when building integrations
@@ -233,7 +239,7 @@ The building mode system prompt is composed of multiple layers:
 
 ## Workflow Documentation Prompts
 
-The building agent maintains two key documentation files that define how the completed workflow will be used:
+The building agent maintains three key documentation files that define how the completed workflow will be used:
 
 ### 1. WORKFLOW_PROMPT.md (System Prompt for Conversation Mode)
 
@@ -320,26 +326,75 @@ The agent is a **bridge between scripts and humans**, not just a script runner.
 
 **Critical for Building Agent**: The building agent must understand that this is NOT a system prompt, but rather how a real user would naturally ask for the workflow to run.
 
+### 3. REFINER_PROMPT.md (Task Refinement Instructions)
+
+**Purpose**: Instructions for refining incoming task descriptions before execution, used by the task queue system.
+
+**Location**: `{instance_dir}/app/docs/REFINER_PROMPT.md`
+
+**Template**: `backend/app/env-templates/python-env-advanced/app/workspace/docs/REFINER_PROMPT.md`
+
+**Content Requirements**:
+- **Default values** for common parameters (date ranges, output formats, priorities)
+- **Mandatory fields** that must be clarified by users before execution
+- **Enhancement guidelines** for transforming vague requests into detailed instructions
+- **Examples** of good vs. bad task descriptions
+
+**Example**:
+```markdown
+## Default Values
+- Date range: Last 7 days (unless specified)
+- Output format: Summary table with key metrics
+- Priority: Normal (unless urgent mentioned)
+
+## Mandatory Clarifications
+- Target system/data source must be specified
+- Required output format (report, email, notification)
+- If a specific date is needed, it must be provided
+
+## Enhancement Guidelines
+- Add specific metric names when user mentions "performance"
+- Include comparison period when user asks for "trends"
+- Default to including visualizations for data-heavy reports
+
+## Examples
+Good: "Generate a sales report for last quarter with regional breakdown"
+Bad: "Generate a report" (missing: report type, time period, breakdown)
+```
+
+**When to Create/Update**:
+- When finalizing the workflow's expected inputs
+- When identifying common parameters with sensible defaults
+- When discovering users often forget to specify certain details
+- When the workflow has specific requirements that should be enforced
+
+**Loading**: `prompt_generator.py::_load_refiner_prompt()` - included in building mode system prompt
+
+**Sync**: `MessageService.sync_agent_prompts_from_environment()` - synced to backend Agent model after building sessions
+
+**Usage**: The task refiner (`backend/app/agents/task_refiner.py`) uses this prompt when refining task descriptions in the task queue, applying defaults and requesting clarifications as specified.
+
 ### Bidirectional Sync
 
 **From Environment → Backend** (automatic):
 - Triggered after building mode sessions complete
 - `messages.py` route calls `MessageService.sync_agent_prompts_from_environment()`
 - Reads prompts via `docker_adapter.py::get_agent_prompts()` (calls `/config/agent-prompts`)
-- Updates `Agent.workflow_prompt` and `Agent.entrypoint_prompt` fields
+- Updates `Agent.workflow_prompt`, `Agent.entrypoint_prompt`, and `Agent.refiner_prompt` fields
 
 **From Backend → Environment** (manual):
 - User edits prompts in backend UI
 - Calls `agents.py::sync_agent_prompts()` route
 - Pushes via `docker_adapter.py::set_agent_prompts()` (calls `/config/agent-prompts`)
-- Updates files in `{instance_dir}/app/docs/`
+- Updates files in `{instance_dir}/app/docs/` (WORKFLOW_PROMPT.md, ENTRYPOINT_PROMPT.md, REFINER_PROMPT.md)
 
 ### Building Agent Instructions
 
-The building agent sees both prompts in its system prompt and is instructed to:
+The building agent sees all three prompts in its system prompt and is instructed to:
 - Update `WORKFLOW_PROMPT.md` as scripts and capabilities are developed
 - Fill in `ENTRYPOINT_PROMPT.md` with a concise trigger message
-- Keep both files current as the workflow evolves
+- Define `REFINER_PROMPT.md` with task refinement guidelines
+- Keep all three files current as the workflow evolves
 
 **Reference**: `BUILDING_AGENT_EXAMPLE.md` section "Workflow Documentation"
 
@@ -700,6 +755,7 @@ Check these folders for documentation files if needed.
    - `/app/workspace/scripts/README.md` (fresh load)
    - `/app/workspace/docs/WORKFLOW_PROMPT.md` (fresh load)
    - `/app/workspace/docs/ENTRYPOINT_PROMPT.md` (fresh load)
+   - `/app/workspace/docs/REFINER_PROMPT.md` (fresh load)
    - `/app/workspace/credentials/README.md` (fresh load)
    - `/app/workspace/knowledge/` (scans for topic folder names only)
 4. Constructs SystemPromptPreset dict with Claude Code preset

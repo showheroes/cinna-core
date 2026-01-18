@@ -16,6 +16,7 @@ import { AgentHandovers } from "./AgentHandovers"
 import { EditDescriptionModal } from "./EditDescriptionModal"
 import { EditEntrypointPromptModal } from "./EditEntrypointPromptModal"
 import { EditWorkflowPromptModal } from "./EditWorkflowPromptModal"
+import { EditRefinerPromptModal } from "./EditRefinerPromptModal"
 
 interface AgentConfigTabProps {
   agent: AgentPublic
@@ -27,6 +28,7 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
   const [descriptionModalOpen, setDescriptionModalOpen] = useState(false)
   const [entrypointModalOpen, setEntrypointModalOpen] = useState(false)
   const [workflowModalOpen, setWorkflowModalOpen] = useState(false)
+  const [refinerModalOpen, setRefinerModalOpen] = useState(false)
 
   // Scheduler state
   const [schedulerEnabled, setSchedulerEnabled] = useState(false)
@@ -80,7 +82,7 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button
                 variant="outline"
                 onClick={() => setEntrypointModalOpen(true)}
@@ -92,6 +94,12 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
                 onClick={() => setWorkflowModalOpen(true)}
               >
                 Workflow Prompt
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setRefinerModalOpen(true)}
+              >
+                Refiner Prompt
               </Button>
             </div>
           </CardContent>
@@ -170,6 +178,13 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
         currentPrompt={agent.workflow_prompt}
         open={workflowModalOpen}
         onClose={() => setWorkflowModalOpen(false)}
+        readOnly={readOnly}
+      />
+      <EditRefinerPromptModal
+        agentId={agent.id}
+        currentPrompt={agent.refiner_prompt}
+        open={refinerModalOpen}
+        onClose={() => setRefinerModalOpen(false)}
         readOnly={readOnly}
       />
     </div>

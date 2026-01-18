@@ -366,7 +366,7 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
         Get agent prompts from docs files.
 
         Returns:
-            Dictionary with 'workflow_prompt' and 'entrypoint_prompt' keys
+            Dictionary with 'workflow_prompt', 'entrypoint_prompt', and 'refiner_prompt' keys
         """
         try:
             async with httpx.AsyncClient() as client:
@@ -379,19 +379,26 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
                 data = response.json()
                 return {
                     "workflow_prompt": data.get("workflow_prompt"),
-                    "entrypoint_prompt": data.get("entrypoint_prompt")
+                    "entrypoint_prompt": data.get("entrypoint_prompt"),
+                    "refiner_prompt": data.get("refiner_prompt")
                 }
         except httpx.HTTPError as e:
             logger.error(f"Failed to get agent prompts: {e}")
             raise Exception(f"Failed to get agent prompts: {e}")
 
-    async def set_agent_prompts(self, workflow_prompt: str | None = None, entrypoint_prompt: str | None = None) -> bool:
+    async def set_agent_prompts(
+        self,
+        workflow_prompt: str | None = None,
+        entrypoint_prompt: str | None = None,
+        refiner_prompt: str | None = None
+    ) -> bool:
         """
         Update agent prompts in docs files.
 
         Args:
             workflow_prompt: Content for docs/WORKFLOW_PROMPT.md (None to skip)
             entrypoint_prompt: Content for docs/ENTRYPOINT_PROMPT.md (None to skip)
+            refiner_prompt: Content for docs/REFINER_PROMPT.md (None to skip)
 
         Returns:
             True if successful
@@ -402,6 +409,8 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
                 payload["workflow_prompt"] = workflow_prompt
             if entrypoint_prompt is not None:
                 payload["entrypoint_prompt"] = entrypoint_prompt
+            if refiner_prompt is not None:
+                payload["refiner_prompt"] = refiner_prompt
 
             if not payload:
                 return True  # Nothing to update

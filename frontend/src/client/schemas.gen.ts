@@ -1280,6 +1280,17 @@ export const AgentCreateSchema = {
             ],
             title: 'Entrypoint Prompt'
         },
+        refiner_prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Refiner Prompt'
+        },
         description: {
             anyOf: [
                 {
@@ -2008,6 +2019,17 @@ export const AgentPublicSchema = {
             ],
             title: 'Entrypoint Prompt'
         },
+        refiner_prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Refiner Prompt'
+        },
         is_active: {
             type: 'boolean',
             title: 'Is Active'
@@ -2156,7 +2178,7 @@ export const AgentPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'name', 'description', 'workflow_prompt', 'entrypoint_prompt', 'is_active', 'active_environment_id', 'ui_color_preset', 'show_on_dashboard', 'conversation_mode_ui', 'created_at', 'updated_at', 'owner_id', 'user_workspace_id'],
+    required: ['id', 'name', 'description', 'workflow_prompt', 'entrypoint_prompt', 'refiner_prompt', 'is_active', 'active_environment_id', 'ui_color_preset', 'show_on_dashboard', 'conversation_mode_ui', 'created_at', 'updated_at', 'owner_id', 'user_workspace_id'],
     title: 'AgentPublic'
 } as const;
 
@@ -2427,6 +2449,17 @@ export const AgentUpdateSchema = {
                 }
             ],
             title: 'Entrypoint Prompt'
+        },
+        refiner_prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Refiner Prompt'
         },
         is_active: {
             anyOf: [

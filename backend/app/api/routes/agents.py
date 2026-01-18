@@ -85,6 +85,7 @@ def _agent_to_public_with_clone_info(session, agent: Agent) -> AgentPublic:
         description=agent.description,
         workflow_prompt=agent.workflow_prompt,
         entrypoint_prompt=agent.entrypoint_prompt,
+        refiner_prompt=agent.refiner_prompt,
         is_active=agent.is_active,
         active_environment_id=agent.active_environment_id,
         ui_color_preset=agent.ui_color_preset,
@@ -277,7 +278,7 @@ async def sync_agent_prompts(
     """
     Sync agent prompts to active environment.
 
-    When user manually edits workflow_prompt or entrypoint_prompt in the backend,
+    When user manually edits workflow_prompt, entrypoint_prompt, or refiner_prompt in the backend,
     this endpoint pushes those changes to the active environment's docs files.
     """
     agent = session.get(Agent, id)
@@ -310,7 +311,8 @@ async def sync_agent_prompts(
         await EnvironmentService.sync_agent_prompts_to_environment(
             environment=environment,
             workflow_prompt=agent.workflow_prompt,
-            entrypoint_prompt=agent.entrypoint_prompt
+            entrypoint_prompt=agent.entrypoint_prompt,
+            refiner_prompt=agent.refiner_prompt
         )
         return Message(message="Agent prompts synced to environment successfully")
     except Exception as e:

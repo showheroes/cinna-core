@@ -285,15 +285,17 @@ async def get_agent_prompts() -> AgentPromptsResponse:
     Returns the content of:
     - ./docs/WORKFLOW_PROMPT.md
     - ./docs/ENTRYPOINT_PROMPT.md
+    - ./docs/REFINER_PROMPT.md
 
     These files are maintained by the building agent and define how the
     workflow should operate in conversation mode.
     """
-    workflow_prompt, entrypoint_prompt = agent_env_service.get_agent_prompts()
+    workflow_prompt, entrypoint_prompt, refiner_prompt = agent_env_service.get_agent_prompts()
 
     return AgentPromptsResponse(
         workflow_prompt=workflow_prompt,
-        entrypoint_prompt=entrypoint_prompt
+        entrypoint_prompt=entrypoint_prompt,
+        refiner_prompt=refiner_prompt
     )
 
 
@@ -305,13 +307,15 @@ async def update_agent_prompts(prompts: AgentPromptsUpdate):
     Updates the content of:
     - ./docs/WORKFLOW_PROMPT.md (if workflow_prompt is provided)
     - ./docs/ENTRYPOINT_PROMPT.md (if entrypoint_prompt is provided)
+    - ./docs/REFINER_PROMPT.md (if refiner_prompt is provided)
 
     This is used by the backend to sync manually edited prompts to the agent environment.
     """
     try:
         updated_files = agent_env_service.update_agent_prompts(
             workflow_prompt=prompts.workflow_prompt,
-            entrypoint_prompt=prompts.entrypoint_prompt
+            entrypoint_prompt=prompts.entrypoint_prompt,
+            refiner_prompt=prompts.refiner_prompt
         )
 
         return {

@@ -778,7 +778,7 @@ class EnvironmentService:
         Sync agent prompts from environment docs files back to agent model.
 
         This should be called after a building mode session completes to capture
-        any updates the agent made to WORKFLOW_PROMPT.md and ENTRYPOINT_PROMPT.md.
+        any updates the agent made to WORKFLOW_PROMPT.md, ENTRYPOINT_PROMPT.md, and REFINER_PROMPT.md.
 
         Args:
             session: Database session
@@ -800,6 +800,7 @@ class EnvironmentService:
 
             workflow_prompt = prompts.get("workflow_prompt")
             entrypoint_prompt = prompts.get("entrypoint_prompt")
+            refiner_prompt = prompts.get("refiner_prompt")
 
             # Update agent if prompts have changed
             updated = False
@@ -812,6 +813,11 @@ class EnvironmentService:
                 agent.entrypoint_prompt = entrypoint_prompt
                 updated = True
                 logger.info(f"Updated agent {agent.id} entrypoint_prompt from environment ({len(entrypoint_prompt)} chars)")
+
+            if refiner_prompt and refiner_prompt != agent.refiner_prompt:
+                agent.refiner_prompt = refiner_prompt
+                updated = True
+                logger.info(f"Updated agent {agent.id} refiner_prompt from environment ({len(refiner_prompt)} chars)")
 
             if updated:
                 agent.updated_at = datetime.utcnow()
@@ -830,7 +836,8 @@ class EnvironmentService:
     async def sync_agent_prompts_to_environment(
         environment: AgentEnvironment,
         workflow_prompt: str | None = None,
-        entrypoint_prompt: str | None = None
+        entrypoint_prompt: str | None = None,
+        refiner_prompt: str | None = None
     ) -> bool:
         """
         Sync agent prompts from backend to environment docs files.
@@ -842,6 +849,7 @@ class EnvironmentService:
             environment: Agent environment instance
             workflow_prompt: Updated workflow prompt content (None to skip)
             entrypoint_prompt: Updated entrypoint prompt content (None to skip)
+            refiner_prompt: Updated refiner prompt content (None to skip)
 
         Returns:
             True if sync successful
@@ -853,7 +861,8 @@ class EnvironmentService:
             # Push prompts to environment
             await adapter.set_agent_prompts(
                 workflow_prompt=workflow_prompt,
-                entrypoint_prompt=entrypoint_prompt
+                entrypoint_prompt=entrypoint_prompt,
+                refiner_prompt=refiner_prompt
             )
 
             logger.info(f"Synced agent prompts to environment {environment.id}")

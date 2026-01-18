@@ -29,6 +29,7 @@ class AgentBase(SQLModel):
     name: str = Field(min_length=1, max_length=255)
     workflow_prompt: str | None = Field(default=None)
     entrypoint_prompt: str | None = Field(default=None)
+    refiner_prompt: str | None = Field(default=None)
 
 
 # Properties to receive on agent creation
@@ -43,6 +44,7 @@ class AgentUpdate(SQLModel):
     description: str | None = None
     workflow_prompt: str | None = None
     entrypoint_prompt: str | None = None
+    refiner_prompt: str | None = None
     is_active: bool | None = None
     ui_color_preset: str | None = None
     show_on_dashboard: bool | None = None
@@ -114,6 +116,7 @@ class AgentPublic(SQLModel):
     description: str | None
     workflow_prompt: str | None
     entrypoint_prompt: str | None
+    refiner_prompt: str | None
     is_active: bool
     active_environment_id: uuid.UUID | None
     ui_color_preset: str | None
