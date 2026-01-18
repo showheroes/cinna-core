@@ -33,6 +33,7 @@ Add `user_workspace_id` (UUID, nullable, FK to user_workspace) to:
 - `agent_sessions`
 - `credentials`
 - `activities` (related to sessions)
+- `input_task` (task management)
 
 **Null value** = entity belongs to "Default" workspace
 
@@ -105,7 +106,7 @@ Add `user_workspace_id` (UUID, nullable, FK to user_workspace) to:
 
 ### Entity Creation
 
-When user creates new agent/session/credential:
+When user creates new agent/session/credential/task:
 - If workspace is active: set `user_workspace_id` to active workspace ID
 - If "Default" active: set `user_workspace_id` to `null`
 
@@ -116,6 +117,7 @@ For queries listing:
 - Sessions
 - Credentials
 - Activities
+- Tasks
 
 **Filter logic**:
 - If "Default" workspace active: show entities where `user_workspace_id IS NULL`
