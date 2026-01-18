@@ -52,6 +52,12 @@ class InputTask(InputTaskBase, table=True):
     user_workspace_id: uuid.UUID | None = Field(
         default=None, foreign_key="user_workspace.id", ondelete="CASCADE"
     )
+    # Agent-initiated task fields (for handover through task creation)
+    agent_initiated: bool = Field(default=False)
+    auto_execute: bool = Field(default=False)
+    source_session_id: uuid.UUID | None = Field(
+        default=None, foreign_key="session.id", ondelete="SET NULL"
+    )
     status: str = Field(default=InputTaskStatus.NEW)
     refinement_history: list = Field(default_factory=list, sa_column=Column(JSON))
     error_message: str | None = None
@@ -67,6 +73,10 @@ class InputTaskCreate(SQLModel):
     original_message: str = Field(min_length=1, max_length=10000)
     selected_agent_id: uuid.UUID | None = None
     user_workspace_id: uuid.UUID | None = None
+    # Agent-initiated task fields
+    agent_initiated: bool = False
+    auto_execute: bool = False
+    source_session_id: uuid.UUID | None = None
 
 
 # Update schema
@@ -85,6 +95,10 @@ class InputTaskPublic(SQLModel):
     selected_agent_id: uuid.UUID | None
     session_id: uuid.UUID | None
     user_workspace_id: uuid.UUID | None
+    # Agent-initiated task fields
+    agent_initiated: bool
+    auto_execute: bool
+    source_session_id: uuid.UUID | None
     error_message: str | None
     created_at: datetime
     updated_at: datetime

@@ -858,16 +858,18 @@ async def execute_handover(
     data: ExecuteHandoverRequest
 ) -> Any:
     """
-    Execute a handover by creating a new session for target agent and sending the handover message.
-    This endpoint is called by agent-env tools to trigger another agent.
+    Execute a handover by creating a task for target agent, optionally refining it,
+    and auto-executing. This endpoint is called by agent-env tools to trigger another agent.
 
-    The handover process:
-    1. Creates new conversation session for target agent
-    2. Posts handover message to new session
-    3. Logs system message in source session with link to new session
+    The handover process (task-based):
+    1. Creates InputTask (agent_initiated=True, auto_execute=True)
+    2. If target agent has refiner_prompt, runs auto-refine
+    3. Creates session for target agent and links to task
+    4. Sends the (possibly refined) message to the session
+    5. Logs system message in source session about task creation
     """
     logger.info(f"Handover request from user {current_user.id}: target_agent_id={data.target_agent_id}, source_session_id={data.source_session_id}")
-    success, new_session_id, error = await AgentService.execute_handover(
+    success, task_id, error = await AgentService.execute_handover(
         session=session,
         user_id=current_user.id,
         target_agent_id=data.target_agent_id,
@@ -878,7 +880,8 @@ async def execute_handover(
 
     return ExecuteHandoverResponse(
         success=success,
-        session_id=new_session_id,
+        task_id=task_id,
+        message=f"Task created for handover to '{data.target_agent_name}'" if success else None,
         error=error
     )
 

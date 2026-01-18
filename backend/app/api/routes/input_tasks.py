@@ -7,33 +7,39 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
-    InputTask,
     InputTaskCreate,
     InputTaskUpdate,
     InputTaskPublic,
     InputTaskPublicExtended,
-    InputTasksPublic,
     InputTasksPublicExtended,
     InputTaskStatus,
     RefineTaskRequest,
     RefineTaskResponse,
     ExecuteTaskRequest,
     ExecuteTaskResponse,
-    SessionCreate,
     SessionsPublic,
     SessionPublic,
     Message,
-    Agent,
 )
-from app.services.input_task_service import InputTaskService
-from app.services.ai_functions_service import AIFunctionsService
+from app.services.input_task_service import (
+    InputTaskService,
+    InputTaskError,
+    TaskNotFoundError,
+    AgentNotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from app.services.session_service import SessionService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def _handle_service_error(e: InputTaskError) -> None:
+    """Convert service exceptions to HTTP exceptions."""
+    raise HTTPException(status_code=e.status_code, detail=e.message)
 
 
 @router.post("/", response_model=InputTaskPublic)
@@ -43,18 +49,21 @@ def create_task(
     """
     Create a new input task.
     """
-    # Verify agent exists if specified
-    if task_in.selected_agent_id:
-        agent = session.get(Agent, task_in.selected_agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        if not current_user.is_superuser and agent.owner_id != current_user.id:
-            raise HTTPException(status_code=400, detail="Not enough permissions")
+    try:
+        # Verify agent access if specified
+        if task_in.selected_agent_id:
+            InputTaskService.verify_agent_access(
+                db_session=session,
+                agent_id=task_in.selected_agent_id,
+                user_id=current_user.id,
+            )
 
-    task = InputTaskService.create_task(
-        db_session=session, user_id=current_user.id, data=task_in
-    )
-    return task
+        task = InputTaskService.create_task(
+            db_session=session, user_id=current_user.id, data=task_in
+        )
+        return task
+    except InputTaskError as e:
+        _handle_service_error(e)
 
 
 @router.get("/", response_model=InputTasksPublicExtended)
@@ -83,69 +92,18 @@ def list_tasks(
             - Empty string (""): filters for default workspace (NULL)
             - UUID string: filters for that workspace
     """
-    # Parse status filter
-    status_filter = None
-    if status:
-        if status == "active":
-            status_filter = [
-                InputTaskStatus.NEW,
-                InputTaskStatus.REFINING,
-                InputTaskStatus.RUNNING,
-                InputTaskStatus.PENDING_INPUT,
-                InputTaskStatus.ERROR,
-            ]
-        elif status == "completed":
-            status_filter = [InputTaskStatus.COMPLETED]
-        elif status == "archived":
-            status_filter = [InputTaskStatus.ARCHIVED]
-        elif status == "all":
-            status_filter = None
-        else:
-            # Single status filter
-            status_filter = [status]
-
-    # Parse workspace filter
-    workspace_filter: uuid.UUID | None = None
-    apply_workspace_filter = False
-
-    if user_workspace_id is None:
-        apply_workspace_filter = False
-    elif user_workspace_id == "":
-        workspace_filter = None
-        apply_workspace_filter = True
-    else:
-        try:
-            workspace_filter = uuid.UUID(user_workspace_id)
-            apply_workspace_filter = True
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid workspace ID format")
-
-    results, count = InputTaskService.list_tasks(
-        db_session=session,
-        user_id=current_user.id,
-        status_filter=status_filter,
-        user_workspace_id=workspace_filter,
-        apply_workspace_filter=apply_workspace_filter,
-        skip=skip,
-        limit=limit,
-    )
-
-    data = []
-    for task, agent_name in results:
-        # Get sessions info for this task
-        sessions_count, latest_session_id = SessionService.get_task_sessions_info(
-            db_session=session, task_id=task.id
+    try:
+        data, count = InputTaskService.list_tasks_extended(
+            db_session=session,
+            user_id=current_user.id,
+            status=status,
+            user_workspace_id=user_workspace_id,
+            skip=skip,
+            limit=limit,
         )
-        data.append(
-            InputTaskPublicExtended(
-                **task.model_dump(),
-                agent_name=agent_name,
-                sessions_count=sessions_count,
-                latest_session_id=latest_session_id,
-            )
-        )
-
-    return InputTasksPublicExtended(data=data, count=count)
+        return InputTasksPublicExtended(data=data, count=count)
+    except InputTaskError as e:
+        _handle_service_error(e)
 
 
 @router.get("/{id}", response_model=InputTaskPublicExtended)
@@ -153,27 +111,14 @@ def get_task(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> A
     """
     Get a single input task with details.
     """
-    result = InputTaskService.get_task_with_agent(db_session=session, task_id=id)
-    if not result:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    task, agent_name = result
-
-    # Verify ownership
-    if not current_user.is_superuser and task.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions")
-
-    # Get sessions info for this task
-    sessions_count, latest_session_id = SessionService.get_task_sessions_info(
-        db_session=session, task_id=id
-    )
-
-    return InputTaskPublicExtended(
-        **task.model_dump(),
-        agent_name=agent_name,
-        sessions_count=sessions_count,
-        latest_session_id=latest_session_id,
-    )
+    try:
+        return InputTaskService.get_task_extended(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
+        )
+    except InputTaskError as e:
+        _handle_service_error(e)
 
 
 @router.patch("/{id}", response_model=InputTaskPublic)
@@ -187,26 +132,28 @@ def update_task(
     """
     Update an input task.
     """
-    task = session.get(InputTask, id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        # Get task with ownership check
+        task = InputTaskService.get_task_with_ownership_check(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
+        )
 
-    # Verify ownership
-    if not current_user.is_superuser and task.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions")
+        # Verify agent access if being updated
+        if task_in.selected_agent_id:
+            InputTaskService.verify_agent_access(
+                db_session=session,
+                agent_id=task_in.selected_agent_id,
+                user_id=current_user.id,
+            )
 
-    # Verify agent exists if being updated
-    if task_in.selected_agent_id:
-        agent = session.get(Agent, task_in.selected_agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        if not current_user.is_superuser and agent.owner_id != current_user.id:
-            raise HTTPException(status_code=400, detail="Not enough permissions for this agent")
-
-    updated_task = InputTaskService.update_task(
-        db_session=session, task=task, data=task_in
-    )
-    return updated_task
+        updated_task = InputTaskService.update_task(
+            db_session=session, task=task, data=task_in
+        )
+        return updated_task
+    except InputTaskError as e:
+        _handle_service_error(e)
 
 
 @router.delete("/{id}")
@@ -216,16 +163,16 @@ def delete_task(
     """
     Delete an input task.
     """
-    task = session.get(InputTask, id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    # Verify ownership
-    if not current_user.is_superuser and task.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions")
-
-    InputTaskService.delete_task(db_session=session, task=task)
-    return Message(message="Task deleted successfully")
+    try:
+        task = InputTaskService.get_task_with_ownership_check(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
+        )
+        InputTaskService.delete_task(db_session=session, task=task)
+        return Message(message="Task deleted successfully")
+    except InputTaskError as e:
+        _handle_service_error(e)
 
 
 @router.post("/{id}/refine", response_model=RefineTaskResponse)
@@ -242,62 +189,29 @@ def refine_task(
     Uses AI to improve the task description based on user's feedback or comments.
     Appends the conversation to refinement_history.
     """
-    task = session.get(InputTask, id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    # Verify ownership
-    if not current_user.is_superuser and task.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions")
-
-    # Set status to refining
-    if task.status == InputTaskStatus.NEW:
-        InputTaskService.update_status(
-            db_session=session, task=task, status=InputTaskStatus.REFINING
+    try:
+        task = InputTaskService.get_task_with_ownership_check(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
         )
 
-    # Append user comment to history
-    InputTaskService.append_to_refinement_history(
-        db_session=session, task=task, role="user", content=refine_in.user_comment
-    )
+        result = InputTaskService.refine_task(
+            db_session=session,
+            task=task,
+            user_id=current_user.id,
+            user_comment=refine_in.user_comment,
+            user_selected_text=refine_in.user_selected_text,
+        )
 
-    # Call AI refinement service
-    result = AIFunctionsService.refine_task(
-        db=session,
-        current_description=task.current_description,
-        user_comment=refine_in.user_comment,
-        agent_id=task.selected_agent_id,
-        owner_id=current_user.id,
-        refinement_history=task.refinement_history,
-        user_selected_text=refine_in.user_selected_text,
-    )
-
-    if not result.get("success"):
         return RefineTaskResponse(
-            success=False,
-            error=result.get("error", "Failed to refine task"),
+            success=result["success"],
+            refined_description=result.get("refined_description"),
+            feedback_message=result.get("feedback_message"),
+            error=result.get("error"),
         )
-
-    # Update task description with refined version
-    refined_description = result.get("refined_description", "")
-    feedback_message = result.get("feedback_message", "")
-
-    InputTaskService.update_description(
-        db_session=session, task=task, new_description=refined_description
-    )
-
-    # Append AI response to history
-    InputTaskService.append_to_refinement_history(
-        db_session=session, task=task, role="ai", content=feedback_message
-    )
-
-    # Status stays as REFINING - user can continue refining or execute
-
-    return RefineTaskResponse(
-        success=True,
-        refined_description=refined_description,
-        feedback_message=feedback_message,
-    )
+    except InputTaskError as e:
+        _handle_service_error(e)
 
 
 @router.post("/{id}/execute", response_model=ExecuteTaskResponse)
@@ -313,60 +227,26 @@ def execute_task(
 
     Requires a selected_agent_id to be set on the task.
     """
-    task = session.get(InputTask, id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    # Verify ownership
-    if not current_user.is_superuser and task.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions")
-
-    # Verify agent is selected
-    if not task.selected_agent_id:
-        raise HTTPException(status_code=400, detail="No agent selected for this task")
-
-    # Verify agent exists and user owns it
-    agent = session.get(Agent, task.selected_agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Selected agent not found")
-    if not current_user.is_superuser and agent.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions for this agent")
-
-    # Verify agent has an active environment
-    if not agent.active_environment_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Selected agent has no active environment",
+    try:
+        task = InputTaskService.get_task_with_ownership_check(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
         )
 
-    # Create session
-    session_data = SessionCreate(
-        agent_id=task.selected_agent_id,
-        title=task.current_description[:100],  # First 100 chars as title
-        mode=execute_in.mode,
-    )
-    new_session = SessionService.create_session(
-        db_session=session,
-        user_id=current_user.id,
-        data=session_data,
-        source_task_id=task.id,
-    )
-
-    if not new_session:
-        return ExecuteTaskResponse(
-            success=False,
-            error="Failed to create session",
+        success, new_session, error = InputTaskService.execute_task_sync(
+            db_session=session,
+            task=task,
+            user_id=current_user.id,
+            mode=execute_in.mode,
         )
 
-    # Link session to task and update status
-    InputTaskService.link_session(
-        db_session=session, task=task, session_id=new_session.id
-    )
+        if not success:
+            return ExecuteTaskResponse(success=False, error=error)
 
-    return ExecuteTaskResponse(
-        success=True,
-        session_id=new_session.id,
-    )
+        return ExecuteTaskResponse(success=True, session_id=new_session.id)
+    except InputTaskError as e:
+        _handle_service_error(e)
 
 
 @router.post("/{id}/archive", response_model=InputTaskPublic)
@@ -376,19 +256,19 @@ def archive_task(
     """
     Archive a completed or error task.
     """
-    task = session.get(InputTask, id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        task = InputTaskService.get_task_with_ownership_check(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
+        )
 
-    # Verify ownership
-    if not current_user.is_superuser and task.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions")
-
-    updated_task = InputTaskService.update_status(
-        db_session=session, task=task, status=InputTaskStatus.ARCHIVED
-    )
-
-    return updated_task
+        updated_task = InputTaskService.update_status(
+            db_session=session, task=task, status=InputTaskStatus.ARCHIVED
+        )
+        return updated_task
+    except InputTaskError as e:
+        _handle_service_error(e)
 
 
 @router.get("/{id}/sessions", response_model=SessionsPublic)
@@ -404,19 +284,21 @@ def list_task_sessions(
 
     A single task can trigger multiple sessions (e.g., retries, re-runs).
     """
-    task = session.get(InputTask, id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        # Verify task exists and user has access
+        InputTaskService.get_task_with_ownership_check(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
+        )
 
-    # Verify ownership
-    if not current_user.is_superuser and task.owner_id != current_user.id:
-        raise HTTPException(status_code=400, detail="Not enough permissions")
+        sessions = SessionService.list_task_sessions(
+            db_session=session, task_id=id, limit=limit, offset=skip
+        )
 
-    sessions = SessionService.list_task_sessions(
-        db_session=session, task_id=id, limit=limit, offset=skip
-    )
-
-    return SessionsPublic(
-        data=[SessionPublic(**s.model_dump()) for s in sessions],
-        count=len(sessions),
-    )
+        return SessionsPublic(
+            data=[SessionPublic(**s.model_dump()) for s in sessions],
+            count=len(sessions),
+        )
+    except InputTaskError as e:
+        _handle_service_error(e)

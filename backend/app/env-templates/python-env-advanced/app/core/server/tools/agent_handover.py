@@ -163,24 +163,27 @@ async def agent_handover(args: dict[str, Any]) -> dict[str, Any]:
         logger.debug(f"Making handover request to {url}")
 
         # Make request to backend - backend handles everything:
-        # 1. Creates new session for target agent
-        # 2. Posts handover message to new session
-        # 3. Logs system message in source session
+        # 1. Creates InputTask (agent_initiated=True, auto_execute=True)
+        # 2. If target agent has refiner_prompt, runs auto-refine
+        # 3. Creates session for target agent and links to task
+        # 4. Sends the (possibly refined) message to the session
+        # 5. Logs system message in source session about task creation
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
 
             if response.status_code == 200:
                 data = response.json()
                 success = data.get("success", False)
-                session_id = data.get("session_id")
+                task_id = data.get("task_id")
+                message = data.get("message")
                 error = data.get("error")
 
-                if success and session_id:
-                    logger.info(f"Handover successful: Created session {session_id} for agent {target_agent_id}")
+                if success and task_id:
+                    logger.info(f"Handover successful: Created task {task_id} for agent {target_agent_id}")
                     return {
                         "content": [{
                             "type": "text",
-                            "text": f"Successfully handed over to agent '{target_agent_name}'. A new session has been created and your message has been sent."
+                            "text": message or f"Successfully handed over to agent '{target_agent_name}'. A task has been created and is being executed."
                         }]
                     }
                 else:

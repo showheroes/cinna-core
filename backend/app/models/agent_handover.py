@@ -101,5 +101,6 @@ class ExecuteHandoverRequest(SQLModel):
 class ExecuteHandoverResponse(SQLModel):
     """Response from handover execution."""
     success: bool
-    session_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
+    message: str | None = None
     error: str | None = None

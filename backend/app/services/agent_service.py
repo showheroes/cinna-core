@@ -4,12 +4,13 @@ import logging
 from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
-from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment, Session as ChatSession, AgentSdkConfig
+from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment, Session as ChatSession, AgentSdkConfig, InputTaskCreate
 from app.models.environment import AgentEnvironmentCreate
 from app.services.environment_service import EnvironmentService
 from app.services.environment_lifecycle import EnvironmentLifecycleManager
 from app.services.session_service import SessionService
 from app.services.ai_functions_service import AIFunctionsService
+from app.services.input_task_service import InputTaskService
 from app.agents.skills_generator import generate_a2a_skills
 from app.core.config import settings
 from app.core.db import engine
@@ -475,13 +476,13 @@ class AgentService:
         source_session_id: UUID
     ) -> tuple[bool, UUID | None, str | None]:
         """
-        Execute agent handover by creating new session and posting handover message.
+        Execute agent handover by creating a task, optionally refining it, and auto-executing.
 
-        This method:
+        New flow (task-based handover):
         1. Validates target agent exists and user has access
-        2. Creates new conversation session for target agent
-        3. Posts handover message to new session
-        4. Logs system message in source session with link to new session
+        2. Creates InputTask with auto-refine (via InputTaskService)
+        3. Executes task - creates session and sends message (via InputTaskService)
+        4. Logs system message in source session about task creation
 
         Args:
             session: Database session
@@ -492,7 +493,7 @@ class AgentService:
             source_session_id: Source session UUID (for logging handover)
 
         Returns:
-            Tuple of (success: bool, session_id: UUID | None, error: str | None)
+            Tuple of (success: bool, task_id: UUID | None, error: str | None)
         """
         from app.services.message_service import MessageService
 
@@ -510,62 +511,61 @@ class AgentService:
             if not target_agent.active_environment_id:
                 return False, None, "Target agent has no active environment"
 
-            # Create session for target agent (conversation mode by default)
-            session_create = SessionCreate(
-                agent_id=target_agent_id,
-                title=f"Handover from {target_agent_name}",
-                mode="conversation",
+            # Get source session to inherit workspace
+            source_session = session.get(ChatSession, source_session_id)
+            user_workspace_id = source_session.user_workspace_id if source_session else None
+
+            # Step 1: Create InputTask with auto-refine (if agent has refiner_prompt)
+            task_data = InputTaskCreate(
+                original_message=handover_message,
+                selected_agent_id=target_agent_id,
+                user_workspace_id=user_workspace_id,
+                agent_initiated=True,
+                auto_execute=True,
+                source_session_id=source_session_id,
             )
 
-            new_session = SessionService.create_session(
+            task, message_to_send = InputTaskService.create_task_with_auto_refine(
                 db_session=session,
                 user_id=user_id,
-                data=session_create
+                data=task_data,
             )
 
-            if not new_session:
-                return False, None, "Failed to create session for target agent"
+            logger.info(f"Created task {task.id} for handover to agent {target_agent_id}")
 
-            # Send handover message using centralized service method
-            # This handles message creation and stream initiation
-            result = await SessionService.send_session_message(
-                session_id=new_session.id,
+            # Step 2: Execute task (creates session, links it, sends message)
+            success, new_session, error = await InputTaskService.execute_task(
+                db_session=session,
+                task=task,
                 user_id=user_id,
-                content=handover_message,
-                file_ids=None,
-                answers_to_message_id=None,
-                get_fresh_db_session=lambda: Session(engine)
+                message_to_send=message_to_send,
             )
 
-            # Log the result for debugging
-            if result["action"] == "error":
-                logger.error(f"Failed to send handover message: {result['message']}")
-                return False, None, f"Failed to send handover message: {result['message']}"
+            if not success:
+                return False, None, error
 
-            logger.info(f"Handover message sent to session {new_session.id}, action: {result['action']}")
-
-            # Log system message in source session about the handover
-            source_session = session.get(ChatSession, source_session_id)
+            # Step 3: Log system message in source session about task creation
             if source_session:
                 MessageService.create_message(
                     session=session,
                     session_id=source_session_id,
                     role="system",
-                    content=f"🔀 Agent handed over to '{target_agent.name}'",
+                    content=f"📋 Task created for '{target_agent.name}'",
                     message_metadata={
-                        "handover_type": "agent_handover",
-                        "forwarded_to_session_id": str(new_session.id),
+                        "task_created": True,
+                        "task_id": str(task.id),
                         "target_agent_id": str(target_agent_id),
-                        "target_agent_name": target_agent.name
+                        "target_agent_name": target_agent.name,
+                        "session_id": str(new_session.id),
                     }
                 )
 
             logger.info(
-                f"Handover executed: Created session {new_session.id} for agent {target_agent_id}, "
+                f"Handover executed: Created task {task.id} and session {new_session.id} for agent {target_agent_id}, "
                 f"source session: {source_session_id}"
             )
 
-            return True, new_session.id, None
+            return True, task.id, None
 
         except Exception as e:
             logger.error(f"Error executing handover: {str(e)}")

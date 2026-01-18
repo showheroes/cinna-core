@@ -889,13 +889,15 @@ export class AgentsService {
     
     /**
      * Execute Handover
-     * Execute a handover by creating a new session for target agent and sending the handover message.
-     * This endpoint is called by agent-env tools to trigger another agent.
+     * Execute a handover by creating a task for target agent, optionally refining it,
+     * and auto-executing. This endpoint is called by agent-env tools to trigger another agent.
      *
-     * The handover process:
-     * 1. Creates new conversation session for target agent
-     * 2. Posts handover message to new session
-     * 3. Logs system message in source session with link to new session
+     * The handover process (task-based):
+     * 1. Creates InputTask (agent_initiated=True, auto_execute=True)
+     * 2. If target agent has refiner_prompt, runs auto-refine
+     * 3. Creates session for target agent and links to task
+     * 4. Sends the (possibly refined) message to the session
+     * 5. Logs system message in source session about task creation
      * @param data The data for the request.
      * @param data.requestBody
      * @returns ExecuteHandoverResponse Successful Response

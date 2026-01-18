@@ -12,17 +12,279 @@ from app.models import (
     InputTask,
     InputTaskCreate,
     InputTaskUpdate,
+    InputTaskPublicExtended,
     InputTaskStatus,
     Agent,
     Session,
     SessionMessage,
+    SessionCreate,
 )
 from app.core.db import engine
+from app.services.session_service import SessionService
 
 logger = logging.getLogger(__name__)
 
 
+class InputTaskError(Exception):
+    """Base exception for input task service errors."""
+
+    def __init__(self, message: str, status_code: int = 400):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
+
+
+class TaskNotFoundError(InputTaskError):
+    """Task not found."""
+
+    def __init__(self, message: str = "Task not found"):
+        super().__init__(message, status_code=404)
+
+
+class AgentNotFoundError(InputTaskError):
+    """Agent not found."""
+
+    def __init__(self, message: str = "Agent not found"):
+        super().__init__(message, status_code=404)
+
+
+class PermissionDeniedError(InputTaskError):
+    """Permission denied."""
+
+    def __init__(self, message: str = "Not enough permissions"):
+        super().__init__(message, status_code=400)
+
+
+class ValidationError(InputTaskError):
+    """Validation error."""
+
+    def __init__(self, message: str):
+        super().__init__(message, status_code=400)
+
+
 class InputTaskService:
+    # ==================== Helper Methods ====================
+
+    @staticmethod
+    def verify_agent_access(
+        db_session: DBSession,
+        agent_id: UUID,
+        user_id: UUID,
+        require_active_environment: bool = False,
+    ) -> Agent:
+        """
+        Verify agent exists and user has access to it.
+
+        Args:
+            db_session: Database session
+            agent_id: Agent UUID to verify
+            user_id: User ID requesting access
+            require_active_environment: If True, verify agent has active environment
+
+        Returns:
+            Agent instance if valid
+
+        Raises:
+            AgentNotFoundError: If agent doesn't exist
+            PermissionDeniedError: If user doesn't own the agent
+            ValidationError: If agent has no active environment (when required)
+        """
+        agent = db_session.get(Agent, agent_id)
+        if not agent:
+            raise AgentNotFoundError()
+        if agent.owner_id != user_id:
+            raise PermissionDeniedError("Not enough permissions for this agent")
+        if require_active_environment and not agent.active_environment_id:
+            raise ValidationError("Selected agent has no active environment")
+        return agent
+
+    @staticmethod
+    def get_task_with_ownership_check(
+        db_session: DBSession,
+        task_id: UUID,
+        user_id: UUID,
+    ) -> InputTask:
+        """
+        Get task and verify ownership.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+            user_id: User ID requesting access
+
+        Returns:
+            InputTask instance if valid
+
+        Raises:
+            TaskNotFoundError: If task doesn't exist
+            PermissionDeniedError: If user doesn't own the task
+        """
+        task = db_session.get(InputTask, task_id)
+        if not task:
+            raise TaskNotFoundError()
+        if task.owner_id != user_id:
+            raise PermissionDeniedError()
+        return task
+
+    @staticmethod
+    def parse_status_filter(status: str | None) -> list[str] | None:
+        """
+        Parse status filter string into list of statuses.
+
+        Args:
+            status: Filter string - "active", "completed", "archived", "all", or specific status
+
+        Returns:
+            List of status values to filter by, or None for no filter
+        """
+        if not status or status == "all":
+            return None
+
+        if status == "active":
+            return [
+                InputTaskStatus.NEW,
+                InputTaskStatus.REFINING,
+                InputTaskStatus.RUNNING,
+                InputTaskStatus.PENDING_INPUT,
+                InputTaskStatus.ERROR,
+            ]
+        elif status == "completed":
+            return [InputTaskStatus.COMPLETED]
+        elif status == "archived":
+            return [InputTaskStatus.ARCHIVED]
+        else:
+            # Single status filter
+            return [status]
+
+    @staticmethod
+    def parse_workspace_filter(
+        user_workspace_id: str | None,
+    ) -> tuple[UUID | None, bool]:
+        """
+        Parse workspace filter parameter.
+
+        Args:
+            user_workspace_id: Workspace filter string
+                - None: no filter
+                - "": filter for default workspace (NULL)
+                - UUID string: filter for that workspace
+
+        Returns:
+            Tuple of (workspace_uuid, apply_filter)
+
+        Raises:
+            ValidationError: If workspace ID format is invalid
+        """
+        if user_workspace_id is None:
+            return None, False
+        elif user_workspace_id == "":
+            return None, True
+        else:
+            try:
+                return UUID(user_workspace_id), True
+            except ValueError:
+                raise ValidationError("Invalid workspace ID format")
+
+    @staticmethod
+    def get_task_extended(
+        db_session: DBSession,
+        task_id: UUID,
+        user_id: UUID,
+    ) -> InputTaskPublicExtended:
+        """
+        Get task with extended info (agent name, sessions count).
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+            user_id: User ID requesting access
+
+        Returns:
+            InputTaskPublicExtended with full task details
+
+        Raises:
+            TaskNotFoundError: If task doesn't exist
+            PermissionDeniedError: If user doesn't own the task
+        """
+        result = InputTaskService.get_task_with_agent(db_session=db_session, task_id=task_id)
+        if not result:
+            raise TaskNotFoundError()
+
+        task, agent_name = result
+
+        if task.owner_id != user_id:
+            raise PermissionDeniedError()
+
+        sessions_count, latest_session_id = SessionService.get_task_sessions_info(
+            db_session=db_session, task_id=task_id
+        )
+
+        return InputTaskPublicExtended(
+            **task.model_dump(),
+            agent_name=agent_name,
+            sessions_count=sessions_count,
+            latest_session_id=latest_session_id,
+        )
+
+    @staticmethod
+    def list_tasks_extended(
+        db_session: DBSession,
+        user_id: UUID,
+        status: str | None = None,
+        user_workspace_id: str | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[InputTaskPublicExtended], int]:
+        """
+        List user's tasks with extended info.
+
+        Args:
+            db_session: Database session
+            user_id: User ID
+            status: Status filter string
+            user_workspace_id: Workspace filter string
+            skip: Number of records to skip
+            limit: Number of records to return
+
+        Returns:
+            Tuple of (list of extended tasks, total count)
+
+        Raises:
+            ValidationError: If workspace ID format is invalid
+        """
+        status_filter = InputTaskService.parse_status_filter(status)
+        workspace_filter, apply_workspace_filter = InputTaskService.parse_workspace_filter(
+            user_workspace_id
+        )
+
+        results, count = InputTaskService.list_tasks(
+            db_session=db_session,
+            user_id=user_id,
+            status_filter=status_filter,
+            user_workspace_id=workspace_filter,
+            apply_workspace_filter=apply_workspace_filter,
+            skip=skip,
+            limit=limit,
+        )
+
+        data = []
+        for task, agent_name in results:
+            sessions_count, latest_session_id = SessionService.get_task_sessions_info(
+                db_session=db_session, task_id=task.id
+            )
+            data.append(
+                InputTaskPublicExtended(
+                    **task.model_dump(),
+                    agent_name=agent_name,
+                    sessions_count=sessions_count,
+                    latest_session_id=latest_session_id,
+                )
+            )
+
+        return data, count
+
+    # ==================== CRUD Operations ====================
+
     @staticmethod
     def create_task(
         db_session: DBSession,
@@ -35,7 +297,7 @@ class InputTaskService:
         Args:
             db_session: Database session
             user_id: User ID creating the task
-            data: Task creation data
+            data: Task creation data (including agent_initiated, auto_execute, source_session_id)
         """
         task = InputTask(
             owner_id=user_id,
@@ -43,6 +305,9 @@ class InputTaskService:
             current_description=data.original_message,  # Start with same as original
             selected_agent_id=data.selected_agent_id,
             user_workspace_id=data.user_workspace_id,
+            agent_initiated=data.agent_initiated,
+            auto_execute=data.auto_execute,
+            source_session_id=data.source_session_id,
             status=InputTaskStatus.NEW,
             refinement_history=[],
         )
@@ -50,6 +315,161 @@ class InputTaskService:
         db_session.commit()
         db_session.refresh(task)
         return task
+
+    @staticmethod
+    def create_task_with_auto_refine(
+        db_session: DBSession,
+        user_id: UUID,
+        data: InputTaskCreate,
+    ) -> tuple[InputTask, str]:
+        """
+        Create a new input task with optional auto-refinement.
+
+        If the selected agent has a refiner_prompt configured, the task description
+        will be automatically refined before returning.
+
+        Args:
+            db_session: Database session
+            user_id: User ID creating the task
+            data: Task creation data
+
+        Returns:
+            Tuple of (task, message_to_send) where message_to_send is the
+            possibly-refined task description ready for execution.
+        """
+        from app.services.ai_functions_service import AIFunctionsService
+
+        # Create the task first
+        task = InputTaskService.create_task(
+            db_session=db_session,
+            user_id=user_id,
+            data=data,
+        )
+
+        message_to_send = data.original_message
+
+        # Auto-refine if agent has refiner_prompt
+        if data.selected_agent_id:
+            agent = db_session.get(Agent, data.selected_agent_id)
+            if agent and agent.refiner_prompt and AIFunctionsService.is_available():
+                try:
+                    refine_result = AIFunctionsService.refine_task(
+                        db=db_session,
+                        current_description=data.original_message,
+                        user_comment="Auto-refine for task execution",
+                        agent_id=data.selected_agent_id,
+                        owner_id=user_id,
+                        refinement_history=None,
+                        user_selected_text=None,
+                    )
+
+                    if refine_result.get("success") and refine_result.get("refined_description"):
+                        message_to_send = refine_result["refined_description"]
+
+                        # Update task description
+                        task.current_description = message_to_send
+                        task.updated_at = datetime.utcnow()
+                        db_session.add(task)
+                        db_session.commit()
+                        db_session.refresh(task)
+
+                        # Append to refinement history
+                        InputTaskService.append_to_refinement_history(
+                            db_session=db_session,
+                            task=task,
+                            role="ai",
+                            content=f"Auto-refined: {refine_result.get('feedback_message', 'Task refined for agent execution')}",
+                        )
+
+                        logger.info(f"Task {task.id} auto-refined")
+                    else:
+                        logger.warning(f"Auto-refine failed or returned no result: {refine_result.get('error')}")
+
+                except Exception as e:
+                    logger.warning(f"Auto-refine failed for task {task.id}: {e}")
+                    # Continue with original message if refinement fails
+
+        return task, message_to_send
+
+    @staticmethod
+    async def execute_task(
+        db_session: DBSession,
+        task: InputTask,
+        user_id: UUID,
+        message_to_send: str,
+    ) -> tuple[bool, Session | None, str | None]:
+        """
+        Execute a task by creating a session and sending the message.
+
+        This method:
+        1. Creates a session for the task's selected agent
+        2. Links the session to the task
+        3. Sends the message to initiate the agent
+
+        Args:
+            db_session: Database session
+            task: The task to execute
+            user_id: User ID executing the task
+            message_to_send: The message to send (possibly refined)
+
+        Returns:
+            Tuple of (success, session, error_message)
+        """
+        if not task.selected_agent_id:
+            return False, None, "Task has no selected agent"
+
+        # Create session for target agent
+        session_title = f"Task: {message_to_send[:50]}..." if len(message_to_send) > 50 else f"Task: {message_to_send}"
+        session_create = SessionCreate(
+            agent_id=task.selected_agent_id,
+            title=session_title,
+            mode="conversation",
+        )
+
+        new_session = SessionService.create_session(
+            db_session=db_session,
+            user_id=user_id,
+            data=session_create,
+            source_task_id=task.id,
+        )
+
+        if not new_session:
+            InputTaskService.update_status(
+                db_session=db_session,
+                task=task,
+                status=InputTaskStatus.ERROR,
+                error_message="Failed to create session for agent",
+            )
+            return False, None, "Failed to create session for agent"
+
+        # Link session to task
+        InputTaskService.link_session(
+            db_session=db_session,
+            task=task,
+            session_id=new_session.id,
+        )
+
+        # Send message to session
+        result = await SessionService.send_session_message(
+            session_id=new_session.id,
+            user_id=user_id,
+            content=message_to_send,
+            file_ids=None,
+            answers_to_message_id=None,
+            get_fresh_db_session=lambda: DBSession(engine)
+        )
+
+        if result["action"] == "error":
+            InputTaskService.update_status(
+                db_session=db_session,
+                task=task,
+                status=InputTaskStatus.ERROR,
+                error_message=f"Failed to send message: {result['message']}",
+            )
+            return False, None, f"Failed to send message: {result['message']}"
+
+        logger.info(f"Task {task.id} executed: session {new_session.id} created")
+        return True, new_session, None
 
     @staticmethod
     def get_task(db_session: DBSession, task_id: UUID) -> Optional[InputTask]:
@@ -254,7 +674,151 @@ class InputTaskService:
         db_session.delete(task)
         db_session.commit()
 
-    # Status sync methods - compute and sync task status from connected sessions
+    # ==================== Business Logic Operations ====================
+
+    @staticmethod
+    def refine_task(
+        db_session: DBSession,
+        task: InputTask,
+        user_id: UUID,
+        user_comment: str,
+        user_selected_text: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Refine a task description with AI assistance.
+
+        Orchestrates the full refinement flow:
+        1. Updates status to REFINING if NEW
+        2. Appends user comment to history
+        3. Calls AI refinement service
+        4. Updates description with refined version
+        5. Appends AI response to history
+
+        Args:
+            db_session: Database session
+            task: Task to refine
+            user_id: User ID performing refinement
+            user_comment: User's refinement comment/feedback
+            user_selected_text: Optional selected text for targeted refinement
+
+        Returns:
+            Dict with success, refined_description, feedback_message, or error
+        """
+        from app.services.ai_functions_service import AIFunctionsService
+
+        # Set status to refining if new
+        if task.status == InputTaskStatus.NEW:
+            InputTaskService.update_status(
+                db_session=db_session, task=task, status=InputTaskStatus.REFINING
+            )
+
+        # Append user comment to history
+        InputTaskService.append_to_refinement_history(
+            db_session=db_session, task=task, role="user", content=user_comment
+        )
+
+        # Call AI refinement service
+        result = AIFunctionsService.refine_task(
+            db=db_session,
+            current_description=task.current_description,
+            user_comment=user_comment,
+            agent_id=task.selected_agent_id,
+            owner_id=user_id,
+            refinement_history=task.refinement_history,
+            user_selected_text=user_selected_text,
+        )
+
+        if not result.get("success"):
+            return {
+                "success": False,
+                "error": result.get("error", "Failed to refine task"),
+            }
+
+        # Update task description with refined version
+        refined_description = result.get("refined_description", "")
+        feedback_message = result.get("feedback_message", "")
+
+        InputTaskService.update_description(
+            db_session=db_session, task=task, new_description=refined_description
+        )
+
+        # Append AI response to history
+        InputTaskService.append_to_refinement_history(
+            db_session=db_session, task=task, role="ai", content=feedback_message
+        )
+
+        return {
+            "success": True,
+            "refined_description": refined_description,
+            "feedback_message": feedback_message,
+        }
+
+    @staticmethod
+    def execute_task_sync(
+        db_session: DBSession,
+        task: InputTask,
+        user_id: UUID,
+        mode: str = "conversation",
+    ) -> tuple[bool, Session | None, str | None]:
+        """
+        Execute a task by creating a session (synchronous version).
+
+        This method validates the agent, creates a session linked to the task,
+        but does NOT send a message. Used by the API endpoint.
+
+        For the async version that also sends a message, see execute_task().
+
+        Args:
+            db_session: Database session
+            task: Task to execute
+            user_id: User ID executing the task
+            mode: Session mode (conversation, etc.)
+
+        Returns:
+            Tuple of (success, session, error_message)
+
+        Raises:
+            ValidationError: If no agent selected
+            AgentNotFoundError: If agent doesn't exist
+            PermissionDeniedError: If user doesn't have access to agent
+        """
+        # Verify agent is selected
+        if not task.selected_agent_id:
+            raise ValidationError("No agent selected for this task")
+
+        # Verify agent exists and user has access (with active environment required)
+        InputTaskService.verify_agent_access(
+            db_session=db_session,
+            agent_id=task.selected_agent_id,
+            user_id=user_id,
+            require_active_environment=True,
+        )
+
+        # Create session
+        session_data = SessionCreate(
+            agent_id=task.selected_agent_id,
+            title=task.current_description[:100],  # First 100 chars as title
+            mode=mode,
+        )
+        new_session = SessionService.create_session(
+            db_session=db_session,
+            user_id=user_id,
+            data=session_data,
+            source_task_id=task.id,
+        )
+
+        if not new_session:
+            return False, None, "Failed to create session"
+
+        # Link session to task and update status
+        InputTaskService.link_session(
+            db_session=db_session, task=task, session_id=new_session.id
+        )
+
+        return True, new_session, None
+
+    # ==================== Status Sync Methods ====================
+    # Compute and sync task status from connected sessions
 
     @staticmethod
     def compute_status_from_sessions(db_session: DBSession, task_id: UUID) -> str | None:

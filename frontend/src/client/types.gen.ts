@@ -769,7 +769,8 @@ export type ExecuteHandoverRequest = {
  */
 export type ExecuteHandoverResponse = {
     success: boolean;
-    session_id?: (string | null);
+    task_id?: (string | null);
+    message?: (string | null);
     error?: (string | null);
 };
 
@@ -877,6 +878,9 @@ export type InputTaskCreate = {
     original_message: string;
     selected_agent_id?: (string | null);
     user_workspace_id?: (string | null);
+    agent_initiated?: boolean;
+    auto_execute?: boolean;
+    source_session_id?: (string | null);
 };
 
 export type InputTaskPublic = {
@@ -888,6 +892,9 @@ export type InputTaskPublic = {
     selected_agent_id: (string | null);
     session_id: (string | null);
     user_workspace_id: (string | null);
+    agent_initiated: boolean;
+    auto_execute: boolean;
+    source_session_id: (string | null);
     error_message: (string | null);
     created_at: string;
     updated_at: string;
@@ -908,6 +915,9 @@ export type InputTaskPublicExtended = {
     selected_agent_id: (string | null);
     session_id: (string | null);
     user_workspace_id: (string | null);
+    agent_initiated: boolean;
+    auto_execute: boolean;
+    source_session_id: (string | null);
     error_message: (string | null);
     created_at: string;
     updated_at: string;

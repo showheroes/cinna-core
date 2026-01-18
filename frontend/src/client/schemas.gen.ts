@@ -3475,7 +3475,7 @@ export const ExecuteHandoverResponseSchema = {
             type: 'boolean',
             title: 'Success'
         },
-        session_id: {
+        task_id: {
             anyOf: [
                 {
                     type: 'string',
@@ -3485,7 +3485,18 @@ export const ExecuteHandoverResponseSchema = {
                     type: 'null'
                 }
             ],
-            title: 'Session Id'
+            title: 'Task Id'
+        },
+        message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message'
         },
         error: {
             anyOf: [
@@ -3842,6 +3853,28 @@ export const InputTaskCreateSchema = {
                 }
             ],
             title: 'User Workspace Id'
+        },
+        agent_initiated: {
+            type: 'boolean',
+            title: 'Agent Initiated',
+            default: false
+        },
+        auto_execute: {
+            type: 'boolean',
+            title: 'Auto Execute',
+            default: false
+        },
+        source_session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Session Id'
         }
     },
     type: 'object',
@@ -3909,6 +3942,26 @@ export const InputTaskPublicSchema = {
             ],
             title: 'User Workspace Id'
         },
+        agent_initiated: {
+            type: 'boolean',
+            title: 'Agent Initiated'
+        },
+        auto_execute: {
+            type: 'boolean',
+            title: 'Auto Execute'
+        },
+        source_session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Session Id'
+        },
         error_message: {
             anyOf: [
                 {
@@ -3968,7 +4021,7 @@ export const InputTaskPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
+    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
     title: 'InputTaskPublic'
 } as const;
 
@@ -4031,6 +4084,26 @@ export const InputTaskPublicExtendedSchema = {
                 }
             ],
             title: 'User Workspace Id'
+        },
+        agent_initiated: {
+            type: 'boolean',
+            title: 'Agent Initiated'
+        },
+        auto_execute: {
+            type: 'boolean',
+            title: 'Auto Execute'
+        },
+        source_session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Session Id'
         },
         error_message: {
             anyOf: [
@@ -4124,7 +4197,7 @@ export const InputTaskPublicExtendedSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
+    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
     title: 'InputTaskPublicExtended',
     description: 'Extended response with agent name and sessions count'
 } as const;

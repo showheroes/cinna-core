@@ -119,10 +119,11 @@ The AI generates an **initial draft** that users can refine based on their speci
 - `POST /agents/handover/execute`
 - Body: `{ target_agent_id, target_agent_name, handover_message, source_session_id }`
 - Called by agent-env tool during runtime
-- Creates new session for target agent
-- Posts handover message to new session
-- Logs system message in source session with link metadata
-- Returns session ID and success status
+- Creates InputTask with `agent_initiated=true`, `auto_execute=true`
+- If target agent has `refiner_prompt`, auto-refines the handover message
+- Creates session linked to task and sends the (possibly refined) message
+- Logs system message in source session with task metadata
+- Returns task ID and success status
 
 **File**: `backend/app/api/routes/agents.py`
 
@@ -131,10 +132,11 @@ The AI generates an **initial draft** that users can refine based on their speci
 ### System Message Display
 
 **Component**: `frontend/src/components/Chat/MessageBubble.tsx`
-- Detects handover messages via `message_metadata.handover_type === "agent_handover"`
+- Detects task creation messages via `message_metadata.task_created === true`
 - Renders with distinctive blue styling
-- Displays clickable link to new session using `forwarded_to_session_id` from metadata
-- Link navigates to `/sessions/$sessionId` for seamless session switching
+- Displays clickable link to session using `session_id` from metadata
+- Link navigates to `/session/$sessionId` for seamless session switching
+- Metadata also includes `task_id`, `target_agent_id`, `target_agent_name`
 
 ### Handover Configuration
 
@@ -262,22 +264,34 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 - Appends handover instructions to conversation mode system prompt
 - Provides agents with context about available handovers and usage
 
-#### 5. Handover Execution Flow
+#### 5. Handover Execution Flow (Task-Based)
 
 **Business Logic**: `AgentService.execute_handover()` in `backend/app/services/agent_service.py`
 - Async method that validates target agent and permissions
-- Creates new conversation session using `SessionService.create_session()`
-- Creates user message with handover content using `MessageService.create_message()`
-- Initiates streaming using `SessionService.initiate_stream()` which handles:
-  - Checking environment status
-  - Starting background processing if environment is ready
-  - Marking session as pending_stream if environment is not ready
-- Message is saved and processed by target agent without blocking handover response
-- Logs system message in source session with metadata (forwarded_to_session_id, target_agent_id, target_agent_name)
-- Returns success status and new session ID immediately while processing continues in background
+- Delegates task creation and execution to `InputTaskService`:
+
+**Task Creation**: `InputTaskService.create_task_with_auto_refine()` in `backend/app/services/input_task_service.py`
+- Creates InputTask with `agent_initiated=true`, `auto_execute=true`, `source_session_id`
+- If target agent has `refiner_prompt`, automatically refines the handover message using `AIFunctionsService.refine_task()`
+- Returns `(task, message_to_send)` tuple with possibly-refined message
+
+**Task Execution**: `InputTaskService.execute_task()` in `backend/app/services/input_task_service.py`
+- Creates session for target agent linked to task via `source_task_id`
+- Links session back to task via `InputTaskService.link_session()`
+- Sends the (possibly refined) message using `SessionService.send_session_message()`
+- Returns `(success, session, error)` tuple
+
+**System Message Logging**: `AgentService.execute_handover()` continues:
+- Logs system message in source session with metadata:
+  - `task_created: true`
+  - `task_id`: UUID of created task
+  - `session_id`: UUID of created session
+  - `target_agent_id`, `target_agent_name`
+- Returns success status and task ID
 
 **Backend Endpoint**: `POST /agents/handover/execute` in `backend/app/api/routes/agents.py`
 - Async endpoint that delegates all logic to `AgentService.execute_handover()`
+- Returns `{ success, task_id, message, error }`
 
 **Session Context**: Backend session ID passed via ChatRequest payload and tracked globally
 - `session_id`: Claude SDK session ID (for SDK resumption)
@@ -307,9 +321,11 @@ Python's `contextvars.ContextVar` does not propagate to new async tasks created 
 ### Integration Points
 
 **Backend Services**:
-- `backend/app/services/agent_service.py` - Handover execution and config sync
+- `backend/app/services/agent_service.py` - Handover orchestration and config sync
+- `backend/app/services/input_task_service.py` - Task creation with auto-refine, task execution
 - `backend/app/services/session_service.py` - Session creation
 - `backend/app/services/message_service.py` - Message creation and backend session ID propagation
+- `backend/app/services/ai_functions_service.py` - Task refinement AI function
 - `backend/app/services/adapters/docker_adapter.py` - Environment communication
 
 **Agent-Env Components**:
@@ -467,10 +483,13 @@ Python's `contextvars.ContextVar` does not propagate to new async tasks created 
    - Start conversation session with source agent
    - Trigger handover condition in conversation
    - Agent calls handover tool with context message
-   - New session created for target agent with handover message
+   - Task created with `agent_initiated=true` flag
+   - If target agent has `refiner_prompt`, message is auto-refined
+   - New session created for target agent linked to task
    - System message appears in source session with link to new session
    - Click link to navigate to new session
-   - Verify handover message appears in target agent's new session
+   - Verify (possibly refined) handover message appears in target agent's new session
+   - Verify task appears in Tasks list with correct status
 
 ### Edge Cases
 
@@ -504,13 +523,15 @@ Python's `contextvars.ContextVar` does not propagate to new async tasks created 
 
 ## Summary
 
-Agent Handover Management provides **end-to-end agent-to-agent collaboration**. Users configure handover conditions through the UI with AI-assisted prompt generation. At runtime, conversational agents use the `agent_handover` tool to automatically create sessions for target agents and pass context, enabling complex multi-agent workflows.
+Agent Handover Management provides **end-to-end agent-to-agent collaboration**. Users configure handover conditions through the UI with AI-assisted prompt generation. At runtime, conversational agents use the `agent_handover` tool to create tasks for target agents, enabling complex multi-agent workflows with task tracking.
 
 **Key Features**:
 - Configuration management with AI-assisted prompt generation
 - Automatic sync to agent runtime environments
 - Tool registration in conversation mode only
-- Session creation and message passing between agents
+- **Task-based handover**: Creates InputTask with `agent_initiated=true`
+- **Auto-refinement**: If target agent has `refiner_prompt`, handover message is refined
+- Session creation linked to task for tracking
 - Validation against configured handovers for security
 
-**Architecture Principle**: Simple configuration layer with powerful runtime execution, keeping handover logic flexible through natural language prompts.
+**Architecture Principle**: Simple configuration layer with powerful runtime execution, keeping handover logic flexible through natural language prompts. Task-based flow enables visibility and tracking of agent-to-agent handovers.

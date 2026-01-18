@@ -58,9 +58,9 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
   const isSystem = message.role === "system"
   const isSystemError = isSystem && message.status === "error"
 
-  // Check if this is a handover system message
-  const isHandoverMessage = isSystem && message.message_metadata?.handover_type === "agent_handover"
-  const forwardedToSessionId = message.message_metadata?.forwarded_to_session_id as string | undefined
+  // Check if this is a task creation message (task-based handover)
+  const isTaskCreatedMessage = isSystem && message.message_metadata?.task_created === true
+  const taskSessionId = message.message_metadata?.session_id as string | undefined
 
   if (isSystem) {
     return (
@@ -69,17 +69,17 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
           className={`text-sm px-4 py-2 rounded-lg max-w-2xl ${
             isSystemError
               ? "bg-destructive/10 text-destructive border border-destructive/20"
-              : isHandoverMessage
+              : isTaskCreatedMessage
               ? "bg-blue-50/60 dark:bg-blue-950/20 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
               : "bg-muted/60 text-muted-foreground"
           }`}
         >
           <div className="flex items-center gap-2">
             <span>{message.content}</span>
-            {isHandoverMessage && forwardedToSessionId && (
+            {isTaskCreatedMessage && taskSessionId && (
               <Link
                 to="/session/$sessionId"
-                params={{ sessionId: forwardedToSessionId }}
+                params={{ sessionId: taskSessionId }}
                 search={{ initialMessage: undefined, fileIds: undefined }}
                 className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2"
               >
