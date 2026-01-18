@@ -90,17 +90,51 @@ class GenerateHandoverPromptResponse(SQLModel):
     error: str | None = None
 
 
-class ExecuteHandoverRequest(SQLModel):
-    """Request to execute a handover to another agent."""
-    target_agent_id: uuid.UUID
-    target_agent_name: str
-    handover_message: str
+class CreateAgentTaskRequest(SQLModel):
+    """
+    Request to create a task (with or without target agent).
+
+    If target_agent_id is provided: Direct handover (task auto-executes)
+    If target_agent_id is None: Inbox task (user reviews and executes manually)
+    """
+    task_message: str
+    target_agent_id: uuid.UUID | None = None
+    target_agent_name: str | None = None
     source_session_id: uuid.UUID
 
 
-class ExecuteHandoverResponse(SQLModel):
-    """Response from handover execution."""
+class CreateAgentTaskResponse(SQLModel):
+    """Response from task creation."""
     success: bool
     task_id: uuid.UUID | None = None
+    session_id: uuid.UUID | None = None  # Only set for direct handover (auto-executed)
     message: str | None = None
     error: str | None = None
+
+
+# Backward compatibility aliases
+class ExecuteHandoverRequest(CreateAgentTaskRequest):
+    """
+    Deprecated: Use CreateAgentTaskRequest instead.
+    Request to execute a handover to another agent.
+    """
+    # Map old field names to new ones
+    @property
+    def handover_message(self) -> str:
+        return self.task_message
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        # Handle old field name
+        if isinstance(obj, dict) and "handover_message" in obj and "task_message" not in obj:
+            obj = obj.copy()
+            obj["task_message"] = obj.pop("handover_message")
+        return super().model_validate(obj, **kwargs)
+
+
+class ExecuteHandoverResponse(CreateAgentTaskResponse):
+    """
+    Deprecated: Use CreateAgentTaskResponse instead.
+    Response from handover execution.
+    """
+    pass

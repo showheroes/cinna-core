@@ -233,15 +233,17 @@ class PromptGenerator:
             logger.error(f"Failed to scan knowledge directory: {e}")
             return None
 
-    def _load_handover_prompt(self) -> Optional[str]:
+    def _load_task_creation_prompt(self) -> Optional[str]:
         """
-        Load handover prompt from agent_handover_config.json file.
+        Load task creation prompt from agent_handover_config.json file.
 
         Returns the handover_prompt field which contains instructions for using
-        the agent_handover tool in conversation mode.
+        the create_agent_task tool in conversation mode. This prompt covers both:
+        - Direct handover (to configured target agents)
+        - Inbox task creation (for user review)
 
         Returns:
-            Handover prompt string if exists, None otherwise
+            Task creation prompt string if exists, None otherwise
         """
         import json
 
@@ -257,10 +259,10 @@ class PromptGenerator:
                 handover_prompt = config.get("handover_prompt", "").strip()
 
                 if handover_prompt:
-                    logger.info(f"Loaded handover prompt ({len(handover_prompt)} chars)")
+                    logger.info(f"Loaded task creation prompt ({len(handover_prompt)} chars)")
                     return handover_prompt
                 else:
-                    logger.debug("Handover prompt is empty")
+                    logger.debug("Task creation prompt is empty")
                     return None
         except Exception as e:
             logger.error(f"Failed to load agent_handover_config.json: {e}")
@@ -460,13 +462,13 @@ class PromptGenerator:
         conversation_prompt_parts.append(self._get_environment_context())
         logger.info("Included environment context in conversation mode prompt")
 
-        # Append handover prompt if it exists
-        handover_prompt = self._load_handover_prompt()
-        if handover_prompt:
+        # Append task creation prompt if it exists (includes handover and inbox task instructions)
+        task_creation_prompt = self._load_task_creation_prompt()
+        if task_creation_prompt:
             conversation_prompt_parts.append(
-                f"\n\n---\n\n## Agent Handover\n\n{handover_prompt}"
+                f"\n\n---\n\n{task_creation_prompt}"
             )
-            logger.info("Included handover prompt in conversation mode prompt")
+            logger.info("Included task creation prompt in conversation mode prompt")
 
         # Combine all parts into a single system prompt string
         if conversation_prompt_parts:

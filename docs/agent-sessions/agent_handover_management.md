@@ -1,12 +1,21 @@
-# Agent Handover Management
+# Agent Task Creation & Handover Management
 
-## What is Agent Handover?
+## What is Agent Task Creation?
 
-**Agent Handover** is a mechanism that allows one conversational agent to trigger another agent when specific conditions are met, passing relevant context from the first agent to the second. This enables **agent-to-agent collaboration** where specialized agents can work in sequence, each handling their domain expertise.
+**Agent Task Creation** is a mechanism that allows conversational agents to create tasks in two modes:
 
-### Example Use Case
+1. **Direct Handover**: Agent specifies a target agent → task auto-executes
+2. **Inbox Task Creation**: Agent creates task without target → goes to user's inbox
 
+This enables both **agent-to-agent collaboration** (specialized agents working in sequence) and **agent-to-user handoff** (agents creating follow-up work for human review).
+
+### Example Use Cases
+
+**Direct Handover:**
 A "Cryptocurrency Rate Analytic" agent analyzes market data and identifies the top 3 cryptocurrencies with growth potential. Instead of executing trades itself, it hands over to a "Cryptocurrency Trader" agent with the analysis results. The trader agent then processes the recommendations according to its own specialized workflow.
+
+**Inbox Task:**
+A code review agent identifies several refactoring opportunities during analysis. Instead of implementing them (outside its scope), it creates inbox tasks for each opportunity. The user later reviews these tasks, assigns appropriate agents, and executes them.
 
 ## Why Agent Handover?
 
@@ -115,15 +124,27 @@ The AI generates an **initial draft** that users can refine based on their speci
 - Returns AI-generated handover prompt draft
 - User can then edit and save
 
-**Execute Handover**
+**Create Agent Task**
+- `POST /agents/tasks/create`
+- Body: `{ task_message, source_session_id, target_agent_id?, target_agent_name? }`
+- Called by agent-env `create_agent_task` tool during runtime
+- **Direct Handover Mode** (target_agent_id provided):
+  - Creates InputTask with `agent_initiated=true`, `auto_execute=true`
+  - If target agent has `refiner_prompt`, auto-refines the task message
+  - Creates session linked to task and sends the (possibly refined) message
+  - Logs system message in source session with task and session metadata
+  - Returns task ID and session ID
+- **Inbox Task Mode** (target_agent_id not provided):
+  - Creates InputTask with `agent_initiated=true`, `auto_execute=false`
+  - Does NOT auto-refine (user will refine manually)
+  - Does NOT execute (user will select agent and execute)
+  - Logs system message in source session with task metadata and `inbox_task=true`
+  - Returns task ID only (no session ID)
+
+**Execute Handover (Deprecated)**
 - `POST /agents/handover/execute`
-- Body: `{ target_agent_id, target_agent_name, handover_message, source_session_id }`
-- Called by agent-env tool during runtime
-- Creates InputTask with `agent_initiated=true`, `auto_execute=true`
-- If target agent has `refiner_prompt`, auto-refines the handover message
-- Creates session linked to task and sends the (possibly refined) message
-- Logs system message in source session with task metadata
-- Returns task ID and success status
+- Deprecated: Use `/agents/tasks/create` instead
+- Kept for backward compatibility, delegates to create_agent_task
 
 **File**: `backend/app/api/routes/agents.py`
 
@@ -134,9 +155,13 @@ The AI generates an **initial draft** that users can refine based on their speci
 **Component**: `frontend/src/components/Chat/MessageBubble.tsx`
 - Detects task creation messages via `message_metadata.task_created === true`
 - Renders with distinctive blue styling
-- Displays clickable link to session using `session_id` from metadata
-- Link navigates to `/session/$sessionId` for seamless session switching
-- Metadata also includes `task_id`, `target_agent_id`, `target_agent_name`
+- **Direct Handover**: Displays clickable "View session" link using `session_id` from metadata
+- **Inbox Task**: Displays clickable "View task" link using `task_id` from metadata (when `inbox_task=true`)
+- Metadata includes:
+  - `task_id`: UUID of created task (always present)
+  - `inbox_task`: true for inbox tasks, absent for direct handover
+  - `session_id`: UUID of created session (only for direct handover)
+  - `target_agent_id`, `target_agent_name`: Target agent info (only for direct handover)
 
 ### Handover Configuration
 
@@ -244,31 +269,37 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 
 #### 3. Tool Registration in Conversation Mode
 
-**SDK Manager** in `sdk_manager.py`:
-- Registers `agent_handover` tool only in conversation mode
-- Tool available as `mcp__handover__agent_handover`
-- Imported from `tools/agent_handover.py`
+**SDK Manager** in `adapters/claude_code.py`:
+- Registers `create_agent_task` tool only in conversation mode
+- Tool available as `mcp__task__create_agent_task`
+- Imported from `tools/create_agent_task.py`
 
-**Tool Implementation** in `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py`:
-- Validates target agent ID against configured handovers in JSON
+**Tool Implementation** in `backend/app/env-templates/python-env-advanced/app/core/server/tools/create_agent_task.py`:
+- Supports two modes based on parameters:
+  - **Direct Handover**: Validates target agent ID against configured handovers in JSON
+  - **Inbox Task**: No target validation needed, creates task for user review
 - Retrieves SDK session ID via `get_current_sdk_session_id()` helper function
 - Retrieves backend session ID via `get_backend_session_id()` helper function
-- Calls backend API `POST /agents/handover/execute` with source session ID
-- Backend handles session creation, message posting, and source session logging
-- Returns success confirmation to agent
+- Calls backend API `POST /agents/tasks/create` with source session ID
+- Backend handles task creation, optional session creation, and source session logging
+- Returns success confirmation to agent with mode-appropriate message
 
 #### 4. System Prompt Integration
 
 **Prompt Generator** in `prompt_generator.py`:
-- `_load_handover_prompt()` - Loads handover_prompt from config JSON
-- Appends handover instructions to conversation mode system prompt
-- Provides agents with context about available handovers and usage
+- `_load_task_creation_prompt()` - Loads handover_prompt from config JSON
+- Appends task creation instructions to conversation mode system prompt
+- Provides agents with context about:
+  - Available direct handover targets (configured agents)
+  - Inbox task creation capability (always available)
 
-#### 5. Handover Execution Flow (Task-Based)
+#### 5. Task Creation Flow
 
-**Business Logic**: `AgentService.execute_handover()` in `backend/app/services/agent_service.py`
-- Async method that validates target agent and permissions
+**Business Logic**: `AgentService.create_agent_task()` in `backend/app/services/agent_service.py`
+- Async method that handles both direct handover and inbox task creation
 - Delegates task creation and execution to `InputTaskService`:
+
+**Direct Handover Mode** (target_agent_id provided):
 
 **Task Creation**: `InputTaskService.create_task_with_auto_refine()` in `backend/app/services/input_task_service.py`
 - Creates InputTask with `agent_initiated=true`, `auto_execute=true`, `source_session_id`
@@ -281,17 +312,33 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 - Sends the (possibly refined) message using `SessionService.send_session_message()`
 - Returns `(success, session, error)` tuple
 
-**System Message Logging**: `AgentService.execute_handover()` continues:
+**System Message Logging** for direct handover:
 - Logs system message in source session with metadata:
   - `task_created: true`
   - `task_id`: UUID of created task
   - `session_id`: UUID of created session
   - `target_agent_id`, `target_agent_name`
-- Returns success status and task ID
+- Returns success status, task ID, and session ID
 
-**Backend Endpoint**: `POST /agents/handover/execute` in `backend/app/api/routes/agents.py`
-- Async endpoint that delegates all logic to `AgentService.execute_handover()`
-- Returns `{ success, task_id, message, error }`
+**Inbox Task Mode** (target_agent_id not provided):
+
+**Task Creation**: `InputTaskService.create_task()` in `backend/app/services/input_task_service.py`
+- Creates InputTask with `agent_initiated=true`, `auto_execute=false`, `source_session_id`
+- Does NOT auto-refine (user will refine manually in task detail view)
+- Does NOT execute (user will select agent and execute manually)
+
+**System Message Logging** for inbox task:
+- Logs system message in source session with metadata:
+  - `task_created: true`
+  - `task_id`: UUID of created task
+  - `inbox_task: true`
+- Returns success status and task ID (no session ID)
+
+**Backend Endpoints** in `backend/app/api/routes/agents.py`:
+- `POST /agents/tasks/create` - Primary endpoint for task creation
+  - Async endpoint that delegates all logic to `AgentService.create_agent_task()`
+  - Returns `{ success, task_id, session_id, message, error }`
+- `POST /agents/handover/execute` - Deprecated alias, delegates to same logic
 
 **Session Context**: Backend session ID passed via ChatRequest payload and tracked globally
 - `session_id`: Claude SDK session ID (for SDK resumption)
@@ -332,9 +379,9 @@ Python's `contextvars.ContextVar` does not propagate to new async tasks created 
 - `backend/app/env-templates/python-env-advanced/app/core/server/routes.py` - Config and chat endpoints, passes backend_session_id to SDK manager
 - `backend/app/env-templates/python-env-advanced/app/core/server/models.py` - ChatRequest with backend_session_id field
 - `backend/app/env-templates/python-env-advanced/app/core/server/agent_env_service.py` - Config storage
-- `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py` - Tool registration, global session state with async lock, helper functions for session ID access
+- `backend/app/env-templates/python-env-advanced/app/core/server/adapters/claude_code.py` - Tool registration, global session state with async lock, helper functions for session ID access
 - `backend/app/env-templates/python-env-advanced/app/core/server/prompt_generator.py` - Prompt injection
-- `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py` - Tool implementation, uses helper functions to retrieve session IDs
+- `backend/app/env-templates/python-env-advanced/app/core/server/tools/create_agent_task.py` - Task creation tool implementation, uses helper functions to retrieve session IDs
 
 **Frontend Components**:
 - `frontend/src/components/Agents/AgentHandovers.tsx` - Handover configuration management
@@ -427,9 +474,9 @@ Python's `contextvars.ContextVar` does not propagate to new async tasks created 
 - `backend/app/env-templates/python-env-advanced/app/core/server/agent_env_service.py` - Config file management
 
 **Runtime**:
-- `backend/app/env-templates/python-env-advanced/app/core/server/sdk_manager.py` - Tool registration
+- `backend/app/env-templates/python-env-advanced/app/core/server/adapters/claude_code.py` - Tool registration
 - `backend/app/env-templates/python-env-advanced/app/core/server/prompt_generator.py` - Prompt injection
-- `backend/app/env-templates/python-env-advanced/app/core/server/tools/agent_handover.py` - Handover tool implementation
+- `backend/app/env-templates/python-env-advanced/app/core/server/tools/create_agent_task.py` - Task creation tool implementation
 
 **Storage**:
 - `{workspace}/docs/agent_handover_config.json` - Runtime handover configuration
@@ -523,15 +570,27 @@ Python's `contextvars.ContextVar` does not propagate to new async tasks created 
 
 ## Summary
 
-Agent Handover Management provides **end-to-end agent-to-agent collaboration**. Users configure handover conditions through the UI with AI-assisted prompt generation. At runtime, conversational agents use the `agent_handover` tool to create tasks for target agents, enabling complex multi-agent workflows with task tracking.
+Agent Task Creation & Handover Management provides **end-to-end agent-to-agent collaboration** and **agent-to-user task handoff**. Users configure handover targets through the UI with AI-assisted prompt generation. At runtime, conversational agents use the `create_agent_task` tool in two modes:
+
+**Direct Handover Mode**:
+- Agent specifies target agent → task auto-executes
+- If target agent has `refiner_prompt`, message is auto-refined
+- New session created for target agent
+- User can view session via link in system message
+
+**Inbox Task Mode**:
+- Agent creates task without target → goes to user's inbox
+- User reviews, selects agent, refines if needed
+- User executes when ready
+- User can view task via link in system message
 
 **Key Features**:
 - Configuration management with AI-assisted prompt generation
 - Automatic sync to agent runtime environments
-- Tool registration in conversation mode only
-- **Task-based handover**: Creates InputTask with `agent_initiated=true`
-- **Auto-refinement**: If target agent has `refiner_prompt`, handover message is refined
-- Session creation linked to task for tracking
-- Validation against configured handovers for security
+- Tool registration in conversation mode only (`mcp__task__create_agent_task`)
+- **Task-based flow**: Creates InputTask with `agent_initiated=true`
+- **Two modes**: Direct handover (auto-execute) and inbox task (user review)
+- **Auto-refinement**: For direct handover, if target agent has `refiner_prompt`
+- Session/task linking for tracking and navigation
 
-**Architecture Principle**: Simple configuration layer with powerful runtime execution, keeping handover logic flexible through natural language prompts. Task-based flow enables visibility and tracking of agent-to-agent handovers.
+**Architecture Principle**: Simple configuration layer with powerful runtime execution, keeping handover logic flexible through natural language prompts. Task-based flow enables visibility and tracking of both agent-to-agent handovers and agent-to-user task creation.

@@ -425,32 +425,52 @@ class AgentService:
                 "prompt": config.handover_prompt
             })
 
-        # Generate overall handover prompt
+        # Generate overall task creation prompt (includes both handover and inbox task modes)
+        handover_prompt = (
+            "## TASK CREATION INSTRUCTIONS\n\n"
+            "You have the `create_agent_task` tool available in this conversation. "
+            "This tool allows you to create tasks in two modes:\n\n"
+        )
+
+        # Direct handover section (only if handovers are configured)
         if handovers_list:
-            handover_prompt = (
-                "## AGENT HANDOVER INSTRUCTIONS FOR THIS CONVERSATION\n\n"
-                "CRITICAL: You have the `agent_handover` tool available RIGHT NOW in this conversation. "
-                "When you complete a task that matches the trigger conditions below IN THIS CONVERSATION, "
-                "you MUST immediately call the tool IN THE SAME RESPONSE - do not just describe what you would do, "
-                "do not wait for the next message, do not ask for permission. "
-                "Execute the handover IMMEDIATELY when conditions are met.\n\n"
-                "**CONFIGURED HANDOVERS (these apply to the current conversation):**\n"
+            handover_prompt += (
+                "### 1. Direct Handover (to configured agents)\n\n"
+                "When you complete a task that matches the trigger conditions below, "
+                "you MUST immediately call the tool IN THE SAME RESPONSE - do not wait, do not ask for permission.\n\n"
+                "**CONFIGURED HANDOVERS:**\n"
             )
 
             for h in handovers_list:
                 handover_prompt += f"\n**→ {h['name']}** (ID: {h['id']})\n{h['prompt']}\n"
 
             handover_prompt += (
-                "\n**HOW TO EXECUTE THE HANDOVER RIGHT NOW:**\n"
-                "As soon as conditions are met in this conversation, call `agent_handover` with:\n"
+                "\n**How to execute direct handover:**\n"
+                "Call `create_agent_task` with:\n"
+                "- `task_message`: The context message as specified in the instructions above\n"
                 "- `target_agent_id`: UUID of the target agent (shown above)\n"
-                "- `target_agent_name`: Name of the target agent (shown above)\n"
-                "- `handover_message`: The context message as specified in the instructions above\n\n"
-                "CRITICAL: This happens in the CURRENT conversation. When you complete the triggering task, "
-                "call the tool in that same response. Do not wait, do not ask, do not describe - just execute.\n"
+                "- `target_agent_name`: Name of the target agent (shown above)\n\n"
             )
-        else:
-            handover_prompt = ""
+
+        # Inbox task section (always available)
+        handover_prompt += (
+            "### " + ("2. " if handovers_list else "1. ") + "Inbox Task (for user review)\n\n"
+            "When you identify work that needs human decision on how to proceed, "
+            "or when the appropriate agent is not clear, create an inbox task.\n\n"
+            "**When to use inbox tasks:**\n"
+            "- Work that requires human judgment on approach\n"
+            "- Tasks where agent selection needs user input\n"
+            "- Follow-up work identified during current task execution\n"
+            "- Complex tasks that need user refinement before execution\n\n"
+            "**How to create an inbox task:**\n"
+            "Call `create_agent_task` with ONLY:\n"
+            "- `task_message`: Clear description of the task/work item\n\n"
+            "Do NOT provide `target_agent_id` or `target_agent_name` - the user will select the agent.\n"
+            "The task will appear in the user's inbox where they can:\n"
+            "- Review and refine the task description\n"
+            "- Select an appropriate agent\n"
+            "- Execute when ready\n"
+        )
 
         # Get environment adapter and sync config
         try:
@@ -467,6 +487,157 @@ class AgentService:
             logger.error(f"Failed to sync handover config to environment: {e}")
 
     @staticmethod
+    async def create_agent_task(
+        session: Session,
+        user: User,
+        task_message: str,
+        source_session_id: UUID,
+        target_agent_id: UUID | None = None,
+        target_agent_name: str | None = None,
+    ) -> tuple[bool, UUID | None, UUID | None, str | None]:
+        """
+        Create a task from an agent.
+
+        If target_agent_id is provided: Direct handover (existing behavior)
+        - Validates target agent exists and user has access
+        - Creates InputTask with auto-refine (via InputTaskService)
+        - Executes task - creates session and sends message (via InputTaskService)
+        - Logs system message in source session about task creation
+
+        If target_agent_id is None: Inbox task (new behavior)
+        - Creates InputTask without agent selection
+        - Does NOT auto-refine (user will refine manually)
+        - Does NOT execute (user will select agent and execute)
+        - Logs system message in source session about task creation
+
+        Args:
+            session: Database session
+            user: User executing the task creation
+            task_message: Message/description for the task
+            source_session_id: Source session UUID (for logging)
+            target_agent_id: Target agent UUID (optional - if None, creates inbox task)
+            target_agent_name: Target agent name (optional - required if target_agent_id provided)
+
+        Returns:
+            Tuple of (success: bool, task_id: UUID | None, session_id: UUID | None, error: str | None)
+            - session_id is None for inbox tasks (no auto-execute)
+        """
+        from app.services.message_service import MessageService
+
+        try:
+            # Get source session to inherit workspace
+            source_session = session.get(ChatSession, source_session_id)
+            user_workspace_id = source_session.user_workspace_id if source_session else None
+
+            if target_agent_id:
+                # DIRECT HANDOVER MODE (existing behavior)
+                # Get target agent
+                target_agent = session.get(Agent, target_agent_id)
+                if not target_agent:
+                    return False, None, None, "Target agent not found"
+
+                # Check permissions
+                if target_agent.owner_id != user.id:
+                    return False, None, None, "Not enough permissions to access target agent"
+
+                # Verify target agent has active environment
+                if not target_agent.active_environment_id:
+                    return False, None, None, "Target agent has no active environment"
+
+                # Create InputTask with auto-refine (if agent has refiner_prompt)
+                task_data = InputTaskCreate(
+                    original_message=task_message,
+                    selected_agent_id=target_agent_id,
+                    user_workspace_id=user_workspace_id,
+                    agent_initiated=True,
+                    auto_execute=True,
+                    source_session_id=source_session_id,
+                )
+
+                task, message_to_send = InputTaskService.create_task_with_auto_refine(
+                    db_session=session,
+                    user_id=user.id,
+                    data=task_data,
+                )
+
+                logger.info(f"Created task {task.id} for handover to agent {target_agent_id}")
+
+                # Execute task (creates session, links it, sends message)
+                success, new_session, error = await InputTaskService.execute_task(
+                    db_session=session,
+                    task=task,
+                    user_id=user.id,
+                    message_to_send=message_to_send,
+                )
+
+                if not success:
+                    return False, task.id, None, error
+
+                # Log system message in source session about task creation
+                if source_session:
+                    MessageService.create_message(
+                        session=session,
+                        session_id=source_session_id,
+                        role="system",
+                        content=f"📋 Task created for '{target_agent.name}'",
+                        message_metadata={
+                            "task_created": True,
+                            "task_id": str(task.id),
+                            "target_agent_id": str(target_agent_id),
+                            "target_agent_name": target_agent.name,
+                            "session_id": str(new_session.id),
+                        }
+                    )
+
+                logger.info(
+                    f"Handover executed: Created task {task.id} and session {new_session.id} "
+                    f"for agent {target_agent_id}, source session: {source_session_id}"
+                )
+
+                return True, task.id, new_session.id, None
+
+            else:
+                # INBOX TASK MODE (new behavior)
+                # Create InputTask without agent selection, without auto-refine or execute
+                task_data = InputTaskCreate(
+                    original_message=task_message,
+                    selected_agent_id=None,  # No agent selected
+                    user_workspace_id=user_workspace_id,
+                    agent_initiated=True,
+                    auto_execute=False,  # User must execute manually
+                    source_session_id=source_session_id,
+                )
+
+                # Create task WITHOUT auto-refine (user will refine manually)
+                task = InputTaskService.create_task(
+                    db_session=session,
+                    user_id=user.id,
+                    data=task_data,
+                )
+
+                logger.info(f"Created inbox task {task.id} from session {source_session_id}")
+
+                # Log system message in source session about inbox task creation
+                if source_session:
+                    MessageService.create_message(
+                        session=session,
+                        session_id=source_session_id,
+                        role="system",
+                        content="📋 Task created in user's inbox",
+                        message_metadata={
+                            "task_created": True,
+                            "task_id": str(task.id),
+                            "inbox_task": True,
+                        }
+                    )
+
+                return True, task.id, None, None  # No session_id for inbox tasks
+
+        except Exception as e:
+            logger.error(f"Error creating agent task: {str(e)}")
+            return False, None, None, str(e)
+
+    @staticmethod
     async def execute_handover(
         session: Session,
         user_id: UUID,
@@ -476,100 +647,32 @@ class AgentService:
         source_session_id: UUID
     ) -> tuple[bool, UUID | None, str | None]:
         """
+        Deprecated: Use create_agent_task instead.
+
         Execute agent handover by creating a task, optionally refining it, and auto-executing.
-
-        New flow (task-based handover):
-        1. Validates target agent exists and user has access
-        2. Creates InputTask with auto-refine (via InputTaskService)
-        3. Executes task - creates session and sends message (via InputTaskService)
-        4. Logs system message in source session about task creation
-
-        Args:
-            session: Database session
-            user_id: User executing the handover
-            target_agent_id: Target agent UUID
-            target_agent_name: Target agent name
-            handover_message: Message to send to target agent
-            source_session_id: Source session UUID (for logging handover)
+        This method is kept for backward compatibility.
 
         Returns:
             Tuple of (success: bool, task_id: UUID | None, error: str | None)
         """
-        from app.services.message_service import MessageService
+        logger.warning("Deprecated method execute_handover called, use create_agent_task instead")
 
-        try:
-            # Get target agent
-            target_agent = session.get(Agent, target_agent_id)
-            if not target_agent:
-                return False, None, "Target agent not found"
+        # Get user from session
+        from app.models import User
+        user = session.get(User, user_id)
+        if not user:
+            return False, None, "User not found"
 
-            # Check permissions
-            if target_agent.owner_id != user_id:
-                return False, None, "Not enough permissions to access target agent"
+        success, task_id, session_id, error = await AgentService.create_agent_task(
+            session=session,
+            user=user,
+            task_message=handover_message,
+            source_session_id=source_session_id,
+            target_agent_id=target_agent_id,
+            target_agent_name=target_agent_name,
+        )
 
-            # Verify target agent has active environment
-            if not target_agent.active_environment_id:
-                return False, None, "Target agent has no active environment"
-
-            # Get source session to inherit workspace
-            source_session = session.get(ChatSession, source_session_id)
-            user_workspace_id = source_session.user_workspace_id if source_session else None
-
-            # Step 1: Create InputTask with auto-refine (if agent has refiner_prompt)
-            task_data = InputTaskCreate(
-                original_message=handover_message,
-                selected_agent_id=target_agent_id,
-                user_workspace_id=user_workspace_id,
-                agent_initiated=True,
-                auto_execute=True,
-                source_session_id=source_session_id,
-            )
-
-            task, message_to_send = InputTaskService.create_task_with_auto_refine(
-                db_session=session,
-                user_id=user_id,
-                data=task_data,
-            )
-
-            logger.info(f"Created task {task.id} for handover to agent {target_agent_id}")
-
-            # Step 2: Execute task (creates session, links it, sends message)
-            success, new_session, error = await InputTaskService.execute_task(
-                db_session=session,
-                task=task,
-                user_id=user_id,
-                message_to_send=message_to_send,
-            )
-
-            if not success:
-                return False, None, error
-
-            # Step 3: Log system message in source session about task creation
-            if source_session:
-                MessageService.create_message(
-                    session=session,
-                    session_id=source_session_id,
-                    role="system",
-                    content=f"📋 Task created for '{target_agent.name}'",
-                    message_metadata={
-                        "task_created": True,
-                        "task_id": str(task.id),
-                        "target_agent_id": str(target_agent_id),
-                        "target_agent_name": target_agent.name,
-                        "session_id": str(new_session.id),
-                    }
-                )
-
-            logger.info(
-                f"Handover executed: Created task {task.id} and session {new_session.id} for agent {target_agent_id}, "
-                f"source session: {source_session_id}"
-            )
-
-            return True, task.id, None
-
-        except Exception as e:
-            logger.error(f"Error executing handover: {str(e)}")
-            return False, None, str(e)
+        return success, task_id, error
 
     # SDK Config Methods
 

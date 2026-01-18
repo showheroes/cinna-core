@@ -42,6 +42,8 @@ from app.models import (
     HandoverConfigsPublic,
     GenerateHandoverPromptRequest,
     GenerateHandoverPromptResponse,
+    CreateAgentTaskRequest,
+    CreateAgentTaskResponse,
     ExecuteHandoverRequest,
     ExecuteHandoverResponse,
     AgentShare,
@@ -850,6 +852,56 @@ def generate_handover_prompt_endpoint(
     return GenerateHandoverPromptResponse(**result)
 
 
+@router.post("/tasks/create", response_model=CreateAgentTaskResponse)
+async def create_agent_task(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    data: CreateAgentTaskRequest
+) -> Any:
+    """
+    Create a task from an agent.
+
+    If target_agent_id is provided: Creates task with auto_execute=true (direct handover)
+    - Validates target agent exists and user has access
+    - Creates InputTask (agent_initiated=True, auto_execute=True)
+    - If target agent has refiner_prompt, runs auto-refine
+    - Creates session for target agent and sends message
+    - Logs system message in source session about task creation
+
+    If target_agent_id is None: Creates task with auto_execute=false (inbox task)
+    - Creates InputTask (agent_initiated=True, auto_execute=False)
+    - Does NOT auto-refine (user will refine manually)
+    - Does NOT execute (user will select agent and execute)
+    - Logs system message in source session about task creation
+    """
+    logger.info(
+        f"Create agent task from user {current_user.id}: "
+        f"target_agent_id={data.target_agent_id}, source_session_id={data.source_session_id}"
+    )
+    success, task_id, session_id, error = await AgentService.create_agent_task(
+        session=session,
+        user=current_user,
+        task_message=data.task_message,
+        source_session_id=data.source_session_id,
+        target_agent_id=data.target_agent_id,
+        target_agent_name=data.target_agent_name,
+    )
+
+    if data.target_agent_id:
+        message = f"Task created for handover to '{data.target_agent_name}'" if success else None
+    else:
+        message = "Task created in user's inbox" if success else None
+
+    return CreateAgentTaskResponse(
+        success=success,
+        task_id=task_id,
+        session_id=session_id,
+        message=message,
+        error=error
+    )
+
+
 @router.post("/handover/execute", response_model=ExecuteHandoverResponse)
 async def execute_handover(
     *,
@@ -858,29 +910,28 @@ async def execute_handover(
     data: ExecuteHandoverRequest
 ) -> Any:
     """
+    Deprecated: Use /tasks/create instead.
+
     Execute a handover by creating a task for target agent, optionally refining it,
     and auto-executing. This endpoint is called by agent-env tools to trigger another agent.
-
-    The handover process (task-based):
-    1. Creates InputTask (agent_initiated=True, auto_execute=True)
-    2. If target agent has refiner_prompt, runs auto-refine
-    3. Creates session for target agent and links to task
-    4. Sends the (possibly refined) message to the session
-    5. Logs system message in source session about task creation
     """
+    logger.warning("Deprecated endpoint /handover/execute called, use /tasks/create instead")
     logger.info(f"Handover request from user {current_user.id}: target_agent_id={data.target_agent_id}, source_session_id={data.source_session_id}")
-    success, task_id, error = await AgentService.execute_handover(
+
+    # Call the new unified service method
+    success, task_id, session_id, error = await AgentService.create_agent_task(
         session=session,
-        user_id=current_user.id,
+        user=current_user,
+        task_message=data.task_message,
+        source_session_id=data.source_session_id,
         target_agent_id=data.target_agent_id,
         target_agent_name=data.target_agent_name,
-        handover_message=data.handover_message,
-        source_session_id=data.source_session_id
     )
 
     return ExecuteHandoverResponse(
         success=success,
         task_id=task_id,
+        session_id=session_id,
         message=f"Task created for handover to '{data.target_agent_name}'" if success else None,
         error=error
     )

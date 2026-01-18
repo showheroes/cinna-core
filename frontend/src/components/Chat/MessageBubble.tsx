@@ -58,8 +58,10 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
   const isSystem = message.role === "system"
   const isSystemError = isSystem && message.status === "error"
 
-  // Check if this is a task creation message (task-based handover)
+  // Check if this is a task creation message (task-based handover or inbox task)
   const isTaskCreatedMessage = isSystem && message.message_metadata?.task_created === true
+  const isInboxTask = message.message_metadata?.inbox_task === true
+  const taskId = message.message_metadata?.task_id as string | undefined
   const taskSessionId = message.message_metadata?.session_id as string | undefined
 
   if (isSystem) {
@@ -76,7 +78,17 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
         >
           <div className="flex items-center gap-2">
             <span>{message.content}</span>
-            {isTaskCreatedMessage && taskSessionId && (
+            {isTaskCreatedMessage && isInboxTask && taskId && (
+              <Link
+                to="/task/$taskId"
+                params={{ taskId: taskId }}
+                className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2"
+              >
+                <span>View task</span>
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            )}
+            {isTaskCreatedMessage && !isInboxTask && taskSessionId && (
               <Link
                 to="/session/$sessionId"
                 params={{ sessionId: taskSessionId }}

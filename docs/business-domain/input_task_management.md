@@ -18,13 +18,22 @@ Enable users to receive, refine, and execute incoming tasks through an AI-assist
 9. Task status syncs with session state (running, pending_input, completed, error)
 10. User archives completed tasks to clear from active view
 
-**Flow (Agent-Initiated via Handover):**
-1. Source agent triggers handover tool with message for target agent
+**Flow (Agent-Initiated via Direct Handover):**
+1. Source agent triggers `create_agent_task` tool with target agent specified
 2. System creates InputTask with `agent_initiated=true`, `auto_execute=true`
 3. If target agent has `refiner_prompt`, message is auto-refined
 4. System auto-creates session and sends the (possibly refined) message
 5. Task appears in Tasks list with `agent_initiated` flag
 6. Task status syncs with session state as usual
+
+**Flow (Agent-Initiated via Inbox Task):**
+1. Source agent triggers `create_agent_task` tool WITHOUT target agent
+2. System creates InputTask with `agent_initiated=true`, `auto_execute=false`
+3. Task appears in user's inbox with status `NEW`
+4. User reviews task, optionally refines description
+5. User selects appropriate agent
+6. User executes task when ready
+7. Task status syncs with session state as usual
 
 ## Architecture
 
@@ -311,14 +320,24 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 
 ## Key Integration Points
 
-### With Agent Handovers
+### With Agent Task Creation
 
-When an agent triggers a handover to another agent:
-- `AgentService.execute_handover()` calls `InputTaskService.create_task_with_auto_refine()`
+Agents can create tasks via the `create_agent_task` tool in two modes:
+
+**Direct Handover (target agent specified):**
+- `AgentService.create_agent_task()` calls `InputTaskService.create_task_with_auto_refine()`
 - Task is created with `agent_initiated=true`, `auto_execute=true`, `source_session_id` set
 - If target agent has `refiner_prompt`, message is automatically refined
 - `InputTaskService.execute_task()` creates session and sends message
-- Task appears in Tasks list, allowing users to monitor agent-to-agent workflows
+- System message logged in source session with link to new session
+
+**Inbox Task (no target agent):**
+- `AgentService.create_agent_task()` calls `InputTaskService.create_task()`
+- Task is created with `agent_initiated=true`, `auto_execute=false`, `source_session_id` set
+- NO auto-refinement (user will refine manually)
+- NO auto-execution (user will select agent and execute)
+- System message logged in source session with link to task page
+- Task appears in user's inbox for review and action
 
 **Related Documentation:** `docs/agent-sessions/agent_handover_management.md`
 
@@ -382,9 +401,16 @@ When an agent triggers a handover to another agent:
 
 ---
 
-**Document Version:** 2.4
+**Document Version:** 2.5
 **Last Updated:** 2026-01-18
 **Status:** Implementation Complete
+
+**Changes in v2.5:**
+- Added inbox task flow: agents can now create tasks without specifying target agent
+- Updated agent tool name from `agent_handover` to `create_agent_task`
+- Inbox tasks created with `auto_execute=false` for user review
+- System messages now link to task page for inbox tasks (vs session for direct handover)
+- Updated integration points documentation to cover both modes
 
 **Changes in v2.4:**
 - Added `todo_progress` JSON field to Session and InputTask models for TodoWrite tool tracking

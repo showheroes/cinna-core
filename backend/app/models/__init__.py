@@ -146,8 +146,10 @@ from .agent_handover import (
     HandoverConfigsPublic,
     GenerateHandoverPromptRequest,
     GenerateHandoverPromptResponse,
-    ExecuteHandoverRequest,
-    ExecuteHandoverResponse,
+    CreateAgentTaskRequest,
+    CreateAgentTaskResponse,
+    ExecuteHandoverRequest,  # Deprecated, use CreateAgentTaskRequest
+    ExecuteHandoverResponse,  # Deprecated, use CreateAgentTaskResponse
 )
 from .user_workspace import (
     UserWorkspace,
@@ -361,7 +363,7 @@ __all__ = [
     "ScheduleResponse",
     "SaveScheduleRequest",
     "AgentSchedulePublic",
-    # Agent Handovers
+    # Agent Handovers / Task Creation
     "AgentHandoverConfig",
     "HandoverConfigCreate",
     "HandoverConfigUpdate",
@@ -369,8 +371,10 @@ __all__ = [
     "HandoverConfigsPublic",
     "GenerateHandoverPromptRequest",
     "GenerateHandoverPromptResponse",
-    "ExecuteHandoverRequest",
-    "ExecuteHandoverResponse",
+    "CreateAgentTaskRequest",
+    "CreateAgentTaskResponse",
+    "ExecuteHandoverRequest",  # Deprecated
+    "ExecuteHandoverResponse",  # Deprecated
     # User Workspaces
     "UserWorkspace",
     "UserWorkspaceCreate",

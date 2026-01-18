@@ -235,23 +235,23 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
                 # Add custom tools for conversation mode
                 if mode == "conversation":
                     try:
-                        from ..tools.agent_handover import agent_handover
+                        from ..tools.create_agent_task import create_agent_task
 
-                        handover_server = create_sdk_mcp_server(
-                            name="handover",
+                        task_server = create_sdk_mcp_server(
+                            name="task",
                             version="1.0.0",
-                            tools=[agent_handover]
+                            tools=[create_agent_task]
                         )
                         if options.mcp_servers:
-                            options.mcp_servers["handover"] = handover_server
+                            options.mcp_servers["task"] = task_server
                         else:
-                            options.mcp_servers = {"handover": handover_server}
-                        options.allowed_tools.append("mcp__handover__agent_handover")
-                        logger.info("Added agent handover tool for conversation mode")
+                            options.mcp_servers = {"task": task_server}
+                        options.allowed_tools.append("mcp__task__create_agent_task")
+                        logger.info("Added create_agent_task tool for conversation mode")
                     except ImportError as e:
-                        logger.warning(f"Could not import agent handover tool: {e}")
+                        logger.warning(f"Could not import create_agent_task tool: {e}")
                     except Exception as e:
-                        logger.warning(f"Could not setup agent handover tool: {e}")
+                        logger.warning(f"Could not setup create_agent_task tool: {e}")
 
                 # Load plugins for current mode
                 try:
