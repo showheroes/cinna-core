@@ -233,7 +233,7 @@ function TaskDetail() {
                 "h-8 px-3 rounded-md text-sm font-medium transition-all flex items-center gap-1.5",
                 headerAgentColorPreset
                   ? `${headerAgentColorPreset.badgeBg} ${headerAgentColorPreset.badgeText} ${headerAgentColorPreset.badgeHover}`
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  : "bg-orange-500/20 text-orange-600 dark:text-orange-400 hover:bg-orange-500/30 ring-2 ring-orange-500/50 animate-pulse"
               )}
             >
               <Bot className="h-4 w-4" />
