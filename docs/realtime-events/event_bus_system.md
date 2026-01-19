@@ -56,15 +56,22 @@ Frontend Components                    Backend Services
 
 ### Environment Activation Events
 
-`ENVIRONMENT_ACTIVATED` is emitted whenever an environment transitions to "running" status:
+**`ENVIRONMENT_ACTIVATING`** is emitted when an environment begins transitioning to "running":
+- **`activate_suspended_environment()`**: When reactivating a suspended environment
+- **`start_environment()`**: When starting a stopped environment
+
+This event allows the frontend to show "Activating" loading state in the UI (e.g., "App" icon in session header).
+
+**`ENVIRONMENT_ACTIVATED`** is emitted whenever an environment transitions to "running" status:
 - **`activate_suspended_environment()`**: When a suspended environment is reactivated
 - **`start_environment()`**: When an environment starts for the first time or restarts
 - **`rebuild_environment()`**: When an environment is rebuilt and was previously running
 
 This ensures any sessions waiting for the environment (with `pending_stream` status) are processed, regardless of how the environment became active. Critical for:
 - Handovers that target an agent while its environment is building/starting
-- Messages sent while environment is activating
+- Messages sent while environment is activating or stopped
 - Multiple concurrent requests waiting for the same environment
+- Clone environments that auto-start after creation
 
 ## Key Files
 

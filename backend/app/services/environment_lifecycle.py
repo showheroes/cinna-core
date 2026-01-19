@@ -400,6 +400,21 @@ class EnvironmentLifecycleManager:
         db_session.add(environment)
         db_session.commit()
 
+        # Emit ENVIRONMENT_ACTIVATING event so frontend can show loading state
+        from app.services.event_service import event_service
+        from app.models.event import EventType
+        await event_service.emit_event(
+            event_type=EventType.ENVIRONMENT_ACTIVATING,
+            model_id=environment.id,
+            user_id=agent.owner_id,
+            meta={
+                "environment_id": str(environment.id),
+                "agent_id": str(agent.id),
+                "instance_name": environment.instance_name
+            }
+        )
+        logger.info(f"Emitted ENVIRONMENT_ACTIVATING event for environment {environment.id}")
+
         try:
             # Check if container exists
             container_existed = await self._container_exists(environment)

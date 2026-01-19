@@ -172,7 +172,8 @@ class AgentCloneService:
                 agent_id=clone.id,
                 data=env_data,
                 user=recipient_user,
-                auto_start=False  # Don't auto-start until credentials are set up
+                auto_start=True,  # Auto-start the environment after build completes
+                source_environment_id=original_env.id if original_env else None  # Copy workspace from original
             )
             logger.info(f"Created environment {clone_env.id} for clone {clone.id}")
 
@@ -185,14 +186,10 @@ class AgentCloneService:
             logger.error(f"Failed to create environment for clone: {e}")
             # Continue without environment - it can be created later
 
-        # 3. Copy workspace files from original to clone after env is created
-        if original_env and clone_env:
-            await AgentCloneService.copy_workspace(
-                original_env_id=original_env.id,
-                clone_env_id=clone_env.id
-            )
+        # Note: Workspace files are copied inside _create_environment_background() after the
+        # environment directory is created, using the source_environment_id parameter
 
-        # 4. Setup credentials
+        # 3. Setup credentials
         await AgentCloneService.setup_clone_credentials(
             session=session,
             original_agent=original_agent,

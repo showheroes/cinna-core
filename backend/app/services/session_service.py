@@ -882,17 +882,18 @@ class SessionService:
                 logger.info(f"[DEBUG] Session {session_id} already has title: '{session.title}'. Skipping title generation.")
 
             # Check environment status
-            if environment.status == "suspended":
-                logger.info(f"Environment {environment.id} is suspended, initiating activation...")
+            if environment.status in ("suspended", "stopped"):
+                logger.info(f"Environment {environment.id} is {environment.status}, initiating start...")
 
                 # Store IDs for background task (avoid passing detached ORM objects)
                 environment_id_for_activation = environment.id
                 agent_id_for_activation = agent.id
+                env_was_suspended = environment.status == "suspended"
 
                 # Start activation in background
                 from app.services.environment_lifecycle import EnvironmentLifecycleManager
 
-                async def _activate_with_fresh_session():
+                async def _start_with_fresh_session():
                     """Wrapper to fetch objects with a fresh DB session"""
                     with get_fresh_db_session() as fresh_db:
                         fresh_env = fresh_db.get(AgentEnvironment, environment_id_for_activation)
@@ -902,16 +903,25 @@ class SessionService:
                             return False
 
                         lifecycle_manager = EnvironmentLifecycleManager()
-                        return await lifecycle_manager.activate_suspended_environment(
-                            db_session=fresh_db,
-                            environment=fresh_env,
-                            agent=fresh_agent,
-                            emit_events=True
-                        )
+                        if env_was_suspended:
+                            # Use optimized activation for suspended environments
+                            return await lifecycle_manager.activate_suspended_environment(
+                                db_session=fresh_db,
+                                environment=fresh_env,
+                                agent=fresh_agent,
+                                emit_events=True
+                            )
+                        else:
+                            # Use full start for stopped environments
+                            return await lifecycle_manager.start_environment(
+                                db_session=fresh_db,
+                                environment=fresh_env,
+                                agent=fresh_agent
+                            )
 
                 create_task_with_error_logging(
-                    _activate_with_fresh_session(),
-                    task_name=f"activate_environment_{environment_id_for_activation}"
+                    _start_with_fresh_session(),
+                    task_name=f"start_environment_{environment_id_for_activation}"
                 )
 
                 # Mark session as pending stream
@@ -920,7 +930,7 @@ class SessionService:
                 db.add(session)
                 db.commit()
 
-                logger.info(f"Environment activation started, session {session_id} marked as pending_stream")
+                logger.info(f"Environment start initiated, session {session_id} marked as pending_stream")
                 return {
                     "action": "pending",
                     "message": "Environment is starting, messages will be processed once ready",
@@ -1054,7 +1064,11 @@ class SessionService:
         timeout_seconds: int = 120
     ) -> tuple[AgentEnvironment, Agent]:
         """
-        Wait for an environment that's already activating to become ready.
+        Wait for an environment that's already starting/activating to become ready.
+
+        Handles both:
+        - 'activating' status (suspended environments being reactivated)
+        - 'starting' status (stopped environments being started)
 
         Args:
             environment_id: Environment UUID
@@ -1066,7 +1080,7 @@ class SessionService:
             tuple: (environment, agent) when ready
 
         Raises:
-            RuntimeError: If activation fails or times out
+            RuntimeError: If start/activation fails or times out
         """
         import time
 
@@ -1093,6 +1107,62 @@ class SessionService:
         raise RuntimeError(f"Timeout waiting for environment activation ({timeout_seconds}s)")
 
     @staticmethod
+    async def _start_stopped_environment_and_wait(
+        environment_id: UUID,
+        agent_id: UUID,
+        get_fresh_db_session: callable,
+        timeout_seconds: int = 120
+    ) -> tuple[AgentEnvironment, Agent]:
+        """
+        Start a stopped environment and wait for it to become ready.
+
+        This is similar to _activate_environment_and_wait but uses start_environment()
+        instead of activate_suspended_environment() since stopped environments may
+        need full container setup.
+
+        Args:
+            environment_id: Environment UUID
+            agent_id: Agent UUID
+            get_fresh_db_session: Callable that returns a fresh DB session (context manager)
+            timeout_seconds: Maximum time to wait for start (default 120s)
+
+        Returns:
+            tuple: (environment, agent) when ready
+
+        Raises:
+            RuntimeError: If start fails or times out
+        """
+        from app.services.environment_lifecycle import EnvironmentLifecycleManager
+
+        logger.info(f"Starting stopped environment {environment_id} synchronously...")
+
+        with get_fresh_db_session() as db:
+            environment = db.get(AgentEnvironment, environment_id)
+            agent = db.get(Agent, agent_id)
+
+            if not environment or not agent:
+                raise RuntimeError("Environment or agent not found")
+
+            lifecycle_manager = EnvironmentLifecycleManager()
+
+            # Start the environment (this handles both new and existing containers)
+            await lifecycle_manager.start_environment(
+                db_session=db,
+                environment=environment,
+                agent=agent
+            )
+
+        # Refresh and verify
+        with get_fresh_db_session() as db:
+            environment = db.get(AgentEnvironment, environment_id)
+            agent = db.get(Agent, agent_id)
+
+            if environment.status != "running":
+                raise RuntimeError(f"Environment start failed, status: {environment.status}")
+
+            return environment, agent
+
+    @staticmethod
     async def ensure_environment_ready_for_streaming(
         session_id: UUID,
         get_fresh_db_session: callable,
@@ -1102,23 +1172,28 @@ class SessionService:
         Ensure environment is ready for streaming (blocking).
 
         This method checks if the environment is ready to accept streaming requests.
-        If the environment is suspended, it activates it and waits for activation to complete.
+        If the environment is suspended or stopped, it starts it and waits for it to become ready.
 
         This is a BLOCKING method suitable for A2A streaming where we need
         the environment to be running before we can stream (unlike UI flow which uses
         WebSocket events for async notification).
 
+        Handles:
+        - 'suspended' environments: Uses optimized activation (skips container setup)
+        - 'stopped' environments: Uses full start (may need container setup)
+        - 'activating'/'starting' environments: Waits for them to complete
+
         Args:
             session_id: Session UUID
             get_fresh_db_session: Callable that returns a fresh DB session (context manager)
-            timeout_seconds: Maximum time to wait for activation (default 120s)
+            timeout_seconds: Maximum time to wait for start/activation (default 120s)
 
         Returns:
             tuple: (environment, agent) when ready
 
         Raises:
             ValueError: If session/environment/agent not found
-            RuntimeError: If environment is in an error state or timeout waiting for activation
+            RuntimeError: If environment is in an error state or timeout waiting for start/activation
         """
         with get_fresh_db_session() as db:
             session = SessionService.get_session(db, session_id)
@@ -1153,8 +1228,17 @@ class SessionService:
                 timeout_seconds=timeout_seconds
             )
 
-        # If activating, wait for it to complete using shared helper
-        if initial_status == "activating":
+        # If stopped, start it synchronously using shared helper
+        if initial_status == "stopped":
+            return await SessionService._start_stopped_environment_and_wait(
+                environment_id=environment_id,
+                agent_id=agent_id,
+                get_fresh_db_session=get_fresh_db_session,
+                timeout_seconds=timeout_seconds
+            )
+
+        # If activating or starting, wait for it to complete using shared helper
+        if initial_status in ("activating", "starting"):
             return await SessionService._wait_for_environment_ready(
                 environment_id=environment_id,
                 agent_id=agent_id,
@@ -1162,7 +1246,7 @@ class SessionService:
                 timeout_seconds=timeout_seconds
             )
 
-        # Other statuses (error, stopped, building, etc.) - cannot proceed
+        # Other statuses (error, building, etc.) - cannot proceed
         raise RuntimeError(f"Environment is not ready for streaming, status: {initial_status}")
 
     @staticmethod

@@ -104,7 +104,8 @@ class EnvironmentService:
         minimax_api_key: str | None = None,
         openai_compatible_api_key: str | None = None,
         openai_compatible_base_url: str | None = None,
-        openai_compatible_model: str | None = None
+        openai_compatible_model: str | None = None,
+        source_environment_id: UUID | None = None
     ):
         """
         Background task to create environment instance.
@@ -119,6 +120,7 @@ class EnvironmentService:
             openai_compatible_api_key: User's OpenAI Compatible API key
             openai_compatible_base_url: User's OpenAI Compatible base URL
             openai_compatible_model: User's OpenAI Compatible model
+            source_environment_id: If provided, copy workspace from this environment after build
         """
         # Create new database session for background task
         with Session(engine) as session:
@@ -138,6 +140,15 @@ class EnvironmentService:
                     openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model
                 )
 
+                # Copy workspace from source environment if provided (for clones)
+                if source_environment_id:
+                    from app.services.agent_clone_service import AgentCloneService
+                    logger.info(f"Copying workspace from {source_environment_id} to {env_id}")
+                    await AgentCloneService.copy_workspace(
+                        original_env_id=source_environment_id,
+                        clone_env_id=env_id
+                    )
+
                 # Auto-start if requested (typically for default agent environments)
                 if auto_start and environment.status == "stopped":
                     # Start the environment
@@ -156,6 +167,7 @@ class EnvironmentService:
             except Exception as e:
                 # Error is already logged and status updated in create_environment_instance
                 # Just ensure we don't leave the background task hanging
+                logger.error(f"Error in _create_environment_background: {e}")
                 pass
 
     @staticmethod
@@ -322,7 +334,8 @@ class EnvironmentService:
         agent_id: UUID,
         data: AgentEnvironmentCreate,
         user: User,
-        auto_start: bool = False
+        auto_start: bool = False,
+        source_environment_id: UUID | None = None
     ) -> AgentEnvironment:
         """
         Create environment for agent.
@@ -339,6 +352,7 @@ class EnvironmentService:
             data: Environment creation data
             user: User creating the environment
             auto_start: If True, automatically start and activate after build completes
+            source_environment_id: If provided, copy workspace from this environment after build (for clones)
 
         Note: The actual Docker build happens asynchronously.
         Use GET /environments/{id}/status to track progress.
@@ -510,7 +524,8 @@ class EnvironmentService:
         asyncio.create_task(
             EnvironmentService._create_environment_background(
                 environment.id, agent_id, anthropic_api_key, auto_start, minimax_api_key,
-                openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model
+                openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model,
+                source_environment_id
             )
         )
 

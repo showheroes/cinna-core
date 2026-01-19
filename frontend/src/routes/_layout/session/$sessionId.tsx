@@ -172,7 +172,8 @@ function ChatInterface() {
   useEffect(() => {
     if (environment) {
       const status = environment.status
-      if (status === "suspended" || status === "activating") {
+      // Show activating state for suspended, stopped, activating, or starting statuses
+      if (status === "suspended" || status === "stopped" || status === "activating" || status === "starting") {
         setIsEnvActivating(true)
       } else if (status === "running") {
         setIsEnvActivating(false)

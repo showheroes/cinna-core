@@ -38,9 +38,13 @@ Frontend → Backend API → AgentShareService → AgentCloneService → Environ
 ```
 Share → Pending → Accept → Clone Created → Active Use
                     │
-              Credentials Setup
+              Credentials Setup (immediate)
                     │
-              Workspace Copy
+              Environment Build (background)
+                    │
+              Workspace Copy (after build)
+                    │
+              Auto-Start Environment
 ```
 
 ## Data/State Lifecycle
@@ -291,13 +295,22 @@ Service methods in `AgentSharesService`:
 **Clone Creation Flow:** `AgentShareService.accept_share()`
 1. Validate share exists and is pending
 2. Validate recipient matches share target
-3. Call `AgentCloneService.create_clone()`
+3. Call `AgentCloneService.create_clone()`:
+   - Creates clone agent record
+   - Creates environment with `auto_start=True` and `source_environment_id` (spawns background task)
+   - Sets up credentials (immediate, committed to DB)
 4. Update share record with `cloned_agent_id`
+5. Background task completes:
+   - Builds Docker image
+   - **Copies workspace files** from source environment (after directory exists)
+   - Auto-starts the environment
+   - UI shows "Activating" state during this process
 
 **Workspace Copy:** `AgentCloneService.copy_workspace()`
+- Called inside `_create_environment_background()` **after** environment directory is created
 - Uses `ENV_INSTANCES_DIR` + environment ID paths
-- Copies: `app/core/scripts/`, `app/core/docs/`, `app/core/knowledge/`
-- Does NOT copy: user files, databases, logs
+- Copies: `app/workspace/scripts/`, `app/workspace/docs/`, `app/workspace/knowledge/`, `app/workspace/files/`, `app/workspace/uploads/`
+- Does NOT copy: logs, databases, credentials (handled separately via dynamic sync)
 
 **Update Push Flow:** `AgentCloneService.push_updates()`
 1. Verify ownership and non-clone status
@@ -408,6 +421,6 @@ Service methods in `AgentSharesService`:
 
 ---
 
-**Document Version:** 3.0
-**Last Updated:** 2026-01-17
+**Document Version:** 3.1
+**Last Updated:** 2026-01-19
 **Status:** Complete (All Phases)

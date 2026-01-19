@@ -436,6 +436,7 @@ def _agent_to_public(session, agent: Agent) -> AgentPublic:
         description=agent.description,
         workflow_prompt=agent.workflow_prompt,
         entrypoint_prompt=agent.entrypoint_prompt,
+        refiner_prompt=agent.refiner_prompt,
         is_active=agent.is_active,
         active_environment_id=agent.active_environment_id,
         ui_color_preset=agent.ui_color_preset,

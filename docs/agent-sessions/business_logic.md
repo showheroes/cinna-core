@@ -37,11 +37,7 @@ User → Session → Environment → Docker Container → Google ADK Agent
 
 ### Session Interaction
 - **As a user**, I want to create a new conversation session with my agent
-- **As a user**, I want to switch between two session modes:
-  - **Building Mode**: Set up agent capabilities, write scripts, configure integrations
-  - **Conversation Mode**: Execute tasks using pre-built tools and workflows
 - **As a user**, I want to send messages and receive real-time responses
-- **As a user**, I want my conversation history to persist across sessions
 - **As a user**, I want to have multiple parallel sessions with the same agent
 
 ### Security & Isolation
@@ -64,7 +60,7 @@ User → Session → Environment → Docker Container → Google ADK Agent
 - Stop environment → gracefully shuts down container
 - Health check → verify environment is responsive
 - Activate environment → set as agent's active environment for new sessions
-- Status tracking: `stopped`, `starting`, `running`, `error`, `deprecated`
+- Status tracking: (`stopped`, `starting`, `running`, `error`, etc)
 
 ### Session Management
 - Create session → uses agent's active environment, defaults to "conversation" mode
@@ -76,6 +72,7 @@ User → Session → Environment → Docker Container → Google ADK Agent
 ### Message Flow
 - Send message to session
 - Backend validates session ownership and environment status
+- **If environment is suspended or stopped**: System automatically starts the environment, marks session as `pending_stream`, and processes messages once environment is running
 - Route message to environment's agent (via Docker HTTP API or SSH/HTTP adapter)
 - Agent processes message using Google ADK
 - Store user message and agent response in database
@@ -97,9 +94,7 @@ User → Session → Environment → Docker Container → Google ADK Agent
 - Smaller context window, faster responses, lower cost
 
 ### Authorization Rules
-- Users can only access their own agents
-- Users can only access their own sessions
-- Admins can view all resources
+- Users can only access their own resources (agents, sessions, credentials), unless these resources were explicitly shared
 - Sessions must belong to user's agent environment
 
 ### Data Integrity
@@ -113,15 +108,9 @@ User → Session → Environment → Docker Container → Google ADK Agent
 1. **Agent can have multiple environments** (for versioning, testing, blue-green deployment)
 2. **Only one environment can be active** at a time per agent
 3. **Sessions are created against specific environment**, not agent directly
-4. **Environment must be running** to create new sessions or send messages
-5. **Session mode can be switched** at any time during conversation
-6. **Messages are immutable** once created (stored for audit trail)
-7. **Credentials are defined at agent level**, inherited by all environments
-8. **Environment status transitions**:
-   - `stopped → starting → running` (successful start)
-   - `stopped → starting → error` (failed start)
-   - `running → stopped` (manual stop)
-   - `running → error` (health check failure)
+4. **Environment must be running** to create new sessions; messages to suspended/stopped environments trigger automatic environment start
+5. **Messages are immutable** once created (stored for audit trail)
+6. **Credentials are defined at agent level**, inherited by all environments
 
 ## Key Differentiators
 
@@ -135,7 +124,7 @@ User → Session → Environment → Docker Container → Google ADK Agent
 
 - **Backend**: FastAPI (Python) with PostgreSQL
 - **Frontend**: React + TypeScript
-- **Agent Runtime**: Google Agent Development Kit (ADK) in Python
+- **Agent Runtime**: Google Agent Development Kit (ADK) in Python and ClaudeCode
 - **Isolation**: Docker containers with mounted volumes
 - **Communication**: HTTP API between backend and agent containers
 - **Database**: PostgreSQL with UUID primary keys, JSON columns for flexible metadata
@@ -143,6 +132,6 @@ User → Session → Environment → Docker Container → Google ADK Agent
 ## Implementation Philosophy
 
 - **Service Layer Pattern**: Business logic in service classes, not routes or models
-- **Domain-Driven Structure**: Models, services, and routes grouped by domain (agents, environments, sessions)
+- **Domain-Driven Structure**: Models, services, and routes grouped by domain (agents, environments, sessions, etc.)
 - **Authorization at Route Level**: Validate ownership before delegating to services
 - **Stub First, Implement Later**: Create data layer and API contracts before implementing Docker/agent logic
