@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState, useCallback } from "react"
-import { Plus, MessageSquare, Play, Sparkles, Circle, CheckCircle2, List, Archive, Loader2, MoreVertical, Trash2, Layers } from "lucide-react"
+import { Plus, MessageSquare, Play, Sparkles, Circle, CheckCircle2, List, Archive, Loader2, MoreVertical, Trash2, Layers, FileText } from "lucide-react"
 
 import { TasksService, AgentsService } from "@/client"
 import type { InputTaskPublicExtended } from "@/client"
@@ -199,9 +199,26 @@ function TasksList() {
   }, [setHeaderContent])
 
   const handleTaskClick = (task: InputTaskPublicExtended) => {
+    // For completed tasks with a session, navigate directly to the session
+    if (task.status === "completed" && task.latest_session_id) {
+      navigate({
+        to: "/session/$sessionId",
+        params: { sessionId: task.latest_session_id },
+        search: { initialMessage: undefined, fileIds: undefined },
+      })
+    } else {
+      navigate({
+        to: "/task/$taskId",
+        params: { taskId: task.id },
+      })
+    }
+  }
+
+  const handleOpenPrompt = (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
     navigate({
       to: "/task/$taskId",
-      params: { taskId: task.id },
+      params: { taskId },
     })
   }
 
@@ -415,7 +432,16 @@ function TasksList() {
                                 {task.sessions_count} sessions
                               </Button>
                             )}
-                            {task.latest_session_id && (
+                            {task.status === "completed" && task.latest_session_id ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => handleOpenPrompt(e, task.id)}
+                              >
+                                <FileText className="h-4 w-4 mr-1" />
+                                Open Prompt
+                              </Button>
+                            ) : task.latest_session_id ? (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -423,7 +449,7 @@ function TasksList() {
                               >
                                 Go to Session
                               </Button>
-                            )}
+                            ) : null}
                             <Button
                               size="sm"
                               onClick={(e) => handleExecute(e, task.id, task.current_description)}
