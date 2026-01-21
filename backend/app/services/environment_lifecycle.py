@@ -49,7 +49,7 @@ class EnvironmentLifecycleManager:
     - delete_environment_instance: Remove all resources (DOWN + cleanup)
 
     Data Sync Strategy:
-    - DYNAMIC DATA (synced every UP): prompts, credentials
+    - DYNAMIC DATA (synced every UP): prompts, credentials, plugins, handover config
     - CONTAINER SETUP (only for NEW containers): custom packages, system files
     """
 
@@ -227,10 +227,16 @@ class EnvironmentLifecycleManager:
         DYNAMIC DATA (synced every time on activation/up):
         - Agent prompts (workflow, entrypoint)
         - Credentials files
+        - Plugins configuration
+        - Handover configuration
 
         This should be called every time container becomes running:
         - After container starts (new or existing)
         - After backend updates (even if container was already running)
+
+        Note: Handover config sync is critical for cloned agents to ensure
+        they get empty handover config (queried from DB) instead of stale
+        parent config that may have been copied during workspace copy.
 
         Args:
             db_session: Database session
@@ -267,6 +273,16 @@ class EnvironmentLifecycleManager:
         db_session.commit()
 
         await self._sync_plugins_to_environment(db_session, environment, agent)
+
+        # Sync handover configuration to environment
+        # This ensures cloned agents get empty handover config (not stale parent config)
+        # and all agents have current handover state on activation
+        environment.status_message = "Syncing handover configuration..."
+        db_session.add(environment)
+        db_session.commit()
+
+        from app.services.agent_service import AgentService
+        await AgentService.sync_agent_handover_config(db_session, agent.id)
 
     async def _sync_plugins_to_environment(
         self,

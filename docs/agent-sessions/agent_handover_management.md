@@ -249,6 +249,12 @@ When handover configs are created/updated/deleted, they are synced to the agent'
 - Generates consolidated handover prompt with tool usage instructions
 - Pushes config to agent-env via adapter
 
+**Automatic Sync on Environment Activation**:
+Handover config is also synced as part of `_sync_dynamic_data()` in `environment_lifecycle.py`:
+- Called every time an environment starts or activates
+- Ensures cloned agents get empty handover config (from DB) instead of stale parent config
+- Critical for shared agents where workspace files are copied but handover configs are not
+
 **Environment Storage**: `docs/agent_handover_config.json` in agent workspace
 - Contains array of configured handovers (id, name, prompt)
 - Contains overall handover_prompt for system prompt inclusion
