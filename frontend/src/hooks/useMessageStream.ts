@@ -36,7 +36,7 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
   const streamCompleteCalledRef = useRef(false)
 
   // Define handleStreamComplete FIRST (before handleStreamEvent uses it)
-  const handleStreamComplete = useCallback(async (wasInterrupted: boolean) => {
+  const handleStreamComplete = useCallback(async (_wasInterrupted: boolean) => {
     // Cleanup subscriptions
     if (streamSubscriptionRef.current) {
       eventService.unsubscribe(streamSubscriptionRef.current)
