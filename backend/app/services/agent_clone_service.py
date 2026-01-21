@@ -305,21 +305,22 @@ class AgentCloneService:
         Setup credentials for a clone.
 
         For each credential linked to original agent:
-        - If allow_sharing=true: Create CredentialShare link
-        - If allow_sharing=false: Create placeholder credential
-
-        Apply user_provided_data to placeholders.
+        - If user selected their own credential (by ID): Link that credential
+        - If allow_sharing=true and no override: Create CredentialShare link
+        - If allow_sharing=false and no selection: Create placeholder credential
 
         Args:
             session: Database session
             original_agent: The original agent
             clone: The cloned agent
-            user_provided_data: Dict of {credential_id: {field: value}} for placeholders
+            user_provided_data: Dict of {credential_name: credential_id} for credential selections
+                               OR {credential_name: {field: value}} for legacy placeholder data
 
         Returns:
             List of created/linked credentials
         """
         from app.services.credentials_service import CredentialsService
+        from uuid import UUID
 
         # Get original agent's credentials via the link table
         stmt = select(AgentCredentialLink).where(
@@ -334,6 +335,58 @@ class AgentCloneService:
             if not orig_cred:
                 continue
 
+            # Check if user provided a credential selection (by name)
+            user_selection = user_provided_data.get(orig_cred.name) if user_provided_data else None
+
+            # Determine if user_selection is a credential ID (string UUID) or legacy data (dict)
+            selected_credential_id = None
+            legacy_data = None
+
+            if user_selection:
+                if isinstance(user_selection, str):
+                    # New format: credential ID as string
+                    try:
+                        selected_credential_id = UUID(user_selection)
+                    except (ValueError, TypeError):
+                        # Not a valid UUID, might be other data
+                        pass
+                elif isinstance(user_selection, dict):
+                    # Legacy format: {field: value} for placeholder data
+                    legacy_data = user_selection
+
+            # If user selected their own credential, link it directly
+            if selected_credential_id:
+                # Verify the credential exists and belongs to or is shared with the clone owner
+                selected_cred = session.get(Credential, selected_credential_id)
+                if selected_cred:
+                    # Check if user owns the credential
+                    user_owns = selected_cred.owner_id == clone.owner_id
+
+                    # Check if credential is shared with the user
+                    user_has_access = False
+                    if not user_owns:
+                        stmt = select(CredentialShare).where(
+                            CredentialShare.credential_id == selected_credential_id,
+                            CredentialShare.shared_with_user_id == clone.owner_id
+                        )
+                        share_record = session.exec(stmt).first()
+                        user_has_access = share_record is not None
+
+                    if user_owns or user_has_access:
+                        # Link user's credential to the clone
+                        clone_link = AgentCredentialLink(
+                            agent_id=clone.id,
+                            credential_id=selected_credential_id
+                        )
+                        session.add(clone_link)
+                        logger.info(f"Linked user's credential {selected_cred.name} for {orig_cred.name}")
+                        continue
+                    else:
+                        logger.warning(f"User does not have access to credential {selected_credential_id} for {orig_cred.name}")
+                else:
+                    logger.warning(f"Credential {selected_credential_id} not found for {orig_cred.name}")
+
+            # Default behavior: share or create placeholder
             if orig_cred.allow_sharing:
                 # Create CredentialShare link for recipient
                 # Check if share already exists
@@ -361,9 +414,6 @@ class AgentCloneService:
 
             else:
                 # Create placeholder credential for the clone
-                # Import encryption function
-                from app.services.credentials_service import CredentialsService
-
                 placeholder = Credential(
                     owner_id=clone.owner_id,
                     name=f"{orig_cred.name} (placeholder)",
@@ -375,12 +425,9 @@ class AgentCloneService:
                     allow_sharing=False
                 )
 
-                # Apply user-provided data if available
-                cred_key = str(orig_cred.id)
-                if cred_key in user_provided_data:
-                    placeholder.encrypted_data = CredentialsService._encrypt_data(
-                        user_provided_data[cred_key]
-                    )
+                # Apply legacy user-provided data if available
+                if legacy_data:
+                    placeholder.encrypted_data = CredentialsService._encrypt_data(legacy_data)
                     placeholder.is_placeholder = False  # Now complete
                     placeholder.name = orig_cred.name  # Use original name
 

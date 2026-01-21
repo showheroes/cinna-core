@@ -1,11 +1,12 @@
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { PendingSharePublic } from "@/client"
-import { CheckCircle, AlertTriangle, Loader2 } from "lucide-react"
+import { CheckCircle, AlertTriangle, Loader2, User } from "lucide-react"
+import type { CredentialSelection } from "./AcceptShareWizard"
 
 interface WizardStepConfirmProps {
   share: PendingSharePublic
-  credentialsData: Record<string, Record<string, string>>
+  credentialSelections: Record<string, CredentialSelection>
   onAccept: () => void
   onBack: () => void
   isLoading: boolean
@@ -14,18 +15,30 @@ interface WizardStepConfirmProps {
 
 export function WizardStepConfirm({
   share,
-  credentialsData,
+  credentialSelections,
   onAccept,
   onBack,
   isLoading,
   error,
 }: WizardStepConfirmProps) {
   const credentials = share.credentials_required || []
-  const setupRequired = credentials.filter((c) => !c.allow_sharing)
-  const configuredCount = Object.keys(credentialsData).filter(
-    (key) => credentialsData[key]?.value
+
+  // Count credential statuses
+  const sharedCount = credentials.filter((c) => {
+    const selection = credentialSelections[c.name]
+    // Using shared: shareable credential with no override selection
+    return c.allow_sharing && (!selection?.selectedCredentialId || selection.selectedCredentialId === null)
+  }).length
+
+  const ownCredentialCount = Object.values(credentialSelections).filter(
+    (s) => s.selectedCredentialId && s.selectedCredentialId !== "__create_new__"
   ).length
-  const skippedCount = setupRequired.length - configuredCount
+
+  const nonShareableCredentials = credentials.filter((c) => !c.allow_sharing)
+  const skippedCount = nonShareableCredentials.filter((c) => {
+    const selection = credentialSelections[c.name]
+    return !selection?.selectedCredentialId || selection.selectedCredentialId === "__create_new__"
+  }).length
 
   return (
     <div className="space-y-6">
@@ -55,17 +68,16 @@ export function WizardStepConfirm({
         <div className="space-y-2">
           <h4 className="font-medium">Credentials</h4>
           <ul className="text-sm space-y-1">
-            {credentials.filter((c) => c.allow_sharing).length > 0 && (
+            {sharedCount > 0 && (
               <li className="flex items-center gap-2 text-green-700 dark:text-green-400">
                 <CheckCircle className="h-4 w-4" />
-                {credentials.filter((c) => c.allow_sharing).length} shared
-                credentials ready
+                {sharedCount} using owner's shared credentials
               </li>
             )}
-            {configuredCount > 0 && (
-              <li className="flex items-center gap-2 text-green-700 dark:text-green-400">
-                <CheckCircle className="h-4 w-4" />
-                {configuredCount} credentials configured
+            {ownCredentialCount > 0 && (
+              <li className="flex items-center gap-2 text-blue-700 dark:text-blue-400">
+                <User className="h-4 w-4" />
+                {ownCredentialCount} using your own credentials
               </li>
             )}
             {skippedCount > 0 && (
