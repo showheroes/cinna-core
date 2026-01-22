@@ -2,6 +2,7 @@ import uuid as uuid_module
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy import Index, UniqueConstraint, ForeignKeyConstraint
 
 if TYPE_CHECKING:
     from app.models.agent import Agent
@@ -34,10 +35,41 @@ class AgentShareBase(SQLModel):
 class AgentShare(AgentShareBase, table=True):
     """Database model for agent sharing records"""
     __tablename__ = "agent_share"
+    __table_args__ = (
+        # Indexes for efficient querying
+        Index("ix_agent_share_original_agent", "original_agent_id"),
+        Index("ix_agent_share_recipient", "shared_with_user_id"),
+        Index("ix_agent_share_status", "status"),
+        # Unique constraint: one share per agent+user pair
+        UniqueConstraint(
+            "original_agent_id",
+            "shared_with_user_id",
+            name="uq_agent_share_agent_user",
+        ),
+        # Named foreign keys with ondelete
+        ForeignKeyConstraint(
+            ["original_agent_id"],
+            ["agent.id"],
+            name="agent_share_original_agent_id_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["shared_with_user_id"],
+            ["user.id"],
+            name="agent_share_shared_with_user_id_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["cloned_agent_id"],
+            ["agent.id"],
+            name="agent_share_cloned_agent_id_fkey",
+            ondelete="SET NULL",
+        ),
+    )
 
     id: uuid_module.UUID = Field(default_factory=uuid_module.uuid4, primary_key=True)
-    original_agent_id: uuid_module.UUID = Field(foreign_key="agent.id", nullable=False)
-    shared_with_user_id: uuid_module.UUID = Field(foreign_key="user.id", nullable=False)
+    original_agent_id: uuid_module.UUID = Field(nullable=False)  # FK in __table_args__
+    shared_with_user_id: uuid_module.UUID = Field(nullable=False)  # FK in __table_args__
     shared_by_user_id: uuid_module.UUID = Field(foreign_key="user.id", nullable=False)
     share_mode: str = Field(nullable=False)  # "user" | "builder"
 
@@ -48,7 +80,7 @@ class AgentShare(AgentShareBase, table=True):
     declined_at: datetime | None = Field(default=None)
 
     # Reference to created clone (after acceptance)
-    cloned_agent_id: uuid_module.UUID | None = Field(default=None, foreign_key="agent.id")
+    cloned_agent_id: uuid_module.UUID | None = Field(default=None)  # FK in __table_args__
 
     # AI credential provision (owner can provide their AI credentials to recipient)
     provide_ai_credentials: bool = Field(default=False)

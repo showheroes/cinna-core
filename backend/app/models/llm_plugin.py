@@ -40,7 +40,7 @@ class LLMPluginMarketplaceBase(SQLModel):
     url: str  # Git repository URL
     git_branch: str = Field(default="main")
     ssh_key_id: Optional[uuid.UUID] = Field(default=None, foreign_key="user_ssh_keys.id")
-    public_discovery: bool = Field(default=False, index=True)
+    public_discovery: bool = Field(default=False)  # Indexed via idx_marketplace_public in __table_args__
     type: str = Field(default="claude")  # Marketplace type (claude, openai, custom)
     status: MarketplaceStatus = Field(default=MarketplaceStatus.pending)
     status_message: Optional[str] = None

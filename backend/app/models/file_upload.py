@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Column
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Index
 
 
 class FileUpload(SQLModel, table=True):
@@ -53,6 +53,11 @@ class InputTaskFile(SQLModel, table=True):
     """Junction table linking input tasks to files"""
 
     __tablename__ = "input_task_files"
+    __table_args__ = (
+        # Indexes for efficient querying
+        Index("ix_input_task_files_task_id", "task_id"),
+        Index("ix_input_task_files_file_id", "file_id"),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     task_id: uuid.UUID = Field(foreign_key="input_task.id", ondelete="CASCADE")

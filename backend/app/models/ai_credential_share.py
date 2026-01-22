@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy import Index, UniqueConstraint
 
 if TYPE_CHECKING:
     from app.models.ai_credential import AICredential
@@ -23,6 +24,17 @@ class AICredentialShareBase(SQLModel):
 class AICredentialShare(AICredentialShareBase, table=True):
     """Database model for AI credential shares."""
     __tablename__ = "ai_credential_shares"
+    __table_args__ = (
+        # Indexes for efficient querying
+        Index("ix_ai_credential_shares_ai_credential_id", "ai_credential_id"),
+        Index("ix_ai_credential_shares_shared_with_user_id", "shared_with_user_id"),
+        # Unique constraint: one share per credential+user pair
+        UniqueConstraint(
+            "ai_credential_id",
+            "shared_with_user_id",
+            name="uq_ai_credential_shares_credential_user",
+        ),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     ai_credential_id: uuid.UUID = Field(

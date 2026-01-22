@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 from sqlmodel import Field, Relationship, SQLModel, Column
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Index, ForeignKeyConstraint, text
 
 from app.models.user import User
 from app.models.link_models import AgentCredentialLink
@@ -56,6 +56,32 @@ class AgentUpdate(SQLModel):
 
 # Database model, database table inferred from class name
 class Agent(AgentBase, table=True):
+    __table_args__ = (
+        # Partial indexes for efficient clone/update queries
+        Index(
+            "ix_agent_is_clone",
+            "is_clone",
+            postgresql_where=text("is_clone = true"),
+        ),
+        Index(
+            "ix_agent_parent",
+            "parent_agent_id",
+            postgresql_where=text("parent_agent_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_agent_pending_update",
+            "pending_update",
+            postgresql_where=text("pending_update = true"),
+        ),
+        # Named foreign key for parent_agent_id
+        ForeignKeyConstraint(
+            ["parent_agent_id"],
+            ["agent.id"],
+            name="fk_agent_parent",
+            ondelete="SET NULL",
+        ),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     owner_id: uuid.UUID = Field(
         foreign_key="user.id", nullable=False, ondelete="CASCADE"
@@ -77,7 +103,7 @@ class Agent(AgentBase, table=True):
 
     # Clone relationship fields
     is_clone: bool = Field(default=False)
-    parent_agent_id: uuid.UUID | None = Field(default=None, foreign_key="agent.id")
+    parent_agent_id: uuid.UUID | None = Field(default=None)  # FK defined in __table_args__
     clone_mode: str | None = Field(default=None)  # "user" | "builder"
     last_sync_at: datetime | None = Field(default=None)
 

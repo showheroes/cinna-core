@@ -2,7 +2,7 @@ import uuid as uuid_module
 from datetime import datetime
 from typing import TYPE_CHECKING
 from sqlmodel import Field, Relationship, SQLModel, Column
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Index, ForeignKeyConstraint
 
 if TYPE_CHECKING:
     from app.models.agent import Agent
@@ -30,17 +30,40 @@ class CloneUpdateRequest(CloneUpdateRequestBase, table=True):
     with the specific actions to be performed.
     """
     __tablename__ = "clone_update_request"
+    __table_args__ = (
+        # Compound index for efficient lookup by clone and status
+        Index("ix_clone_update_request_clone_status", "clone_agent_id", "status"),
+        # Named foreign keys with ondelete
+        ForeignKeyConstraint(
+            ["clone_agent_id"],
+            ["agent.id"],
+            name="clone_update_request_clone_agent_id_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["parent_agent_id"],
+            ["agent.id"],
+            name="clone_update_request_parent_agent_id_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["pushed_by_user_id"],
+            ["user.id"],
+            name="clone_update_request_pushed_by_user_id_fkey",
+            ondelete="CASCADE",
+        ),
+    )
 
     id: uuid_module.UUID = Field(default_factory=uuid_module.uuid4, primary_key=True)
 
     # The clone agent that should receive the update
-    clone_agent_id: uuid_module.UUID = Field(foreign_key="agent.id", nullable=False)
+    clone_agent_id: uuid_module.UUID = Field(nullable=False)  # FK in __table_args__
 
     # The parent agent that is pushing the update
-    parent_agent_id: uuid_module.UUID = Field(foreign_key="agent.id", nullable=False)
+    parent_agent_id: uuid_module.UUID = Field(nullable=False)  # FK in __table_args__
 
     # The user who pushed the update (owner of parent agent)
-    pushed_by_user_id: uuid_module.UUID = Field(foreign_key="user.id", nullable=False)
+    pushed_by_user_id: uuid_module.UUID = Field(nullable=False)  # FK in __table_args__
 
     # Actions to perform
     copy_files_folder: bool = Field(default=False)

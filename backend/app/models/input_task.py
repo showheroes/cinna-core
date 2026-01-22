@@ -7,7 +7,8 @@ an AI-assisted preparation workflow.
 import uuid
 from datetime import datetime
 from sqlmodel import Field, SQLModel, Column
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Index
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.file_upload import FileUploadPublic
 
@@ -39,6 +40,10 @@ class InputTaskBase(SQLModel):
 # Database model
 class InputTask(InputTaskBase, table=True):
     __tablename__ = "input_task"
+    __table_args__ = (
+        # Compound index for efficient lookup by owner and status
+        Index("ix_input_task_owner_status", "owner_id", "status"),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     owner_id: uuid.UUID = Field(
@@ -62,7 +67,7 @@ class InputTask(InputTaskBase, table=True):
     status: str = Field(default=InputTaskStatus.NEW)
     refinement_history: list = Field(default_factory=list, sa_column=Column(JSON))
     # To-do progress tracking from TodoWrite tool (list of TodoItem dicts)
-    todo_progress: list | None = Field(default=None, sa_column=Column(JSON))
+    todo_progress: list | None = Field(default=None, sa_column=Column(JSONB))
     error_message: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

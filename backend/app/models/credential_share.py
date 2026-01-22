@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy import Index, UniqueConstraint, ForeignKeyConstraint
 
 if TYPE_CHECKING:
     from app.models.credential import Credential
@@ -23,10 +24,34 @@ class CredentialShareBase(SQLModel):
 class CredentialShare(CredentialShareBase, table=True):
     """Database model for credential shares."""
     __tablename__ = "credential_shares"
+    __table_args__ = (
+        # Indexes for efficient querying
+        Index("ix_credential_shares_credential_id", "credential_id"),
+        Index("ix_credential_shares_shared_with_user_id", "shared_with_user_id"),
+        # Unique constraint: one share per credential+user pair
+        UniqueConstraint(
+            "credential_id",
+            "shared_with_user_id",
+            name="uq_credential_shares_credential_user",
+        ),
+        # Named foreign keys with ondelete
+        ForeignKeyConstraint(
+            ["credential_id"],
+            ["credential.id"],
+            name="credential_shares_credential_id_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["shared_with_user_id"],
+            ["user.id"],
+            name="credential_shares_shared_with_user_id_fkey",
+            ondelete="CASCADE",
+        ),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    credential_id: uuid.UUID = Field(foreign_key="credential.id", nullable=False)
-    shared_with_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    credential_id: uuid.UUID = Field(nullable=False)  # FK in __table_args__
+    shared_with_user_id: uuid.UUID = Field(nullable=False)  # FK in __table_args__
     shared_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
     shared_at: datetime = Field(default_factory=datetime.utcnow)
 

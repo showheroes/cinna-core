@@ -2,6 +2,7 @@ import uuid
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional
 from sqlmodel import Field, Relationship, SQLModel, Column, Text
+from sqlalchemy import Index, ForeignKeyConstraint, text
 
 from app.models.user import User
 from app.models.link_models import AgentCredentialLink
@@ -79,6 +80,27 @@ class CredentialUpdate(SQLModel):
 
 # Database model
 class Credential(CredentialBase, table=True):
+    __table_args__ = (
+        # Partial indexes for efficient querying
+        Index(
+            "ix_credential_allow_sharing",
+            "allow_sharing",
+            postgresql_where=text("allow_sharing = true"),
+        ),
+        Index(
+            "ix_credential_placeholder",
+            "is_placeholder",
+            postgresql_where=text("is_placeholder = true"),
+        ),
+        # Named foreign key for placeholder_source_id
+        ForeignKeyConstraint(
+            ["placeholder_source_id"],
+            ["credential.id"],
+            name="fk_credential_placeholder_source",
+            ondelete="SET NULL",
+        ),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     # Store encrypted credential data as text
     encrypted_data: str = Field(sa_column=Column(Text, nullable=False))
@@ -91,10 +113,7 @@ class Credential(CredentialBase, table=True):
 
     # Placeholder fields (for clones when original credential is not shareable)
     is_placeholder: bool = Field(default=False)
-    placeholder_source_id: uuid.UUID | None = Field(
-        default=None,
-        foreign_key="credential.id"
-    )
+    placeholder_source_id: uuid.UUID | None = Field(default=None)  # FK in __table_args__
 
     owner: User | None = Relationship(back_populates="credentials")
     agents: List["app.models.agent.Agent"] = Relationship(
