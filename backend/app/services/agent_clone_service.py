@@ -711,11 +711,16 @@ class AgentCloneService:
             logger.info(f"Copied workspace to clone {clone_id} (include_files={should_copy_files})")
 
         # Handle rebuild environment action
-        if should_rebuild_env:
-            # TODO: Implement environment rebuild logic
-            # This should trigger a rebuild of the clone's environment
-            # For now, just log that it was requested
-            logger.info(f"Environment rebuild requested for clone {clone_id} (not yet implemented)")
+        if should_rebuild_env and clone.active_environment_id:
+            logger.info(f"Triggering environment rebuild for clone {clone_id}")
+            try:
+                await EnvironmentService.rebuild_environment(
+                    session=session,
+                    env_id=clone.active_environment_id
+                )
+                logger.info(f"Environment rebuild completed for clone {clone_id}")
+            except Exception as e:
+                logger.error(f"Failed to rebuild environment for clone {clone_id}: {e}")
 
         # Update clone record
         clone.last_sync_at = datetime.utcnow()
@@ -898,3 +903,43 @@ class AgentCloneService:
 
         logger.info(f"Dismissed update request {request_id} for clone {update_request.clone_agent_id}")
         return update_request
+
+    @staticmethod
+    async def check_and_apply_automatic_updates(
+        session: Session,
+        agent: Agent
+    ) -> bool:
+        """
+        Check if agent is a clone with automatic updates pending and apply them.
+
+        This method is called before environment suspension to apply any pending
+        automatic updates while the environment is inactive.
+
+        Args:
+            session: Database session
+            agent: The agent to check
+
+        Returns:
+            True if updates were applied, False otherwise
+        """
+        # Check if this is a clone with automatic mode and pending updates
+        if not agent.is_clone:
+            return False
+        if agent.update_mode != "automatic":
+            return False
+        if not agent.pending_update:
+            return False
+
+        logger.info(f"Applying automatic update for clone {agent.id}")
+
+        try:
+            await AgentCloneService.apply_update(
+                session=session,
+                clone_id=agent.id,
+                clone_owner_id=agent.owner_id
+            )
+            logger.info(f"Automatic update applied for clone {agent.id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to apply automatic update for clone {agent.id}: {e}", exc_info=True)
+            return False

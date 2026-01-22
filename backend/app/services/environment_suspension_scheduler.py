@@ -10,6 +10,7 @@ from app.models.agent import Agent
 from app.services.environment_lifecycle import EnvironmentLifecycleManager
 from app.services.event_service import event_service
 from app.models.event import EventType
+from app.services.agent_clone_service import AgentCloneService
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,9 @@ async def _check_and_suspend_environments():
                         f"(last_activity: {env.last_activity_at}, user_online: {user_online}, "
                         f"is_active: {env.is_active})"
                     )
+
+                    # Apply automatic updates before suspension if this is a clone with pending updates
+                    await AgentCloneService.check_and_apply_automatic_updates(session, agent)
 
                     # Suspend environment
                     await lifecycle_manager.suspend_environment(session, env)
