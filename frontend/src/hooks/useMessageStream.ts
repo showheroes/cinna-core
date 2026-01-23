@@ -219,6 +219,39 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
         queryClient.invalidateQueries({ queryKey: ["messages", sessionId] })
       }, 3000)
 
+      // Start completion polling fallback after a delay.
+      // The delay is needed because the backend starts streaming asynchronously
+      // (background task), so /streaming-status returns false initially.
+      // After 15s, if WebSocket stream_completed event was lost, this catches it.
+      if (completionPollRef.current) {
+        clearInterval(completionPollRef.current)
+      }
+      const completionPollDelayTimer = setTimeout(() => {
+        // Don't start if streaming already completed during the delay
+        if (streamCompleteCalledRef.current) return
+        completionPollRef.current = setInterval(async () => {
+          try {
+            const statusResponse = await fetch(
+              `${import.meta.env.VITE_API_URL}/api/v1/sessions/${sessionId}/messages/streaming-status`,
+              { headers: { "Authorization": `Bearer ${token}` } }
+            )
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json()
+              if (!statusData.is_streaming) {
+                if (!streamCompleteCalledRef.current) {
+                  streamCompleteCalledRef.current = true
+                  handleStreamComplete(false)
+                }
+              }
+            }
+          } catch {
+            // Ignore fetch errors during polling
+          }
+        }, 3000)
+      }, 15000)
+      // Store timer so it can be cleared if streaming completes before delay fires
+      completionPollRef.current = completionPollDelayTimer as unknown as ReturnType<typeof setInterval>
+
       // Optimistically add user message to cache
       // If fileObjects are provided, use them for immediate display (before backend confirms)
       const tempUserMessageId = `temp-${Date.now()}`
@@ -306,6 +339,10 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current)
         pollIntervalRef.current = null
+      }
+      if (completionPollRef.current) {
+        clearInterval(completionPollRef.current)
+        completionPollRef.current = null
       }
       if (streamSubscriptionRef.current) {
         eventService.unsubscribe(streamSubscriptionRef.current)
