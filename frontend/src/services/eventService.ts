@@ -79,6 +79,7 @@ export type ConnectionStatusListener = (status: ConnectionStatus) => void
 class EventServiceClass {
   private socket: Socket | null = null
   private subscriptions: Map<string, EventSubscription> = new Map()
+  private activeRooms: Set<string> = new Set()
   private isConnecting = false
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
@@ -120,6 +121,20 @@ class EventServiceClass {
       this.reconnectAttempts = 0
       this.reconnectDelay = 1000
       this.updateStatus("connected")
+
+      // Re-subscribe to any active rooms after reconnect
+      if (this.activeRooms.size > 0) {
+        this.activeRooms.forEach((room) => {
+          console.log("[EventService] Re-subscribing to room:", room)
+          this.socket?.emit("subscribe", { room }, (response: any) => {
+            if (response?.status === "success") {
+              console.log(`[EventService] Re-subscribed to room: ${room}`)
+            } else {
+              console.error(`[EventService] Failed to re-subscribe to room: ${room}`, response)
+            }
+          })
+        })
+      }
     })
 
     this.socket.on("disconnect", (reason) => {
@@ -171,6 +186,7 @@ class EventServiceClass {
       this.socket = null
       this.isConnecting = false
       this.subscriptions.clear()
+      this.activeRooms.clear()
       this.updateStatus("disconnected")
     }
   }
@@ -205,8 +221,11 @@ class EventServiceClass {
    * @param room - Room name to subscribe to
    */
   async subscribeToRoom(room: string): Promise<void> {
+    // Track room regardless of connection state so it gets re-subscribed on reconnect
+    this.activeRooms.add(room)
+
     if (!this.socket) {
-      console.warn("[EventService] Cannot subscribe to room: not connected")
+      console.warn("[EventService] Cannot subscribe to room: not connected (will subscribe on reconnect)")
       return
     }
 
@@ -228,6 +247,8 @@ class EventServiceClass {
    * @param room - Room name to unsubscribe from
    */
   async unsubscribeFromRoom(room: string): Promise<void> {
+    this.activeRooms.delete(room)
+
     if (!this.socket) {
       console.warn("[EventService] Cannot unsubscribe from room: not connected")
       return

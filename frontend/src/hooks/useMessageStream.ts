@@ -34,9 +34,23 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
   const hasCheckedForActiveStream = useRef(false)
   // Track if stream complete has been called to prevent duplicate calls
   const streamCompleteCalledRef = useRef(false)
+  // Track polling interval for message refresh fallback
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Track completion polling interval (for late-joiner reconnection)
+  const completionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Define handleStreamComplete FIRST (before handleStreamEvent uses it)
   const handleStreamComplete = useCallback(async (_wasInterrupted: boolean) => {
+    // Stop polling fallback
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = null
+    }
+    if (completionPollRef.current) {
+      clearInterval(completionPollRef.current)
+      completionPollRef.current = null
+    }
+
     // Cleanup subscriptions
     if (streamSubscriptionRef.current) {
       eventService.unsubscribe(streamSubscriptionRef.current)
@@ -196,6 +210,15 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
       })
       streamSubscriptionRef.current = subscriptionId
 
+      // Start polling fallback for message updates during streaming
+      // This ensures content appears even if WebSocket events are missed
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+      }
+      pollIntervalRef.current = setInterval(() => {
+        queryClient.invalidateQueries({ queryKey: ["messages", sessionId] })
+      }, 3000)
+
       // Optimistically add user message to cache
       // If fileObjects are provided, use them for immediate display (before backend confirms)
       const tempUserMessageId = `temp-${Date.now()}`
@@ -280,6 +303,10 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
       setStreamingEvents([])
 
       // Cleanup
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
       if (streamSubscriptionRef.current) {
         eventService.unsubscribe(streamSubscriptionRef.current)
         streamSubscriptionRef.current = null
@@ -367,29 +394,41 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
           const subscriptionId = eventService.subscribe("stream_event", handleStreamEvent)
           streamSubscriptionRef.current = subscriptionId
 
-          // Refresh messages
+          // Refresh messages immediately
           await queryClient.invalidateQueries({ queryKey: ["messages", sessionId] })
 
-          // Poll for completion
-          const pollInterval = setInterval(async () => {
-            const statusResponse = await fetch(
-              `${import.meta.env.VITE_API_URL}/api/v1/sessions/${sessionId}/messages/streaming-status`,
-              { headers: { "Authorization": `Bearer ${token}` } }
-            )
+          // Start polling fallback for message updates during streaming
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current)
+          }
+          pollIntervalRef.current = setInterval(() => {
+            queryClient.invalidateQueries({ queryKey: ["messages", sessionId] })
+          }, 3000)
 
-            if (statusResponse.ok) {
-              const statusData = await statusResponse.json()
-              if (!statusData.is_streaming) {
-                clearInterval(pollInterval)
-                if (!streamCompleteCalledRef.current) {
-                  streamCompleteCalledRef.current = true
-                  handleStreamComplete(false)
+          // Poll for completion (separate from message polling)
+          if (completionPollRef.current) {
+            clearInterval(completionPollRef.current)
+          }
+          completionPollRef.current = setInterval(async () => {
+            try {
+              const statusResponse = await fetch(
+                `${import.meta.env.VITE_API_URL}/api/v1/sessions/${sessionId}/messages/streaming-status`,
+                { headers: { "Authorization": `Bearer ${token}` } }
+              )
+
+              if (statusResponse.ok) {
+                const statusData = await statusResponse.json()
+                if (!statusData.is_streaming) {
+                  if (!streamCompleteCalledRef.current) {
+                    streamCompleteCalledRef.current = true
+                    handleStreamComplete(false)
+                  }
                 }
               }
+            } catch {
+              // Ignore fetch errors during polling
             }
-          }, 1000)
-
-          return () => clearInterval(pollInterval)
+          }, 2000)
         }
       }
     } catch (error) {
@@ -404,6 +443,14 @@ export function useMessageStream({ sessionId, sessionMode, onSuccess, onError }:
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
+      if (completionPollRef.current) {
+        clearInterval(completionPollRef.current)
+        completionPollRef.current = null
+      }
       if (streamSubscriptionRef.current) {
         eventService.unsubscribe(streamSubscriptionRef.current)
       }
