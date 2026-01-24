@@ -76,26 +76,64 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming,
             </div>
           ) : (
             <>
-              {messages
-                .filter((message) => {
-                  // Hide the in-progress message while streaming is active -
-                  // StreamingMessage component handles its display.
-                  // When streaming ends, the message renders normally with final content.
-                  if (!isStreaming) return true
-                  const metadata = message.message_metadata as Record<string, any> | undefined
-                  return !metadata?.streaming_in_progress
+              {(() => {
+                if (!isStreaming) {
+                  return messages.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      onSendAnswer={onSendAnswer}
+                      onSendMessage={onSendMessage}
+                      conversationModeUi={conversationModeUi}
+                      agentId={agentId}
+                    />
+                  ))
+                }
+
+                // During streaming, find the in-progress message's sequence number
+                // so we can also defer messages created after it (e.g. delegation/system
+                // messages created by tool calls during streaming)
+                const streamingMsg = messages.find((m) => {
+                  const metadata = m.message_metadata as Record<string, any> | undefined
+                  return metadata?.streaming_in_progress
                 })
-                .map((message) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    onSendAnswer={onSendAnswer}
-                    onSendMessage={onSendMessage}
-                    conversationModeUi={conversationModeUi}
-                    agentId={agentId}
-                  />
-                ))}
-              {isStreaming && <StreamingMessage events={streamingEvents || []} conversationModeUi={conversationModeUi} />}
+                const streamingSeq = streamingMsg?.sequence_number ?? Infinity
+
+                const beforeStreaming = messages.filter((m) => {
+                  const metadata = m.message_metadata as Record<string, any> | undefined
+                  return !metadata?.streaming_in_progress && m.sequence_number < streamingSeq
+                })
+                const afterStreaming = messages.filter((m) => {
+                  const metadata = m.message_metadata as Record<string, any> | undefined
+                  return !metadata?.streaming_in_progress && m.sequence_number > streamingSeq
+                })
+
+                return (
+                  <>
+                    {beforeStreaming.map((message) => (
+                      <MessageBubble
+                        key={message.id}
+                        message={message}
+                        onSendAnswer={onSendAnswer}
+                        onSendMessage={onSendMessage}
+                        conversationModeUi={conversationModeUi}
+                        agentId={agentId}
+                      />
+                    ))}
+                    <StreamingMessage events={streamingEvents || []} conversationModeUi={conversationModeUi} />
+                    {afterStreaming.map((message) => (
+                      <MessageBubble
+                        key={message.id}
+                        message={message}
+                        onSendAnswer={onSendAnswer}
+                        onSendMessage={onSendMessage}
+                        conversationModeUi={conversationModeUi}
+                        agentId={agentId}
+                      />
+                    ))}
+                  </>
+                )
+              })()}
               <div ref={messagesEndRef} />
             </>
           )}
