@@ -175,6 +175,23 @@ class EventService:
                         logger.warning(f"Environment {environment_id} not found")
                         return {"status": "error", "message": "Environment not found"}
 
+                    # Resolve to the agent's active environment if the passed one is not active
+                    agent = session.get(Agent, environment.agent_id)
+                    if not agent:
+                        logger.error(f"Agent {environment.agent_id} not found for environment {environment_id}")
+                        return {"status": "error", "message": "Agent not found"}
+
+                    if agent.active_environment_id and agent.active_environment_id != environment.id:
+                        active_env = session.get(AgentEnvironment, agent.active_environment_id)
+                        if active_env:
+                            logger.info(
+                                f"Resolving agent_usage_intent from non-active environment {environment.id} "
+                                f"(status={environment.status}) to active environment {active_env.id} "
+                                f"(status={active_env.status})"
+                            )
+                            environment = active_env
+                            environment_id = str(active_env.id)
+
                     # Update last_activity_at
                     environment.last_activity_at = datetime.utcnow()
                     session.add(environment)
@@ -183,12 +200,6 @@ class EventService:
                     # If suspended, trigger activation in background
                     if environment.status == "suspended":
                         logger.info(f"User {user_id} triggered activation for suspended environment {environment_id}")
-
-                        # Get agent
-                        agent = session.get(Agent, environment.agent_id)
-                        if not agent:
-                            logger.error(f"Agent {environment.agent_id} not found for environment {environment_id}")
-                            return {"status": "error", "message": "Agent not found"}
 
                         # Store IDs for background task (avoid passing detached ORM objects)
                         env_id_for_activation = environment.id

@@ -47,6 +47,7 @@ function ChatInterface() {
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
   const [isEnvActivating, setIsEnvActivating] = useState(false)
   const usageIntentSent = useRef(false)
+  const [resolvedEnvId, setResolvedEnvId] = useState<string | null>(null)
 
   const [isSessionStreaming, setIsSessionStreaming] = useState(false)
 
@@ -85,12 +86,15 @@ function ChatInterface() {
     enabled: !!session?.agent_id,
   })
 
+  // Use resolved environment ID (from agent_usage_intent) or fall back to session's environment_id
+  const effectiveEnvId = resolvedEnvId || session?.environment_id
+
   const {
     data: environment,
   } = useQuery({
-    queryKey: ["environment", session?.environment_id],
-    queryFn: () => EnvironmentsService.getEnvironment({ id: session!.environment_id! }),
-    enabled: !!session?.environment_id,
+    queryKey: ["environment", effectiveEnvId],
+    queryFn: () => EnvironmentsService.getEnvironment({ id: effectiveEnvId! }),
+    enabled: !!effectiveEnvId,
   })
 
   const { sendMessage, stopMessage, isStreaming, streamingEvents, isInterruptPending } = useSessionStreaming({
@@ -212,7 +216,12 @@ function ChatInterface() {
     if (session && session.environment_id && !usageIntentSent.current) {
       usageIntentSent.current = true
       // Send usage intent to potentially activate suspended environment
-      eventService.sendAgentUsageIntent(session.environment_id).catch((error) => {
+      eventService.sendAgentUsageIntent(session.environment_id).then((response) => {
+        // If backend resolved to a different (active) environment, track it
+        if (response?.environment_id && response.environment_id !== session.environment_id) {
+          setResolvedEnvId(response.environment_id)
+        }
+      }).catch((error) => {
         console.error("Failed to send agent usage intent:", error)
       })
     }
@@ -220,52 +229,48 @@ function ChatInterface() {
 
   // Listen for environment activation events
   useEffect(() => {
-    if (!session?.environment_id) return
+    if (!effectiveEnvId) return
 
     const subscriptions: string[] = []
 
     // Listen for activating event
     const activatingSub = eventService.subscribe(EventTypes.ENVIRONMENT_ACTIVATING, (event) => {
-      if (event.model_id === session.environment_id) {
+      if (event.model_id === effectiveEnvId) {
         console.log("Environment is activating...")
         setIsEnvActivating(true)
-        // Invalidate environment query to refetch status
-        queryClient.invalidateQueries({ queryKey: ["environment", session.environment_id] })
+        queryClient.invalidateQueries({ queryKey: ["environment", effectiveEnvId] })
       }
     })
     subscriptions.push(activatingSub)
 
     // Listen for activated event
     const activatedSub = eventService.subscribe(EventTypes.ENVIRONMENT_ACTIVATED, (event) => {
-      if (event.model_id === session.environment_id) {
+      if (event.model_id === effectiveEnvId) {
         console.log("Environment activated successfully")
         setIsEnvActivating(false)
         showSuccessToast("Agent environment activated")
-        // Invalidate environment query to refetch status
-        queryClient.invalidateQueries({ queryKey: ["environment", session.environment_id] })
+        queryClient.invalidateQueries({ queryKey: ["environment", effectiveEnvId] })
       }
     })
     subscriptions.push(activatedSub)
 
     // Listen for activation failed event
     const failedSub = eventService.subscribe(EventTypes.ENVIRONMENT_ACTIVATION_FAILED, (event) => {
-      if (event.model_id === session.environment_id) {
+      if (event.model_id === effectiveEnvId) {
         console.error("Environment activation failed:", event.meta)
         setIsEnvActivating(false)
         showErrorToast("Failed to activate agent environment")
-        // Invalidate environment query to refetch status
-        queryClient.invalidateQueries({ queryKey: ["environment", session.environment_id] })
+        queryClient.invalidateQueries({ queryKey: ["environment", effectiveEnvId] })
       }
     })
     subscriptions.push(failedSub)
 
     // Listen for suspended event
     const suspendedSub = eventService.subscribe(EventTypes.ENVIRONMENT_SUSPENDED, (event) => {
-      if (event.model_id === session.environment_id) {
+      if (event.model_id === effectiveEnvId) {
         console.log("Environment was suspended")
         setIsEnvActivating(false)
-        // Invalidate environment query to refetch status
-        queryClient.invalidateQueries({ queryKey: ["environment", session.environment_id] })
+        queryClient.invalidateQueries({ queryKey: ["environment", effectiveEnvId] })
       }
     })
     subscriptions.push(suspendedSub)
@@ -274,7 +279,7 @@ function ChatInterface() {
     return () => {
       subscriptions.forEach(sub => eventService.unsubscribe(sub))
     }
-  }, [session?.environment_id, showSuccessToast, showErrorToast, queryClient])
+  }, [effectiveEnvId, showSuccessToast, showErrorToast, queryClient])
 
   // Listen for session_interaction_status_changed WS events
   useEffect(() => {
@@ -389,7 +394,7 @@ function ChatInterface() {
           conversationModeUi={session.mode === "building" ? "detailed" : (agent?.conversation_mode_ui || "detailed")}
           agentId={session?.agent_id ?? undefined}
         />
-        <EnvironmentPanel isOpen={envPanelOpen} environmentId={session?.environment_id} agentId={session?.agent_id ?? undefined} />
+        <EnvironmentPanel isOpen={envPanelOpen} environmentId={effectiveEnvId} agentId={session?.agent_id ?? undefined} />
       </div>
       <MessageInput
         ref={messageInputRef}

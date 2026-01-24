@@ -965,6 +965,20 @@ class SessionService:
             if not agent:
                 return {"action": "error", "message": "Agent not found"}
 
+            # If session points to a non-active environment, resolve to the agent's active one
+            if agent.active_environment_id and agent.active_environment_id != environment.id:
+                active_env = db.get(AgentEnvironment, agent.active_environment_id)
+                if active_env:
+                    logger.info(
+                        f"Session {session_id} points to non-active environment {environment.id} "
+                        f"(status={environment.status}), switching to active environment {active_env.id} "
+                        f"(status={active_env.status})"
+                    )
+                    session.environment_id = active_env.id
+                    db.add(session)
+                    db.commit()
+                    environment = active_env
+
             # Check if there are pending messages
             concatenated_content, pending_messages = MessageService.collect_pending_messages(db, session_id)
 

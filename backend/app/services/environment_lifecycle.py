@@ -1311,10 +1311,10 @@ AGENT_AUTH_TOKEN={auth_token}
 DATABASE_URL={agent_personal_database_url}
 
 # Resource Limits
-CPU_LIMIT={environment.config.get('cpu_limit', '1.0')}
-MEMORY_LIMIT={environment.config.get('memory_limit', '512M')}
-CPU_RESERVATION={environment.config.get('cpu_reservation', '0.25')}
-MEMORY_RESERVATION={environment.config.get('memory_reservation', '128M')}
+CPU_LIMIT={environment.config.get('cpu_limit', settings.AGENT_ENV_CPU_LIMIT)}
+MEMORY_LIMIT={environment.config.get('memory_limit', settings.AGENT_ENV_MEMORY_LIMIT)}
+CPU_RESERVATION={environment.config.get('cpu_reservation', settings.AGENT_ENV_CPU_RESERVATION)}
+MEMORY_RESERVATION={environment.config.get('memory_reservation', settings.AGENT_ENV_MEMORY_RESERVATION)}
 
 # Logging
 LOG_LEVEL={agent_container_log_level}

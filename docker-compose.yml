@@ -30,6 +30,10 @@ services:
       - ENV_TEMPLATES_DIR=app/env-templates
       - ENV_INSTANCES_DIR=/agent-environments
       - HOST_AGENT_ENVIRONMENTS_DIR=${HOST_AGENT_ENVIRONMENTS_DIR:-./backend/agent-environments}
+      - AGENT_ENV_CPU_LIMIT=${AGENT_ENV_CPU_LIMIT:-1.0}
+      - AGENT_ENV_MEMORY_LIMIT=${AGENT_ENV_MEMORY_LIMIT:-512M}
+      - AGENT_ENV_CPU_RESERVATION=${AGENT_ENV_CPU_RESERVATION:-0.25}
+      - AGENT_ENV_MEMORY_RESERVATION=${AGENT_ENV_MEMORY_RESERVATION:-128M}
       - UPLOAD_BASE_PATH=/app/data/uploads
     ports:
       # Expose backend API and WebSocket port

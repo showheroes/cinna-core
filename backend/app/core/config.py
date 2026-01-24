@@ -161,6 +161,12 @@ class Settings(BaseSettings):
     # We need absolute path from host perspective for volume mounts
     HOST_AGENT_ENVIRONMENTS_DIR: str | None = None
 
+    # Agent Environment Resource Limits
+    AGENT_ENV_CPU_LIMIT: str = "1.0"
+    AGENT_ENV_MEMORY_LIMIT: str = "512M"
+    AGENT_ENV_CPU_RESERVATION: str = "0.25"
+    AGENT_ENV_MEMORY_RESERVATION: str = "128M"
+
     # Docker Network
     DOCKER_NETWORK_NAME: str = "agent-bridge"
 

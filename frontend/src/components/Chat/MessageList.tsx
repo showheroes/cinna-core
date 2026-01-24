@@ -76,10 +76,16 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming,
             </div>
           ) : (
             <>
-              {messages.map((message) => {
-                const metadata = message.message_metadata as Record<string, any> | undefined
-                const isStreamingMessage = !!metadata?.streaming_in_progress
-                return (
+              {messages
+                .filter((message) => {
+                  // Hide the in-progress message while streaming is active -
+                  // StreamingMessage component handles its display.
+                  // When streaming ends, the message renders normally with final content.
+                  if (!isStreaming) return true
+                  const metadata = message.message_metadata as Record<string, any> | undefined
+                  return !metadata?.streaming_in_progress
+                })
+                .map((message) => (
                   <MessageBubble
                     key={message.id}
                     message={message}
@@ -87,10 +93,8 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming,
                     onSendMessage={onSendMessage}
                     conversationModeUi={conversationModeUi}
                     agentId={agentId}
-                    isStreamingMessage={isStreamingMessage}
                   />
-                )
-              })}
+                ))}
               {isStreaming && <StreamingMessage events={streamingEvents || []} conversationModeUi={conversationModeUi} />}
               <div ref={messagesEndRef} />
             </>

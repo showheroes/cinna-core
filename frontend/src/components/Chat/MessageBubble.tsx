@@ -16,10 +16,9 @@ interface MessageBubbleProps {
   onSendMessage?: (content: string) => void
   conversationModeUi?: string
   agentId?: string
-  isStreamingMessage?: boolean
 }
 
-export function MessageBubble({ message, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId, isStreamingMessage }: MessageBubbleProps) {
+export function MessageBubble({ message, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId }: MessageBubbleProps) {
   const [showAnswerModal, setShowAnswerModal] = useState(false)
   const approvalMessageSentRef = useRef(false)
 
@@ -226,18 +225,6 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
                 <p className="whitespace-pre-wrap break-words">{message.content}</p>
               ) : (
                 <StreamEventRenderer events={streamingEvents} conversationModeUi={conversationModeUi} />
-              )}
-
-              {/* Streaming indicator for in-progress messages */}
-              {isStreamingMessage && (
-                <div className="flex items-center gap-2 pt-1">
-                  <div className="flex gap-1">
-                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" style={{ animationDelay: "0ms" }} />
-                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" style={{ animationDelay: "150ms" }} />
-                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" style={{ animationDelay: "300ms" }} />
-                  </div>
-                  <p className="text-xs text-muted-foreground">Streaming...</p>
-                </div>
               )}
 
               {/* File badges */}
