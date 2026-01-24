@@ -32,6 +32,7 @@ class ChatRequest(BaseModel):
     backend_session_id: Optional[str] = None  # Backend database session ID (for handover tracking)
     mode: str = "conversation"  # "building" | "conversation"
     system_prompt: Optional[str] = None
+    session_state: Optional[dict] = None  # Backend-managed state context (e.g., previous_result_state)
 
 
 class ChatResponse(BaseModel):

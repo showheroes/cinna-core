@@ -246,7 +246,7 @@ def refine_task(
 
 
 @router.post("/{id}/execute", response_model=ExecuteTaskResponse)
-def execute_task(
+async def execute_task(
     *,
     session: SessionDep,
     current_user: CurrentUser,
@@ -257,7 +257,7 @@ def execute_task(
     Execute a task by creating a session and sending the task description as the initial message.
 
     Requires a selected_agent_id to be set on the task.
-    Returns attached file_ids so the frontend can pass them to the session.
+    The backend handles sending the initial message to the session.
     """
     try:
         task = InputTaskService.get_task_with_ownership_check(
@@ -266,23 +266,24 @@ def execute_task(
             user_id=current_user.id,
         )
 
-        success, new_session, error = InputTaskService.execute_task_sync(
+        # Get attached file IDs to send with the message
+        file_id_strings = InputTaskService.get_task_file_ids(db_session=session, task_id=id)
+        file_ids = [uuid.UUID(fid) for fid in file_id_strings] if file_id_strings else None
+
+        success, new_session, error = await InputTaskService.execute_task(
             db_session=session,
             task=task,
             user_id=current_user.id,
             mode=execute_in.mode,
+            file_ids=file_ids,
         )
 
         if not success:
             return ExecuteTaskResponse(success=False, error=error)
 
-        # Get attached file IDs to pass to session
-        file_ids = InputTaskService.get_task_file_ids(db_session=session, task_id=id)
-
         return ExecuteTaskResponse(
             success=True,
             session_id=new_session.id,
-            file_ids=file_ids if file_ids else None,
         )
     except InputTaskError as e:
         _handle_service_error(e)

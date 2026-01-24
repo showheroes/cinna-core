@@ -147,6 +147,7 @@ class SDKManager:
         backend_session_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
         mode: str = "conversation",
+        session_state: Optional[dict] = None,
     ) -> AsyncIterator[dict]:
         """
         Send message to SDK and stream responses.
@@ -160,6 +161,7 @@ class SDKManager:
             backend_session_id: Backend session ID for tracking
             system_prompt: Custom system prompt (overrides mode-based prompt)
             mode: "building" or "conversation" - determines adapter selection
+            session_state: Backend-managed state context (e.g., previous_result_state)
 
         Yields:
             Dictionaries with message data (backward compatible format):
@@ -187,6 +189,7 @@ class SDKManager:
                 backend_session_id=backend_session_id,
                 system_prompt=system_prompt,
                 mode=mode,
+                session_state=session_state,
             ):
                 # Convert SDKEvent to dict for backward compatibility
                 yield self._event_to_dict(event)

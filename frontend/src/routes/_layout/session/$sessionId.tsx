@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect, useState, useRef, useCallback } from "react"
-import { ArrowLeft, EllipsisVertical, Package, Loader2 } from "lucide-react"
+import { useEffect, useState, useRef, useCallback, useMemo } from "react"
+import { ArrowLeft, EllipsisVertical, Package, Loader2, ListTodo } from "lucide-react"
 
-import { SessionsService, MessagesService, AgentsService, EnvironmentsService } from "@/client"
+import { SessionsService, MessagesService, AgentsService, EnvironmentsService, OpenAPI } from "@/client"
+import { SubTasksPanel } from "@/components/Chat/SubTasksPanel"
 import { MessageList } from "@/components/Chat/MessageList"
 import { MessageInput } from "@/components/Chat/MessageInput"
 import EditSession from "@/components/Sessions/EditSession"
@@ -48,6 +49,7 @@ function ChatInterface() {
   const [isEnvActivating, setIsEnvActivating] = useState(false)
   const usageIntentSent = useRef(false)
   const [resolvedEnvId, setResolvedEnvId] = useState<string | null>(null)
+  const [showSubTasks, setShowSubTasks] = useState(false)
 
   const [isSessionStreaming, setIsSessionStreaming] = useState(false)
 
@@ -96,6 +98,51 @@ function ChatInterface() {
     queryFn: () => EnvironmentsService.getEnvironment({ id: effectiveEnvId! }),
     enabled: !!effectiveEnvId,
   })
+
+  // Query sub-tasks for badge count and state-based coloring
+  const { data: subTasksData } = useQuery({
+    queryKey: ["subTasksCount", sessionId],
+    queryFn: async () => {
+      const token = typeof OpenAPI.TOKEN === "function"
+        ? await OpenAPI.TOKEN({} as any)
+        : OpenAPI.TOKEN || ""
+      const response = await fetch(`${OpenAPI.BASE}/api/v1/tasks/by-source-session/${sessionId}`, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
+      if (!response.ok) return { data: [], count: 0 }
+      return response.json()
+    },
+    refetchInterval: 15000,
+  })
+
+  const subTaskCount = subTasksData?.count || 0
+
+  // Derive effective state: result_state (agent-declared) takes priority, fallback to task status
+  const getEffectiveState = (t: { result_state?: string | null; status?: string }) => {
+    if (t.result_state) return t.result_state
+    switch (t.status) {
+      case "completed": return "completed"
+      case "error": return "error"
+      case "pending_input": return "needs_input"
+      case "new": return "new"
+      default: return "running"
+    }
+  }
+
+  // Compute per-status badge counts
+  const subTaskBadges = useMemo(() => {
+    const tasks = subTasksData?.data || []
+    if (tasks.length === 0) return { running: 0, needsInput: 0, errors: 0, completed: 0, new: 0 }
+    const completed = tasks.filter((t: any) => getEffectiveState(t) === "completed").length
+    const needsInput = tasks.filter((t: any) => getEffectiveState(t) === "needs_input").length
+    const errors = tasks.filter((t: any) => getEffectiveState(t) === "error").length
+    const newTasks = tasks.filter((t: any) => getEffectiveState(t) === "new").length
+    const running = tasks.length - completed - needsInput - errors - newTasks
+    return { running, needsInput, errors, completed, new: newTasks }
+  }, [subTasksData?.data])
 
   const { sendMessage, stopMessage, isStreaming, streamingEvents, isInterruptPending } = useSessionStreaming({
     sessionId,
@@ -296,6 +343,15 @@ function ChatInterface() {
     return () => { eventService.unsubscribe(sub) }
   }, [sessionId, queryClient])
 
+  // Listen for session state updates to refresh sub-tasks badge
+  useEffect(() => {
+    const sub = eventService.subscribe(EventTypes.SESSION_STATE_UPDATED, () => {
+      queryClient.invalidateQueries({ queryKey: ["subTasksCount", sessionId] })
+      queryClient.invalidateQueries({ queryKey: ["subTasks", sessionId] })
+    })
+    return () => { eventService.unsubscribe(sub) }
+  }, [sessionId, queryClient])
+
   // Update header when session loads
   useEffect(() => {
     if (session) {
@@ -319,6 +375,44 @@ function ChatInterface() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {subTaskCount > 0 && (
+              <Button
+                variant={showSubTasks ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => setShowSubTasks(!showSubTasks)}
+                className="gap-1.5"
+              >
+                <ListTodo className="h-4 w-4" />
+                <span>Tasks</span>
+                <div className="flex items-center gap-0.5">
+                  {subTaskBadges.new > 0 && (
+                    <span className="text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">
+                      {subTaskBadges.new}
+                    </span>
+                  )}
+                  {subTaskBadges.running > 0 && (
+                    <span className="text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                      {subTaskBadges.running}
+                    </span>
+                  )}
+                  {subTaskBadges.needsInput > 0 && (
+                    <span className="text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                      {subTaskBadges.needsInput}
+                    </span>
+                  )}
+                  {subTaskBadges.errors > 0 && (
+                    <span className="text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">
+                      {subTaskBadges.errors}
+                    </span>
+                  )}
+                  {subTaskBadges.completed > 0 && (
+                    <span className="text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300">
+                      {subTaskBadges.completed}
+                    </span>
+                  )}
+                </div>
+              </Button>
+            )}
             {isEnvActivating ? (
               <Button
                 variant="ghost"
@@ -359,7 +453,7 @@ function ChatInterface() {
       )
     }
     return () => setHeaderContent(null)
-  }, [session, setHeaderContent, menuOpen, envPanelOpen, handleBack, handleDeleteSuccess, isEnvActivating])
+  }, [session, setHeaderContent, menuOpen, envPanelOpen, handleBack, handleDeleteSuccess, isEnvActivating, subTaskCount, subTaskBadges, showSubTasks])
 
   if (sessionLoading || messagesLoading) {
     return <PendingItems />
@@ -395,6 +489,12 @@ function ChatInterface() {
           agentId={session?.agent_id ?? undefined}
         />
         <EnvironmentPanel isOpen={envPanelOpen} environmentId={effectiveEnvId} agentId={session?.agent_id ?? undefined} />
+        {showSubTasks && (
+          <SubTasksPanel
+            sessionId={sessionId}
+            onClose={() => setShowSubTasks(false)}
+          />
+        )}
       </div>
       <MessageInput
         ref={messageInputRef}

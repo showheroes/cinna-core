@@ -273,15 +273,21 @@ class SessionService:
         return count, latest_session_id
 
     @staticmethod
-    def delete_session(db_session: DBSession, session_id: UUID) -> bool:
-        """Delete session"""
+    def delete_session(db_session: DBSession, session_id: UUID) -> UUID | None:
+        """Delete session.
+
+        Returns:
+            The source_task_id of the deleted session, or None if session not found
+            or had no linked task.
+        """
         session = db_session.get(Session, session_id)
         if not session:
-            return False
+            return None
 
+        source_task_id = session.source_task_id
         db_session.delete(session)
         db_session.commit()
-        return True
+        return source_task_id
 
     # External SDK session management methods
 

@@ -137,11 +137,7 @@ function TaskDetail() {
         navigate({
           to: "/session/$sessionId",
           params: { sessionId: result.session_id },
-          search: {
-            initialMessage: task?.current_description,
-            fileIds: result.file_ids?.join(',') ?? undefined,
-            fileObjects: undefined,
-          },
+          search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
         })
       } else {
         showErrorToast(result.error || "Failed to execute task")

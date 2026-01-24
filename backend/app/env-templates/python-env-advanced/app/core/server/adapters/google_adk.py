@@ -468,6 +468,7 @@ class GoogleADKAdapter(BaseSDKAdapter):
         backend_session_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
         mode: str = "conversation",
+        session_state: Optional[dict] = None,
     ) -> AsyncIterator[SDKEvent]:
         """
         Send message via Google ADK and stream responses.

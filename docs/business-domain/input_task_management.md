@@ -100,6 +100,15 @@ When a task has connected sessions (via `source_task_id`), the task status autom
 - `STREAM_ERROR` → syncs task to `ERROR`
 - `TODO_LIST_UPDATED` → propagates session todo progress to linked task, emits `TASK_TODO_UPDATED`
 
+**Session Deletion Reset:**
+- When a session linked to a task is deleted (`DELETE /api/v1/sessions/{id}`), the system checks if any sessions remain for that task
+- If ALL sessions are deleted and the task is in execution phase (`running`, `pending_input`, `completed`, `error`):
+  - Task status resets to `NEW`
+  - `session_id`, `todo_progress`, `error_message` are cleared
+  - `executed_at`, `completed_at` timestamps are cleared
+- If some sessions remain after deletion, the task status is recomputed from the remaining sessions
+- Tasks in `new`, `refining`, or `archived` status are not affected by session deletion
+
 ### Session Result State
 
 Agents can explicitly declare session outcomes via the `update_session_state` tool. This is stored on the session and propagated to linked tasks.
@@ -263,6 +272,7 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 - `update_status()` - Change status with appropriate timestamp updates
 - `append_to_refinement_history()` - Add user/ai message to history
 - `link_session()` - Set session_id and status to running
+- `reset_task_if_no_sessions()` - Reset task to `NEW` if all linked sessions are deleted; recomputes status if sessions remain
 - `delete_task()` - Remove task
 
 *Business Logic Operations:*
@@ -289,6 +299,7 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 **SessionService Updates:** `backend/app/services/session_service.py`
 - `create_session()` - Now accepts optional `source_task_id` parameter
 - `list_task_sessions()` - List sessions by source_task_id
+- `delete_session()` - Returns `source_task_id` of deleted session (or None) to enable task status reset
 
 **ActivityService Updates:** `backend/app/services/activity_service.py`
 - `handle_session_state_updated()` - Maps state to activity type, creates activity for offline notification
@@ -515,6 +526,7 @@ Session state management enables agents to report outcomes and communicate acros
 - Session stores `source_task_id` for backlink
 - Task refinement page lists all sessions via `TasksService.listTaskSessions()`
 - Task `session_id` field stores latest/primary session for quick access
+- Deleting a session triggers `reset_task_if_no_sessions()`: if no sessions remain, task reverts to `NEW`
 
 ### With Agents
 
@@ -580,9 +592,16 @@ Session state management enables agents to report outcomes and communicate acros
 
 ---
 
-**Document Version:** 2.6
+**Document Version:** 2.7
 **Last Updated:** 2026-01-24
 **Status:** Implementation Complete
+
+**Changes in v2.7:**
+- Added session deletion reset: when all sessions are deleted from a task, task reverts to `NEW` status
+- `SessionService.delete_session()` now returns `source_task_id` of the deleted session
+- Added `InputTaskService.reset_task_if_no_sessions()` method for post-deletion status management
+- Session delete route (`DELETE /api/v1/sessions/{id}`) now triggers task status check after deletion
+- If partial sessions remain, task status is recomputed from remaining sessions
 
 **Changes in v2.6:**
 - Added session state management: agents can declare outcomes via `update_session_state` tool

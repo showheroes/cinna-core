@@ -470,7 +470,9 @@ class InputTaskService:
         db_session: DBSession,
         task: InputTask,
         user_id: UUID,
-        message_to_send: str,
+        message_to_send: str | None = None,
+        mode: str = "conversation",
+        file_ids: list[UUID] | None = None,
     ) -> tuple[bool, Session | None, str | None]:
         """
         Execute a task by creating a session and sending the message.
@@ -484,7 +486,9 @@ class InputTaskService:
             db_session: Database session
             task: The task to execute
             user_id: User ID executing the task
-            message_to_send: The message to send (possibly refined)
+            message_to_send: The message to send (defaults to task.current_description)
+            mode: Session mode (conversation, building)
+            file_ids: Optional file IDs to attach to the message
 
         Returns:
             Tuple of (success, session, error_message)
@@ -492,12 +496,14 @@ class InputTaskService:
         if not task.selected_agent_id:
             return False, None, "Task has no selected agent"
 
+        content = message_to_send or task.current_description
+
         # Create session for target agent
-        session_title = f"Task: {message_to_send[:50]}..." if len(message_to_send) > 50 else f"Task: {message_to_send}"
+        session_title = f"Task: {content[:50]}..." if len(content) > 50 else f"Task: {content}"
         session_create = SessionCreate(
             agent_id=task.selected_agent_id,
             title=session_title,
-            mode="conversation",
+            mode=mode,
         )
 
         new_session = SessionService.create_session(
@@ -527,8 +533,8 @@ class InputTaskService:
         result = await SessionService.send_session_message(
             session_id=new_session.id,
             user_id=user_id,
-            content=message_to_send,
-            file_ids=None,
+            content=content,
+            file_ids=file_ids,
             answers_to_message_id=None,
             get_fresh_db_session=lambda: DBSession(engine)
         )
@@ -743,6 +749,60 @@ class InputTaskService:
         return task
 
     @staticmethod
+    def reset_task_if_no_sessions(db_session: DBSession, task_id: UUID) -> InputTask | None:
+        """
+        Reset task to 'new' status if no sessions remain linked to it.
+
+        Called after a session is deleted. If the task has no remaining sessions,
+        it means there are no results, so the task should revert to 'new'.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+
+        Returns:
+            Updated task if reset, None if task not found or still has sessions
+        """
+        task = db_session.get(InputTask, task_id)
+        if not task:
+            return None
+
+        # Only reset tasks that are in execution phase
+        execution_statuses = [
+            InputTaskStatus.RUNNING,
+            InputTaskStatus.PENDING_INPUT,
+            InputTaskStatus.COMPLETED,
+            InputTaskStatus.ERROR,
+        ]
+        if task.status not in execution_statuses:
+            return None
+
+        # Check if any sessions remain
+        remaining_count = db_session.exec(
+            select(Session).where(Session.source_task_id == task_id)
+        ).first()
+
+        if remaining_count is not None:
+            # Still has sessions - recompute status instead
+            return InputTaskService.sync_task_status_from_sessions(db_session, task_id)
+
+        # No sessions remain - reset to 'new'
+        task.status = InputTaskStatus.NEW
+        task.session_id = None
+        task.todo_progress = None
+        task.error_message = None
+        task.executed_at = None
+        task.completed_at = None
+        task.updated_at = datetime.utcnow()
+
+        db_session.add(task)
+        db_session.commit()
+        db_session.refresh(task)
+
+        logger.info(f"Task {task_id} reset to NEW (all sessions deleted)")
+        return task
+
+    @staticmethod
     def delete_task(db_session: DBSession, task: InputTask) -> None:
         """Delete a task"""
         db_session.delete(task)
@@ -927,13 +987,20 @@ class InputTaskService:
         all_completed = True
 
         for session in sessions:
-            # Check for error status
-            if session.status == "error":
+            # Check for error status (session-level or agent-reported)
+            if session.status == "error" or session.result_state == "error":
                 has_error = True
                 continue
 
+            # Check agent-reported needs_input state
+            if session.result_state == "needs_input":
+                has_pending_input = True
+
             # Check if session is not completed
             if session.status != "completed":
+                all_completed = False
+            elif session.result_state == "needs_input":
+                # Session stream completed but agent is waiting for input
                 all_completed = False
 
             # Check for running interaction
@@ -1198,8 +1265,8 @@ class InputTaskService:
     async def handle_session_state_updated(event_data: dict[str, Any]) -> None:
         """
         React to SESSION_STATE_UPDATED events.
-        If the session is linked to a task with auto_feedback enabled,
-        delivers feedback to the source session.
+        Syncs task status based on session result_state, and delivers
+        feedback to source session if auto_feedback is enabled.
         """
         try:
             meta = event_data.get("meta", {})
@@ -1216,7 +1283,18 @@ class InputTaskService:
                 if not session or not session.source_task_id:
                     return  # Not a task session
 
-                task = db.get(InputTask, session.source_task_id)
+                # Sync task status based on reported session state
+                updated_task = InputTaskService.sync_task_status_from_sessions(
+                    db_session=db,
+                    task_id=session.source_task_id,
+                )
+                if updated_task:
+                    logger.info(
+                        f"Task {updated_task.id} status synced to {updated_task.status} "
+                        f"(SESSION_STATE_UPDATED: {state})"
+                    )
+
+                task = updated_task or db.get(InputTask, session.source_task_id)
                 if not task:
                     return
 

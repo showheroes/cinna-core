@@ -594,7 +594,8 @@ class MessageService:
         user_message: str,
         mode: str,
         external_session_id: str | None = None,
-        backend_session_id: str | None = None
+        backend_session_id: str | None = None,
+        session_state: dict | None = None
     ) -> AsyncIterator[dict]:
         """
         Send message to environment and stream response.
@@ -626,6 +627,8 @@ class MessageService:
             "session_id": external_session_id,
             "backend_session_id": backend_session_id,
         }
+        if session_state:
+            payload["session_state"] = session_state
 
         logger.info(
             f"Sending message to {base_url}/chat/stream "
@@ -724,20 +727,43 @@ class MessageService:
             external_session_id=external_session_id
         )
 
-        # Get user_id and agent's allowed_tools for event emission and tool approval checking
-        def _get_session_context():
+        # Get user_id, agent's allowed_tools, and reset result_state if needed
+        def _get_session_context_and_reset_state():
             with get_fresh_db_session() as db:
                 session_db = db.get(ChatSession, session_id)
                 user_id = session_db.user_id if session_db else None
                 allowed_tools = set()
+                previous_result_state = None
+
                 if session_db:
                     env = db.get(AgentEnvironment, environment_id)
                     if env and env.agent_id:
                         agent = db.get(Agent, env.agent_id)
                         if agent and agent.agent_sdk_config:
                             allowed_tools = set(agent.agent_sdk_config.get("allowed_tools", []))
-                return user_id, allowed_tools
-        user_id, agent_allowed_tools = await asyncio.to_thread(_get_session_context)
+
+                    # Reset result_state when user sends a new message
+                    if session_db.result_state is not None:
+                        previous_result_state = session_db.result_state
+                        session_db.result_state = None
+                        session_db.result_summary = None
+                        db.add(session_db)
+                        db.commit()
+                        logger.info(
+                            f"Reset result_state '{previous_result_state}' for session {session_id}"
+                        )
+
+                        # Sync task status if session is linked to a task
+                        if session_db.source_task_id:
+                            from app.services.input_task_service import InputTaskService
+                            InputTaskService.sync_task_status_from_sessions(
+                                db_session=db, task_id=session_db.source_task_id
+                            )
+
+                return user_id, allowed_tools, previous_result_state
+        user_id, agent_allowed_tools, previous_result_state = await asyncio.to_thread(
+            _get_session_context_and_reset_state
+        )
 
         # Emit STREAM_STARTED event for activity tracking
         try:
@@ -772,6 +798,11 @@ class MessageService:
             "mode": session_mode,
         }
 
+        # Build session_state for agent-env
+        session_state = None
+        if previous_result_state:
+            session_state = {"previous_result_state": previous_result_state}
+
         try:
             # Stream from environment
             async for event in MessageService.send_message_to_environment_stream(
@@ -780,7 +811,8 @@ class MessageService:
                 user_message=user_message_content,
                 mode=session_mode,
                 external_session_id=external_session_id,
-                backend_session_id=str(session_id)
+                backend_session_id=str(session_id),
+                session_state=session_state
             ):
                 # Handle interrupted events
                 if event.get("type") == "interrupted":

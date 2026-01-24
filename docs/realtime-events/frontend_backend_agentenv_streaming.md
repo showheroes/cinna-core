@@ -441,6 +441,76 @@ class ActiveStream:
 - Uses DB `interaction_status` as primary source of truth
 - Supplements with `ActiveStreamingManager` info (duration, external_session_id)
 
+### Session State Auto-Reset on User Message
+
+When an agent calls `update_session_state("needs_input")`, the session's `result_state` is set and the linked task transitions to `PENDING_INPUT`. When the user sends a follow-up message, the `result_state` must be automatically cleared so the task can transition back to `RUNNING`.
+
+**Reset Logic** (`message_service.py:stream_message_with_events`):
+
+Before streaming begins, `_get_session_context_and_reset_state()` handles the reset:
+
+```python
+def _get_session_context_and_reset_state():
+    with get_fresh_db_session() as db:
+        session_db = db.get(ChatSession, session_id)
+        # ... get user_id and allowed_tools ...
+
+        # Reset result_state when user sends a new message
+        if session_db.result_state is not None:
+            previous_result_state = session_db.result_state
+            session_db.result_state = None
+            session_db.result_summary = None
+            db.commit()
+
+            # Sync task status if session is linked to a task
+            if session_db.source_task_id:
+                InputTaskService.sync_task_status_from_sessions(
+                    db_session=db, task_id=session_db.source_task_id
+                )
+
+        return user_id, allowed_tools, previous_result_state
+```
+
+**Session State Passthrough to Agent-Env**:
+
+The previous state is passed to the agent environment as `session_state` context, enabling future prompt-level awareness of state transitions:
+
+```python
+# Build session_state for agent-env
+session_state = None
+if previous_result_state:
+    session_state = {"previous_result_state": previous_result_state}
+
+# Included in the SSE payload to agent-env
+payload = {
+    "message": user_message,
+    "mode": mode,
+    "session_id": external_session_id,
+    "backend_session_id": backend_session_id,
+}
+if session_state:
+    payload["session_state"] = session_state
+```
+
+**Agent-Env Pipeline**:
+
+The `session_state` dict flows through the agent-env layers:
+- `ChatRequest.session_state` (models) → `routes.py` → `SDKManager.send_message_stream()` → `BaseSDKAdapter.send_message_stream()`
+- Adapters accept the parameter but don't use it yet (extensibility for future prompt integration)
+
+**Task Status Sync Flow**:
+```
+User sends message → stream_message_with_events() starts
+    → _get_session_context_and_reset_state()
+        → result_state was "needs_input" → reset to None
+        → result_summary → reset to None
+        → commit to DB
+        → InputTaskService.sync_task_status_from_sessions()
+            → Task status: PENDING_INPUT → RUNNING
+    → session_state = {"previous_result_state": "needs_input"}
+    → send_message_to_environment_stream(..., session_state=session_state)
+```
+
 ### Streaming Status
 
 The streaming status is now primarily DB-based:
@@ -639,6 +709,9 @@ Same mechanism as page refresh - derived state from session query handles everyt
 | `streaming_started_at` | `datetime | None` | When current stream started (cleared on end) |
 | `status` | `str` | `"active"`, `"completed"`, `"error"` |
 | `pending_messages_count` | `int` | Number of unsent user messages |
+| `result_state` | `str | None` | Agent-set state (e.g., `"needs_input"`, `"completed"`). Auto-reset to null on next user message. |
+| `result_summary` | `str | None` | Agent-set summary text. Auto-reset to null on next user message. |
+| `source_task_id` | `UUID | None` | Linked InputTask ID. Used for task status sync on state reset. |
 
 ### SessionMessage Fields (streaming-related)
 

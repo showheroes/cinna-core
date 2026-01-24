@@ -126,6 +126,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         backend_session_id=request.backend_session_id,
         system_prompt=request.system_prompt,  # Only use explicit override if provided
         mode=request.mode,
+        session_state=request.session_state,
     ):
         # Capture session ID from session_created event
         if chunk["type"] == "session_created":
@@ -171,6 +172,7 @@ async def chat_stream(request: ChatRequest):
                 backend_session_id=request.backend_session_id,
                 system_prompt=request.system_prompt,  # Only use explicit override if provided
                 mode=request.mode,
+                session_state=request.session_state,
             ):
                 event_count += 1
                 logger.info(f"[Stream event #{event_count}] Received chunk type={chunk.get('type')}, content_length={len(chunk.get('content', ''))}")

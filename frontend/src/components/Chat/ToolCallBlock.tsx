@@ -10,6 +10,7 @@ import { WebSearchToolBlock } from "./WebSearchToolBlock"
 import { BashToolBlock } from "./BashToolBlock"
 import { KnowledgeQueryToolBlock } from "./KnowledgeQueryToolBlock"
 import { AgentHandoverToolBlock } from "./AgentHandoverToolBlock"
+import { UpdateSessionStateToolBlock } from "./UpdateSessionStateToolBlock"
 import { CompactBashBlock } from "./CompactBashBlock"
 
 interface ToolCallBlockProps {
@@ -99,6 +100,11 @@ export function ToolCallBlock({ toolName, toolInput, conversationModeUi = "detai
         taskMessage={toolInput.task_message}
       />
     )
+  }
+
+  // Special rendering for Update Session State tool
+  if (toolNameLower === "mcp__task__update_session_state" && toolInput?.state) {
+    return <UpdateSessionStateToolBlock state={toolInput.state} summary={toolInput.summary} />
   }
 
   // Default rendering for other tools

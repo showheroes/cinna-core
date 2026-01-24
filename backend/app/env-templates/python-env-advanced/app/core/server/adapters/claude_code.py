@@ -154,6 +154,7 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
         backend_session_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
         mode: str = "conversation",
+        session_state: Optional[dict] = None,
     ) -> AsyncIterator[SDKEvent]:
         """
         Send message to Claude SDK and stream responses as SDKEvents.

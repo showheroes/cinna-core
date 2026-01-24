@@ -280,5 +280,11 @@ def delete_session(
     if not current_user.is_superuser and (chat_session.user_id != current_user.id):
         raise HTTPException(status_code=400, detail="Not enough permissions")
 
-    SessionService.delete_session(db_session=session, session_id=id)
+    source_task_id = SessionService.delete_session(db_session=session, session_id=id)
+
+    # If session was linked to a task, check if task needs status reset
+    if source_task_id:
+        from app.services.input_task_service import InputTaskService
+        InputTaskService.reset_task_if_no_sessions(db_session=session, task_id=source_task_id)
+
     return Message(message="Session deleted successfully")

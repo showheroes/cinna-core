@@ -63,18 +63,18 @@ function TasksList() {
   })
 
   const executeMutation = useMutation({
-    mutationFn: (params: { taskId: string; description: string }) =>
+    mutationFn: (taskId: string) =>
       TasksService.executeTask({
-        id: params.taskId,
+        id: taskId,
         requestBody: {},
       }),
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       if (data.session_id) {
         navigate({
           to: "/session/$sessionId",
           params: { sessionId: data.session_id },
-          search: { initialMessage: variables.description, fileIds: undefined, fileObjects: undefined },
+          search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
         })
       }
     },
@@ -85,9 +85,9 @@ function TasksList() {
     autoRefineMutation.mutate(taskId)
   }
 
-  const handleExecute = (e: React.MouseEvent, taskId: string, description: string) => {
+  const handleExecute = (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation()
-    executeMutation.mutate({ taskId, description })
+    executeMutation.mutate(taskId)
   }
 
   const archiveMutation = useMutation({
@@ -199,8 +199,8 @@ function TasksList() {
   }, [setHeaderContent])
 
   const handleTaskClick = (task: InputTaskPublicExtended) => {
-    // For completed tasks with a session, navigate directly to the session
-    if (task.status === "completed" && task.latest_session_id) {
+    // For tasks with a session, navigate directly to the session
+    if (task.latest_session_id) {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId: task.latest_session_id },
@@ -219,15 +219,6 @@ function TasksList() {
     navigate({
       to: "/task/$taskId",
       params: { taskId },
-    })
-  }
-
-  const handleGoToSession = (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation()
-    navigate({
-      to: "/session/$sessionId",
-      params: { sessionId },
-      search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
     })
   }
 
@@ -406,7 +397,7 @@ function TasksList() {
 
                           {/* Action buttons */}
                           <div className="flex items-center gap-2">
-                            {task.status !== "completed" && (
+                            {task.status !== "completed" && !task.latest_session_id && (
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -432,7 +423,7 @@ function TasksList() {
                                 {task.sessions_count} sessions
                               </Button>
                             )}
-                            {task.status === "completed" && task.latest_session_id ? (
+                            {task.latest_session_id ? (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -441,18 +432,10 @@ function TasksList() {
                                 <FileText className="h-4 w-4 mr-1" />
                                 Open Prompt
                               </Button>
-                            ) : task.latest_session_id ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => handleGoToSession(e, task.latest_session_id!)}
-                              >
-                                Go to Session
-                              </Button>
                             ) : null}
                             <Button
                               size="sm"
-                              onClick={(e) => handleExecute(e, task.id, task.current_description)}
+                              onClick={(e) => handleExecute(e, task.id)}
                               disabled={executeMutation.isPending || !task.selected_agent_id}
                               title={!task.selected_agent_id ? "Select an agent first" : "Execute task"}
                             >

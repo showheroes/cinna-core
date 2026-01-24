@@ -191,6 +191,7 @@ class BaseSDKAdapter(ABC):
         backend_session_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
         mode: str = "conversation",
+        session_state: Optional[dict] = None,
     ) -> AsyncIterator[SDKEvent]:
         """
         Send a message and stream responses as SDKEvents.
@@ -204,6 +205,7 @@ class BaseSDKAdapter(ABC):
             backend_session_id: Backend session ID for tracking
             system_prompt: Optional custom system prompt
             mode: "building" or "conversation"
+            session_state: Backend-managed state context (e.g., previous_result_state)
 
         Yields:
             SDKEvent objects representing adapter responses

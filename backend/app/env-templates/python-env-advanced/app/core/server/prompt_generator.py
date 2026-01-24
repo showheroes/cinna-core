@@ -473,13 +473,13 @@ class PromptGenerator:
         # Append session state reporting instructions
         conversation_prompt_parts.append(
             "\n\n---\n\n"
-            "## Session State Reporting\n\n"
-            "You have the `update_session_state` tool available. Use it to report your outcome:\n"
-            "- When you finish processing successfully: `update_session_state(state=\"completed\", summary=\"<result>\")`\n"
-            "- When you need user/caller input to proceed: `update_session_state(state=\"needs_input\", summary=\"<question>\")`\n"
-            "- When you encounter an unrecoverable error: `update_session_state(state=\"error\", summary=\"<details>\")`\n\n"
-            "This notifies the user even if they are offline, and enables multi-agent coordination.\n"
-            "Call this tool when your work is done or when you are blocked.\n"
+            "## MANDATORY RULE: Session State Reporting\n\n"
+            "**RULE**: If your response asks the user ANYTHING (question, confirmation, clarification) "
+            "you MUST call the `update_session_state` tool with `state=\"needs_input\"`. "
+            "If you encounter an unrecoverable error, call it with `state=\"error\"`. "
+            "Do NOT call this tool when you complete the task successfully — the system handles that.\n\n"
+            "You MUST call this tool EVERY TIME you ask a question. No exceptions. "
+            "The user will NOT see your question unless you call this tool.\n"
         )
 
         # Combine all parts into a single system prompt string
