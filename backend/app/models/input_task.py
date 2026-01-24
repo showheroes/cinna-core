@@ -64,6 +64,9 @@ class InputTask(InputTaskBase, table=True):
     source_session_id: uuid.UUID | None = Field(
         default=None, foreign_key="session.id", ondelete="SET NULL"
     )
+    # Auto-feedback: whether to auto-trigger source agent on session state change
+    auto_feedback: bool = Field(default=True)
+    feedback_delivered: bool = Field(default=False)
     status: str = Field(default=InputTaskStatus.NEW)
     refinement_history: list = Field(default_factory=list, sa_column=Column(JSON))
     # To-do progress tracking from TodoWrite tool (list of TodoItem dicts)
@@ -109,6 +112,7 @@ class InputTaskPublic(SQLModel):
     agent_initiated: bool
     auto_execute: bool
     source_session_id: uuid.UUID | None
+    auto_feedback: bool
     error_message: str | None
     created_at: datetime
     updated_at: datetime
@@ -125,6 +129,9 @@ class InputTaskPublicExtended(InputTaskPublic):
     sessions_count: int = 0
     latest_session_id: uuid.UUID | None = None
     attached_files: list[FileUploadPublic] = Field(default_factory=list)
+    # Session result state (joined from linked session)
+    result_state: str | None = None
+    result_summary: str | None = None
 
 
 class InputTasksPublic(SQLModel):

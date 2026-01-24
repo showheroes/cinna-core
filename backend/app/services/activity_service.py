@@ -414,6 +414,12 @@ class ActivityService:
                 logger.info(f"Skipping activities for session {session_id} with status '{chat_session.status}' (not completed)")
                 return None, None
 
+            # Skip generic completion activity if agent already declared a result_state
+            # (the more meaningful activity was created by handle_session_state_updated)
+            if chat_session.result_state:
+                logger.info(f"Skipping generic completion activity for session {session_id} (result_state='{chat_session.result_state}' already set)")
+                return None, None
+
             # Get the latest agent message to check if it has questions
             latest_message_stmt = (
                 select(SessionMessage)
@@ -737,3 +743,90 @@ class ActivityService:
 
         except Exception as e:
             logger.error(f"Error in handle_stream_interrupted: {e}", exc_info=True)
+
+    @staticmethod
+    async def handle_session_state_updated(event_data: dict[str, Any]):
+        """
+        Event handler for SESSION_STATE_UPDATED events.
+
+        Creates activity when agent declares session outcome via update_session_state tool.
+        Maps session state to activity type:
+        - completed → session_completed activity
+        - needs_input → session_feedback_required activity (action_required)
+        - error → error_occurred activity
+        """
+        try:
+            from app.core.db import engine as db_engine
+            from sqlmodel import Session as DBSession
+            from app.services.event_service import event_service
+
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+            state = meta.get("state")
+            summary = meta.get("summary")
+            user_id = event_data.get("user_id")
+
+            if not session_id or not state or not summary or not user_id:
+                logger.warning("SESSION_STATE_UPDATED event missing required fields")
+                return
+
+            # Map state to activity type and action_required
+            activity_map = {
+                "completed": ("session_completed", ""),
+                "needs_input": ("session_feedback_required", "answers_required"),
+                "error": ("error_occurred", ""),
+            }
+
+            if state not in activity_map:
+                logger.warning(f"Unknown session state: {state}")
+                return
+
+            activity_type, action_required = activity_map[state]
+
+            with DBSession(db_engine) as db:
+                # Get session to find agent_id
+                chat_session = db.get(Session, UUID(session_id))
+                if not chat_session:
+                    logger.warning(f"Session {session_id} not found for state update activity")
+                    return
+
+                environment = db.get(AgentEnvironment, chat_session.environment_id)
+                agent_id = environment.agent_id if environment else None
+
+                # Delete any existing session_running activity
+                await ActivityService.delete_session_running_activity(
+                    db_session=db,
+                    session_id=UUID(session_id)
+                )
+
+                # Create the state-specific activity
+                activity = ActivityService.create_activity(
+                    db_session=db,
+                    user_id=UUID(user_id),
+                    data=ActivityCreate(
+                        session_id=UUID(session_id),
+                        agent_id=agent_id,
+                        activity_type=activity_type,
+                        text=summary,
+                        action_required=action_required,
+                        is_read=False,
+                    )
+                )
+
+                # Emit WebSocket event for activity creation
+                await event_service.emit_event(
+                    event_type=EventType.ACTIVITY_CREATED,
+                    model_id=activity.id,
+                    user_id=UUID(user_id),
+                    meta={
+                        "activity_type": activity_type,
+                        "session_id": session_id,
+                        "agent_id": str(agent_id) if agent_id else None,
+                        "state": state,
+                    }
+                )
+
+            logger.info(f"[Event Handler] Created '{activity_type}' activity for session {session_id} (state={state})")
+
+        except Exception as e:
+            logger.error(f"Error in handle_session_state_updated: {e}", exc_info=True)

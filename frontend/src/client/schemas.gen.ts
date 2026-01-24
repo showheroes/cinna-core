@@ -4018,6 +4018,10 @@ export const HandoverConfigPublicSchema = {
             type: 'boolean',
             title: 'Enabled'
         },
+        auto_feedback: {
+            type: 'boolean',
+            title: 'Auto Feedback'
+        },
         created_at: {
             type: 'string',
             format: 'date-time',
@@ -4030,7 +4034,7 @@ export const HandoverConfigPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'source_agent_id', 'target_agent_id', 'target_agent_name', 'handover_prompt', 'enabled', 'created_at', 'updated_at'],
+    required: ['id', 'source_agent_id', 'target_agent_id', 'target_agent_name', 'handover_prompt', 'enabled', 'auto_feedback', 'created_at', 'updated_at'],
     title: 'HandoverConfigPublic',
     description: 'Public response model for AgentHandoverConfig.'
 } as const;
@@ -4058,6 +4062,17 @@ export const HandoverConfigUpdateSchema = {
                 }
             ],
             title: 'Enabled'
+        },
+        auto_feedback: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Auto Feedback'
         }
     },
     type: 'object',
@@ -4240,6 +4255,10 @@ export const InputTaskPublicSchema = {
             ],
             title: 'Source Session Id'
         },
+        auto_feedback: {
+            type: 'boolean',
+            title: 'Auto Feedback'
+        },
         error_message: {
             anyOf: [
                 {
@@ -4299,7 +4318,7 @@ export const InputTaskPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
+    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'auto_feedback', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
     title: 'InputTaskPublic'
 } as const;
 
@@ -4382,6 +4401,10 @@ export const InputTaskPublicExtendedSchema = {
                 }
             ],
             title: 'Source Session Id'
+        },
+        auto_feedback: {
+            type: 'boolean',
+            title: 'Auto Feedback'
         },
         error_message: {
             anyOf: [
@@ -4491,10 +4514,32 @@ export const InputTaskPublicExtendedSchema = {
             },
             type: 'array',
             title: 'Attached Files'
+        },
+        result_state: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result State'
+        },
+        result_summary: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result Summary'
         }
     },
     type: 'object',
-    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
+    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'auto_feedback', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
     title: 'InputTaskPublicExtended',
     description: 'Extended response with agent name and sessions count'
 } as const;
@@ -6118,6 +6163,27 @@ export const RefreshKnowledgeResponseSchema = {
     description: 'Response for refresh knowledge endpoint.'
 } as const;
 
+export const RespondToTaskRequestSchema = {
+    properties: {
+        task_id: {
+            type: 'string',
+            title: 'Task Id'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        },
+        source_session_id: {
+            type: 'string',
+            title: 'Source Session Id'
+        }
+    },
+    type: 'object',
+    required: ['task_id', 'message', 'source_session_id'],
+    title: 'RespondToTaskRequest',
+    description: 'Request to respond to a sub-task from source agent.'
+} as const;
+
 export const RevokeResponseSchema = {
     properties: {
         status: {
@@ -6467,6 +6533,28 @@ export const SessionPublicSchema = {
             type: 'integer',
             title: 'Pending Messages Count'
         },
+        result_state: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result State'
+        },
+        result_summary: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result Summary'
+        },
         todo_progress: {
             anyOf: [
                 {
@@ -6598,6 +6686,28 @@ export const SessionPublicExtendedSchema = {
         pending_messages_count: {
             type: 'integer',
             title: 'Pending Messages Count'
+        },
+        result_state: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result State'
+        },
+        result_summary: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result Summary'
         },
         todo_progress: {
             anyOf: [
@@ -6937,6 +7047,62 @@ export const UpdatePasswordSchema = {
     type: 'object',
     required: ['current_password', 'new_password'],
     title: 'UpdatePassword'
+} as const;
+
+export const UpdateSessionStateRequestSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            title: 'Session Id'
+        },
+        state: {
+            type: 'string',
+            title: 'State'
+        },
+        summary: {
+            type: 'string',
+            title: 'Summary'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'state', 'summary'],
+    title: 'UpdateSessionStateRequest',
+    description: 'Request to update session state from agent-env.'
+} as const;
+
+export const UpdateSessionStateResponseSchema = {
+    properties: {
+        success: {
+            type: 'boolean',
+            title: 'Success'
+        },
+        message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['success'],
+    title: 'UpdateSessionStateResponse',
+    description: 'Response from session state update.'
 } as const;
 
 export const UpdateStatusResponseSchema = {

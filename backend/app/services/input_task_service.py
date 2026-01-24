@@ -290,6 +290,63 @@ class InputTaskService:
 
         return data, count
 
+    @staticmethod
+    def list_tasks_by_source_session(
+        db_session: DBSession,
+        source_session_id: UUID,
+        user_id: UUID,
+    ) -> tuple[list[InputTaskPublicExtended], int]:
+        """
+        List all tasks created from a specific source session.
+
+        Args:
+            db_session: Database session
+            source_session_id: Source session UUID
+            user_id: User ID (for ownership verification)
+
+        Returns:
+            Tuple of (list of extended tasks, total count)
+        """
+        statement = (
+            select(InputTask, Agent.name)
+            .outerjoin(Agent, InputTask.selected_agent_id == Agent.id)
+            .where(
+                InputTask.source_session_id == source_session_id,
+                InputTask.owner_id == user_id,
+            )
+            .order_by(InputTask.created_at.desc())
+        )
+
+        results = db_session.exec(statement).all()
+
+        data = []
+        for task, agent_name in results:
+            sessions_count, latest_session_id = SessionService.get_task_sessions_info(
+                db_session=db_session, task_id=task.id
+            )
+
+            # Join session result_state/result_summary
+            result_state = None
+            result_summary = None
+            if task.session_id:
+                task_session = db_session.get(Session, task.session_id)
+                if task_session:
+                    result_state = task_session.result_state
+                    result_summary = task_session.result_summary
+
+            data.append(
+                InputTaskPublicExtended(
+                    **task.model_dump(),
+                    agent_name=agent_name,
+                    sessions_count=sessions_count,
+                    latest_session_id=latest_session_id,
+                    result_state=result_state,
+                    result_summary=result_summary,
+                )
+            )
+
+        return data, len(data)
+
     # ==================== CRUD Operations ====================
 
     @staticmethod
@@ -1136,6 +1193,116 @@ class InputTaskService:
 
         except Exception as e:
             logger.error(f"Error handling TODO_LIST_UPDATED for task sync: {e}", exc_info=True)
+
+    @staticmethod
+    async def handle_session_state_updated(event_data: dict[str, Any]) -> None:
+        """
+        React to SESSION_STATE_UPDATED events.
+        If the session is linked to a task with auto_feedback enabled,
+        delivers feedback to the source session.
+        """
+        try:
+            meta = event_data.get("meta", {})
+            session_id = meta.get("session_id")
+            state = meta.get("state")
+            summary = meta.get("summary")
+
+            if not session_id or not state or not summary:
+                logger.debug("SESSION_STATE_UPDATED event missing fields, skipping")
+                return
+
+            with DBSession(engine) as db:
+                session = db.get(Session, UUID(session_id))
+                if not session or not session.source_task_id:
+                    return  # Not a task session
+
+                task = db.get(InputTask, session.source_task_id)
+                if not task:
+                    return
+
+                # Deliver feedback if auto_feedback enabled and not already delivered
+                if task.auto_feedback and not task.feedback_delivered:
+                    await InputTaskService.deliver_feedback_to_source(
+                        db, task, state, summary
+                    )
+
+        except Exception as e:
+            logger.error(f"Error in InputTaskService.handle_session_state_updated: {e}", exc_info=True)
+
+    @staticmethod
+    async def deliver_feedback_to_source(
+        db_session: DBSession,
+        task: InputTask,
+        state: str,
+        summary: str,
+    ) -> bool:
+        """
+        Send session state feedback as a message to the source session.
+
+        Args:
+            db_session: Database session
+            task: The input task with source_session_id
+            state: Session state ("completed", "needs_input", "error")
+            summary: The agent's summary text
+
+        Returns:
+            True if feedback was delivered successfully
+        """
+        from app.services.message_service import MessageService
+
+        if not task.source_session_id:
+            return False
+
+        source_session = db_session.get(Session, task.source_session_id)
+        if not source_session:
+            return False
+
+        # Compose feedback content
+        content_map = {
+            "completed": f"[Sub-task completed] {summary}",
+            "needs_input": f"[Sub-task needs input] {summary}",
+            "error": f"[Sub-task error] {summary}",
+        }
+        content = content_map.get(state, f"[Sub-task update] {summary}")
+
+        # Create message in source session (role="user" triggers agent processing)
+        MessageService.create_message(
+            session=db_session,
+            session_id=task.source_session_id,
+            role="user",
+            content=content,
+            message_metadata={
+                "task_feedback": True,
+                "task_id": str(task.id),
+                "task_state": state,
+                "task_summary": summary,
+            },
+            sent_to_agent_status="pending",
+        )
+
+        task.feedback_delivered = True
+        db_session.add(task)
+        db_session.commit()
+
+        # If source session is idle, trigger agent processing
+        if source_session.interaction_status == "":
+            from app.utils import create_task_with_error_logging
+            from app.core.db import engine as db_engine
+            from sqlmodel import Session as FreshDBSession
+
+            create_task_with_error_logging(
+                SessionService.initiate_stream(
+                    session_id=task.source_session_id,
+                    get_fresh_db_session=lambda: FreshDBSession(db_engine),
+                ),
+                task_name=f"feedback_initiate_stream_{task.source_session_id}"
+            )
+
+        logger.info(
+            f"Delivered feedback to source session {task.source_session_id} "
+            f"for task {task.id} (state={state})"
+        )
+        return True
 
     # ==================== File Attachment Methods ====================
 

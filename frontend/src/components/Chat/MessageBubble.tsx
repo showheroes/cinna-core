@@ -7,7 +7,7 @@ import { StreamEventRenderer } from "./StreamEventRenderer"
 import { MessageActions } from "./MessageActions"
 import { AnswerQuestionsModal } from "./AnswerQuestionsModal"
 import { FileBadge } from "./FileBadge"
-import { Info, AlertCircle, ExternalLink } from "lucide-react"
+import { Info, AlertCircle, ExternalLink, CheckCircle2, HelpCircle, AlertTriangle } from "lucide-react"
 import { useToolApproval } from "@/hooks/useToolApproval"
 
 interface MessageBubbleProps {
@@ -64,6 +64,45 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
   const isInboxTask = message.message_metadata?.inbox_task === true
   const taskId = message.message_metadata?.task_id as string | undefined
   const taskSessionId = message.message_metadata?.session_id as string | undefined
+
+  // Check if this is a task feedback message (from sub-task agent)
+  const isTaskFeedback = isUser && message.message_metadata?.task_feedback === true
+  const feedbackState = message.message_metadata?.task_state as string | undefined
+  const feedbackTaskId = message.message_metadata?.task_id as string | undefined
+
+  if (isTaskFeedback) {
+    const stateConfig = {
+      completed: { icon: CheckCircle2, color: "border-green-500", iconColor: "text-green-600 dark:text-green-400", bg: "bg-green-50/60 dark:bg-green-950/20" },
+      needs_input: { icon: HelpCircle, color: "border-amber-500", iconColor: "text-amber-600 dark:text-amber-400", bg: "bg-amber-50/60 dark:bg-amber-950/20" },
+      error: { icon: AlertTriangle, color: "border-red-500", iconColor: "text-red-600 dark:text-red-400", bg: "bg-red-50/60 dark:bg-red-950/20" },
+    }[feedbackState || "completed"] || { icon: CheckCircle2, color: "border-blue-500", iconColor: "text-blue-600", bg: "bg-blue-50/60 dark:bg-blue-950/20" }
+
+    const Icon = stateConfig.icon
+
+    return (
+      <div className="flex justify-center my-4">
+        <div className={`text-sm px-4 py-3 rounded-lg max-w-2xl border-l-4 ${stateConfig.color} ${stateConfig.bg}`}>
+          <div className="flex items-start gap-2">
+            <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${stateConfig.iconColor}`} />
+            <div className="flex-1 min-w-0">
+              <span className="text-foreground">{message.content}</span>
+              {feedbackTaskId && (
+                <Link
+                  to="/session/$sessionId"
+                  params={{ sessionId: feedbackTaskId }}
+                  search={{ initialMessage: undefined, fileIds: undefined, fileObjects: undefined }}
+                  className="ml-2 inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2 text-xs"
+                >
+                  <span>View session</span>
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (isSystem) {
     return (

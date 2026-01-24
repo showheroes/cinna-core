@@ -549,6 +549,16 @@ class AgentService:
             "- Execute when ready\n"
         )
 
+        # Add feedback handling instructions (for receiving sub-task feedback)
+        handover_prompt += (
+            "\n### Handling Sub-Task Feedback\n\n"
+            "When a sub-task reports back, you receive a message prefixed with:\n"
+            "- `[Sub-task completed]` - Acknowledge the result, inform the user if all tasks are done\n"
+            "- `[Sub-task needs input]` - Call `respond_to_task(task_id, message)` with your answer\n"
+            "- `[Sub-task error]` - Decide whether to retry or inform the user\n\n"
+            "The message metadata contains `task_id` for use with the `respond_to_task` tool.\n"
+        )
+
         # Get environment adapter and sync config
         try:
             environment = session.get(AgentEnvironment, environment_id)
@@ -636,6 +646,22 @@ class AgentService:
                     user_id=user.id,
                     data=task_data,
                 )
+
+                # Copy auto_feedback from handover config if available
+                if source_session:
+                    source_env = session.get(AgentEnvironment, source_session.environment_id)
+                    if source_env:
+                        handover_config = session.exec(
+                            select(AgentHandoverConfig).where(
+                                AgentHandoverConfig.source_agent_id == source_env.agent_id,
+                                AgentHandoverConfig.target_agent_id == target_agent_id,
+                                AgentHandoverConfig.enabled == True,
+                            )
+                        ).first()
+                        if handover_config:
+                            task.auto_feedback = handover_config.auto_feedback
+                            session.add(task)
+                            session.commit()
 
                 logger.info(f"Created task {task.id} for handover to agent {target_agent_id}")
 

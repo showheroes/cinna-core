@@ -1,7 +1,11 @@
+import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, ListTodo } from "lucide-react"
 import type { SessionPublic } from "@/client"
+import { OpenAPI } from "@/client"
 import { AnimatedPlaceholder } from "@/components/Common/AnimatedPlaceholder"
+import { SubTasksPanel } from "./SubTasksPanel"
 
 interface ChatHeaderProps {
   session: SessionPublic
@@ -9,11 +13,36 @@ interface ChatHeaderProps {
   onBack: () => void
 }
 
+async function fetchSubTasksCount(sessionId: string): Promise<number> {
+  const token = typeof OpenAPI.TOKEN === "function"
+    ? await OpenAPI.TOKEN({} as any)
+    : OpenAPI.TOKEN || ""
+
+  const response = await fetch(`${OpenAPI.BASE}/api/v1/tasks/by-source-session/${sessionId}`, {
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  })
+
+  if (!response.ok) return 0
+  const data = await response.json()
+  return data.count || 0
+}
+
 export function ChatHeader({ session, onModeSwitch, onBack }: ChatHeaderProps) {
   const isBuilding = session.mode === "building"
+  const [showSubTasks, setShowSubTasks] = useState(false)
+
+  // Query sub-task count for badge
+  const { data: subTaskCount = 0 } = useQuery({
+    queryKey: ["subTasksCount", session.id],
+    queryFn: () => fetchSubTasksCount(session.id),
+    refetchInterval: 15000,
+  })
 
   return (
-    <div className="border-b px-6 py-3 bg-background shrink-0">
+    <div className="border-b px-6 py-3 bg-background shrink-0 relative">
       <div className="flex items-center justify-between gap-4 max-w-7xl mx-auto">
         <div className="flex items-center gap-3 min-w-0">
           <Button variant="ghost" size="sm" onClick={onBack} className="shrink-0">
@@ -32,7 +61,18 @@ export function ChatHeader({ session, onModeSwitch, onBack }: ChatHeaderProps) {
           </div>
         </div>
 
-        <div className="shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          {subTaskCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowSubTasks(!showSubTasks)}
+              className="gap-1.5 relative"
+            >
+              <ListTodo className="h-4 w-4" />
+              <span className="text-xs">{subTaskCount}</span>
+            </Button>
+          )}
           <Button
             variant={isBuilding ? "outline" : "default"}
             size="sm"
@@ -47,6 +87,14 @@ export function ChatHeader({ session, onModeSwitch, onBack }: ChatHeaderProps) {
           </Button>
         </div>
       </div>
+
+      {/* Sub-tasks panel overlay */}
+      {showSubTasks && (
+        <SubTasksPanel
+          sessionId={session.id}
+          onClose={() => setShowSubTasks(false)}
+        />
+      )}
     </div>
   )
 }

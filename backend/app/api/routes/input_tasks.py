@@ -43,6 +43,28 @@ def _handle_service_error(e: InputTaskError) -> None:
     raise HTTPException(status_code=e.status_code, detail=e.message)
 
 
+@router.get("/by-source-session/{session_id}", response_model=InputTasksPublicExtended)
+def list_tasks_by_source_session(
+    session: SessionDep,
+    current_user: CurrentUser,
+    session_id: uuid.UUID,
+) -> Any:
+    """
+    List all tasks created from a specific source session.
+
+    Used by SubTasksPanel to show sub-tasks for the current session.
+    """
+    try:
+        data, count = InputTaskService.list_tasks_by_source_session(
+            db_session=session,
+            source_session_id=session_id,
+            user_id=current_user.id,
+        )
+        return InputTasksPublicExtended(data=data, count=count)
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
 @router.post("/", response_model=InputTaskPublic)
 def create_task(
     *, session: SessionDep, current_user: CurrentUser, task_in: InputTaskCreate

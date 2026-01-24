@@ -158,6 +158,9 @@ from .agent_handover import (
     CreateAgentTaskResponse,
     ExecuteHandoverRequest,  # Deprecated, use CreateAgentTaskRequest
     ExecuteHandoverResponse,  # Deprecated, use CreateAgentTaskResponse
+    UpdateSessionStateRequest,
+    UpdateSessionStateResponse,
+    RespondToTaskRequest,
 )
 from .user_workspace import (
     UserWorkspace,
@@ -390,6 +393,9 @@ __all__ = [
     "CreateAgentTaskResponse",
     "ExecuteHandoverRequest",  # Deprecated
     "ExecuteHandoverResponse",  # Deprecated
+    "UpdateSessionStateRequest",
+    "UpdateSessionStateResponse",
+    "RespondToTaskRequest",
     # User Workspaces
     "UserWorkspace",
     "UserWorkspaceCreate",

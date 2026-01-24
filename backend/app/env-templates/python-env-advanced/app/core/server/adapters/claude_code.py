@@ -236,22 +236,28 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
                 if mode == "conversation":
                     try:
                         from ..tools.create_agent_task import create_agent_task
+                        from ..tools.update_session_state import update_session_state
+                        from ..tools.respond_to_task import respond_to_task
+
+                        task_tools = [create_agent_task, update_session_state, respond_to_task]
 
                         task_server = create_sdk_mcp_server(
                             name="task",
                             version="1.0.0",
-                            tools=[create_agent_task]
+                            tools=task_tools
                         )
                         if options.mcp_servers:
                             options.mcp_servers["task"] = task_server
                         else:
                             options.mcp_servers = {"task": task_server}
                         options.allowed_tools.append("mcp__task__create_agent_task")
-                        logger.info("Added create_agent_task tool for conversation mode")
+                        options.allowed_tools.append("mcp__task__update_session_state")
+                        options.allowed_tools.append("mcp__task__respond_to_task")
+                        logger.info("Added task tools (create_agent_task, update_session_state, respond_to_task) for conversation mode")
                     except ImportError as e:
-                        logger.warning(f"Could not import create_agent_task tool: {e}")
+                        logger.warning(f"Could not import task tools: {e}")
                     except Exception as e:
-                        logger.warning(f"Could not setup create_agent_task tool: {e}")
+                        logger.warning(f"Could not setup task tools: {e}")
 
                 # Load plugins for current mode
                 try:

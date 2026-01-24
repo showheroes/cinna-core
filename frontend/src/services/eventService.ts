@@ -43,7 +43,10 @@ export const EventTypes = {
   // Session streaming status change (DB-based, emitted on interaction_status change)
   SESSION_INTERACTION_STATUS_CHANGED: "session_interaction_status_changed",
 
-  // To=do progress events (from TodoWrite tool)
+  // Session state events
+  SESSION_STATE_UPDATED: "session_state_updated",  // Agent declared session outcome
+
+  // To-do progress events (from TodoWrite tool)
   TODO_LIST_UPDATED: "todo_list_updated",    // Session-level to-do update
   TASK_TODO_UPDATED: "task_todo_updated",    // Task-level to-do update
 

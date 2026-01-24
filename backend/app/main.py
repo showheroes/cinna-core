@@ -145,6 +145,16 @@ def on_startup():
         handler=InputTaskService.handle_todo_list_updated
     )
 
+    # Session state handlers: activity creation + task feedback delivery
+    event_service.register_handler(
+        event_type=EventType.SESSION_STATE_UPDATED,
+        handler=ActivityService.handle_session_state_updated
+    )
+    event_service.register_handler(
+        event_type=EventType.SESSION_STATE_UPDATED,
+        handler=InputTaskService.handle_session_state_updated
+    )
+
     logger.info("Registered backend event handlers (EnvironmentService, ActivityService, SessionService, InputTaskService)")
 
     logger.info("Application startup complete")

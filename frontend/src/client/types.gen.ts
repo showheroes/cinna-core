@@ -904,6 +904,7 @@ export type HandoverConfigPublic = {
     target_agent_name: string;
     handover_prompt: string;
     enabled: boolean;
+    auto_feedback: boolean;
     created_at: string;
     updated_at: string;
 };
@@ -922,6 +923,7 @@ export type HandoverConfigsPublic = {
 export type HandoverConfigUpdate = {
     handover_prompt?: (string | null);
     enabled?: (boolean | null);
+    auto_feedback?: (boolean | null);
 };
 
 export type HTTPValidationError = {
@@ -950,6 +952,7 @@ export type InputTaskPublic = {
     agent_initiated: boolean;
     auto_execute: boolean;
     source_session_id: (string | null);
+    auto_feedback: boolean;
     error_message: (string | null);
     created_at: string;
     updated_at: string;
@@ -973,6 +976,7 @@ export type InputTaskPublicExtended = {
     agent_initiated: boolean;
     auto_execute: boolean;
     source_session_id: (string | null);
+    auto_feedback: boolean;
     error_message: (string | null);
     created_at: string;
     updated_at: string;
@@ -985,6 +989,8 @@ export type InputTaskPublicExtended = {
     sessions_count?: number;
     latest_session_id?: (string | null);
     attached_files?: Array<FileUploadPublic>;
+    result_state?: (string | null);
+    result_summary?: (string | null);
 };
 
 export type InputTasksPublicExtended = {
@@ -1370,6 +1376,15 @@ export type RefreshKnowledgeResponse = {
 };
 
 /**
+ * Request to respond to a sub-task from source agent.
+ */
+export type RespondToTaskRequest = {
+    task_id: string;
+    message: string;
+    source_session_id: string;
+};
+
+/**
  * Response for revoke action.
  */
 export type RevokeResponse = {
@@ -1424,6 +1439,8 @@ export type SessionPublic = {
     status: string;
     interaction_status: string;
     pending_messages_count: number;
+    result_state?: (string | null);
+    result_summary?: (string | null);
     todo_progress?: (Array<unknown> | null);
     streaming_started_at?: (string | null);
     created_at: string;
@@ -1446,6 +1463,8 @@ export type SessionPublicExtended = {
     status: string;
     interaction_status: string;
     pending_messages_count: number;
+    result_state?: (string | null);
+    result_summary?: (string | null);
     todo_progress?: (Array<unknown> | null);
     streaming_started_at?: (string | null);
     created_at: string;
@@ -1550,6 +1569,24 @@ export type Token = {
 export type UpdatePassword = {
     current_password: string;
     new_password: string;
+};
+
+/**
+ * Request to update session state from agent-env.
+ */
+export type UpdateSessionStateRequest = {
+    session_id: string;
+    state: string;
+    summary: string;
+};
+
+/**
+ * Response from session state update.
+ */
+export type UpdateSessionStateResponse = {
+    success: boolean;
+    message?: (string | null);
+    error?: (string | null);
 };
 
 /**
@@ -1940,6 +1977,18 @@ export type AgentsGetPendingToolsData = {
 };
 
 export type AgentsGetPendingToolsResponse = (PendingToolsResponse);
+
+export type AgentsUpdateSessionStateData = {
+    requestBody: UpdateSessionStateRequest;
+};
+
+export type AgentsUpdateSessionStateResponse = (UpdateSessionStateResponse);
+
+export type AgentsRespondToTaskData = {
+    requestBody: RespondToTaskRequest;
+};
+
+export type AgentsRespondToTaskResponse = (UpdateSessionStateResponse);
 
 export type AgentSharesShareAgentData = {
     agentId: string;
@@ -2634,6 +2683,12 @@ export type SshKeysGenerateSshKeyData = {
 };
 
 export type SshKeysGenerateSshKeyResponse = (SSHKeyPublic);
+
+export type TasksListTasksBySourceSessionData = {
+    sessionId: string;
+};
+
+export type TasksListTasksBySourceSessionResponse = (InputTasksPublicExtended);
 
 export type TasksCreateTaskData = {
     requestBody: InputTaskCreate;

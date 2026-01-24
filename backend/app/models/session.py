@@ -31,6 +31,9 @@ class Session(SQLModel, table=True):
     session_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
     # To-do progress tracking from TodoWrite tool (list of TodoItem dicts)
     todo_progress: list | None = Field(default=None, sa_column=Column(JSON))
+    # Agent-declared session outcome (set via update_session_state tool)
+    result_state: str | None = None  # "completed" | "needs_input" | "error"
+    result_summary: str | None = None  # Agent's summary/question/error description
     streaming_started_at: datetime | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -84,6 +87,8 @@ class SessionPublic(SQLModel):
     status: str
     interaction_status: str
     pending_messages_count: int
+    result_state: str | None = None
+    result_summary: str | None = None
     todo_progress: list | None = None
     streaming_started_at: datetime | None = None
     created_at: datetime

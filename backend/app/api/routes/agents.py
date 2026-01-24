@@ -46,8 +46,13 @@ from app.models import (
     CreateAgentTaskResponse,
     ExecuteHandoverRequest,
     ExecuteHandoverResponse,
+    UpdateSessionStateRequest,
+    UpdateSessionStateResponse,
+    RespondToTaskRequest,
     AgentShare,
     User,
+    InputTask,
+    Session as ChatSession,
 )
 from app.services.environment_service import EnvironmentService
 from app.services.agent_service import AgentService
@@ -677,6 +682,7 @@ def list_handover_configs(
                 target_agent_name=target_agent.name if target_agent else "Unknown",
                 handover_prompt=config.handover_prompt,
                 enabled=config.enabled,
+                auto_feedback=config.auto_feedback,
                 created_at=config.created_at,
                 updated_at=config.updated_at,
             )
@@ -732,6 +738,7 @@ async def create_handover_config(
         target_agent_name=target_agent.name,
         handover_prompt=config.handover_prompt,
         enabled=config.enabled,
+        auto_feedback=config.auto_feedback,
         created_at=config.created_at,
         updated_at=config.updated_at,
     )
@@ -762,6 +769,8 @@ async def update_handover_config(
         config.handover_prompt = data.handover_prompt
     if data.enabled is not None:
         config.enabled = data.enabled
+    if data.auto_feedback is not None:
+        config.auto_feedback = data.auto_feedback
 
     config.updated_at = datetime.utcnow()
     session.add(config)
@@ -779,6 +788,7 @@ async def update_handover_config(
         target_agent_name=target_agent.name if target_agent else "Unknown",
         handover_prompt=config.handover_prompt,
         enabled=config.enabled,
+        auto_feedback=config.auto_feedback,
         created_at=config.created_at,
         updated_at=config.updated_at,
     )
@@ -1020,3 +1030,163 @@ def get_pending_tools(
 
     pending = AgentService.get_pending_tools(session=session, agent_id=id)
     return PendingToolsResponse(pending_tools=pending)
+
+
+# Session State Management routes
+@router.post("/sessions/update-state", response_model=UpdateSessionStateResponse)
+async def update_session_state(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    data: UpdateSessionStateRequest,
+) -> Any:
+    """
+    Update session state from agent-env.
+
+    Called by the update_session_state tool to declare session outcomes.
+    Creates activities and optionally propagates feedback to source agent.
+    """
+    from app.services.event_service import event_service
+    from app.models.event import EventType
+
+    # Validate state
+    allowed_states = ("completed", "needs_input", "error")
+    if data.state not in allowed_states:
+        return UpdateSessionStateResponse(
+            success=False,
+            error=f"state must be one of: {', '.join(allowed_states)}"
+        )
+
+    if not data.summary.strip():
+        return UpdateSessionStateResponse(
+            success=False,
+            error="summary is required"
+        )
+
+    # Look up session
+    try:
+        session_id = uuid.UUID(data.session_id)
+    except ValueError:
+        return UpdateSessionStateResponse(
+            success=False,
+            error="Invalid session_id format"
+        )
+
+    chat_session = session.get(ChatSession, session_id)
+    if not chat_session:
+        return UpdateSessionStateResponse(
+            success=False,
+            error="Session not found"
+        )
+
+    # Update session result state
+    chat_session.result_state = data.state
+    chat_session.result_summary = data.summary.strip()
+    chat_session.updated_at = datetime.utcnow()
+    session.add(chat_session)
+    session.commit()
+
+    # Emit SESSION_STATE_UPDATED event
+    await event_service.emit_event(
+        event_type=EventType.SESSION_STATE_UPDATED,
+        model_id=session_id,
+        user_id=chat_session.user_id,
+        meta={
+            "session_id": str(session_id),
+            "state": data.state,
+            "summary": data.summary.strip(),
+            "environment_id": str(chat_session.environment_id),
+        }
+    )
+
+    return UpdateSessionStateResponse(
+        success=True,
+        message=f"Session state updated to '{data.state}'"
+    )
+
+
+@router.post("/tasks/respond", response_model=UpdateSessionStateResponse)
+async def respond_to_task(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    data: RespondToTaskRequest,
+) -> Any:
+    """
+    Send a message to a sub-task's session from the source agent.
+
+    Used by source agents to answer clarification requests from sub-tasks.
+    """
+    # Validate inputs
+    try:
+        task_id = uuid.UUID(data.task_id)
+        source_session_id = uuid.UUID(data.source_session_id)
+    except ValueError:
+        return UpdateSessionStateResponse(
+            success=False,
+            error="Invalid task_id or source_session_id format"
+        )
+
+    if not data.message.strip():
+        return UpdateSessionStateResponse(
+            success=False,
+            error="message is required"
+        )
+
+    # Look up task
+    task = session.get(InputTask, task_id)
+    if not task:
+        return UpdateSessionStateResponse(
+            success=False,
+            error="Task not found"
+        )
+
+    # Verify source_session_id matches task's source
+    if task.source_session_id != source_session_id:
+        return UpdateSessionStateResponse(
+            success=False,
+            error="Source session does not match task"
+        )
+
+    # Get task's active session
+    if not task.session_id:
+        return UpdateSessionStateResponse(
+            success=False,
+            error="Task has no active session"
+        )
+
+    task_session = session.get(ChatSession, task.session_id)
+    if not task_session:
+        return UpdateSessionStateResponse(
+            success=False,
+            error="Task session not found"
+        )
+
+    # Reset session result_state (session back in progress)
+    task_session.result_state = None
+    task_session.result_summary = None
+    task_session.updated_at = datetime.utcnow()
+    session.add(task_session)
+
+    # Reset feedback_delivered
+    task.feedback_delivered = False
+    session.add(task)
+    session.commit()
+
+    # Send message to task's session
+    result = await SessionService.send_session_message(
+        session_id=task.session_id,
+        user_id=current_user.id,
+        content=data.message.strip(),
+    )
+
+    if result.get("action") == "error":
+        return UpdateSessionStateResponse(
+            success=False,
+            error=result.get("message", "Failed to send message")
+        )
+
+    return UpdateSessionStateResponse(
+        success=True,
+        message="Message sent to task session"
+    )

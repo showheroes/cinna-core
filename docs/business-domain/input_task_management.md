@@ -35,6 +35,15 @@ Enable users to receive, refine, and execute incoming tasks through an AI-assist
 6. User executes task when ready
 7. Task status syncs with session state as usual
 
+**Flow (Session State Reporting & Bi-Directional Feedback):**
+1. Target agent finishes processing → calls `update_session_state(state, summary)`
+2. Session's `result_state` and `result_summary` are updated
+3. `SESSION_STATE_UPDATED` event emitted for real-time frontend updates
+4. Activity created for offline notification (type depends on state)
+5. If task has `auto_feedback=true` → feedback message sent to source session
+6. Source agent receives feedback → auto-responds or escalates to user
+7. Source agent can reply via `respond_to_task(task_id, message)` → resets session state, resumes target
+
 ## Architecture
 
 ```
@@ -44,9 +53,17 @@ Frontend UI → Backend API → AI Functions → Session Service
 Task (1) ─────────────> (N) Session
        session_id            source_task_id
        (latest/primary)      (authoritative FK)
+
+Bi-Directional Feedback:
+Source Session ──create_agent_task──> Task ──execute──> Target Session
+       ↑                                                      │
+       └──── deliver_feedback_to_source ◄── update_session_state
+              (user message + initiate_stream)    (result_state + summary)
 ```
 
-**Key Relationship:** A single task can spawn multiple sessions (retries, re-runs). The `Session.source_task_id` field links sessions back to their originating task.
+**Key Relationships:**
+- A single task can spawn multiple sessions (retries, re-runs). The `Session.source_task_id` field links sessions back to their originating task.
+- Tasks created by agents have `source_session_id` linking back to the creating session, enabling feedback delivery.
 
 ## Data/State Lifecycle
 
@@ -82,6 +99,34 @@ When a task has connected sessions (via `source_task_id`), the task status autom
 - `STREAM_COMPLETED` → computes and syncs status from all sessions
 - `STREAM_ERROR` → syncs task to `ERROR`
 - `TODO_LIST_UPDATED` → propagates session todo progress to linked task, emits `TASK_TODO_UPDATED`
+
+### Session Result State
+
+Agents can explicitly declare session outcomes via the `update_session_state` tool. This is stored on the session and propagated to linked tasks.
+
+| result_state | Meaning | Activity Type | Source Agent Action |
+|--------------|---------|---------------|---------------------|
+| `null` | Session in progress | - | - |
+| `completed` | Agent finished successfully | `session_completed` | Acknowledge result |
+| `needs_input` | Agent needs clarification | `session_feedback_required` | Call `respond_to_task` |
+| `error` | Unrecoverable issue | `error_occurred` | Retry or inform user |
+
+**Key behaviors:**
+- `result_state` is set on the `Session` model and joined to `InputTaskPublicExtended` for display
+- When `result_state` is set, the generic "Session completed" activity from `handle_stream_completed` is suppressed
+- The `result_summary` field contains the agent's description (result, question, or error details)
+- Calling `respond_to_task` resets `result_state` to null (session back in progress)
+
+### Auto-Feedback Mechanism
+
+Controls whether session state changes are automatically forwarded to the source agent:
+
+- `auto_feedback` flag on `AgentHandoverConfig` → copied to `InputTask` at task creation
+- When `auto_feedback=true` and target agent calls `update_session_state`:
+  - A "user" role message is created in the source session (e.g., `[Sub-task completed] Done processing`)
+  - If source session is idle, agent processing is triggered automatically
+  - If source session is streaming, message stays pending until current stream ends
+- `feedback_delivered` flag prevents duplicate delivery
 
 ### Refinement History Structure
 
@@ -125,17 +170,19 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 - `backend/app/alembic/versions/l2g3h4i5j6k7_add_input_task_table.py` - Creates `input_task` table, adds `source_task_id` to `session`
 - `backend/app/alembic/versions/o5j6k7l8m9n0_add_agent_initiated_fields_to_input_task.py` - Adds agent handover fields
 - `backend/app/alembic/versions/p6k7l8m9n0o1_add_todo_progress_to_session.py` - Adds `todo_progress` JSON field to session and input_task tables
+- `backend/app/alembic/versions/u1p2q3r4s5t6_add_session_state_and_task_feedback.py` - Adds `result_state`/`result_summary` to session, `auto_feedback`/`feedback_delivered` to input_task, `auto_feedback` to agent_handover_config
 
 **Models:** `backend/app/models/input_task.py`
 - `InputTask` - Database table with:
   - Core fields: owner_id, original_message, current_description, status
   - Agent fields: selected_agent_id, session_id, user_workspace_id
   - **Agent-initiated fields**: `agent_initiated` (bool), `auto_execute` (bool), `source_session_id` (UUID, FK to session)
+  - **Feedback control**: `auto_feedback` (bool, default=True), `feedback_delivered` (bool, default=False)
   - History: refinement_history (JSON array)
   - **Todo progress**: `todo_progress` (JSON array) - Tracks TodoWrite tool progress from agent execution
   - Timestamps: created_at, updated_at, executed_at, completed_at, archived_at
 - `InputTaskCreate`, `InputTaskUpdate` - API input schemas (Create includes agent_initiated, auto_execute, source_session_id)
-- `InputTaskPublic`, `InputTaskPublicExtended` - API response schemas (extended includes agent_name)
+- `InputTaskPublic`, `InputTaskPublicExtended` - API response schemas (extended includes agent_name, result_state, result_summary)
 - `RefineTaskRequest`, `RefineTaskResponse` - Refinement action schemas
 - `ExecuteTaskRequest`, `ExecuteTaskResponse` - Execution action schemas
 - `InputTaskStatus` - Status enum constants
@@ -143,7 +190,14 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 **Session Model Update:** `backend/app/models/session.py`
 - Added `source_task_id: uuid.UUID | None` with FK to `input_task.id`
 - Added `todo_progress: list | None` (JSON) - Stores TodoWrite tool progress during agent execution
-- Both fields included in `SessionPublic` schema
+- Added `result_state: str | None` - Agent-declared outcome ("completed", "needs_input", "error")
+- Added `result_summary: str | None` - Agent's description of result/question/error
+- All fields included in `SessionPublic` schema
+
+**Handover Config Update:** `backend/app/models/agent_handover.py`
+- Added `auto_feedback: bool = True` to `AgentHandoverConfig` - Controls automatic feedback delivery
+- Added `UpdateSessionStateRequest`, `UpdateSessionStateResponse` - Session state endpoint schemas
+- Added `RespondToTaskRequest` - Task response endpoint schema
 
 ## Backend Implementation
 
@@ -165,6 +219,20 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 - `POST /api/v1/tasks/{id}/execute` - Execute task (uses `get_task_with_ownership_check`, `execute_task_sync`)
 - `POST /api/v1/tasks/{id}/archive` - Archive task (uses `get_task_with_ownership_check`, `update_status`)
 - `GET /api/v1/tasks/{id}/sessions` - List sessions (uses `get_task_with_ownership_check`, `SessionService.list_task_sessions`)
+
+**Sub-Task Queries:**
+- `GET /api/v1/tasks/by-source-session/{session_id}` - List tasks created by a source session (powers SubTasksPanel)
+
+**Session State & Feedback (Agent-Env Routes):**
+
+**File:** `backend/app/api/routes/agents.py`
+
+- `POST /api/v1/agents/sessions/update-state` - Agent declares session outcome
+  - Validates state ("completed"/"needs_input"/"error"), updates session fields
+  - Emits `SESSION_STATE_UPDATED` event → triggers activity creation + task feedback
+- `POST /api/v1/agents/tasks/respond` - Source agent responds to sub-task
+  - Verifies source_session_id ownership, resets session result_state to null
+  - Sends message to target session via `SessionService.send_session_message()`
 
 **Router Registration:** `backend/app/api/main.py` - includes `input_tasks.router`
 
@@ -207,15 +275,24 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
   - Returns `(success, session, error)` tuple
   - Used by agent handover flow
 
+*Session State & Feedback Methods:*
+- `list_tasks_by_source_session()` - Query tasks by source_session_id, joins session result_state/result_summary
+- `deliver_feedback_to_source()` - Creates user message in source session with task_feedback metadata, triggers agent processing if idle
+
 *Event Handlers (static async methods):*
 - `handle_stream_started()` - Syncs task status to RUNNING
 - `handle_stream_completed()` - Computes and syncs status from all linked sessions
 - `handle_stream_error()` - Syncs task status to ERROR
 - `handle_todo_list_updated()` - Propagates session todo progress to linked task, emits `TASK_TODO_UPDATED` event
+- `handle_session_state_updated()` - Checks auto_feedback flag, calls deliver_feedback_to_source if enabled
 
 **SessionService Updates:** `backend/app/services/session_service.py`
 - `create_session()` - Now accepts optional `source_task_id` parameter
 - `list_task_sessions()` - List sessions by source_task_id
+
+**ActivityService Updates:** `backend/app/services/activity_service.py`
+- `handle_session_state_updated()` - Maps state to activity type, creates activity for offline notification
+- `create_completion_activities()` - Modified to skip generic activity when `session.result_state` is already set
 
 **AIFunctionsService:** `backend/app/services/ai_functions_service.py`
 - `refine_task()` - Wrapper that fetches agent workflow_prompt and refiner_prompt, calls task refiner
@@ -233,6 +310,44 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 - JSON output format specification
 
 **Export:** `backend/app/agents/__init__.py` - exports `refine_task`
+
+### Agent-Env Tools (MCP Server)
+
+**Tool:** `update_session_state` — `backend/app/env-templates/python-env-advanced/app/core/server/tools/update_session_state.py`
+- Called by target agent to declare session outcome
+- Parameters: `state` ("completed"/"needs_input"/"error"), `summary` (result/question/error description)
+- Calls backend `POST /api/v1/agents/sessions/update-state`
+
+**Tool:** `respond_to_task` — `backend/app/env-templates/python-env-advanced/app/core/server/tools/respond_to_task.py`
+- Called by source agent to reply to sub-task clarification requests
+- Parameters: `task_id`, `message`
+- Calls backend `POST /api/v1/agents/tasks/respond`
+
+**Registration:** `backend/app/env-templates/python-env-advanced/app/core/server/adapters/claude_code.py`
+- Both tools registered in the `task` MCP server alongside `create_agent_task`
+
+**PRE_ALLOWED_TOOLS:** `backend/app/services/message_service.py`
+- Added `mcp__task__update_session_state`, `mcp__task__respond_to_task`
+
+### Agent Prompts
+
+**Task Session Prompt** (appended in `prompt_generator.py`):
+- All conversation-mode sessions get "Session State Reporting" instructions
+- Instructs agents to call `update_session_state` when finished, needing input, or on error
+
+**Handover Feedback Prompt** (appended in `agent_service.py` during `sync_agent_handover_config`):
+- Source agents get "Handling Sub-Task Feedback" instructions
+- Describes message prefixes (`[Sub-task completed]`, `[Sub-task needs input]`, `[Sub-task error]`)
+- Instructs use of `respond_to_task` tool for clarification responses
+
+### Event Handler Registration
+
+**File:** `backend/app/main.py`
+
+```python
+event_service.register_handler(EventType.SESSION_STATE_UPDATED, ActivityService.handle_session_state_updated)
+event_service.register_handler(EventType.SESSION_STATE_UPDATED, InputTaskService.handle_session_state_updated)
+```
 
 ## Frontend Implementation
 
@@ -278,6 +393,37 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 - Tooltip on hover shows full task content
 - Displays current in-progress step as text hint
 - Subscribes to `TASK_TODO_UPDATED` events for real-time updates
+
+### Sub-Tasks Panel & Session State Display
+
+**SubTasksPanel:** `frontend/src/components/Chat/SubTasksPanel.tsx`
+- Slide-out overlay from right side of chat view
+- Fetches sub-tasks via `GET /api/v1/tasks/by-source-session/{sessionId}`
+- Shows task cards with: state icon, agent name, status badge, original message, result summary
+- Links to sub-task sessions via TanStack Router `Link`
+- Real-time updates via `SESSION_STATE_UPDATED` event subscription (invalidates query)
+- Polling fallback every 10 seconds
+
+**ChatHeader Badge:** `frontend/src/components/Chat/ChatHeader.tsx`
+- Badge button (ListTodo icon) showing count of sub-tasks for current session
+- Only visible when sub-tasks exist (`count > 0`)
+- Toggles SubTasksPanel overlay on click
+
+**Task Feedback Messages:** `frontend/src/components/Chat/MessageBubble.tsx`
+- Detects `message_metadata.task_feedback === true`
+- Renders with colored left border (green=completed, amber=needs_input, red=error)
+- Shows state-specific icon (CheckCircle2/HelpCircle/AlertTriangle)
+- Displays task summary text
+
+**Activity Type:** `frontend/src/routes/_layout/activities.tsx`
+- Added `session_feedback_required` case → renders HelpCircle icon
+
+**Handover Config:** `frontend/src/components/Agents/AgentHandovers.tsx`
+- Auto-feedback toggle switch per handover configuration
+- Controls whether source agent auto-runs when sub-tasks report state
+
+**Event Type:** `frontend/src/services/eventService.ts`
+- Added `SESSION_STATE_UPDATED: "session_state_updated"` to EventTypes
 
 ### Sidebar Integration
 
@@ -341,6 +487,28 @@ Agents can create tasks via the `create_agent_task` tool in two modes:
 
 **Related Documentation:** `docs/agent-sessions/agent_handover_management.md`
 
+### With Session State & Bi-Directional Feedback
+
+Session state management enables agents to report outcomes and communicate across sessions:
+
+**State Reporting Flow:**
+1. Target agent calls `update_session_state(state, summary)` → backend updates session
+2. `SESSION_STATE_UPDATED` event fires → two handlers execute:
+   - `ActivityService.handle_session_state_updated()` → creates activity for user notification
+   - `InputTaskService.handle_session_state_updated()` → delivers feedback to source session
+
+**Feedback Delivery:**
+- Creates message with `role="user"` and `message_metadata.task_feedback=true`
+- Content prefixed: `[Sub-task completed]`, `[Sub-task needs input]`, `[Sub-task error]`
+- If source session is idle (`interaction_status=""`), triggers `initiate_stream`
+- If source session is streaming, message stays pending until stream ends
+
+**Clarification Loop:**
+1. Target agent: `update_session_state("needs_input", "What category?")`
+2. Source agent receives feedback message → calls `respond_to_task(task_id, "Travel")`
+3. Backend resets `result_state` to null, sends message to target session
+4. Target agent processes response → calls `update_session_state("completed", "Done")`
+
 ### With Sessions
 
 - Task creates session on execute via `SessionService.create_session(source_task_id=task.id)`
@@ -381,8 +549,15 @@ Agents can create tasks via the `create_agent_task` tool in two modes:
 - `backend/app/agents/prompts/task_refiner_prompt.md`
 - `backend/app/agents/__init__.py`
 
+**Backend - Agent-Env Tools:**
+- `backend/app/env-templates/python-env-advanced/app/core/server/tools/update_session_state.py`
+- `backend/app/env-templates/python-env-advanced/app/core/server/tools/respond_to_task.py`
+- `backend/app/env-templates/python-env-advanced/app/core/server/adapters/claude_code.py` (tool registration)
+- `backend/app/env-templates/python-env-advanced/app/core/server/prompt_generator.py` (session state prompt)
+
 **Backend - Migration:**
 - `backend/app/alembic/versions/l2g3h4i5j6k7_add_input_task_table.py`
+- `backend/app/alembic/versions/u1p2q3r4s5t6_add_session_state_and_task_feedback.py`
 
 **Frontend - Routes:**
 - `frontend/src/routes/_layout/tasks.tsx`
@@ -393,6 +568,10 @@ Agents can create tasks via the `create_agent_task` tool in two modes:
 - `frontend/src/components/Tasks/CreateTaskDialog.tsx`
 - `frontend/src/components/Tasks/RefinementChat.tsx`
 - `frontend/src/components/Tasks/TaskTodoProgress.tsx`
+- `frontend/src/components/Chat/SubTasksPanel.tsx` (sub-tasks overlay)
+- `frontend/src/components/Chat/ChatHeader.tsx` (sub-tasks badge)
+- `frontend/src/components/Chat/MessageBubble.tsx` (task feedback rendering)
+- `frontend/src/components/Agents/AgentHandovers.tsx` (auto-feedback toggle)
 - `frontend/src/components/Sidebar/AppSidebar.tsx`
 
 **Frontend - Client (auto-generated):**
@@ -401,9 +580,25 @@ Agents can create tasks via the `create_agent_task` tool in two modes:
 
 ---
 
-**Document Version:** 2.5
-**Last Updated:** 2026-01-18
+**Document Version:** 2.6
+**Last Updated:** 2026-01-24
 **Status:** Implementation Complete
+
+**Changes in v2.6:**
+- Added session state management: agents can declare outcomes via `update_session_state` tool
+- Added `result_state`/`result_summary` fields to Session model
+- Added `auto_feedback`/`feedback_delivered` fields to InputTask model
+- Added `auto_feedback` field to AgentHandoverConfig model
+- Added `SESSION_STATE_UPDATED` event type with handlers in ActivityService and InputTaskService
+- Added bi-directional agent communication: `deliver_feedback_to_source()` sends messages to source session
+- Added `respond_to_task` agent-env tool for source agent replies to sub-task clarifications
+- Added `POST /agents/sessions/update-state` and `POST /agents/tasks/respond` endpoints
+- Added `GET /tasks/by-source-session/{session_id}` endpoint for SubTasksPanel
+- Added SubTasksPanel frontend component with real-time state updates
+- Added ChatHeader sub-tasks badge, MessageBubble task feedback rendering
+- Added auto-feedback toggle in AgentHandovers UI
+- Added session state reporting prompt to all conversation-mode agents
+- Migration: `u1p2q3r4s5t6_add_session_state_and_task_feedback.py`
 
 **Changes in v2.5:**
 - Added inbox task flow: agents can now create tasks without specifying target agent

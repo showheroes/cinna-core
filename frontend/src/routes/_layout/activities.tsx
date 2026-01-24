@@ -8,7 +8,7 @@ import PendingItems from "@/components/Pending/PendingItems"
 import { usePageHeader } from "@/routes/_layout"
 import { getColorPreset } from "@/utils/colorPresets"
 import { RelativeTime } from "@/components/Common/RelativeTime"
-import { Bell, CheckCircle2, AlertCircle, FileText, MessageCircle, AlertOctagon, Loader2, EllipsisVertical, Trash2 } from "lucide-react"
+import { Bell, CheckCircle2, AlertCircle, FileText, MessageCircle, AlertOctagon, Loader2, EllipsisVertical, Trash2, HelpCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 import useWorkspace from "@/hooks/useWorkspace"
@@ -207,6 +207,8 @@ function ActivitiesList() {
         return <CheckCircle2 className="h-4 w-4" />
       case "questions_asked":
         return <MessageCircle className="h-4 w-4" />
+      case "session_feedback_required":
+        return <HelpCircle className="h-4 w-4" />
       case "error_occurred":
         return <AlertOctagon className="h-4 w-4" />
       case "file_created":
