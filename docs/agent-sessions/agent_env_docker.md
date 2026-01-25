@@ -314,6 +314,15 @@ The environment lifecycle uses standard Docker operations:
 
 This is critical for cloned agents with shared AI credentials - ensures the clone always uses the owner's shared credentials, not the recipient's own credentials.
 
+**Anthropic Credential Type Detection**:
+When Anthropic credentials are resolved, the system auto-detects the credential type by prefix:
+- `sk-ant-api*` → Sets `ANTHROPIC_API_KEY` environment variable
+- `sk-ant-oat*` → Sets `CLAUDE_CODE_OAUTH_TOKEN` environment variable
+
+Both variables are defined in the generated `.env` file, but only one is set based on the credential type. The unused variable is left empty with a comment. This allows the Claude Code SDK to automatically use the correct authentication method.
+
+**Reference**: `backend/app/services/environment_lifecycle.py:1293-1344` - `_generate_env_file()` method
+
 **Optimization**: Restarting an existing stopped container skips package installation (step 6), making restarts much faster.
 
 **Note**: Core files are both baked into image AND volume-mounted for easier development. Production could use image-only.

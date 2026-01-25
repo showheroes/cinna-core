@@ -150,3 +150,38 @@ def verify_password_reset_token(token: str) -> str | None:
         return str(decoded_token["sub"])
     except InvalidTokenError:
         return None
+
+
+def detect_anthropic_credential_type(api_key: str) -> tuple[str, str]:
+    """
+    Detect the type of Anthropic credential based on its prefix.
+
+    Args:
+        api_key: The Anthropic API key or OAuth token
+
+    Returns:
+        Tuple of (env_var_name, key_type_description)
+        - sk-ant-oat* → ("CLAUDE_CODE_OAUTH_TOKEN", "OAuth Token")
+        - sk-ant-api* → ("ANTHROPIC_API_KEY", "API Key")
+        - other → ("ANTHROPIC_API_KEY", "API Key (Unknown Format)")
+
+    Examples:
+        >>> detect_anthropic_credential_type("sk-ant-oat01-abc123")
+        ("CLAUDE_CODE_OAUTH_TOKEN", "OAuth Token")
+
+        >>> detect_anthropic_credential_type("sk-ant-api03-xyz789")
+        ("ANTHROPIC_API_KEY", "API Key")
+    """
+    if not api_key:
+        return ("ANTHROPIC_API_KEY", "API Key (Empty)")
+
+    # OAuth tokens start with sk-ant-oat
+    if api_key.startswith("sk-ant-oat"):
+        return ("CLAUDE_CODE_OAUTH_TOKEN", "OAuth Token")
+
+    # API keys start with sk-ant-api
+    if api_key.startswith("sk-ant-api"):
+        return ("ANTHROPIC_API_KEY", "API Key")
+
+    # Unknown format defaults to API key
+    return ("ANTHROPIC_API_KEY", "API Key (Unknown Format)")

@@ -384,6 +384,7 @@ export type AgentUpdate = {
 export type AICredentialCreate = {
     name: string;
     type: AICredentialType;
+    expiry_notification_date?: (string | null);
     api_key: string;
     base_url?: (string | null);
     model?: (string | null);
@@ -395,6 +396,7 @@ export type AICredentialCreate = {
 export type AICredentialPublic = {
     name: string;
     type: AICredentialType;
+    expiry_notification_date?: (string | null);
     id: string;
     is_default: boolean;
     has_api_key?: boolean;
@@ -441,6 +443,7 @@ export type AICredentialUpdate = {
     api_key?: (string | null);
     base_url?: (string | null);
     model?: (string | null);
+    expiry_notification_date?: (string | null);
 };
 
 /**

@@ -406,11 +406,16 @@ Events: {
 ### Environment Variables
 
 **Required**:
-- `ANTHROPIC_API_KEY`: API key for Claude SDK (fetched from user AI credentials)
 - `CLAUDE_CODE_WORKSPACE`: Path to workspace (`/app/workspace`)
 - `ENV_ID`: Environment UUID
 - `AGENT_ID`: Agent UUID
 - `AGENT_AUTH_TOKEN`: JWT bearer token for backend API authentication (10-year expiration)
+
+**Anthropic Credentials** (one of these, auto-detected):
+- `ANTHROPIC_API_KEY`: Traditional API key (prefix: `sk-ant-api*`)
+- `CLAUDE_CODE_OAUTH_TOKEN`: OAuth token (prefix: `sk-ant-oat*`)
+
+The system auto-detects credential type by prefix and sets the appropriate variable. Only one is set per environment based on the user's credential type.
 
 **SDK Adapter Configuration**:
 - `SDK_ADAPTER_BUILDING`: Adapter ID for building mode (default: `claude-code/anthropic`)
@@ -429,7 +434,8 @@ Events: {
 **Configuration File Management**:
 - `.env` and `docker-compose.yml` are regenerated on every `rebuild` and `start` operation
 - Fresh JWT tokens generated automatically to replace expired or invalid tokens
-- `ANTHROPIC_API_KEY` always fetched from user settings via `crud.get_user_ai_credentials()`
+- Anthropic credentials (API key or OAuth token) fetched from user AI credentials and auto-detected
+- Credential type determined by prefix: `sk-ant-api*` → `ANTHROPIC_API_KEY`, `sk-ant-oat*` → `CLAUDE_CODE_OAUTH_TOKEN`
 - Configuration updates handled by `EnvironmentLifecycleManager._update_environment_config()`
 
 ### File Locations

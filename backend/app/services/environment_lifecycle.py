@@ -15,6 +15,7 @@ from app.models import User
 from app.core.config import settings
 from app.core import security
 import app.crud as crud
+from app.utils import detect_anthropic_credential_type
 from .adapters.base import EnvironmentAdapter, EnvInitConfig
 from .adapters.docker_adapter import DockerEnvironmentAdapter
 
@@ -1289,8 +1290,23 @@ class EnvironmentLifecycleManager:
         agent_personal_database_url = ''  # To be implemented
         agent_container_log_level = 'INFO'
 
-        # Only include ANTHROPIC_API_KEY if Anthropic SDK is used
-        anthropic_env_line = f"ANTHROPIC_API_KEY={anthropic_api_key or ''}" if uses_anthropic else "# ANTHROPIC_API_KEY not used (MiniMax SDK configured)"
+        # Generate Anthropic credential environment variables based on credential type
+        if uses_anthropic and anthropic_api_key:
+            env_var_name, key_type = detect_anthropic_credential_type(anthropic_api_key)
+            logger.info(f"Detected Anthropic credential: {key_type} -> {env_var_name}")
+
+            if env_var_name == "ANTHROPIC_API_KEY":
+                anthropic_api_key_line = f"ANTHROPIC_API_KEY={anthropic_api_key}"
+                claude_code_oauth_token_line = "# CLAUDE_CODE_OAUTH_TOKEN not set"
+            else:  # CLAUDE_CODE_OAUTH_TOKEN
+                anthropic_api_key_line = "# ANTHROPIC_API_KEY not set"
+                claude_code_oauth_token_line = f"CLAUDE_CODE_OAUTH_TOKEN={anthropic_api_key}"
+        elif uses_anthropic:
+            anthropic_api_key_line = "ANTHROPIC_API_KEY="
+            claude_code_oauth_token_line = "# CLAUDE_CODE_OAUTH_TOKEN not set"
+        else:
+            anthropic_api_key_line = "# ANTHROPIC_API_KEY not used (other SDK configured)"
+            claude_code_oauth_token_line = "# CLAUDE_CODE_OAUTH_TOKEN not used (other SDK configured)"
 
         env_content = f"""# Environment Identification
 ENV_ID={environment.id}
@@ -1324,7 +1340,8 @@ CLAUDE_CODE_WORKSPACE=/app/app
 CLAUDE_CODE_PERMISSION_MODE=acceptEdits
 
 # AI Service Credentials (passed to container)
-{anthropic_env_line}
+{anthropic_api_key_line}
+{claude_code_oauth_token_line}
 
 # SDK Adapter Configuration
 # These variables tell the agent-env which adapter to use for each mode

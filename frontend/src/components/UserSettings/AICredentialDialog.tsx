@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Loader2 } from "lucide-react"
+import { Loader2, Info } from "lucide-react"
 
 import { AiCredentialsService, AICredentialPublic, AICredentialType } from "@/client"
+import { AnthropicCredentialsModal } from "./AnthropicCredentialsModal"
 import {
   Dialog,
   DialogContent,
@@ -53,6 +54,8 @@ export function AICredentialDialog({
   const [baseUrl, setBaseUrl] = useState("")
   const [model, setModel] = useState("")
   const [setAsDefault, setSetAsDefault] = useState(false)
+  const [expiryNotificationDate, setExpiryNotificationDate] = useState("")
+  const [showInstructionsModal, setShowInstructionsModal] = useState(false)
 
   const isEditing = !!credential
 
@@ -67,6 +70,12 @@ export function AICredentialDialog({
         setBaseUrl(credential.base_url || "")
         setModel(credential.model || "")
         setSetAsDefault(credential.is_default)
+        // Format date for input (YYYY-MM-DD)
+        setExpiryNotificationDate(
+          credential.expiry_notification_date
+            ? new Date(credential.expiry_notification_date).toISOString().split('T')[0]
+            : ""
+        )
       } else {
         // Creating new credential
         setName("")
@@ -75,9 +84,21 @@ export function AICredentialDialog({
         setBaseUrl("")
         setModel("")
         setSetAsDefault(false)
+        setExpiryNotificationDate("")
       }
     }
   }, [open, credential])
+
+  // Auto-set expiry date when OAuth token is entered
+  useEffect(() => {
+    if (type === "anthropic" && apiKey && apiKey.startsWith("sk-ant-oat")) {
+      // Detected OAuth token - auto-set expiry to 11 months from now
+      const elevenMonthsFromNow = new Date()
+      elevenMonthsFromNow.setDate(elevenMonthsFromNow.getDate() + 335) // ~11 months
+      const formattedDate = elevenMonthsFromNow.toISOString().split('T')[0]
+      setExpiryNotificationDate(formattedDate)
+    }
+  }, [apiKey, type])
 
   // Create mutation
   const createMutation = useMutation({
@@ -89,6 +110,7 @@ export function AICredentialDialog({
           api_key: apiKey,
           base_url: type === "openai_compatible" ? baseUrl : undefined,
           model: type === "openai_compatible" ? model : undefined,
+          expiry_notification_date: expiryNotificationDate ? new Date(expiryNotificationDate).toISOString() : undefined,
         },
       })
       // If set as default, make another call to set it as default
@@ -129,6 +151,16 @@ export function AICredentialDialog({
         if (model !== credential?.model) {
           updatePayload.model = model || null
         }
+      }
+
+      // Check if expiry_notification_date changed
+      const existingDate = credential?.expiry_notification_date
+        ? new Date(credential.expiry_notification_date).toISOString().split('T')[0]
+        : ""
+      if (expiryNotificationDate !== existingDate) {
+        updatePayload.expiry_notification_date = expiryNotificationDate
+          ? new Date(expiryNotificationDate).toISOString()
+          : null
       }
 
       // Only call update if there are changes
@@ -173,6 +205,7 @@ export function AICredentialDialog({
     (type !== "openai_compatible" || (baseUrl.trim() !== "" && model.trim() !== ""))
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
@@ -220,6 +253,24 @@ export function AICredentialDialog({
             </Select>
           </div>
 
+          {/* Anthropic Instructions Banner */}
+          {type === "anthropic" && (
+            <div className="flex items-center gap-2 p-3 rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30">
+              <Info className="h-4 w-4 text-violet-600 dark:text-violet-400 flex-shrink-0" />
+              <p className="text-sm text-violet-700 dark:text-violet-300 flex-1">
+                Anthropic supports API Keys (sk-ant-api...) and OAuth Tokens (sk-ant-oat...)
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowInstructionsModal(true)}
+                className="text-violet-600 hover:text-violet-700 dark:text-violet-400"
+              >
+                Instructions
+              </Button>
+            </div>
+          )}
+
           {/* API Key */}
           <div className="space-y-2">
             <Label htmlFor="credential-api-key">
@@ -232,6 +283,24 @@ export function AICredentialDialog({
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
+          </div>
+
+          {/* Expiry Notification Date */}
+          <div className="space-y-2">
+            <Label htmlFor="credential-expiry">
+              Expiry Notification Date (Optional)
+            </Label>
+            <Input
+              id="credential-expiry"
+              type="date"
+              value={expiryNotificationDate}
+              onChange={(e) => setExpiryNotificationDate(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              {type === "anthropic"
+                ? "Auto-fills to 11 months from now when you enter an OAuth token (sk-ant-oat...). You can adjust this date."
+                : "Set a date to receive a reminder before this credential expires"}
+            </p>
           </div>
 
           {/* OpenAI Compatible specific fields */}
@@ -307,5 +376,12 @@ export function AICredentialDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Anthropic Instructions Modal */}
+    <AnthropicCredentialsModal
+      open={showInstructionsModal}
+      onOpenChange={setShowInstructionsModal}
+    />
+    </>
   )
 }

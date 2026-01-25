@@ -22,6 +22,7 @@ class AICredentialBase(SQLModel):
     """Base properties for AI credentials"""
     name: str = Field(min_length=1, max_length=255)
     type: AICredentialType = Field(..., sa_type=sa.String(50))
+    expiry_notification_date: datetime | None = Field(default=None)
 
 
 # Properties to receive on creation
@@ -41,6 +42,7 @@ class AICredentialUpdate(SQLModel):
     # Only for openai_compatible type
     base_url: str | None = Field(default=None, max_length=500)
     model: str | None = Field(default=None, max_length=255)
+    expiry_notification_date: datetime | None = Field(default=None)
 
 
 # Database model
@@ -59,6 +61,7 @@ class AICredential(AICredentialBase, table=True):
     # Encrypted JSON: {api_key, base_url?, model?}
     encrypted_data: str = Field(sa_column=Column(Text, nullable=False))
     is_default: bool = Field(default=False)
+    expiry_notification_date: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -75,6 +78,7 @@ class AICredentialPublic(AICredentialBase):
     # Safe to expose for openai_compatible
     base_url: str | None = None
     model: str | None = None
+    expiry_notification_date: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

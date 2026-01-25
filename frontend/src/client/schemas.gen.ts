@@ -11,6 +11,18 @@ export const AICredentialCreateSchema = {
         type: {
             '$ref': '#/components/schemas/AICredentialType'
         },
+        expiry_notification_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expiry Notification Date'
+        },
         api_key: {
             type: 'string',
             minLength: 1,
@@ -57,6 +69,18 @@ export const AICredentialPublicSchema = {
         },
         type: {
             '$ref': '#/components/schemas/AICredentialType'
+        },
+        expiry_notification_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expiry Notification Date'
         },
         id: {
             type: 'string',
@@ -217,6 +241,18 @@ export const AICredentialUpdateSchema = {
                 }
             ],
             title: 'Model'
+        },
+        expiry_notification_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expiry Notification Date'
         }
     },
     type: 'object',

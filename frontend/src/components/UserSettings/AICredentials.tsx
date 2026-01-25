@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Trash2, AlertCircle, MessageCircle, Wrench, Plus, Pencil, Star, Key } from "lucide-react"
+import { Trash2, AlertCircle, MessageCircle, Wrench, Plus, Pencil, Star, Key, Calendar } from "lucide-react"
 import { UsersService, AiCredentialsService, AICredentialPublic, AICredentialType } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -43,6 +43,49 @@ function getSDKDisplayName(sdkId: string | null | undefined): string {
 
 function getTypeDisplayName(type: AICredentialType): string {
   return TYPE_DISPLAY_NAMES[type] || type
+}
+
+// Format expiry date and determine badge style
+function getExpiryBadgeProps(expiryDate: string | null | undefined): {
+  text: string
+  className: string
+  tooltip: string
+} | null {
+  if (!expiryDate) return null
+
+  const expiry = new Date(expiryDate)
+  const now = new Date()
+  const daysUntilExpiry = Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+
+  // Format date as MMM DD, YYYY
+  const formattedDate = expiry.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  })
+
+  let className = ""
+  let tooltip = ""
+
+  if (daysUntilExpiry < 0) {
+    // Expired
+    className = "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
+    tooltip = `Expired on ${formattedDate}`
+  } else if (daysUntilExpiry <= 30) {
+    // Expiring soon (30 days or less)
+    className = "bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800"
+    tooltip = `Expires in ${daysUntilExpiry} days (${formattedDate})`
+  } else if (daysUntilExpiry <= 60) {
+    // Expiring medium term (31-60 days)
+    className = "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+    tooltip = `Expires in ${daysUntilExpiry} days (${formattedDate})`
+  } else {
+    // Not expiring soon (>60 days)
+    className = "bg-muted text-muted-foreground border-border"
+    tooltip = `Expires on ${formattedDate} (in ${daysUntilExpiry} days)`
+  }
+
+  return { text: formattedDate, className, tooltip }
 }
 
 export function AICredentialsSettings() {
@@ -188,7 +231,7 @@ export function AICredentialsSettings() {
                     key={cred.id}
                     className="flex items-center justify-between px-3 py-2 border rounded-lg"
                   >
-                    {/* Left: name and default badge */}
+                    {/* Left: name, default badge, and expiry badge */}
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="font-medium text-sm truncate">{cred.name}</span>
                       {cred.is_default && (
@@ -203,6 +246,25 @@ export function AICredentialsSettings() {
                           </Tooltip>
                         </TooltipProvider>
                       )}
+                      {(() => {
+                        const expiryBadge = getExpiryBadgeProps(cred.expiry_notification_date)
+                        if (!expiryBadge) return null
+                        return (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs shrink-0 ${expiryBadge.className}`}>
+                                  <Calendar className="h-3 w-3" />
+                                  <span>{expiryBadge.text}</span>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {expiryBadge.tooltip}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )
+                      })()}
                     </div>
                     {/* Right: type info and actions */}
                     <div className="flex items-center gap-2 shrink-0">

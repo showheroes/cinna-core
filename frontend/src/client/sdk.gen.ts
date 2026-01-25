@@ -3954,7 +3954,7 @@ export class TasksService {
      * Execute a task by creating a session and sending the task description as the initial message.
      *
      * Requires a selected_agent_id to be set on the task.
-     * Returns attached file_ids so the frontend can pass them to the session.
+     * The backend handles sending the initial message to the session.
      * @param data The data for the request.
      * @param data.id
      * @param data.requestBody

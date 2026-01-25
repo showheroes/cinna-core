@@ -6,12 +6,13 @@ Handles CRUD operations for named AI credentials and syncing defaults to User pr
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.core.security import encrypt_field, decrypt_field
+from app.utils import detect_anthropic_credential_type
 from app.models.ai_credential import (
     AICredential,
     AICredentialCreate,
@@ -72,6 +73,15 @@ class AICredentialsService:
         )
         encrypted_data = encrypt_field(json.dumps(credential_data.model_dump()))
 
+        # Auto-set expiry notification date for OAuth tokens (11 months from now)
+        expiry_date = data.expiry_notification_date
+        if data.type == AICredentialType.ANTHROPIC and not expiry_date:
+            env_var_name, key_type = detect_anthropic_credential_type(data.api_key)
+            if env_var_name == "CLAUDE_CODE_OAUTH_TOKEN":
+                # OAuth token - set expiry to 11 months from now
+                expiry_date = datetime.now(timezone.utc) + timedelta(days=335)  # ~11 months
+                logger.info(f"Auto-set OAuth token expiry notification to {expiry_date.date()}")
+
         # Create credential
         now = datetime.now(timezone.utc)
         credential = AICredential(
@@ -80,6 +90,7 @@ class AICredentialsService:
             type=data.type,
             encrypted_data=encrypted_data,
             is_default=False,
+            expiry_notification_date=expiry_date,
             created_at=now,
             updated_at=now,
         )
@@ -107,10 +118,22 @@ class AICredentialsService:
         if data.name is not None:
             credential.name = data.name
 
+        # Update expiry notification date if provided
+        if data.expiry_notification_date is not None:
+            credential.expiry_notification_date = data.expiry_notification_date
+
         # Update credential data fields
         new_api_key = data.api_key if data.api_key is not None else existing_data.api_key
         new_base_url = data.base_url if data.base_url is not None else existing_data.base_url
         new_model = data.model if data.model is not None else existing_data.model
+
+        # Auto-set expiry notification date when API key is updated to an OAuth token
+        if data.api_key is not None and credential.type == AICredentialType.ANTHROPIC and data.expiry_notification_date is None:
+            env_var_name, key_type = detect_anthropic_credential_type(new_api_key)
+            if env_var_name == "CLAUDE_CODE_OAUTH_TOKEN":
+                # OAuth token - set expiry to 11 months from now
+                credential.expiry_notification_date = datetime.now(timezone.utc) + timedelta(days=335)
+                logger.info(f"Auto-set OAuth token expiry notification to {credential.expiry_notification_date.date()} (key updated)")
 
         # Validate updated data
         self._validate_credential_data(credential.type, new_api_key, new_base_url, new_model)
@@ -220,6 +243,7 @@ class AICredentialsService:
             has_api_key=bool(data.api_key),
             base_url=data.base_url,
             model=data.model,
+            expiry_notification_date=credential.expiry_notification_date,
             created_at=credential.created_at,
             updated_at=credential.updated_at,
         )
