@@ -8,9 +8,10 @@ import useCustomToast from "@/hooks/useCustomToast"
 
 interface ApiKeyOnboardingProps {
   onComplete: () => void
+  onSkip: () => void
 }
 
-export function ApiKeyOnboarding({ onComplete }: ApiKeyOnboardingProps) {
+export function ApiKeyOnboarding({ onComplete, onSkip }: ApiKeyOnboardingProps) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const [apiKey, setApiKey] = useState("")
@@ -155,6 +156,18 @@ export function ApiKeyOnboarding({ onComplete }: ApiKeyOnboardingProps) {
             Or ask your administrator for access credentials
           </p>
         </div>
+
+        {/* Skip Button */}
+        <button
+          onClick={() => {
+            localStorage.setItem("onboardingSkipped", "true")
+            onSkip()
+          }}
+          disabled={updateMutation.isPending || saveSuccess}
+          className="mt-8 text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors disabled:pointer-events-none"
+        >
+          Skip for now
+        </button>
       </div>
     </div>
   )

@@ -147,7 +147,7 @@ class InputTasksPublicExtended(SQLModel):
 # Action request/response schemas
 class RefineTaskRequest(SQLModel):
     """Request to refine a task with AI assistance"""
-    user_comment: str = Field(min_length=1, max_length=2000)
+    user_comment: str = Field(min_length=1, max_length=8000)
     user_selected_text: str | None = Field(default=None, max_length=5000)
 
 

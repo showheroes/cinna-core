@@ -51,6 +51,7 @@ export const Route = createFileRoute("/_layout/")({
 })
 
 const NEW_AGENT_ID = "__new_agent__"
+const MAX_MESSAGE_LENGTH = 8000
 
 // SDK options for new agent configuration
 const SDK_OPTIONS = [
@@ -72,6 +73,7 @@ function Dashboard() {
   const [showGettingStarted, setShowGettingStarted] = useState(false)
   const [isHoveringInput, setIsHoveringInput] = useState(false)
   const [showSdkConfig, setShowSdkConfig] = useState(false)
+  const [inputError, setInputError] = useState<string | null>(null)
   const [sdkConversation, setSdkConversation] = useState("claude-code/anthropic")
   const [sdkBuilding, setSdkBuilding] = useState("claude-code/anthropic")
 
@@ -248,6 +250,8 @@ function Dashboard() {
     } else {
       setMessage("")
     }
+    // Clear any validation errors when auto-populating
+    setInputError(null)
   }, [selectedAgentId, agentsWithActiveEnv, inputMode])
 
   // Handle input text when switching between conversation and building modes
@@ -278,6 +282,12 @@ function Dashboard() {
       return
     }
 
+    // Validate message length
+    if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
+      setInputError(`Message exceeds maximum length of ${MAX_MESSAGE_LENGTH.toLocaleString()} characters (${trimmedMessage.length.toLocaleString()} / ${MAX_MESSAGE_LENGTH.toLocaleString()})`)
+      return
+    }
+
     if (!selectedAgentId) {
       showErrorToast("Please select an agent")
       return
@@ -285,6 +295,7 @@ function Dashboard() {
 
     // Handle "New Agent" flow
     if (selectedAgentId === NEW_AGENT_ID) {
+      setInputError(null)
       navigate({
         to: "/agent/creating",
         search: {
@@ -292,8 +303,12 @@ function Dashboard() {
           mode,
           sdkConversation,
           sdkBuilding,
+          fileIds: attachedFiles.length > 0 ? attachedFiles.map(f => f.id).join(',') : undefined,
+          fileObjects: attachedFiles.length > 0 ? JSON.stringify(attachedFiles) : undefined,
         },
       })
+      // Clear attached files after navigation (they'll be handled by the session)
+      setAttachedFiles([])
       return
     }
 
@@ -361,6 +376,12 @@ function Dashboard() {
     if (inputMode === "automatic") {
       setInputMode("manual")
     }
+    // Clear error when message is within limit
+    if (value.length <= MAX_MESSAGE_LENGTH) {
+      setInputError(null)
+    } else {
+      setInputError(`Message exceeds maximum length of ${MAX_MESSAGE_LENGTH.toLocaleString()} characters`)
+    }
   }
 
   const handleAgentClick = (agentId: string) => {
@@ -372,6 +393,7 @@ function Dashboard() {
       setSelectedAgentId(NEW_AGENT_ID)
       setInputMode("automatic")
       setMessage("")
+      setInputError(null)
       setMode("building")
       return
     }
@@ -410,13 +432,17 @@ function Dashboard() {
     return <PendingItems />
   }
 
-  // Show onboarding if user doesn't have Anthropic API key
-  if (!hasAnthropicKey) {
+  // Show onboarding if user doesn't have Anthropic API key and hasn't skipped
+  const onboardingSkipped = localStorage.getItem("onboardingSkipped") === "true"
+  if (!hasAnthropicKey && !onboardingSkipped) {
     return (
       <ApiKeyOnboarding
         onComplete={() => {
           queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
           setShowGettingStarted(true)
+        }}
+        onSkip={() => {
+          queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
         }}
       />
     )
@@ -562,19 +588,33 @@ function Dashboard() {
             </div>
 
             <div className="flex items-center justify-between">
-              {/* Footer: Show attached files or rotating hints */}
-              {attachedFiles.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {attachedFiles.map(file => (
-                    <FileBadge
-                      key={file.id}
-                      file={file}
-                      onRemove={() => handleFileRemove(file.id)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <RotatingHints onClick={() => setShowGettingStarted(true)} />
+              {/* Footer: Show error, attached files, or rotating hints */}
+              <div className="flex-1 min-w-0">
+                {inputError ? (
+                  <div className="flex items-center gap-2 text-destructive text-sm">
+                    <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                    <span>{inputError}</span>
+                  </div>
+                ) : attachedFiles.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {attachedFiles.map(file => (
+                      <FileBadge
+                        key={file.id}
+                        file={file}
+                        onRemove={() => handleFileRemove(file.id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <RotatingHints onClick={() => setShowGettingStarted(true)} />
+                )}
+              </div>
+
+              {/* Character counter - show when approaching limit */}
+              {message.length > MAX_MESSAGE_LENGTH * 0.8 && (
+                <span className={`text-xs mr-3 ${message.length > MAX_MESSAGE_LENGTH ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                  {message.length.toLocaleString()} / {MAX_MESSAGE_LENGTH.toLocaleString()}
+                </span>
               )}
 
               {/* Mode Switch or SDK Config Cog (for New Agent) */}
@@ -702,7 +742,7 @@ function Dashboard() {
 
                 <Button
                   onClick={handleSend}
-                  disabled={createMutation.isPending || (!message.trim() && attachedFiles.length === 0)}
+                  disabled={createMutation.isPending || (!message.trim() && attachedFiles.length === 0) || message.length > MAX_MESSAGE_LENGTH}
                   size="icon"
                   className="h-9 w-9"
                 >

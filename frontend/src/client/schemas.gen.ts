@@ -1360,7 +1360,7 @@ export const AgentCreateFlowRequestSchema = {
     properties: {
         description: {
             type: 'string',
-            maxLength: 2000,
+            maxLength: 8000,
             minLength: 1,
             title: 'Description'
         },
@@ -6102,7 +6102,7 @@ export const RefineTaskRequestSchema = {
     properties: {
         user_comment: {
             type: 'string',
-            maxLength: 2000,
+            maxLength: 8000,
             minLength: 1,
             title: 'User Comment'
         },

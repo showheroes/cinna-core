@@ -10,6 +10,8 @@ type SearchParams = {
   mode: "conversation" | "building"
   sdkConversation?: string
   sdkBuilding?: string
+  fileIds?: string
+  fileObjects?: string
 }
 
 export const Route = createFileRoute("/_layout/agent/creating")({
@@ -20,6 +22,8 @@ export const Route = createFileRoute("/_layout/agent/creating")({
       mode: (search.mode as "conversation" | "building") || "building",
       sdkConversation: (search.sdkConversation as string) || undefined,
       sdkBuilding: (search.sdkBuilding as string) || undefined,
+      fileIds: (search.fileIds as string) || undefined,
+      fileObjects: (search.fileObjects as string) || undefined,
     }
   },
 })
@@ -33,7 +37,7 @@ type Step = {
 
 function AgentCreating() {
   const navigate = useNavigate()
-  const { description, mode, sdkConversation, sdkBuilding } = Route.useSearch()
+  const { description, mode, sdkConversation, sdkBuilding, fileIds, fileObjects } = Route.useSearch()
   const { activeWorkspaceId } = useWorkspace()
   const [steps, setSteps] = useState<Step[]>([
     { id: "create_agent", label: "Creating agent", status: "pending" },
@@ -115,7 +119,29 @@ function AgentCreating() {
         })
 
         if (!response.ok) {
-          throw new Error(`Failed to start agent creation: ${response.statusText}`)
+          // Try to parse error response body for validation errors (422)
+          let errorMessage = `Failed to start agent creation: ${response.statusText}`
+          try {
+            const errorBody = await response.json()
+            if (errorBody.detail) {
+              // FastAPI validation error format
+              if (Array.isArray(errorBody.detail)) {
+                // Pydantic validation errors
+                const messages = errorBody.detail.map((err: any) => {
+                  const field = err.loc?.slice(1).join('.') || 'input'
+                  return `${field}: ${err.msg}`
+                })
+                errorMessage = messages.join('; ')
+              } else if (typeof errorBody.detail === 'string') {
+                errorMessage = errorBody.detail
+              }
+            } else if (errorBody.message) {
+              errorMessage = errorBody.message
+            }
+          } catch {
+            // If we can't parse the body, use the status text
+          }
+          throw new Error(errorMessage)
         }
 
         // Read the stream
@@ -207,7 +233,7 @@ function AgentCreating() {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId },
-        search: { initialMessage: description, fileIds: undefined, fileObjects: undefined },
+        search: { initialMessage: description, fileIds, fileObjects },
       })
     } catch (err: any) {
       console.error("Error during session start:", err)
@@ -215,10 +241,10 @@ function AgentCreating() {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId },
-        search: { initialMessage: description, fileIds: undefined, fileObjects: undefined },
+        search: { initialMessage: description, fileIds, fileObjects },
       })
     }
-  }, [sessionId, agentId, selectedCredentialIds, navigate, description])
+  }, [sessionId, agentId, selectedCredentialIds, navigate, description, fileIds, fileObjects])
 
   // Handle post-environment-ready flow: create session -> countdown
   useEffect(() => {
