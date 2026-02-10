@@ -14,6 +14,8 @@ Enable users to manage multiple named AI credentials (API keys) for different SD
 - Owner-provided credentials during agent sharing
 - AI credentials step in accept share wizard
 - Clone credential setup with sharing support
+- **Affected environments visibility**: Automatic detection of environments using a credential
+- **Batch rebuild operations**: Easy rebuild of multiple environments after credential updates
 
 ## Architecture
 
@@ -87,6 +89,7 @@ Environment creation → Reads from user profile (backward compatible)
 | `PATCH` | `/api/v1/ai-credentials/{credential_id}` | Update credential |
 | `DELETE` | `/api/v1/ai-credentials/{credential_id}` | Delete credential |
 | `POST` | `/api/v1/ai-credentials/{credential_id}/set-default` | Set as default, sync to user profile |
+| `GET` | `/api/v1/ai-credentials/{credential_id}/affected-environments` | Get environments using this credential |
 
 **Router Registration:** `backend/app/api/main.py`
 
@@ -851,8 +854,79 @@ if uses_anthropic and anthropic_api_key:
 8. Logs: "Auto-set OAuth token expiry notification to 2026-12-26 (key updated)"
 ```
 
+## Phase 4: Affected Environments Widget
+
+When AI credentials are updated, environments using those credentials need to be rebuilt to apply the changes. The **Affected Environments Widget** provides visibility and control for this process.
+
+### Overview
+
+**Widget:** Automatic dialog that appears after credential update or set-as-default operations
+
+**Purpose:** Shows which environments use a credential and enables batch or individual rebuilds
+
+**Key Features:**
+- Automatic detection of affected environments
+- All environments pre-selected by default for quick batch rebuild
+- Individual or batch rebuild operations
+- Background execution (dialog closable during rebuilds)
+- Shows credential usage (conversation, building, or both)
+- Displays shared users list
+- Preserves environment status (suspended stays suspended, running restarts)
+
+### Backend API
+
+**Endpoint:** `GET /api/v1/ai-credentials/{credential_id}/affected-environments`
+
+**Models:** `backend/app/models/ai_credential.py`
+- `AffectedEnvironmentPublic` - Environment details with usage info
+- `SharedUserPublic` - Users with access via shares
+- `AffectedEnvironmentsPublic` - Main response model
+
+**Service:** `backend/app/services/ai_credentials_service.py`
+- `get_affected_environments()` - Queries environments, determines usage type
+
+**Query Logic:**
+1. Verifies user access (ownership or share)
+2. Joins `AgentEnvironment`, `Agent`, `User` tables
+3. Filters by `conversation_ai_credential_id` OR `building_ai_credential_id`
+4. Determines usage: "conversation", "building", or "conversation & building"
+5. Queries `AICredentialShare` for shared users
+
+### Frontend Integration
+
+**Dialog Component:** `frontend/src/components/UserSettings/AffectedEnvironmentsDialog.tsx`
+
+**Triggered From:**
+- `AICredentialDialog.tsx` - After credential update succeeds
+- `AICredentials.tsx` - After set-default succeeds
+
+**User Actions:**
+1. Rebuild all (default: all pre-selected)
+2. Selective rebuild (uncheck some environments)
+3. Individual rebuild (per-environment button)
+4. Skip rebuilding (close dialog)
+
+**Rebuild Behavior:**
+- Uses existing `POST /api/v1/environments/{id}/rebuild` endpoint
+- Batch execution via `Promise.allSettled` (parallel)
+- Status preservation: suspended/stopped stay unchanged, running restarts
+- Background execution with WebSocket progress updates
+
+### Detailed Documentation
+
+**See:** `docs/agent-sessions/widgets/affected_environments_rebuild.md`
+
+Complete widget documentation including:
+- User experience flows
+- Layout structure
+- Security & access control
+- Performance characteristics
+- Error handling
+- Implementation scenarios
+
 ## Related Documentation
 
+- `docs/agent-sessions/widgets/affected_environments_rebuild.md` - Affected Environments Widget (detailed)
 - `docs/business-domain/shared_agents_management.md` - Agent sharing feature
 - `docs/agent-sessions/agent_env_docker.md` - Environment architecture
 - `docs/security_credentials_whitelist.md` - Credential encryption pattern
@@ -891,6 +965,7 @@ if uses_anthropic and anthropic_api_key:
 
 ---
 
-**Document Version:** 4.0
-**Last Updated:** 2026-01-25
-**Status:** Implemented (Phase 3 completed)
+**Document Version:** 5.0
+**Last Updated:** 2026-01-29
+**Status:** Implemented (Phase 4 completed - Affected Environments Widget)
+**Note:** Detailed widget documentation in `docs/agent-sessions/widgets/affected_environments_rebuild.md`

@@ -1080,6 +1080,86 @@ export const ActivityUpdateSchema = {
     title: 'ActivityUpdate'
 } as const;
 
+export const AffectedEnvironmentPublicSchema = {
+    properties: {
+        environment_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Environment Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        agent_name: {
+            type: 'string',
+            title: 'Agent Name'
+        },
+        environment_name: {
+            type: 'string',
+            title: 'Environment Name'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        usage: {
+            type: 'string',
+            title: 'Usage'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        owner_email: {
+            type: 'string',
+            title: 'Owner Email'
+        }
+    },
+    type: 'object',
+    required: ['environment_id', 'agent_id', 'agent_name', 'environment_name', 'status', 'usage', 'owner_id', 'owner_email'],
+    title: 'AffectedEnvironmentPublic',
+    description: 'Information about an environment affected by credential change'
+} as const;
+
+export const AffectedEnvironmentsPublicSchema = {
+    properties: {
+        credential_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Credential Id'
+        },
+        credential_name: {
+            type: 'string',
+            title: 'Credential Name'
+        },
+        environments: {
+            items: {
+                '$ref': '#/components/schemas/AffectedEnvironmentPublic'
+            },
+            type: 'array',
+            title: 'Environments'
+        },
+        shared_with_users: {
+            items: {
+                '$ref': '#/components/schemas/SharedUserPublic'
+            },
+            type: 'array',
+            title: 'Shared With Users'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['credential_id', 'credential_name', 'environments', 'shared_with_users', 'count'],
+    title: 'AffectedEnvironmentsPublic',
+    description: 'Response for affected environments query'
+} as const;
+
 export const AgentAccessTokenCreateSchema = {
     properties: {
         name: {
@@ -7039,6 +7119,29 @@ export const SharedCredentialsPublicSchema = {
     required: ['data', 'count'],
     title: 'SharedCredentialsPublic',
     description: 'Response model for list of credentials shared with current user.'
+} as const;
+
+export const SharedUserPublicSchema = {
+    properties: {
+        user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'User Id'
+        },
+        email: {
+            type: 'string',
+            title: 'Email'
+        },
+        shared_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Shared At'
+        }
+    },
+    type: 'object',
+    required: ['user_id', 'email', 'shared_at'],
+    title: 'SharedUserPublic',
+    description: 'User who has access to this credential via share'
 } as const;
 
 export const SourceStatusSchema = {

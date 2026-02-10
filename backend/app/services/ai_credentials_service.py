@@ -20,6 +20,9 @@ from app.models.ai_credential import (
     AICredentialData,
     AICredentialType,
     AICredentialPublic,
+    AffectedEnvironmentsPublic,
+    AffectedEnvironmentPublic,
+    SharedUserPublic,
 )
 from app.models.ai_credential_share import (
     AICredentialShare,
@@ -27,6 +30,8 @@ from app.models.ai_credential_share import (
     SharedAICredentialPublic,
 )
 from app.models.user import User, AIServiceCredentials, AIServiceCredentialsUpdate
+from app.models.environment import AgentEnvironment
+from app.models.agent import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +377,91 @@ class AICredentialsService:
         session.refresh(user)
 
         logger.info(f"Cleared {cred_type} from user profile after default deleted")
+
+    # ============= Affected Environments Query =============
+
+    def get_affected_environments(
+        self,
+        session: Session,
+        credential_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> AffectedEnvironmentsPublic:
+        """
+        Find all environments affected by this credential.
+
+        Returns environments that use this credential for conversation and/or building,
+        along with information about users who have access to the credential via shares.
+        """
+        # Verify user has access to credential (ownership or share)
+        if not self.can_access_credential(session, credential_id, user_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to access this credential"
+            )
+
+        # Get credential
+        credential = session.get(AICredential, credential_id)
+        if not credential:
+            raise HTTPException(status_code=404, detail="AI credential not found")
+
+        # Find environments using this credential
+        statement = (
+            select(AgentEnvironment, Agent, User)
+            .join(Agent, AgentEnvironment.agent_id == Agent.id)
+            .join(User, Agent.owner_id == User.id)
+            .where(
+                (AgentEnvironment.conversation_ai_credential_id == credential_id) |
+                (AgentEnvironment.building_ai_credential_id == credential_id)
+            )
+        )
+        results = session.exec(statement).all()
+
+        # Build affected environments list
+        environments = []
+        for env, agent, owner in results:
+            # Determine usage type
+            usage = []
+            if env.conversation_ai_credential_id == credential_id:
+                usage.append("conversation")
+            if env.building_ai_credential_id == credential_id:
+                usage.append("building")
+            usage_str = " & ".join(usage)
+
+            environments.append(AffectedEnvironmentPublic(
+                environment_id=env.id,
+                agent_id=agent.id,
+                agent_name=agent.name,
+                environment_name=env.instance_name,
+                status=env.status,
+                usage=usage_str,
+                owner_id=owner.id,
+                owner_email=owner.email,
+            ))
+
+        # Get shared users
+        statement_shares = (
+            select(AICredentialShare, User)
+            .join(User, AICredentialShare.shared_with_user_id == User.id)
+            .where(AICredentialShare.ai_credential_id == credential_id)
+        )
+        share_results = session.exec(statement_shares).all()
+
+        shared_users = [
+            SharedUserPublic(
+                user_id=user.id,
+                email=user.email,
+                shared_at=share.shared_at,
+            )
+            for share, user in share_results
+        ]
+
+        return AffectedEnvironmentsPublic(
+            credential_id=credential_id,
+            credential_name=credential.name,
+            environments=environments,
+            shared_with_users=shared_users,
+            count=len(environments),
+        )
 
     # ============= Sharing Methods =============
 

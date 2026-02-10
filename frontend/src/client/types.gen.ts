@@ -78,6 +78,31 @@ export type ActivityUpdate = {
     is_read?: (boolean | null);
 };
 
+/**
+ * Information about an environment affected by credential change
+ */
+export type AffectedEnvironmentPublic = {
+    environment_id: string;
+    agent_id: string;
+    agent_name: string;
+    environment_name: string;
+    status: string;
+    usage: string;
+    owner_id: string;
+    owner_email: string;
+};
+
+/**
+ * Response for affected environments query
+ */
+export type AffectedEnvironmentsPublic = {
+    credential_id: string;
+    credential_name: string;
+    environments: Array<AffectedEnvironmentPublic>;
+    shared_with_users: Array<SharedUserPublic>;
+    count: number;
+};
+
 export type AgentAccessTokenCreate = {
     name: string;
     mode?: AccessTokenMode;
@@ -1531,6 +1556,15 @@ export type SharedCredentialsPublic = {
 };
 
 /**
+ * User who has access to this credential via share
+ */
+export type SharedUserPublic = {
+    user_id: string;
+    email: string;
+    shared_at: string;
+};
+
+/**
  * Status of a knowledge source.
  */
 export type SourceStatus = 'pending' | 'connected' | 'error' | 'disconnected';
@@ -2196,6 +2230,12 @@ export type AiCredentialsSetAiCredentialDefaultData = {
 };
 
 export type AiCredentialsSetAiCredentialDefaultResponse = (AICredentialPublic);
+
+export type AiCredentialsGetAffectedEnvironmentsData = {
+    credentialId: string;
+};
+
+export type AiCredentialsGetAffectedEnvironmentsResponse = (AffectedEnvironmentsPublic);
 
 export type CredentialsShareCredentialData = {
     credentialId: string;

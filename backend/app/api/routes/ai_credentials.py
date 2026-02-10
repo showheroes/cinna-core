@@ -15,6 +15,7 @@ from app.models.ai_credential import (
     AICredentialUpdate,
     AICredentialPublic,
     AICredentialsPublic,
+    AffectedEnvironmentsPublic,
 )
 from app.services.ai_credentials_service import ai_credentials_service
 
@@ -91,3 +92,18 @@ def set_ai_credential_default(
     This also syncs the credential to the user's profile for backward compatibility.
     """
     return ai_credentials_service.set_default(session, credential_id, current_user.id)
+
+
+@router.get("/{credential_id}/affected-environments", response_model=AffectedEnvironmentsPublic)
+def get_affected_environments(
+    session: SessionDep,
+    current_user: CurrentUser,
+    credential_id: uuid.UUID
+) -> Any:
+    """
+    Get all agent-environments that use this AI credential.
+    Includes information about users with access via shares.
+    """
+    return ai_credentials_service.get_affected_environments(
+        session, credential_id, current_user.id
+    )

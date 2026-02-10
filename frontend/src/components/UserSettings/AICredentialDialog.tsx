@@ -4,6 +4,7 @@ import { Loader2, Info } from "lucide-react"
 
 import { AiCredentialsService, AICredentialPublic, AICredentialType } from "@/client"
 import { AnthropicCredentialsModal } from "./AnthropicCredentialsModal"
+import { AffectedEnvironmentsDialog } from "./AffectedEnvironmentsDialog"
 import {
   Dialog,
   DialogContent,
@@ -56,6 +57,10 @@ export function AICredentialDialog({
   const [setAsDefault, setSetAsDefault] = useState(false)
   const [expiryNotificationDate, setExpiryNotificationDate] = useState("")
   const [showInstructionsModal, setShowInstructionsModal] = useState(false)
+
+  // State for affected environments dialog
+  const [showAffectedDialog, setShowAffectedDialog] = useState(false)
+  const [updatedCredentialId, setUpdatedCredentialId] = useState<string | null>(null)
 
   const isEditing = !!credential
 
@@ -182,6 +187,13 @@ export function AICredentialDialog({
       queryClient.invalidateQueries({ queryKey: ["aiCredentialsList"] })
       queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
       showSuccessToast("AI credential updated successfully")
+
+      // Trigger affected environments dialog
+      if (credential?.id) {
+        setUpdatedCredentialId(credential.id)
+        setShowAffectedDialog(true)
+      }
+
       onOpenChange(false)
     },
     onError: (error: Error) => {
@@ -382,6 +394,16 @@ export function AICredentialDialog({
       open={showInstructionsModal}
       onOpenChange={setShowInstructionsModal}
     />
+
+    {/* Affected Environments Dialog */}
+    {updatedCredentialId && (
+      <AffectedEnvironmentsDialog
+        open={showAffectedDialog}
+        onOpenChange={setShowAffectedDialog}
+        credentialId={updatedCredentialId}
+        credentialName={credential?.name || ""}
+      />
+    )}
     </>
   )
 }

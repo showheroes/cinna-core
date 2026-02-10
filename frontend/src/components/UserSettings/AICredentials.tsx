@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/tooltip"
 import useCustomToast from "@/hooks/useCustomToast"
 import { AICredentialDialog } from "./AICredentialDialog"
+import { AffectedEnvironmentsDialog } from "./AffectedEnvironmentsDialog"
 
 // SDK options
 const SDK_OPTIONS = [
@@ -96,6 +97,11 @@ export function AICredentialsSettings() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingCredential, setEditingCredential] = useState<AICredentialPublic | null>(null)
 
+  // Affected environments dialog state
+  const [showAffectedDialog, setShowAffectedDialog] = useState(false)
+  const [affectedCredentialId, setAffectedCredentialId] = useState<string | null>(null)
+  const [affectedCredentialName, setAffectedCredentialName] = useState<string>("")
+
   // Get current status (for SDK preferences and has_* flags)
   const { data: status } = useQuery({
     queryKey: ["aiCredentialsStatus"],
@@ -124,12 +130,17 @@ export function AICredentialsSettings() {
 
   // Set default mutation
   const setDefaultMutation = useMutation({
-    mutationFn: (credentialId: string) =>
-      AiCredentialsService.setAiCredentialDefault({ credentialId }),
-    onSuccess: () => {
+    mutationFn: (data: { credentialId: string; credentialName: string }) =>
+      AiCredentialsService.setAiCredentialDefault({ credentialId: data.credentialId }),
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["aiCredentialsList"] })
       queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
       showSuccessToast("Default credential updated")
+
+      // Trigger affected environments dialog
+      setAffectedCredentialId(variables.credentialId)
+      setAffectedCredentialName(variables.credentialName)
+      setShowAffectedDialog(true)
     },
     onError: () => {
       showErrorToast("Failed to set default credential")
@@ -295,7 +306,7 @@ export function AICredentialsSettings() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7"
-                                onClick={() => setDefaultMutation.mutate(cred.id)}
+                                onClick={() => setDefaultMutation.mutate({ credentialId: cred.id, credentialName: cred.name })}
                                 disabled={setDefaultMutation.isPending}
                               >
                                 <Star className="h-3.5 w-3.5" />
@@ -434,6 +445,16 @@ export function AICredentialsSettings() {
         onOpenChange={setDialogOpen}
         credential={editingCredential}
       />
+
+      {/* Affected Environments Dialog */}
+      {affectedCredentialId && (
+        <AffectedEnvironmentsDialog
+          open={showAffectedDialog}
+          onOpenChange={setShowAffectedDialog}
+          credentialId={affectedCredentialId}
+          credentialName={affectedCredentialName}
+        />
+      )}
     </div>
   )
 }

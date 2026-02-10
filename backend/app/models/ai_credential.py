@@ -95,3 +95,32 @@ class AICredentialData(SQLModel):
     api_key: str
     base_url: str | None = None
     model: str | None = None
+
+
+# Affected environments query response models
+class AffectedEnvironmentPublic(SQLModel):
+    """Information about an environment affected by credential change"""
+    environment_id: uuid.UUID
+    agent_id: uuid.UUID
+    agent_name: str
+    environment_name: str
+    status: str
+    usage: str  # "conversation", "building", or "conversation & building"
+    owner_id: uuid.UUID
+    owner_email: str
+
+
+class SharedUserPublic(SQLModel):
+    """User who has access to this credential via share"""
+    user_id: uuid.UUID
+    email: str
+    shared_at: datetime
+
+
+class AffectedEnvironmentsPublic(SQLModel):
+    """Response for affected environments query"""
+    credential_id: uuid.UUID
+    credential_name: str
+    environments: list[AffectedEnvironmentPublic]
+    shared_with_users: list[SharedUserPublic]
+    count: int
