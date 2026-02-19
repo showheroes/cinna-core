@@ -243,7 +243,19 @@ See `Makefile` for: `make prestart`, `make migrate`, `make migration`, `make dev
 - **Wrong service names**: Check route `tags` parameter, service names auto-generated from tags
 
 ## Testing
-**Testing framework not configured yet - DO NOT RUN TESTS**
+
+Tests run inside Docker. See `backend/tests/README.md` for full details (architecture, fixtures, conventions, writing new tests).
+
+```bash
+# Run all backend tests
+make test-backend
+
+# Run a specific test file or directory
+docker compose exec backend python -m pytest tests/api/agents/agents_email_integration_test.py -v
+docker compose exec backend python -m pytest tests/api/agents/ -v
+```
+
+**Prerequisites**: Docker services must be running (`make up` or `docker compose up -d`).
 
 ## Security
 - `.env` files gitignored, never commit secrets

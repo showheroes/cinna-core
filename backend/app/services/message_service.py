@@ -9,6 +9,7 @@ import asyncio
 from sqlmodel import Session, select, func
 from app.models import SessionMessage, Session as ChatSession, AgentEnvironment, Agent, SessionUpdate
 from app.services.active_streaming_manager import active_streaming_manager
+from app.services.agent_env_connector import agent_env_connector
 from app.services.agent_service import AgentService
 
 logger = logging.getLogger(__name__)
@@ -600,6 +601,8 @@ class MessageService:
         """
         Send message to environment and stream response.
 
+        Delegates HTTP/SSE logic to agent_env_connector (injectable for testing).
+
         Yields SSE events from the environment server in the format:
         {
             "type": "session_created" | "assistant" | "tool" | "result" | "error" | "done",
@@ -618,9 +621,6 @@ class MessageService:
         Yields:
             dict: SSE event chunks from environment
         """
-        headers = {**auth_headers, "Content-Type": "application/json"}
-
-        # Prepare request payload
         payload = {
             "message": user_message,
             "mode": mode,
@@ -630,59 +630,12 @@ class MessageService:
         if session_state:
             payload["session_state"] = session_state
 
-        logger.info(
-            f"Sending message to {base_url}/chat/stream "
-            f"(mode={mode}, external_session_id={external_session_id})"
-        )
-
-        try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{base_url}/chat/stream",
-                    json=payload,
-                    headers=headers
-                ) as response:
-                    response.raise_for_status()
-
-                    # Parse SSE stream
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data_str = line[6:]  # Remove "data: " prefix
-                            try:
-                                event_data = json.loads(data_str)
-                                yield event_data
-                            except json.JSONDecodeError as e:
-                                logger.error(f"Failed to parse SSE event: {data_str}, error: {e}")
-                                continue
-
-        except httpx.HTTPStatusError as e:
-            # For streaming responses, we need to read the content first
-            try:
-                await e.response.aread()
-                error_text = e.response.text
-            except Exception:
-                error_text = "(unable to read response)"
-            logger.error(f"HTTP error from environment: {e.response.status_code} - {error_text}")
-            yield {
-                "type": "error",
-                "content": f"Environment returned error: {e.response.status_code}",
-                "error_type": "HTTPError"
-            }
-        except httpx.RequestError as e:
-            logger.error(f"Request error to environment: {e}")
-            yield {
-                "type": "error",
-                "content": f"Failed to connect to environment: {str(e)}",
-                "error_type": "ConnectionError"
-            }
-        except Exception as e:
-            logger.error(f"Unexpected error streaming from environment: {e}", exc_info=True)
-            yield {
-                "type": "error",
-                "content": f"Unexpected error: {str(e)}",
-                "error_type": type(e).__name__
-            }
+        async for event in agent_env_connector.stream_chat(
+            base_url=base_url,
+            auth_headers=auth_headers,
+            payload=payload,
+        ):
+            yield event
 
     @staticmethod
     async def stream_message_with_events(

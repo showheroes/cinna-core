@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session, select, func
 
@@ -103,7 +103,7 @@ class EmailIntegrationService:
             )
 
         integration.sqlmodel_update(update_dict)
-        integration.updated_at = datetime.utcnow()
+        integration.updated_at = datetime.now(UTC)
         session.add(integration)
         session.commit()
         session.refresh(integration)
@@ -129,7 +129,7 @@ class EmailIntegrationService:
         EmailIntegrationService._validate_for_enable(session, integration, user_id)
 
         integration.enabled = True
-        integration.updated_at = datetime.utcnow()
+        integration.updated_at = datetime.now(UTC)
         session.add(integration)
         session.commit()
         session.refresh(integration)
@@ -150,7 +150,7 @@ class EmailIntegrationService:
             raise ValueError("Not authorized")
 
         integration.enabled = False
-        integration.updated_at = datetime.utcnow()
+        integration.updated_at = datetime.now(UTC)
         session.add(integration)
         session.commit()
         session.refresh(integration)

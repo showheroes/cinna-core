@@ -6,7 +6,7 @@ from typing import Any
 from sqlmodel import Session as DBSession, select
 from sqlalchemy.orm.attributes import flag_modified
 from app.models import Session, SessionCreate, SessionUpdate, Agent, AgentEnvironment
-from app.core.db import engine
+from app.core.db import engine, create_session
 from app.utils import create_task_with_error_logging
 
 logger = logging.getLogger(__name__)
@@ -802,7 +802,7 @@ class SessionService:
         """
         # Default get_fresh_db_session if not provided
         if get_fresh_db_session is None:
-            get_fresh_db_session = lambda: DBSession(engine)
+            get_fresh_db_session = create_session
 
         has_files = bool(file_ids)
         is_new_session = False

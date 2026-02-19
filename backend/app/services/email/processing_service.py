@@ -9,11 +9,11 @@ After emails are polled and stored (Phase 4), this service:
 """
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session as DBSession, select
 
-from app.core.db import engine
+from app.core.db import create_session
 from app.models.email_message import EmailMessage
 from app.models.session import Session, SessionCreate
 from app.services.email.routing_service import EmailRoutingService, EmailAccessDenied
@@ -58,14 +58,14 @@ class EmailProcessingService:
 
             # In owner mode, the "clone_agent_id" field points to the parent agent itself
             email_msg.clone_agent_id = target_agent_id
-            email_msg.updated_at = datetime.utcnow()
+            email_msg.updated_at = datetime.now(UTC)
             db_session.add(email_msg)
             db_session.commit()
 
             if not is_ready:
                 # Target environment not ready yet - mark for retry
                 email_msg.pending_clone_creation = True
-                email_msg.updated_at = datetime.utcnow()
+                email_msg.updated_at = datetime.now(UTC)
                 db_session.add(email_msg)
                 db_session.commit()
                 logger.info(
@@ -228,7 +228,7 @@ class EmailProcessingService:
         # Use send_session_message which handles session creation, message creation,
         # and streaming initiation
         def get_fresh_db_session():
-            return DBSession(engine)
+            return create_session()
 
         if session_id:
             # Send to existing session
@@ -276,7 +276,7 @@ class EmailProcessingService:
         email_msg.processed = True
         email_msg.pending_clone_creation = False
         email_msg.session_id = session_id
-        email_msg.updated_at = datetime.utcnow()
+        email_msg.updated_at = datetime.now(UTC)
         db_session.add(email_msg)
         db_session.commit()
 
@@ -318,7 +318,7 @@ class EmailProcessingService:
     ) -> None:
         """Record a processing error on an email message."""
         email_msg.processing_error = error
-        email_msg.updated_at = datetime.utcnow()
+        email_msg.updated_at = datetime.now(UTC)
         db_session.add(email_msg)
         db_session.commit()
         logger.warning(f"Email {email_msg.id}: processing error: {error}")

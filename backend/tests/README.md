@@ -97,6 +97,8 @@ tests/
 
 Place test files under `tests/api/<domain>/test_<domain>.py`, mirroring the route structure in `app/api/routes/`. Create an `__init__.py` in each new directory.
 
+Some domains have their own `README.md` with domain-specific testing patterns (e.g., stubs, extra fixtures, relaxed rules). **Always check for a `README.md` in the target directory before writing tests** — for example, `tests/api/agents/README.md` documents the session mocking and environment stubs required for agent tests.
+
 ### Fixtures
 
 Every test function receives fixtures via pytest dependency injection. The key fixtures defined in `conftest.py`:

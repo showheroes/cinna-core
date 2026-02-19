@@ -9,7 +9,7 @@ import imaplib
 import logging
 import ssl
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from email.header import decode_header
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 
@@ -18,6 +18,7 @@ from sqlmodel import Session, select
 from app.models.agent_email_integration import AgentEmailIntegration
 from app.models.email_message import EmailMessage
 from app.models.mail_server_config import MailServerConfig, EncryptionType
+from app.services.email.imap_connector import imap_connector
 from app.services.email.mail_server_service import MailServerService
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class EmailPollingService:
 
         logger.debug(f"Agent {agent_id}: connecting to IMAP server {server.host}:{server.port}")
         try:
-            conn = EmailPollingService._connect_imap(server, password)
+            conn = imap_connector.connect(server, password)
             logger.debug(f"Agent {agent_id}: IMAP connection established")
         except Exception as e:
             logger.error(f"Agent {agent_id}: IMAP connection failed: {e}")
@@ -148,23 +149,6 @@ class EmailPollingService:
                 pass
 
     @staticmethod
-    def _connect_imap(
-        server: MailServerConfig,
-        password: str,
-    ) -> imaplib.IMAP4:
-        """Establish IMAP connection and authenticate."""
-        context = ssl.create_default_context()
-        if server.encryption_type in (EncryptionType.SSL, EncryptionType.TLS):
-            conn = imaplib.IMAP4_SSL(server.host, server.port, ssl_context=context)
-        else:
-            conn = imaplib.IMAP4(server.host, server.port)
-            if server.encryption_type == EncryptionType.STARTTLS:
-                conn.starttls(ssl_context=context)
-
-        conn.login(server.username, password)
-        return conn
-
-    @staticmethod
     def _fetch_unread_emails(
         conn: imaplib.IMAP4,
         mailbox: str = "INBOX",
@@ -227,10 +211,10 @@ class EmailPollingService:
         # Parse date
         date_str = msg.get("Date")
         try:
-            received_at = parsedate_to_datetime(date_str) if date_str else datetime.utcnow()
+            received_at = parsedate_to_datetime(date_str) if date_str else datetime.now(UTC)
         except Exception as e:
             logger.debug(f"  Failed to parse date '{date_str}': {e}, using utcnow")
-            received_at = datetime.utcnow()
+            received_at = datetime.now(UTC)
 
         # Extract body
         logger.debug(f"  Extracting body...")

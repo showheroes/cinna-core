@@ -6,10 +6,8 @@ in the outgoing_email_queue table. This service processes the queue and sends
 emails via the parent agent's SMTP configuration.
 """
 import logging
-import smtplib
-import ssl
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
@@ -18,11 +16,11 @@ from sqlmodel import Session, select
 
 from app.models.agent import Agent
 from app.models.agent_email_integration import AgentEmailIntegration
-from app.models.mail_server_config import EncryptionType
 from app.models.outgoing_email_queue import OutgoingEmailQueue, OutgoingEmailStatus
 from app.models.session import Session as ChatSession, SessionMessage
 from app.models.user import User
 from app.services.email.mail_server_service import MailServerService
+from app.services.email.smtp_connector import smtp_connector
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +135,7 @@ class EmailSendingService:
 
         logger.info(
             f"Queued outgoing email: session={session_id}, "
-            f"recipient={recipient_user.email}, subject={subject}"
+            f"recipient={recipient}, subject={subject}"
         )
         return queue_entry
 
@@ -215,11 +213,11 @@ class EmailSendingService:
 
         # Send via SMTP
         try:
-            EmailSendingService._connect_and_send(server, password, from_address, entry.recipient, msg)
+            smtp_connector.send(server, password, from_address, entry.recipient, msg)
         except Exception as e:
             entry.retry_count += 1
             entry.last_error = str(e)
-            entry.updated_at = datetime.utcnow()
+            entry.updated_at = datetime.now(UTC)
             if entry.retry_count >= MAX_RETRIES:
                 entry.status = OutgoingEmailStatus.FAILED
                 logger.error(
@@ -231,8 +229,8 @@ class EmailSendingService:
 
         # Mark as sent
         entry.status = OutgoingEmailStatus.SENT
-        entry.sent_at = datetime.utcnow()
-        entry.updated_at = datetime.utcnow()
+        entry.sent_at = datetime.now(UTC)
+        entry.updated_at = datetime.now(UTC)
         db_session.add(entry)
         db_session.commit()
 
@@ -264,32 +262,6 @@ class EmailSendingService:
         return msg
 
     @staticmethod
-    def _connect_and_send(
-        server,
-        password: str,
-        from_address: str,
-        to_address: str,
-        msg: MIMEMultipart,
-    ) -> None:
-        """Connect to SMTP and send the email."""
-        context = ssl.create_default_context()
-        if server.encryption_type in (EncryptionType.SSL, EncryptionType.TLS):
-            conn = smtplib.SMTP_SSL(server.host, server.port, timeout=30, context=context)
-        else:
-            conn = smtplib.SMTP(server.host, server.port, timeout=30)
-            if server.encryption_type == EncryptionType.STARTTLS:
-                conn.starttls(context=context)
-
-        try:
-            conn.login(server.username, password)
-            conn.sendmail(from_address, [to_address], msg.as_string())
-        finally:
-            try:
-                conn.quit()
-            except Exception:
-                pass
-
-    @staticmethod
     def _build_reply_subject(chat_session: ChatSession) -> str:
         """Build a reply subject from the session title or thread."""
         title = chat_session.title or "Agent Response"
@@ -306,7 +278,7 @@ class EmailSendingService:
         """Mark a queue entry as permanently failed."""
         entry.status = OutgoingEmailStatus.FAILED
         entry.last_error = error
-        entry.updated_at = datetime.utcnow()
+        entry.updated_at = datetime.now(UTC)
         db_session.add(entry)
         db_session.commit()
         logger.error(f"Email {entry.id}: permanently failed: {error}")
@@ -321,7 +293,7 @@ class EmailSendingService:
         queues the agent's response for sending via SMTP.
         """
         try:
-            from app.core.db import engine as db_engine
+            from app.core.db import create_session
 
             meta = event_data.get("meta", {})
             session_id = meta.get("session_id")
@@ -330,7 +302,7 @@ class EmailSendingService:
             if not session_id or was_interrupted:
                 return
 
-            with Session(db_engine) as db_session:
+            with create_session() as db_session:
                 # Check if this is an email session
                 chat_session = db_session.get(ChatSession, uuid.UUID(session_id))
                 if not chat_session or chat_session.integration_type != "email":

@@ -7,9 +7,8 @@ from typing import Any, Callable, Awaitable
 from uuid import UUID
 import concurrent.futures
 
-import socketio
-
 from app.models.event import EventPublic, EventBroadcast
+from app.services.socketio_connector import socketio_connector
 from app.utils import create_task_with_error_logging
 
 logger = logging.getLogger(__name__)
@@ -23,13 +22,8 @@ class EventService:
 
     def __init__(self):
         """Initialize the event service with a Socket.IO async server."""
-        # Create Socket.IO server with async mode
-        self.sio = socketio.AsyncServer(
-            async_mode="asgi",
-            cors_allowed_origins="*",  # Configure based on CORS settings
-            logger=True,
-            engineio_logger=True,
-        )
+        # Use the injectable connector's sio for handler registration / rooms
+        self.sio = socketio_connector.sio
 
         # Track active connections: {sid: ConnectionInfo}
         self.connections: dict[str, dict[str, Any]] = {}
@@ -335,11 +329,11 @@ class EventService:
         if target_room:
             # Send to specific room
             logger.info(f"Emitting event {event_type} to room {target_room}")
-            await self.sio.emit("event", event_data, room=target_room)
+            await socketio_connector.emit("event", event_data, room=target_room)
         else:
             # Broadcast to all connected clients
             logger.info(f"Broadcasting event {event_type} to all clients")
-            await self.sio.emit("event", event_data)
+            await socketio_connector.emit("event", event_data)
 
     async def broadcast_event(self, broadcast: EventBroadcast):
         """Broadcast an event using EventBroadcast model.
@@ -397,8 +391,8 @@ class EventService:
         room = f"session_{session_id}_stream"
 
         # Emit to session-specific streaming room
-        await self.sio.emit(
-            "stream_event",  # WebSocket event name
+        await socketio_connector.emit(
+            "stream_event",
             {
                 "session_id": str(session_id),
                 "event_type": event_type,
@@ -460,7 +454,7 @@ class EventService:
 
     def get_asgi_app(self):
         """Get the ASGI app for Socket.IO."""
-        return socketio.ASGIApp(self.sio, socketio_path="/")
+        return socketio_connector.get_asgi_app()
 
 
 # Global event service instance

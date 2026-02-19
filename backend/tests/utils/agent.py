@@ -1,0 +1,66 @@
+"""Helper to create agents via API for tests."""
+from fastapi.testclient import TestClient
+
+from app.core.config import settings
+from tests.utils.utils import random_lower_string
+
+
+def create_agent_via_api(
+    client: TestClient,
+    token_headers: dict[str, str],
+    name: str | None = None,
+) -> dict:
+    """Create agent via POST /api/v1/agents/. Environment stub must be active."""
+    data = {"name": name or f"Test Agent {random_lower_string()[:8]}"}
+    r = client.post(
+        f"{settings.API_V1_STR}/agents/",
+        headers=token_headers,
+        json=data,
+    )
+    assert r.status_code == 200, f"Agent creation failed: {r.text}"
+    return r.json()
+
+
+def configure_email_integration(
+    client: TestClient,
+    token_headers: dict[str, str],
+    agent_id: str,
+    incoming_server_id: str,
+    outgoing_server_id: str,
+    agent_session_mode: str = "owner",
+    access_mode: str = "open",
+    incoming_mailbox: str = "agent@test.com",
+    outgoing_from_address: str = "agent@test.com",
+) -> dict:
+    """Configure email integration via POST /api/v1/agents/{id}/email-integration."""
+    data = {
+        "agent_session_mode": agent_session_mode,
+        "access_mode": access_mode,
+        "incoming_server_id": incoming_server_id,
+        "outgoing_server_id": outgoing_server_id,
+        "incoming_mailbox": incoming_mailbox,
+        "outgoing_from_address": outgoing_from_address,
+    }
+    r = client.post(
+        f"{settings.API_V1_STR}/agents/{agent_id}/email-integration",
+        headers=token_headers,
+        json=data,
+    )
+    assert r.status_code == 200, f"Email integration config failed: {r.text}"
+    return r.json()
+
+
+def enable_email_integration(
+    client: TestClient,
+    token_headers: dict[str, str],
+    agent_id: str,
+) -> dict:
+    """Enable email integration via PUT /api/v1/agents/{id}/email-integration/enable."""
+    r = client.put(
+        f"{settings.API_V1_STR}/agents/{agent_id}/email-integration/enable",
+        headers=token_headers,
+    )
+    assert r.status_code == 200, f"Email integration enable failed: {r.text}"
+    body = r.json()
+    assert body["enabled"] is True
+    return body
