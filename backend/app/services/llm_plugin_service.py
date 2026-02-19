@@ -16,7 +16,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -159,7 +159,7 @@ class LLMPluginService:
         for field, value in update_data.items():
             setattr(marketplace, field, value)
 
-        marketplace.updated_at = datetime.utcnow()
+        marketplace.updated_at = datetime.now(UTC)
         session.add(marketplace)
         session.commit()
         session.refresh(marketplace)
@@ -389,7 +389,7 @@ class LLMPluginService:
                 # Update marketplace status
                 marketplace.status = MarketplaceStatus.connected
                 marketplace.status_message = f"Synced {len(plugins_data)} plugins"
-                marketplace.last_sync_at = datetime.utcnow()
+                marketplace.last_sync_at = datetime.now(UTC)
                 marketplace.sync_commit_hash = commit_hash
                 session.add(marketplace)
                 session.commit()
@@ -588,7 +588,7 @@ class LLMPluginService:
                 plugin.source_branch = plugin_data.get("source_branch", "main")
                 plugin.config = plugin_data.get("config")
                 plugin.commit_hash = commit_hash
-                plugin.updated_at = datetime.utcnow()
+                plugin.updated_at = datetime.now(UTC)
                 session.add(plugin)
             else:
                 # Create new plugin
@@ -894,7 +894,7 @@ class LLMPluginService:
         if data.disabled is not None:
             link.disabled = data.disabled
 
-        link.updated_at = datetime.utcnow()
+        link.updated_at = datetime.now(UTC)
         session.add(link)
         session.commit()
         session.refresh(link)
@@ -935,7 +935,7 @@ class LLMPluginService:
         # Update to latest version
         link.installed_version = plugin.version
         link.installed_commit_hash = plugin.commit_hash
-        link.updated_at = datetime.utcnow()
+        link.updated_at = datetime.now(UTC)
 
         session.add(link)
         session.commit()
@@ -1123,7 +1123,7 @@ class LLMPluginService:
 
             # Update plugin with the commit hash
             plugin.source_commit_hash = source_commit_hash
-            plugin.updated_at = datetime.utcnow()
+            plugin.updated_at = datetime.now(UTC)
             session.add(plugin)
             session.commit()
 

@@ -1,7 +1,7 @@
 from uuid import UUID
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
 from app.models import Agent, AgentCreate, AgentUpdate, User, SessionCreate, AgentHandoverConfig, AgentEnvironment, Session as ChatSession, AgentSdkConfig, InputTaskCreate
@@ -43,7 +43,7 @@ def _generate_description_background(agent_id: UUID, workflow_prompt: str, agent
             agent = db_session.get(Agent, agent_id)
             if agent:
                 agent.description = description
-                agent.updated_at = datetime.utcnow()
+                agent.updated_at = datetime.now(UTC)
                 db_session.add(agent)
                 db_session.commit()
                 logger.info(f"Updated agent {agent_id} description: {description[:50]}...")
@@ -188,7 +188,7 @@ class AgentService:
             agent.a2a_config = {
                 "skills": new_skills,
                 "version": _increment_version(current_version),
-                "generated_at": datetime.utcnow().isoformat()
+                "generated_at": datetime.now(UTC).isoformat()
             }
             flag_modified(agent, "a2a_config")
             logger.info(f"Regenerated A2A skills for agent {agent.id}: {len(new_skills)} skills")

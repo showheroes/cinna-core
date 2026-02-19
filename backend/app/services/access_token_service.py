@@ -5,7 +5,7 @@ import uuid
 import secrets
 import hashlib
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import jwt
 from sqlmodel import Session, select
@@ -164,7 +164,7 @@ class AccessTokenService:
             return None, None
 
         # Update last_used_at
-        access_token.last_used_at = datetime.utcnow()
+        access_token.last_used_at = datetime.now(UTC)
         session.add(access_token)
         session.commit()
 
@@ -212,7 +212,7 @@ class AccessTokenService:
             token_hash="",  # Placeholder, will update
             token_prefix="",  # Placeholder, will update
             expires_at=expires_at,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
         )
         session.add(access_token)
         session.flush()  # Get the ID

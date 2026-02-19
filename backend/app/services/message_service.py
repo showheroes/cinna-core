@@ -1,5 +1,5 @@
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import AsyncIterator
 import json
 import time
@@ -76,7 +76,7 @@ class MessageService:
         # Update session's last_message_at
         chat_session = session.get(ChatSession, session_id)
         if chat_session:
-            chat_session.last_message_at = datetime.utcnow()
+            chat_session.last_message_at = datetime.now(UTC)
             session.add(chat_session)
 
         # Flush to ensure message exists in DB before creating message_files

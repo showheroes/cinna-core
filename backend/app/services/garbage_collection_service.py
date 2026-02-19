@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
@@ -19,7 +19,7 @@ class GarbageCollectionService:
 
         Returns count of deleted files.
         """
-        threshold = datetime.utcnow() - timedelta(hours=24)
+        threshold = datetime.now(UTC) - timedelta(hours=24)
 
         statement = select(FileUpload).where(
             FileUpload.status == "marked_for_deletion",
@@ -52,7 +52,7 @@ class GarbageCollectionService:
 
         Returns count of deleted files.
         """
-        threshold = datetime.utcnow() - timedelta(hours=24)
+        threshold = datetime.now(UTC) - timedelta(hours=24)
 
         statement = select(FileUpload).where(
             FileUpload.status == "temporary", FileUpload.uploaded_at < threshold

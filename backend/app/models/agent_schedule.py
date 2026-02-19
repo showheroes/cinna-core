@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -26,8 +26,8 @@ class AgentSchedule(SQLModel, table=True):
     next_execution: datetime  # Calculated next run timestamp
 
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationship
     agent: "Agent" = Relationship(back_populates="schedules")

@@ -10,7 +10,7 @@ rather than direct database queries.
 import logging
 from typing import Callable
 from uuid import UUID
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session as DbSession
 
@@ -89,7 +89,7 @@ class DatabaseTaskStore:
             contextId=str(session.id),  # task = context for Phase 1
             status=TaskStatus(
                 state=state,
-                timestamp=session.updated_at.isoformat() + "Z" if session.updated_at else datetime.utcnow().isoformat() + "Z",
+                timestamp=session.updated_at.isoformat() + "Z" if session.updated_at else datetime.now(UTC).isoformat() + "Z",
             ),
             history=history if history else None,
         )
@@ -173,7 +173,7 @@ class DatabaseTaskStore:
                     contextId=str(session.id),
                     status=TaskStatus(
                         state=state,
-                        timestamp=session.updated_at.isoformat() + "Z" if session.updated_at else datetime.utcnow().isoformat() + "Z",
+                        timestamp=session.updated_at.isoformat() + "Z" if session.updated_at else datetime.now(UTC).isoformat() + "Z",
                     ),
                     history=history if history else None,
                 )

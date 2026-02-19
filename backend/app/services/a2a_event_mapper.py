@@ -9,7 +9,7 @@ All A2A protocol mapping logic is centralized here.
 import logging
 from typing import Any
 from uuid import UUID, uuid4
-from datetime import datetime
+from datetime import UTC, datetime
 
 from a2a.types import (
     TaskState,
@@ -155,7 +155,7 @@ class A2AEventMapper:
         """Create a TaskStatusUpdateEvent dict."""
         status = TaskStatus(
             state=state,
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.now(UTC).isoformat() + "Z",
         )
         if message:
             status.message = Message(

@@ -7,7 +7,7 @@ This service manages the sharing workflow:
 - Revoking shares (with delete or detach options)
 - Querying shares and clones
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 from sqlmodel import Session, select
 from fastapi import HTTPException
@@ -110,7 +110,7 @@ class AgentShareService:
                 # Allow re-sharing after decline/revoke - update existing record
                 existing.status = ShareStatus.PENDING
                 existing.share_mode = share_mode
-                existing.shared_at = datetime.utcnow()
+                existing.shared_at = datetime.now(UTC)
                 existing.accepted_at = None
                 existing.declined_at = None
                 existing.cloned_agent_id = None
@@ -129,7 +129,7 @@ class AgentShareService:
             shared_by_user_id=owner_id,
             share_mode=share_mode,
             status=ShareStatus.PENDING,
-            shared_at=datetime.utcnow(),
+            shared_at=datetime.now(UTC),
             provide_ai_credentials=provide_ai_credentials,
             conversation_ai_credential_id=conversation_ai_credential_id if provide_ai_credentials else None,
             building_ai_credential_id=building_ai_credential_id if provide_ai_credentials else None
@@ -185,8 +185,8 @@ class AgentShareService:
             share_mode=share_mode,
             status=ShareStatus.ACCEPTED,
             source=source,
-            shared_at=datetime.utcnow(),
-            accepted_at=datetime.utcnow(),
+            shared_at=datetime.now(UTC),
+            accepted_at=datetime.now(UTC),
         )
         session.add(share)
         session.commit()
@@ -276,7 +276,7 @@ class AgentShareService:
 
         # Update share record
         share.status = ShareStatus.ACCEPTED
-        share.accepted_at = datetime.utcnow()
+        share.accepted_at = datetime.now(UTC)
         share.cloned_agent_id = clone.id
         session.add(share)
         session.commit()
@@ -308,7 +308,7 @@ class AgentShareService:
             raise HTTPException(status_code=403, detail="This share is not for you")
 
         share.status = ShareStatus.DECLINED
-        share.declined_at = datetime.utcnow()
+        share.declined_at = datetime.now(UTC)
         session.add(share)
         session.commit()
 

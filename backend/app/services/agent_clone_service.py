@@ -8,7 +8,7 @@ This service manages:
 - Setting up credentials (shared or placeholders)
 - Detaching clones from parent
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 import shutil
 import logging
@@ -84,7 +84,7 @@ class AgentCloneService:
             is_clone=True,
             parent_agent_id=original_agent.id,
             clone_mode=clone_mode,
-            last_sync_at=datetime.utcnow(),
+            last_sync_at=datetime.now(UTC),
             update_mode="automatic",
             pending_update=False
         )
@@ -532,7 +532,7 @@ class AgentCloneService:
         )
 
         # Update sync timestamp
-        clone.last_sync_at = datetime.utcnow()
+        clone.last_sync_at = datetime.now(UTC)
         clone.pending_update = False
         clone.pending_update_at = None
         clone.last_update_status = "synced"
@@ -610,7 +610,7 @@ class AgentCloneService:
 
             # 4. Set pending_update on clone
             clone.pending_update = True
-            clone.pending_update_at = datetime.utcnow()
+            clone.pending_update_at = datetime.now(UTC)
             session.add(clone)
 
             # Always queue the request - automatic updates will be applied
@@ -646,7 +646,7 @@ class AgentCloneService:
             )
 
         # Update clone record
-        clone.last_sync_at = datetime.utcnow()
+        clone.last_sync_at = datetime.now(UTC)
         clone.pending_update = False
         clone.pending_update_at = None
         clone.last_update_status = "synced"
@@ -726,7 +726,7 @@ class AgentCloneService:
                 logger.error(f"Failed to rebuild environment for clone {clone_id}: {e}")
 
         # Update clone record
-        clone.last_sync_at = datetime.utcnow()
+        clone.last_sync_at = datetime.now(UTC)
         clone.pending_update = False
         clone.pending_update_at = None
         clone.last_update_status = "synced"
@@ -735,7 +735,7 @@ class AgentCloneService:
         # Mark all pending update requests as applied
         for req in pending_requests:
             req.status = UpdateRequestStatus.APPLIED
-            req.applied_at = datetime.utcnow()
+            req.applied_at = datetime.now(UTC)
             session.add(req)
 
         session.commit()
@@ -885,7 +885,7 @@ class AgentCloneService:
             raise HTTPException(status_code=400, detail="Update request is not pending")
 
         update_request.status = UpdateRequestStatus.DISMISSED
-        update_request.dismissed_at = datetime.utcnow()
+        update_request.dismissed_at = datetime.now(UTC)
         session.add(update_request)
 
         # Check if there are other pending requests for this clone

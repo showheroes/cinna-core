@@ -4,7 +4,7 @@ Task Trigger Service - handles trigger CRUD, webhook validation, and trigger exe
 import hmac
 import logging
 import secrets
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytz
@@ -186,7 +186,7 @@ class TaskTriggerService:
                 pass  # Keep as-is if timezone conversion fails
 
         # Validate future date
-        if execute_at_utc <= datetime.utcnow():
+        if execute_at_utc <= datetime.now(UTC):
             raise TriggerValidationError("Execution date must be in the future")
 
         trigger = TaskTrigger(
@@ -317,7 +317,7 @@ class TaskTriggerService:
                         execute_at_utc = execute_at_utc.astimezone(pytz.utc).replace(tzinfo=None)
                 except Exception:
                     pass
-            if execute_at_utc <= datetime.utcnow():
+            if execute_at_utc <= datetime.now(UTC):
                 raise TriggerValidationError("Execution date must be in the future")
             trigger.execute_at = execute_at_utc
             trigger.executed = False
@@ -333,7 +333,7 @@ class TaskTriggerService:
         if "timezone" in update_data and trigger.type != TriggerType.SCHEDULE:
             trigger.timezone = update_data["timezone"]
 
-        trigger.updated_at = datetime.utcnow()
+        trigger.updated_at = datetime.now(UTC)
         db_session.commit()
         db_session.refresh(trigger)
         logger.info(f"Updated trigger {trigger_id}")
@@ -366,7 +366,7 @@ class TaskTriggerService:
         token = secrets.token_urlsafe(32)
         trigger.webhook_token_encrypted = encrypt_field(token)
         trigger.webhook_token_prefix = token[:8]
-        trigger.updated_at = datetime.utcnow()
+        trigger.updated_at = datetime.now(UTC)
         db_session.commit()
         db_session.refresh(trigger)
         logger.info(f"Regenerated token for webhook trigger {trigger_id}")
@@ -454,7 +454,7 @@ class TaskTriggerService:
             )
 
         # Update trigger execution info
-        trigger.last_execution = datetime.utcnow()
+        trigger.last_execution = datetime.now(UTC)
         if trigger.type == TriggerType.SCHEDULE:
             try:
                 trigger.next_execution = AgentSchedulerService.calculate_next_execution(
@@ -465,7 +465,7 @@ class TaskTriggerService:
         elif trigger.type == TriggerType.EXACT_DATE:
             trigger.executed = True
 
-        trigger.updated_at = datetime.utcnow()
+        trigger.updated_at = datetime.now(UTC)
         db_session.commit()
 
     # ==================== Scheduler Polling ====================
@@ -475,7 +475,7 @@ class TaskTriggerService:
         """Poll for due schedule and exact-date triggers and fire them."""
         import asyncio
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         with DBSession(engine) as db_session:
             # Query due schedule triggers

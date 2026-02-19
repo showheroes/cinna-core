@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Dict, Optional
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class ActiveStream:
     """Represents an active streaming session between backend and agent env"""
     session_id: UUID
     external_session_id: Optional[str]
-    started_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     is_interrupted: bool = False
     is_completed: bool = False
     interrupt_pending: bool = False  # Interrupt requested before external_session_id available
@@ -62,7 +62,7 @@ class ActiveStreamingManager:
             self._active_streams[session_id] = ActiveStream(
                 session_id=session_id,
                 external_session_id=external_session_id,
-                started_at=datetime.utcnow()
+                started_at=datetime.now(UTC)
             )
             logger.info(f"Registered active stream for session {session_id}")
 
@@ -102,7 +102,7 @@ class ActiveStreamingManager:
         async with self._lock:
             if session_id in self._active_streams:
                 stream = self._active_streams[session_id]
-                duration = (datetime.utcnow() - stream.started_at).total_seconds()
+                duration = (datetime.now(UTC) - stream.started_at).total_seconds()
                 del self._active_streams[session_id]
                 logger.info(
                     f"Unregistered stream for session {session_id} "
@@ -202,7 +202,7 @@ class ActiveStreamingManager:
                 return None
 
             stream = self._active_streams[session_id]
-            duration = (datetime.utcnow() - stream.started_at).total_seconds()
+            duration = (datetime.now(UTC) - stream.started_at).total_seconds()
 
             return {
                 "session_id": str(stream.session_id),
@@ -272,7 +272,7 @@ class ActiveStreamingManager:
             result = []
             for session_id in self._active_streams.keys():
                 stream = self._active_streams[session_id]
-                duration = (datetime.utcnow() - stream.started_at).total_seconds()
+                duration = (datetime.now(UTC) - stream.started_at).total_seconds()
                 result.append({
                     "session_id": str(stream.session_id),
                     "external_session_id": stream.external_session_id,

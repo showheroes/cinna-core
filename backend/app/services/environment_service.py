@@ -1,5 +1,5 @@
 from uuid import UUID
-from datetime import datetime
+from datetime import UTC, datetime
 import random
 import asyncio
 import logging
@@ -308,7 +308,7 @@ class EnvironmentService:
                 # Update is_active flags for all environments
                 for env in all_envs:
                     env.is_active = (env.id == env_id)
-                    env.updated_at = datetime.utcnow()
+                    env.updated_at = datetime.now(UTC)
                     session.add(env)
 
                 # Update agent's active_environment_id
@@ -546,7 +546,7 @@ class EnvironmentService:
 
         update_dict = data.model_dump(exclude_unset=True)
         environment.sqlmodel_update(update_dict)
-        environment.updated_at = datetime.utcnow()
+        environment.updated_at = datetime.now(UTC)
 
         session.add(environment)
         session.commit()
@@ -849,7 +849,7 @@ class EnvironmentService:
                 logger.info(f"Updated agent {agent.id} refiner_prompt from environment ({len(refiner_prompt)} chars)")
 
             if updated:
-                agent.updated_at = datetime.utcnow()
+                agent.updated_at = datetime.now(UTC)
                 session.add(agent)
                 session.commit()
                 session.refresh(agent)

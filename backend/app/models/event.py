@@ -1,6 +1,6 @@
 """Event models for WebSocket-based real-time communication."""
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any
 from uuid import UUID
 
@@ -68,7 +68,7 @@ class EventBase(SQLModel):
 class EventPublic(EventBase):
     """Public event model sent to clients."""
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="When the event was created")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC), description="When the event was created")
     user_id: UUID | None = Field(default=None, description="User ID for targeted events (None for broadcast)")
 
 
@@ -88,5 +88,5 @@ class ConnectionInfo(BaseModel):
 
     sid: str = Field(description="Socket.IO session ID")
     user_id: UUID = Field(description="Authenticated user ID")
-    connected_at: datetime = Field(default_factory=datetime.utcnow)
+    connected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     rooms: list[str] = Field(default_factory=list, description="Rooms the connection is subscribed to")

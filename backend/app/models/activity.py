@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlmodel import SQLModel, Field
 
 
@@ -35,7 +35,7 @@ class Activity(SQLModel, table=True):
     # Read status
     is_read: bool = Field(default=False)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # Pydantic Schemas

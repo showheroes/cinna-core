@@ -8,7 +8,7 @@ This module defines models for:
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Optional
 
@@ -61,8 +61,8 @@ class LLMPluginMarketplace(LLMPluginMarketplaceBase, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     plugins: list["LLMPluginMarketplacePlugin"] = Relationship(
@@ -176,8 +176,8 @@ class LLMPluginMarketplacePlugin(LLMPluginMarketplacePluginBase, table=True):
         foreign_key="llm_plugin_marketplace.id", ondelete="CASCADE", index=True
     )
     config: Optional[dict] = Field(default=None, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     marketplace: Optional[LLMPluginMarketplace] = Relationship(back_populates="plugins")
@@ -250,8 +250,8 @@ class AgentPluginLink(AgentPluginLinkBase, table=True):
     )
     installed_version: Optional[str] = None  # Version string at installation time
     installed_commit_hash: Optional[str] = None  # Git commit hash for reproducibility
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     plugin: Optional[LLMPluginMarketplacePlugin] = Relationship(back_populates="agent_links")

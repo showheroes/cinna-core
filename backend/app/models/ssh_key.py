@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlmodel import Field, Relationship, SQLModel, Column, Text
 
 from app.models.user import User
@@ -34,8 +34,8 @@ class UserSSHKey(SSHKeyBase, table=True):
     private_key_encrypted: str = Field(sa_column=Column(Text, nullable=False))
     passphrase_encrypted: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     fingerprint: str = Field(max_length=255, index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     owner: User | None = Relationship()

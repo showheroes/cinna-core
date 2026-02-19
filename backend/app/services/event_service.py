@@ -2,7 +2,7 @@
 
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, Callable, Awaitable
 from uuid import UUID
 import concurrent.futures
@@ -59,7 +59,7 @@ class EventService:
             self.connections[sid] = {
                 "sid": sid,
                 "user_id": UUID(user_id),
-                "connected_at": datetime.utcnow(),
+                "connected_at": datetime.now(UTC),
                 "rooms": [],
             }
 
@@ -125,7 +125,7 @@ class EventService:
         @self.sio.event
         async def ping(sid):
             """Handle ping from client (for keepalive)."""
-            return {"status": "pong", "timestamp": datetime.utcnow().isoformat()}
+            return {"status": "pong", "timestamp": datetime.now(UTC).isoformat()}
 
         @self.sio.event
         async def agent_usage_intent(sid, data):
@@ -187,7 +187,7 @@ class EventService:
                             environment_id = str(active_env.id)
 
                     # Update last_activity_at
-                    environment.last_activity_at = datetime.utcnow()
+                    environment.last_activity_at = datetime.now(UTC)
                     session.add(environment)
                     session.commit()
 
@@ -313,7 +313,7 @@ class EventService:
             text_content=text_content,
             meta=meta or {},
             user_id=user_id,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
 
         event_data = event.model_dump(mode="json")
@@ -397,7 +397,7 @@ class EventService:
                 "session_id": str(session_id),
                 "event_type": event_type,
                 "data": event_data,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             },
             room=room
         )

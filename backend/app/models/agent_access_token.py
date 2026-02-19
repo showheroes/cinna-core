@@ -5,7 +5,7 @@ These tokens provide scoped access to agents for external A2A clients,
 separate from regular user authentication.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
@@ -47,7 +47,7 @@ class AgentAccessToken(AgentAccessTokenBase, table=True):
     # Token prefix for identification (first 8 chars of token)
     token_prefix: str = Field(max_length=8)
     expires_at: datetime
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_used_at: datetime | None = None
     is_revoked: bool = Field(default=False)
 

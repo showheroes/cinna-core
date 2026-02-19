@@ -5,7 +5,7 @@ Each email is stored when polled from IMAP, then routed to the correct clone
 and processed into a session message.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 
 from sqlalchemy import Column, Text
 from sqlmodel import Field, SQLModel, JSON
@@ -19,7 +19,7 @@ class EmailMessageBase(SQLModel):
     body: str = Field(default="", sa_column=Column(Text))
     references: str | None = Field(default=None, sa_column=Column(Text))
     in_reply_to: str | None = Field(default=None, max_length=512)
-    received_at: datetime = Field(default_factory=datetime.utcnow)
+    received_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class EmailMessage(EmailMessageBase, table=True):
@@ -43,8 +43,8 @@ class EmailMessage(EmailMessageBase, table=True):
     # Attachment metadata (JSON list of {filename, content_type, size})
     attachments_metadata: list | None = Field(default=None, sa_column=Column(JSON))
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class EmailMessagePublic(EmailMessageBase):

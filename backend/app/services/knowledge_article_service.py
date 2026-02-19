@@ -14,7 +14,7 @@ import hashlib
 import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 from pydantic import BaseModel, Field, ValidationError
@@ -183,7 +183,7 @@ def upsert_article(
         existing.content = content
         existing.content_hash = content_hash
         existing.commit_hash = commit_hash
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = datetime.now(UTC)
 
         # Note: Embeddings will be regenerated in a later phase
         # For now, we're just storing the content
@@ -210,8 +210,8 @@ def upsert_article(
             embedding_model=None,  # Will be set when embeddings are generated
             embedding_dimensions=None,
             embedding=None,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC)
         )
 
         session.add(article)

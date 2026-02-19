@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlmodel import SQLModel, Field, Column
 from sqlalchemy import JSON, Index
 
@@ -26,7 +26,7 @@ class FileUpload(SQLModel, table=True):
     )  # "temporary" | "attached" | "marked_for_deletion"
 
     # Timestamps
-    uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+    uploaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     attached_at: datetime | None = None
     marked_for_deletion_at: datetime | None = None
 
@@ -46,7 +46,7 @@ class MessageFile(SQLModel, table=True):
     # Agent-env path (where file was stored in container)
     agent_env_path: str | None = Field(default=None, max_length=512)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class InputTaskFile(SQLModel, table=True):
@@ -63,7 +63,7 @@ class InputTaskFile(SQLModel, table=True):
     task_id: uuid.UUID = Field(foreign_key="input_task.id", ondelete="CASCADE")
     file_id: uuid.UUID = Field(foreign_key="file_uploads.id", ondelete="CASCADE")
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # Pydantic schemas (keep existing ones)

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlmodel import SQLModel, Field, Column
 from sqlalchemy import JSON, UniqueConstraint
 
@@ -39,8 +39,8 @@ class Session(SQLModel, table=True):
     integration_type: str | None = None  # "email" | "a2a" | null
     sender_email: str | None = None  # Original sender email (owner mode only)
     streaming_started_at: datetime | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_message_at: datetime | None = None
 
 
@@ -54,7 +54,7 @@ class SessionMessage(SQLModel, table=True):
     content: str
     sequence_number: int
     message_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     tool_questions_status: str | None = None  # null | "unanswered" | "answered"
     answers_to_message_id: uuid.UUID | None = Field(default=None, foreign_key="message.id")
     status: str = ""  # "" | "user_interrupted" | "error"

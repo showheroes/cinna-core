@@ -85,6 +85,12 @@ keep-runtime-typing = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+filterwarnings = [
+    "default",
+    "ignore::DeprecationWarning:sqlmodel.*",
+    "ignore::DeprecationWarning:pydantic.*",
+    "ignore::UserWarning:pydantic.*",
+]
 
 [tool.coverage.run]
 source = ["app"]

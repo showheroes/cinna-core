@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlmodel import Session, select
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.models.environment import AgentEnvironment
 from app.models.agent import Agent
@@ -470,7 +470,7 @@ class EnvironmentLifecycleManager:
             # Update status
             environment.status = "running"
             environment.status_message = "Environment is running"
-            environment.last_health_check = datetime.utcnow()
+            environment.last_health_check = datetime.now(UTC)
             db_session.add(environment)
             db_session.commit()
 
@@ -668,8 +668,8 @@ class EnvironmentLifecycleManager:
             # Update status
             environment.status = "running"
             environment.status_message = "Environment activated"
-            environment.last_health_check = datetime.utcnow()
-            environment.last_activity_at = datetime.utcnow()
+            environment.last_health_check = datetime.now(UTC)
+            environment.last_activity_at = datetime.now(UTC)
             db_session.add(environment)
             db_session.commit()
 
@@ -918,7 +918,7 @@ class EnvironmentLifecycleManager:
 
                 environment.status = "running"
                 environment.status_message = "Environment rebuilt and restarted"
-                environment.last_health_check = datetime.utcnow()
+                environment.last_health_check = datetime.now(UTC)
                 db_session.add(environment)
                 db_session.commit()
 
@@ -971,7 +971,7 @@ class EnvironmentLifecycleManager:
         health = await adapter.health_check()
 
         # Update last health check
-        environment.last_health_check = datetime.utcnow()
+        environment.last_health_check = datetime.now(UTC)
         db_session.add(environment)
         db_session.commit()
 

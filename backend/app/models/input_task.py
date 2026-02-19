@@ -5,7 +5,7 @@ Input tasks allow users to receive, refine, and execute incoming tasks through
 an AI-assisted preparation workflow.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlmodel import Field, SQLModel, Column
 from sqlalchemy import JSON, Index
 from sqlalchemy.dialects.postgresql import JSONB
@@ -28,7 +28,7 @@ class RefinementHistoryItem(SQLModel):
     """Single item in refinement history"""
     role: str  # "user" | "ai"
     content: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # Shared properties
@@ -72,8 +72,8 @@ class InputTask(InputTaskBase, table=True):
     # To-do progress tracking from TodoWrite tool (list of TodoItem dicts)
     todo_progress: list | None = Field(default=None, sa_column=Column(JSONB))
     error_message: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     executed_at: datetime | None = None
     completed_at: datetime | None = None
     archived_at: datetime | None = None

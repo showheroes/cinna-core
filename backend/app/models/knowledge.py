@@ -6,7 +6,7 @@ workspace permissions, and knowledge articles with embeddings.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Optional
 
@@ -56,8 +56,8 @@ class AIKnowledgeGitRepo(AIKnowledgeGitRepoBase, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     # user: Optional["User"] = Relationship(back_populates="knowledge_repos")
@@ -116,7 +116,7 @@ class AIKnowledgeGitRepoWorkspace(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     git_repo_id: uuid.UUID = Field(foreign_key="ai_knowledge_git_repo.id", ondelete="CASCADE", index=True)
     user_workspace_id: uuid.UUID = Field(foreign_key="user_workspace.id", ondelete="CASCADE", index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     git_repo: Optional[AIKnowledgeGitRepo] = Relationship(back_populates="workspace_permissions")
@@ -134,7 +134,7 @@ class UserEnabledDiscoverableSource(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
     git_repo_id: uuid.UUID = Field(foreign_key="ai_knowledge_git_repo.id", ondelete="CASCADE", index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # Discoverable Source Public Schema
@@ -180,8 +180,8 @@ class KnowledgeArticle(KnowledgeArticleBase, table=True):
     git_repo_id: uuid.UUID = Field(foreign_key="ai_knowledge_git_repo.id", ondelete="CASCADE", index=True)
     # NOTE: Using JSON for now, will be migrated to pgvector when embedding functionality is implemented
     embedding: Optional[list[float]] = Field(default=None, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     git_repo: Optional[AIKnowledgeGitRepo] = Relationship(back_populates="articles")
@@ -234,7 +234,7 @@ class KnowledgeArticleChunk(KnowledgeArticleChunkBase, table=True):
     # Using pgvector type for vector storage
     # Will store embeddings as vector type with dynamic dimensions
     embedding: Optional[list[float]] = Field(default=None, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     article: Optional[KnowledgeArticle] = Relationship()

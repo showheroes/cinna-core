@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import AsyncIterator
 from uuid import UUID
-from datetime import datetime
+from datetime import UTC, datetime
 import docker
 from docker.models.containers import Container
 
@@ -305,7 +305,7 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
                         status="unhealthy",
                         uptime=0,
                         message=f"HTTP {response.status_code}: {response_text}",
-                        timestamp=datetime.utcnow()
+                        timestamp=datetime.now(UTC)
                     )
         except httpx.ConnectError as e:
             logger.debug(f"Health check connection error: {e}")
@@ -313,7 +313,7 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
                 status="unhealthy",
                 uptime=0,
                 message=f"Connection error: {e}",
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             )
         except httpx.TimeoutException as e:
             logger.debug(f"Health check timeout: {e}")
@@ -321,7 +321,7 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
                 status="unhealthy",
                 uptime=0,
                 message=f"Timeout: {e}",
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             )
         except Exception as e:
             logger.warning(f"Health check unexpected error: {type(e).__name__}: {e}")
@@ -329,7 +329,7 @@ class DockerEnvironmentAdapter(EnvironmentAdapter):
                 status="unhealthy",
                 uptime=0,
                 message=f"{type(e).__name__}: {e}",
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             )
 
     async def get_status(self) -> str:

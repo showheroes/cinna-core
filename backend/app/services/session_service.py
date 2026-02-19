@@ -1,5 +1,5 @@
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, UTC
 import logging
 import asyncio
 from typing import Any
@@ -92,7 +92,7 @@ class SessionService:
 
         update_dict = data.model_dump(exclude_unset=True)
         session.sqlmodel_update(update_dict)
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(UTC)
 
         db_session.add(session)
         db_session.commit()
@@ -117,7 +117,7 @@ class SessionService:
             return None
 
         session.status = status
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(UTC)
 
         db_session.add(session)
         db_session.commit()
@@ -152,7 +152,7 @@ class SessionService:
         session.interaction_status = interaction_status
         if pending_messages_count is not None:
             session.pending_messages_count = pending_messages_count
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(UTC)
 
         db_session.add(session)
         db_session.commit()
@@ -167,7 +167,7 @@ class SessionService:
             return None
 
         session.mode = new_mode
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(UTC)
 
         db_session.add(session)
         db_session.commit()
@@ -351,7 +351,7 @@ class SessionService:
         # Mark metadata as modified for SQLAlchemy
         flag_modified(session, "session_metadata")
 
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(UTC)
         db.add(session)
         db.commit()
         db.refresh(session)
@@ -386,7 +386,7 @@ class SessionService:
 
         flag_modified(session, "session_metadata")
 
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(UTC)
         db.add(session)
         db.commit()
         db.refresh(session)
@@ -412,7 +412,7 @@ class SessionService:
         """
         old_mode = session.mode
         session.mode = new_mode
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(UTC)
 
         # If switching modes and flag is set, clear external session
         if clear_external_session and old_mode != new_mode:
@@ -460,7 +460,7 @@ class SessionService:
                     logger.warning(f"Session {session_id} not found for STREAM_STARTED event")
                     return
 
-                now = datetime.utcnow()
+                now = datetime.now(UTC)
                 session.interaction_status = "running"
                 session.status = "active"
                 session.streaming_started_at = now
@@ -526,7 +526,7 @@ class SessionService:
                 session.interaction_status = ""
                 session.streaming_started_at = None
                 session.status = "active" if was_interrupted else "completed"
-                session.updated_at = datetime.utcnow()
+                session.updated_at = datetime.now(UTC)
                 user_id = session.user_id
 
                 db.add(session)
@@ -586,7 +586,7 @@ class SessionService:
                 session.interaction_status = ""
                 session.streaming_started_at = None
                 session.status = "error"
-                session.updated_at = datetime.utcnow()
+                session.updated_at = datetime.now(UTC)
                 user_id = session.user_id
 
                 db.add(session)
@@ -644,7 +644,7 @@ class SessionService:
                 session.interaction_status = ""
                 session.streaming_started_at = None
                 session.status = "active"
-                session.updated_at = datetime.utcnow()
+                session.updated_at = datetime.now(UTC)
                 user_id = session.user_id
 
                 db.add(session)

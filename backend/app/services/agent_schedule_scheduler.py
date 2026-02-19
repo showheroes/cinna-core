@@ -5,7 +5,7 @@ Follows the pattern of task_trigger_scheduler.py.
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlmodel import Session as DBSession, select
@@ -23,7 +23,7 @@ async def _poll_due_schedules() -> None:
     """Poll for due agent schedules and trigger execution."""
     from app.services.session_service import SessionService
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     with DBSession(engine) as db_session:
         statement = select(AgentSchedule).where(
@@ -83,7 +83,7 @@ async def _poll_due_schedules() -> None:
                 AgentSchedulerService.update_execution_time(
                     session=db_session,
                     schedule_id=schedule.id,
-                    last_execution=datetime.utcnow(),
+                    last_execution=datetime.now(UTC),
                 )
 
             except Exception as e:

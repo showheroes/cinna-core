@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import TYPE_CHECKING, List, Optional
 from sqlmodel import Field, Relationship, SQLModel, Column
 from sqlalchemy import JSON, Index, ForeignKeyConstraint, text, Text
@@ -98,8 +98,8 @@ class Agent(AgentBase, table=True):
     conversation_mode_ui: str = Field(default="detailed")  # "detailed" or "compact"
     agent_sdk_config: dict = Field(default_factory=dict, sa_column=Column(JSON))  # SDK config: sdk_tools, allowed_tools
     a2a_config: dict = Field(default_factory=dict, sa_column=Column(JSON))  # A2A config: skills, version, generated_at
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Clone relationship fields
     is_clone: bool = Field(default=False)

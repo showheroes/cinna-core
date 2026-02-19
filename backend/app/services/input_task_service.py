@@ -2,7 +2,7 @@
 Input Task Service - handles task creation, retrieval, updates, and status management.
 """
 from uuid import UUID
-from datetime import datetime
+from datetime import UTC, datetime
 import logging
 from typing import Any, Optional
 from sqlmodel import Session as DBSession, select
@@ -442,7 +442,7 @@ class InputTaskService:
 
                         # Update task description
                         task.current_description = message_to_send
-                        task.updated_at = datetime.utcnow()
+                        task.updated_at = datetime.now(UTC)
                         db_session.add(task)
                         db_session.commit()
                         db_session.refresh(task)
@@ -646,7 +646,7 @@ class InputTaskService:
         """
         update_dict = data.model_dump(exclude_unset=True)
         task.sqlmodel_update(update_dict)
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(UTC)
 
         db_session.add(task)
         db_session.commit()
@@ -661,7 +661,7 @@ class InputTaskService:
     ) -> InputTask:
         """Update task description"""
         task.current_description = new_description
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(UTC)
 
         db_session.add(task)
         db_session.commit()
@@ -677,7 +677,7 @@ class InputTaskService:
     ) -> InputTask:
         """Update task status"""
         task.status = status
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(UTC)
 
         if error_message:
             task.error_message = error_message
@@ -686,11 +686,11 @@ class InputTaskService:
 
         # Update timestamps based on status
         if status == InputTaskStatus.RUNNING:
-            task.executed_at = datetime.utcnow()
+            task.executed_at = datetime.now(UTC)
         elif status == InputTaskStatus.COMPLETED:
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(UTC)
         elif status == InputTaskStatus.ARCHIVED:
-            task.archived_at = datetime.utcnow()
+            task.archived_at = datetime.now(UTC)
 
         db_session.add(task)
         db_session.commit()
@@ -716,7 +716,7 @@ class InputTaskService:
         history_item = {
             "role": role,
             "content": content,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         if task.refinement_history is None:
@@ -724,7 +724,7 @@ class InputTaskService:
 
         task.refinement_history.append(history_item)
         flag_modified(task, "refinement_history")
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(UTC)
 
         db_session.add(task)
         db_session.commit()
@@ -740,8 +740,8 @@ class InputTaskService:
         """Link a session to the task"""
         task.session_id = session_id
         task.status = InputTaskStatus.RUNNING
-        task.executed_at = datetime.utcnow()
-        task.updated_at = datetime.utcnow()
+        task.executed_at = datetime.now(UTC)
+        task.updated_at = datetime.now(UTC)
 
         db_session.add(task)
         db_session.commit()
@@ -793,7 +793,7 @@ class InputTaskService:
         task.error_message = None
         task.executed_at = None
         task.completed_at = None
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(UTC)
 
         db_session.add(task)
         db_session.commit()
@@ -1240,7 +1240,7 @@ class InputTaskService:
                 task = db.get(InputTask, task_id)
                 if task:
                     task.todo_progress = todos
-                    task.updated_at = datetime.utcnow()
+                    task.updated_at = datetime.now(UTC)
                     db.add(task)
                     db.commit()
                     logger.info(f"Saved todo_progress to task {task_id}")
@@ -1522,7 +1522,7 @@ class InputTaskService:
             file = db_session.get(FileUpload, file_id)
             if file and file.user_id == user_id and file.status == "temporary":
                 file.status = "marked_for_deletion"
-                file.marked_for_deletion_at = datetime.utcnow()
+                file.marked_for_deletion_at = datetime.now(UTC)
                 db_session.add(file)
 
         db_session.commit()
@@ -1562,7 +1562,7 @@ class InputTaskService:
         count = 0
         for file in files:
             file.status = "marked_for_deletion"
-            file.marked_for_deletion_at = datetime.utcnow()
+            file.marked_for_deletion_at = datetime.now(UTC)
             db_session.add(file)
             count += 1
 

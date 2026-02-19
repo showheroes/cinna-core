@@ -7,7 +7,7 @@ Supports three trigger types:
 - Webhook: External HTTP-triggered execution with token validation
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Literal
 
 from pydantic import computed_field
@@ -59,8 +59,8 @@ class TaskTrigger(SQLModel, table=True):
     webhook_id: str | None = Field(default=None)
 
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # Create schemas

@@ -1,5 +1,5 @@
 import uuid as uuid_module
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import TYPE_CHECKING, Optional
 from sqlmodel import Field, Relationship, SQLModel
 from sqlalchemy import Index, UniqueConstraint, ForeignKeyConstraint
@@ -81,7 +81,7 @@ class AgentShare(AgentShareBase, table=True):
 
     # Status tracking
     status: str = Field(default="pending")  # "pending" | "accepted" | "declined" | "revoked" | "deleted"
-    shared_at: datetime = Field(default_factory=datetime.utcnow)
+    shared_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     accepted_at: datetime | None = Field(default=None)
     declined_at: datetime | None = Field(default=None)
 

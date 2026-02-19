@@ -17,7 +17,7 @@ import json
 import logging
 from typing import AsyncIterator, Any, Callable, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session as DbSession
 
@@ -182,7 +182,7 @@ class A2ARequestHandler:
                 contextId=str(session_id),
                 status=TaskStatus(
                     state=TaskState.completed,
-                    timestamp=datetime.utcnow().isoformat() + "Z",
+                    timestamp=datetime.now(UTC).isoformat() + "Z",
                 ),
             )
         return task

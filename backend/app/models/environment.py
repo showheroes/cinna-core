@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlmodel import SQLModel, Field, Column
 from sqlalchemy import JSON
 
@@ -17,8 +17,8 @@ class AgentEnvironment(SQLModel, table=True):
     is_active: bool = Field(default=False)
     status_message: str | None = None  # Detailed status message for UI (e.g., "Building Docker image...")
     config: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_health_check: datetime | None = None
     last_activity_at: datetime | None = None  # Last time environment was actively used (message sent, session opened, etc.)
     # SDK selection for agent (immutable after creation)

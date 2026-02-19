@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 
 from sqlalchemy import UniqueConstraint
@@ -74,8 +74,8 @@ class AgentEmailIntegration(AgentEmailIntegrationBase, table=True):
     outgoing_server_id: uuid.UUID | None = Field(
         default=None, foreign_key="mail_server_config.id", ondelete="SET NULL"
     )
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # Properties to return via API

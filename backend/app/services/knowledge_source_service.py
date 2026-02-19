@@ -7,7 +7,7 @@ Includes Git clone/pull operations, article parsing, and database storage.
 
 import uuid
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlmodel import Session, select, func
@@ -218,7 +218,7 @@ def update_source(
         source.status = SourceStatus.pending
         source.status_message = "Configuration updated. Please check access."
 
-    source.updated_at = datetime.utcnow()
+    source.updated_at = datetime.now(UTC)
 
     # Update workspace permissions if changed
     if data.workspace_ids is not None and data.workspace_access_type == WorkspaceAccessType.specific:
@@ -301,7 +301,7 @@ def enable_source(
         return None
 
     source.is_enabled = True
-    source.updated_at = datetime.utcnow()
+    source.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(source)
 
@@ -334,7 +334,7 @@ def disable_source(
         return None
 
     source.is_enabled = False
-    source.updated_at = datetime.utcnow()
+    source.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(source)
 
@@ -387,8 +387,8 @@ def check_access(
             if not key_data:
                 source.status = SourceStatus.error
                 source.status_message = "SSH key not found or access denied"
-                source.last_checked_at = datetime.utcnow()
-                source.updated_at = datetime.utcnow()
+                source.last_checked_at = datetime.now(UTC)
+                source.updated_at = datetime.now(UTC)
                 session.commit()
 
                 return CheckAccessResponse(
@@ -417,8 +417,8 @@ def check_access(
             source.status = SourceStatus.error
             source.status_message = message
 
-        source.last_checked_at = datetime.utcnow()
-        source.updated_at = datetime.utcnow()
+        source.last_checked_at = datetime.now(UTC)
+        source.updated_at = datetime.now(UTC)
         session.commit()
 
         logger.info(f"Access check for source {source_id}: {accessible}")
@@ -433,8 +433,8 @@ def check_access(
 
         source.status = SourceStatus.error
         source.status_message = f"Unexpected error: {str(e)}"
-        source.last_checked_at = datetime.utcnow()
-        source.updated_at = datetime.utcnow()
+        source.last_checked_at = datetime.now(UTC)
+        source.updated_at = datetime.now(UTC)
         session.commit()
 
         return CheckAccessResponse(
@@ -499,7 +499,7 @@ def refresh_knowledge(
             if not key_data:
                 source.status = SourceStatus.error
                 source.status_message = "SSH key not found or access denied"
-                source.updated_at = datetime.utcnow()
+                source.updated_at = datetime.now(UTC)
                 session.commit()
 
                 return RefreshKnowledgeResponse(
@@ -576,9 +576,9 @@ def refresh_knowledge(
 
             # Update source metadata
             source.status = SourceStatus.connected
-            source.last_sync_at = datetime.utcnow()
+            source.last_sync_at = datetime.now(UTC)
             source.sync_commit_hash = commit_hash
-            source.updated_at = datetime.utcnow()
+            source.updated_at = datetime.now(UTC)
 
             # Build status message
             message_parts = [
@@ -628,7 +628,7 @@ def refresh_knowledge(
 
         source.status = SourceStatus.error
         source.status_message = f"Authentication failed: {str(e)}"
-        source.updated_at = datetime.utcnow()
+        source.updated_at = datetime.now(UTC)
         session.commit()
 
         return RefreshKnowledgeResponse(
@@ -641,7 +641,7 @@ def refresh_knowledge(
 
         source.status = SourceStatus.error
         source.status_message = f"Connection failed: {str(e)}"
-        source.updated_at = datetime.utcnow()
+        source.updated_at = datetime.now(UTC)
         session.commit()
 
         return RefreshKnowledgeResponse(
@@ -654,7 +654,7 @@ def refresh_knowledge(
 
         source.status = SourceStatus.error
         source.status_message = f"Parse error: {str(e)}"
-        source.updated_at = datetime.utcnow()
+        source.updated_at = datetime.now(UTC)
         session.commit()
 
         return RefreshKnowledgeResponse(
@@ -667,7 +667,7 @@ def refresh_knowledge(
 
         source.status = SourceStatus.error
         source.status_message = f"Git error: {str(e)}"
-        source.updated_at = datetime.utcnow()
+        source.updated_at = datetime.now(UTC)
         session.commit()
 
         return RefreshKnowledgeResponse(
@@ -680,7 +680,7 @@ def refresh_knowledge(
 
         source.status = SourceStatus.error
         source.status_message = f"Unexpected error: {str(e)}"
-        source.updated_at = datetime.utcnow()
+        source.updated_at = datetime.now(UTC)
         session.commit()
 
         return RefreshKnowledgeResponse(

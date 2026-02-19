@@ -1,7 +1,7 @@
 import uuid
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -772,7 +772,7 @@ async def update_handover_config(
     if data.auto_feedback is not None:
         config.auto_feedback = data.auto_feedback
 
-    config.updated_at = datetime.utcnow()
+    config.updated_at = datetime.now(UTC)
     session.add(config)
     session.commit()
     session.refresh(config)
@@ -1082,7 +1082,7 @@ async def update_session_state(
     # Update session result state
     chat_session.result_state = data.state
     chat_session.result_summary = data.summary.strip()
-    chat_session.updated_at = datetime.utcnow()
+    chat_session.updated_at = datetime.now(UTC)
     session.add(chat_session)
     session.commit()
 
@@ -1165,7 +1165,7 @@ async def respond_to_task(
     # Reset session result_state (session back in progress)
     task_session.result_state = None
     task_session.result_summary = None
-    task_session.updated_at = datetime.utcnow()
+    task_session.updated_at = datetime.now(UTC)
     session.add(task_session)
 
     # Reset feedback_delivered

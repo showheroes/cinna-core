@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
@@ -110,7 +110,7 @@ class FileService:
 
         for file in files:
             file.status = "attached"
-            file.attached_at = datetime.utcnow()
+            file.attached_at = datetime.now(UTC)
 
         session.commit()
 
@@ -132,7 +132,7 @@ class FileService:
 
         # Mark for deletion
         file.status = "marked_for_deletion"
-        file.marked_for_deletion_at = datetime.utcnow()
+        file.marked_for_deletion_at = datetime.now(UTC)
         session.commit()
 
     @staticmethod

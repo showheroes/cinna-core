@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 
 from sqlmodel import Field, SQLModel, Column, Text
@@ -51,8 +51,8 @@ class MailServerConfig(MailServerConfigBase, table=True):
         foreign_key="user.id", nullable=False, ondelete="CASCADE"
     )
     encrypted_password: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # Properties to return via API (password redacted)

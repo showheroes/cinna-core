@@ -5,7 +5,7 @@ Each entry represents an agent response that needs to be sent back
 as an email via the parent agent's SMTP configuration.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 
 from sqlalchemy import Column, Text
 from sqlmodel import Field, SQLModel
@@ -40,8 +40,8 @@ class OutgoingEmailQueue(OutgoingEmailQueueBase, table=True):
     retry_count: int = Field(default=0)
     last_error: str | None = Field(default=None, sa_column=Column(Text))
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     sent_at: datetime | None = Field(default=None)
 
 

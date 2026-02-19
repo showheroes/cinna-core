@@ -1,5 +1,5 @@
 import uuid as uuid_module
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import TYPE_CHECKING
 from sqlmodel import Field, Relationship, SQLModel, Column
 from sqlalchemy import JSON, Index, ForeignKeyConstraint
@@ -71,7 +71,7 @@ class CloneUpdateRequest(CloneUpdateRequestBase, table=True):
 
     # Status tracking
     status: str = Field(default="pending")  # "pending" | "applied" | "dismissed"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     applied_at: datetime | None = Field(default=None)
     dismissed_at: datetime | None = Field(default=None)
 

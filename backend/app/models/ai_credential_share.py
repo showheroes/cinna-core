@@ -5,7 +5,7 @@ This enables AI credential owners to grant access to their AI API keys
 to other users, typically through agent sharing.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import TYPE_CHECKING
 
 from sqlmodel import Field, Relationship, SQLModel
@@ -44,7 +44,7 @@ class AICredentialShare(AICredentialShareBase, table=True):
         foreign_key="user.id", nullable=False, ondelete="CASCADE"
     )
     shared_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
-    shared_at: datetime = Field(default_factory=datetime.utcnow)
+    shared_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     ai_credential: "AICredential" = Relationship(

@@ -7,7 +7,7 @@ This service:
 - Manages schedule CRUD operations
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 import uuid
 import pytz
 from croniter import croniter
@@ -48,7 +48,7 @@ class AgentSchedulerService:
                 return cron_string
 
             # Create a naive datetime (we'll use tomorrow to avoid edge cases with current time)
-            naive_dt = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            naive_dt = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
             # Add one day to avoid any "now" edge cases
             from datetime import timedelta
             naive_dt = naive_dt + timedelta(days=1)
@@ -178,7 +178,7 @@ class AgentSchedulerService:
                 existing.description = description
                 existing.enabled = enabled
                 existing.next_execution = next_exec
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(UTC)
                 schedule = existing
                 logger.info(f"Updated schedule for agent {agent_id}: {description}")
             else:
@@ -289,7 +289,7 @@ class AgentSchedulerService:
                     schedule.cron_string,
                     schedule.timezone
                 )
-                schedule.updated_at = datetime.utcnow()
+                schedule.updated_at = datetime.now(UTC)
                 session.commit()
                 logger.info(
                     f"Updated execution time for schedule {schedule_id}. "

@@ -3,7 +3,7 @@ import logging
 import smtplib
 import ssl
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session, select, func
 
@@ -106,7 +106,7 @@ class MailServerService:
             server.encrypted_password = encrypt_field(password)
 
         server.sqlmodel_update(update_dict)
-        server.updated_at = datetime.utcnow()
+        server.updated_at = datetime.now(UTC)
         session.add(server)
         session.commit()
         session.refresh(server)
