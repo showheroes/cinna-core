@@ -23,6 +23,7 @@ from tests.utils.agent import (
     create_agent_via_api,
     enable_email_integration,
 )
+from tests.utils.background_tasks import drain_tasks
 from tests.utils.mail_server import (
     create_imap_server,
     create_smtp_server,
@@ -69,6 +70,12 @@ def test_email_integration_owner_mode_full_flow(
     assert me_resp.status_code == 200
 
     agent = create_agent_via_api(client, superuser_token_headers, name="Email Test Agent")
+    drain_tasks()
+    r = client.get(
+        f"{settings.API_V1_STR}/agents/{agent['id']}",
+        headers=superuser_token_headers,
+    )
+    agent = r.json()
     agent_id = agent["id"]
     assert agent["active_environment_id"] is not None
 

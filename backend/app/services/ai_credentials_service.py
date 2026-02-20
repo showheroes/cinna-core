@@ -30,8 +30,6 @@ from app.models.ai_credential_share import (
     SharedAICredentialPublic,
 )
 from app.models.user import User, AIServiceCredentials, AIServiceCredentialsUpdate
-from app.models.environment import AgentEnvironment
-from app.models.agent import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +389,9 @@ class AICredentialsService:
 
         Returns environments that use this credential for conversation and/or building,
         along with information about users who have access to the credential via shares.
+
+        Delegates environment lookup to EnvironmentService which handles both
+        explicitly linked credentials and default credential resolution.
         """
         # Verify user has access to credential (ownership or share)
         if not self.can_access_credential(session, credential_id, user_id):
@@ -404,39 +405,26 @@ class AICredentialsService:
         if not credential:
             raise HTTPException(status_code=404, detail="AI credential not found")
 
-        # Find environments using this credential
-        statement = (
-            select(AgentEnvironment, Agent, User)
-            .join(Agent, AgentEnvironment.agent_id == Agent.id)
-            .join(User, Agent.owner_id == User.id)
-            .where(
-                (AgentEnvironment.conversation_ai_credential_id == credential_id) |
-                (AgentEnvironment.building_ai_credential_id == credential_id)
-            )
+        # Delegate environment lookup to EnvironmentService
+        from app.services.environment_service import EnvironmentService
+
+        env_results = EnvironmentService.get_environments_for_credential(
+            session, credential
         )
-        results = session.exec(statement).all()
 
-        # Build affected environments list
-        environments = []
-        for env, agent, owner in results:
-            # Determine usage type
-            usage = []
-            if env.conversation_ai_credential_id == credential_id:
-                usage.append("conversation")
-            if env.building_ai_credential_id == credential_id:
-                usage.append("building")
-            usage_str = " & ".join(usage)
-
-            environments.append(AffectedEnvironmentPublic(
-                environment_id=env.id,
-                agent_id=agent.id,
-                agent_name=agent.name,
-                environment_name=env.instance_name,
-                status=env.status,
-                usage=usage_str,
-                owner_id=owner.id,
-                owner_email=owner.email,
-            ))
+        environments = [
+            AffectedEnvironmentPublic(
+                environment_id=r["environment"].id,
+                agent_id=r["agent"].id,
+                agent_name=r["agent"].name,
+                environment_name=r["environment"].instance_name,
+                status=r["environment"].status,
+                usage=r["usage"],
+                owner_id=r["owner"].id,
+                owner_email=r["owner"].email,
+            )
+            for r in env_results
+        ]
 
         # Get shared users
         statement_shares = (

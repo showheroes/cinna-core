@@ -1,11 +1,8 @@
 """
-Agent-specific test fixtures.
+AI Credentials test fixtures.
 
-Provides:
-- Session proxy so service code uses the test DB session
-- Environment adapter stub so agent creation uses real service logic without Docker
-- Background task collector so fire-and-forget tasks can be drained by test utils
-- External service mocks to prevent real calls
+Provides adapter-level environment stubbing so agent creation runs real service
+logic without Docker. Follows the same pattern as tests/api/agents/conftest.py.
 """
 import asyncio
 import pytest
@@ -16,19 +13,13 @@ from app.services.environment_service import EnvironmentService
 from app.services.environment_lifecycle import EnvironmentLifecycleManager
 from tests.stubs.environment_adapter_stub import EnvironmentTestAdapter
 from tests.stubs.socketio_stub import StubSocketIOConnector
-from tests.utils.ai_credential import create_random_ai_credential
 from tests.utils.background_tasks import set_collector
+from tests.utils.ai_credential import create_random_ai_credential
 
 
 class _NonClosingSessionProxy:
     """
     Wraps test DB session so `with create_session() as db:` doesn't close it.
-
-    Service code does:
-        with create_session() as fresh_db:
-            ...
-    The context manager __exit__ would normally close the session.
-    We suppress that so everything stays on the test transaction.
     """
 
     def __init__(self, session):
@@ -38,20 +29,14 @@ class _NonClosingSessionProxy:
         return self._session
 
     def __exit__(self, *args):
-        pass  # Don't close — the test fixture handles rollback
+        pass
 
     def __getattr__(self, name):
         return getattr(self._session, name)
 
 
 class _BackgroundTaskCollector:
-    """Collects fire-and-forget asyncio tasks for deferred execution.
-
-    Replaces create_task_with_error_logging so that background coroutines
-    (e.g. process_pending_messages) are captured instead of scheduled on the
-    event loop.  Test utilities call run_all() to drain them synchronously
-    from the test thread (outside the ASGI event loop).
-    """
+    """Collects fire-and-forget asyncio tasks for deferred execution."""
 
     def __init__(self):
         self.pending: list[tuple] = []
@@ -60,7 +45,6 @@ class _BackgroundTaskCollector:
         self.pending.append((coro, task_name))
 
     def run_all(self, max_rounds: int = 10):
-        """Run all collected tasks synchronously, draining cascading tasks."""
         for _ in range(max_rounds):
             if not self.pending:
                 return
@@ -75,7 +59,6 @@ class _BackgroundTaskCollector:
             )
 
     def _cleanup(self):
-        """Close any unrun coroutines to prevent RuntimeWarning."""
         for coro, _name in self.pending:
             coro.close()
         self.pending.clear()
@@ -83,16 +66,10 @@ class _BackgroundTaskCollector:
 
 @pytest.fixture(autouse=True)
 def patch_create_session(db):
-    """All internal service session creation returns the test session.
-
-    Must patch at every import site because `from app.core.db import create_session`
-    binds a local reference that isn't updated by patching the source module alone.
-    """
+    """All internal service session creation returns the test session."""
     factory = lambda: _NonClosingSessionProxy(db)
     with (
         patch("app.core.db.create_session", factory),
-        patch("app.services.email.processing_service.create_session", factory),
-        patch("app.services.session_service.create_session", factory),
         patch("app.services.environment_service.create_session", factory),
     ):
         yield
@@ -112,8 +89,8 @@ def patch_asyncio_to_thread():
 def patch_environment_adapter(tmp_path_factory):
     """Patch lifecycle manager to use EnvironmentTestAdapter instead of Docker.
 
-    Creates minimal template directory structure so real file I/O works
-    on temp paths without Docker.
+    Uses a single persistent adapter instance so tests can track calls
+    (start, rebuild, set_credentials, etc.) across lifecycle operations.
     """
     tmp = tmp_path_factory.mktemp("env")
     templates_dir = tmp / "templates"
@@ -127,16 +104,21 @@ def patch_environment_adapter(tmp_path_factory):
     (template_dir / "docker-compose.template.yml").write_text(
         "version: '3'\nservices:\n  agent:\n    image: test\n    ports:\n      - '${AGENT_PORT}:8000'\n"
     )
+    # Create app/core directory (required by rebuild_environment validation)
+    (template_dir / "app" / "core").mkdir(parents=True)
 
     # Build lifecycle manager with tmp dirs
     lm = EnvironmentLifecycleManager()
     lm.templates_dir = templates_dir
     lm.instances_dir = instances_dir
 
-    # Patch get_adapter to return test adapter
+    # Use a single persistent adapter so tests can inspect call history
+    adapter = EnvironmentTestAdapter()
+
     def _test_get_adapter(environment):
-        return EnvironmentTestAdapter()
+        return adapter
     lm.get_adapter = _test_get_adapter
+    lm._test_adapter = adapter
 
     # Install as singleton
     EnvironmentService._lifecycle_manager = lm
@@ -146,26 +128,16 @@ def patch_environment_adapter(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def background_tasks():
-    """Collect background tasks for deferred execution.
-
-    Replaces create_task_with_error_logging at every import site so that
-    fire-and-forget coroutines are captured instead of scheduled.
-    Test utilities (e.g. process_emails_with_stub) drain them automatically
-    via drain_tasks().
-    """
+    """Collect background tasks for deferred execution."""
     collector = _BackgroundTaskCollector()
     set_collector(collector)
     with (
         patch(
-            "app.services.session_service.create_task_with_error_logging",
+            "app.services.environment_service.create_task_with_error_logging",
             collector,
         ),
         patch(
             "app.services.event_service.create_task_with_error_logging",
-            collector,
-        ),
-        patch(
-            "app.services.environment_service.create_task_with_error_logging",
             collector,
         ),
     ):

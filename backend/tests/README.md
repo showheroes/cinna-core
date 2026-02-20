@@ -85,10 +85,28 @@ tests/
       test_users.py        # User CRUD, signup, password management
     items/
       test_items.py        # Item CRUD
+    agents/
+      conftest.py          # Environment stubs, background task collector
+      agents_email_integration_test.py
+    ai_credentials/
+      conftest.py          # Environment stubs for credential propagation tests
+      test_ai_credentials.py
+      test_ai_credentials_propagation.py
+  stubs/                   # Test doubles for external services
+    environment_adapter_stub.py
+    email_stubs.py
+    agent_env_stub.py
+    socketio_stub.py
   utils/
     utils.py               # random_lower_string(), random_email(), get_superuser_token_headers()
-    user.py                # create_random_user(), user_authentication_headers(), authentication_token_from_email()
+    user.py                # create_random_user(), user_authentication_headers()
     item.py                # create_random_item()
+    agent.py               # create_agent_via_api(), configure/enable_email_integration()
+    ai_credential.py       # create_random_ai_credential(), set/update/delete/get helpers
+    background_tasks.py    # drain_tasks() for deferred background task execution
+    mail_server.py         # create_imap_server(), create_smtp_server(), process_emails_with_stub()
+    session.py             # get_agent_session()
+    message.py             # get_messages_by_role()
 ```
 
 ## Writing New Tests
@@ -136,29 +154,41 @@ def test_create_widget(
 
 ### Creating Test Data
 
-Always create test data through API endpoints, never through direct DB calls:
+Always create test data through API endpoints, never through direct DB calls. Reusable helpers live in `tests/utils/`:
 
 ```python
-# Create a user
-def _signup_user(client, email=None, password=None):
-    email = email or random_email()
-    password = password or random_lower_string()
-    r = client.post(f"{settings.API_V1_STR}/users/signup",
-                    json={"email": email, "password": password})
-    assert r.status_code == 200
-    result = r.json()
-    result["_password"] = password  # stash for later use
-    return result
-
-# Log in and get auth headers
-def _login(client, email, password):
-    r = client.post(f"{settings.API_V1_STR}/login/access-token",
-                    data={"username": email, "password": password})
-    assert r.status_code == 200
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+from tests.utils.user import create_random_user, user_authentication_headers
+from tests.utils.ai_credential import create_random_ai_credential
+from tests.utils.agent import create_agent_via_api
 ```
 
-Reusable helpers live in `tests/utils/`. Use `create_random_user(client)` and `create_random_item(client, token_headers)` from there.
+### Test Utility Helpers
+
+Every repeated API call pattern should be extracted into a helper in `tests/utils/<domain>.py`. Helpers follow these conventions:
+
+1. **Encapsulate HTTP call + status assertion**, return parsed JSON:
+   ```python
+   def set_ai_credential_default(client, token_headers, credential_id) -> dict:
+       r = client.post(f"{settings.API_V1_STR}/ai-credentials/{credential_id}/set-default",
+                       headers=token_headers)
+       assert r.status_code == 200
+       return r.json()
+   ```
+
+2. **Compose common sequences** via parameters instead of separate calls:
+   ```python
+   # Instead of create + set_default in every test:
+   cred = create_random_ai_credential(client, headers, set_default=True)
+   ```
+
+3. **Keep inline calls only when testing the endpoint itself** (checking specific status codes, error responses, or response structure):
+   ```python
+   # Testing 403 — keep inline, don't use the helper
+   r = client.post(f".../{cred['id']}/set-default", headers=other_user_headers)
+   assert r.status_code == 403
+   ```
+
+4. **Naming**: `create_*` for POST, `get_*` for GET, `update_*` for PATCH, `delete_*` for DELETE, with the domain as prefix (e.g., `create_random_ai_credential`, `get_ai_credentials_profile`).
 
 ### Verifying Side-Effects
 
@@ -199,6 +229,7 @@ def test_password_recovery(client: TestClient) -> None:
 4. **Each test is independent.** Transaction rollback ensures no state leaks. Do not rely on test execution order.
 5. **Use random data.** Use `random_email()` and `random_lower_string()` for test data to avoid collisions.
 6. **Mock external calls.** Patch SMTP, OAuth, and any external HTTP calls.
+7. **Extract repeated API calls into `tests/utils/` helpers.** If the same endpoint call appears in multiple tests as setup (not as the thing being tested), wrap it in a utility function. Compose common multi-step sequences via parameters (e.g., `set_default=True`).
 
 ## Code Style (for application code)
 

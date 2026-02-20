@@ -5,10 +5,12 @@ import asyncio
 import logging
 from typing import Any
 from sqlmodel import Session, select
+from sqlalchemy import or_
 from sqlalchemy.orm.attributes import flag_modified
 from app.models import AgentEnvironment, AgentEnvironmentCreate, AgentEnvironmentUpdate, Agent, User
-from app.models.ai_credential import AICredentialType
-from app.core.db import engine
+from app.models.ai_credential import AICredential, AICredentialType
+from app.core.db import engine, create_session
+from app.utils import create_task_with_error_logging
 from .environment_lifecycle import EnvironmentLifecycleManager
 from .ai_credentials_service import ai_credentials_service
 
@@ -122,7 +124,7 @@ class EnvironmentService:
             source_environment_id: If provided, copy workspace from this environment after build
         """
         # Create new database session for background task
-        with Session(engine) as session:
+        with create_session() as session:
             try:
                 # Get environment and agent
                 environment = session.get(AgentEnvironment, env_id)
@@ -262,7 +264,7 @@ class EnvironmentService:
             env_id: Environment ID to activate
         """
         # Create new database session for background task
-        with Session(engine) as session:
+        with create_session() as session:
             try:
                 # Get agent and target environment
                 agent = session.get(Agent, agent_id)
@@ -320,7 +322,7 @@ class EnvironmentService:
             except Exception as e:
                 # Error is already logged in start_environment
                 # Update target environment status to error if not already done
-                with Session(engine) as error_session:
+                with create_session() as error_session:
                     target_env = error_session.get(AgentEnvironment, env_id)
                     if target_env and target_env.status != "error":
                         target_env.status = "error"
@@ -520,12 +522,13 @@ class EnvironmentService:
 
         # Spawn background task to create Docker instance
         # This allows the API to return immediately while the build happens asynchronously
-        asyncio.create_task(
+        create_task_with_error_logging(
             EnvironmentService._create_environment_background(
                 environment.id, agent_id, anthropic_api_key, auto_start, minimax_api_key,
                 openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model,
                 source_environment_id
-            )
+            ),
+            "create_environment",
         )
 
         return environment
@@ -640,8 +643,9 @@ class EnvironmentService:
 
         # Spawn background task to activate environment
         # This allows the API to return immediately while activation happens asynchronously
-        asyncio.create_task(
-            EnvironmentService._activate_environment_background(agent_id, env_id)
+        create_task_with_error_logging(
+            EnvironmentService._activate_environment_background(agent_id, env_id),
+            "activate_environment",
         )
 
         return target_env
@@ -931,7 +935,7 @@ class EnvironmentService:
             logger.info(f"Handling stream_completed event: syncing prompts from environment {environment_id}")
 
             # Use a fresh database session for this background task
-            with Session(engine) as session:
+            with create_session() as session:
                 environment = session.get(AgentEnvironment, UUID(environment_id))
                 agent = session.get(Agent, UUID(agent_id))
 
@@ -953,3 +957,100 @@ class EnvironmentService:
 
         except Exception as e:
             logger.error(f"Error in handle_stream_completed_event: {e}", exc_info=True)
+
+    @staticmethod
+    def get_environments_for_credential(
+        session: Session,
+        credential: AICredential,
+    ) -> list[dict]:
+        """
+        Find all environments that use a given AI credential, either explicitly
+        (via conversation/building_ai_credential_id) or implicitly (via
+        use_default_ai_credentials when the credential is the user's default).
+
+        Returns a list of dicts with keys: environment, agent, owner, usage.
+        """
+        credential_id = credential.id
+
+        # 1. Environments explicitly linked to this credential
+        explicit_stmt = (
+            select(AgentEnvironment, Agent, User)
+            .join(Agent, AgentEnvironment.agent_id == Agent.id)
+            .join(User, Agent.owner_id == User.id)
+            .where(
+                or_(
+                    AgentEnvironment.conversation_ai_credential_id == credential_id,
+                    AgentEnvironment.building_ai_credential_id == credential_id,
+                )
+            )
+        )
+        explicit_results = session.exec(explicit_stmt).all()
+
+        results: list[dict] = []
+        seen_env_ids: set[UUID] = set()
+
+        for env, agent, owner in explicit_results:
+            usage = []
+            if env.conversation_ai_credential_id == credential_id:
+                usage.append("conversation")
+            if env.building_ai_credential_id == credential_id:
+                usage.append("building")
+
+            results.append({
+                "environment": env,
+                "agent": agent,
+                "owner": owner,
+                "usage": " & ".join(usage),
+            })
+            seen_env_ids.add(env.id)
+
+        # 2. Environments using default credentials where this credential is the default
+        if not credential.is_default:
+            return results
+
+        # Find SDK IDs that map to this credential type
+        matching_sdks = [
+            sdk for sdk, cred_type in SDK_TO_CREDENTIAL_TYPE.items()
+            if cred_type.value == credential.type
+        ]
+        if not matching_sdks:
+            return results
+
+        # Query environments owned by the credential owner that use defaults
+        # and have a matching SDK
+        sdk_filters = []
+        for sdk in matching_sdks:
+            sdk_filters.append(AgentEnvironment.agent_sdk_conversation == sdk)
+            sdk_filters.append(AgentEnvironment.agent_sdk_building == sdk)
+
+        default_stmt = (
+            select(AgentEnvironment, Agent, User)
+            .join(Agent, AgentEnvironment.agent_id == Agent.id)
+            .join(User, Agent.owner_id == User.id)
+            .where(
+                Agent.owner_id == credential.owner_id,
+                AgentEnvironment.use_default_ai_credentials == True,
+                or_(*sdk_filters),
+            )
+        )
+        default_results = session.exec(default_stmt).all()
+
+        for env, agent, owner in default_results:
+            if env.id in seen_env_ids:
+                continue
+
+            usage = []
+            if env.agent_sdk_conversation in matching_sdks:
+                usage.append("conversation")
+            if env.agent_sdk_building in matching_sdks:
+                usage.append("building")
+
+            if usage:
+                results.append({
+                    "environment": env,
+                    "agent": agent,
+                    "owner": owner,
+                    "usage": " & ".join(usage),
+                })
+
+        return results
