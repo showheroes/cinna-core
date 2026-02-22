@@ -119,7 +119,7 @@ def background_tasks():
 
 @pytest.fixture(autouse=True)
 def patch_external_services():
-    """Mock external service calls (OAuth refresh, Socket.IO)."""
+    """Mock external service calls (OAuth refresh, Socket.IO, LLM providers)."""
     with (
         patch(
             "app.services.credentials_service.CredentialsService.refresh_expiring_credentials_for_agent",
@@ -128,6 +128,14 @@ def patch_external_services():
         patch(
             "app.services.event_service.socketio_connector",
             StubSocketIOConnector(),
+        ),
+        patch(
+            "app.services.ai_functions_service.AIFunctionsService.is_available",
+            return_value=False,
+        ),
+        patch(
+            "app.services.agent_service.generate_a2a_skills",
+            return_value=[],
         ),
     ):
         yield
