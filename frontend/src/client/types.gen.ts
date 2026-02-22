@@ -2959,6 +2959,12 @@ export type SessionsResetSdkSessionData = {
 
 export type SessionsResetSdkSessionResponse = (Message);
 
+export type SessionsRecoverSessionData = {
+    id: string;
+};
+
+export type SessionsRecoverSessionResponse = (Message);
+
 export type SessionsBulkDeleteSessionsData = {
     requestBody: BulkDeleteRequest;
 };

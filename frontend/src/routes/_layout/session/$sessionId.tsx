@@ -500,6 +500,7 @@ function ChatInterface() {
           conversationModeUi={session.mode === "building" ? "detailed" : (agent?.conversation_mode_ui || "detailed")}
           agentId={session?.agent_id ?? undefined}
           integrationTyp={session?.integration_type}
+          sessionId={sessionId}
         />
         <EnvironmentPanel isOpen={envPanelOpen} environmentId={effectiveEnvId} agentId={session?.agent_id ?? undefined} />
         {showSubTasks && (

@@ -338,6 +338,48 @@ def reset_sdk_session(
     return Message(message="SDK session cleared. Next message will start a new session.")
 
 
+@router.post("/{id}/recover", response_model=Message)
+async def recover_session(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Message:
+    """
+    Mark session for recovery. Clears SDK session and sets recovery_pending flag.
+    If the last user message was followed only by system errors, it is automatically
+    re-queued and streaming is initiated — no duplicate message is created.
+    """
+    chat_session = session.get(Session, id)
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Verify ownership
+    if not current_user.is_superuser and (chat_session.user_id != current_user.id):
+        raise HTTPException(status_code=400, detail="Not enough permissions")
+
+    has_resendable = SessionService.mark_session_for_recovery(db=session, session=chat_session)
+
+    # Add a system message to the chat indicating recovery
+    from app.services.message_service import MessageService
+    MessageService.create_message(
+        session=session,
+        session_id=id,
+        role="system",
+        content="Session recovered",
+    )
+
+    if has_resendable:
+        # Trigger streaming for the re-pending message
+        from app.core.db import create_session as create_db_session
+        await SessionService.initiate_stream(
+            session_id=id,
+            get_fresh_db_session=create_db_session,
+        )
+        return Message(message="Session marked for recovery. Resending last message.")
+
+    return Message(message="Session marked for recovery. Next message will create a fresh AI session with conversation history.")
+
+
 @router.delete("/{id}")
 def delete_session(
     session: SessionDep, current_user: CurrentUser, id: uuid.UUID

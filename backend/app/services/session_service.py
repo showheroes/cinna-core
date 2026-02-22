@@ -394,6 +394,53 @@ class SessionService:
         return session
 
     @staticmethod
+    def mark_session_for_recovery(db: DBSession, session: Session) -> bool:
+        """Mark session for recovery. Clears external session and sets recovery_pending flag.
+
+        Also detects if the last user message was followed only by system error
+        messages (the typical failure pattern) and resets it to pending so it
+        gets re-processed without creating a duplicate message.
+
+        Returns:
+            True if a resendable user message was found and reset to pending.
+        """
+        from app.models import SessionMessage
+
+        session.session_metadata.pop("external_session_id", None)
+        session.session_metadata.pop("sdk_type", None)
+        session.session_metadata.pop("last_sdk_message_id", None)
+        session.session_metadata["recovery_pending"] = True
+        flag_modified(session, "session_metadata")
+        session.status = "active"
+        session.updated_at = datetime.now(UTC)
+        db.add(session)
+
+        # Detect failed user message pattern: trailing system errors then a user message
+        has_resendable = False
+        messages = list(db.exec(
+            select(SessionMessage)
+            .where(SessionMessage.session_id == session.id)
+            .order_by(SessionMessage.sequence_number.desc())
+            .limit(20)
+        ).all())
+
+        # Walk backwards (messages are desc order): skip system error messages
+        i = 0
+        while i < len(messages) and messages[i].role == "system" and messages[i].status == "error":
+            i += 1
+
+        # If we skipped at least one error and the next message is a user message, reset it
+        if i > 0 and i < len(messages) and messages[i].role == "user":
+            messages[i].sent_to_agent_status = "pending"
+            db.add(messages[i])
+            has_resendable = True
+            logger.info(f"Reset user message {messages[i].id} to pending for recovery resend")
+
+        db.commit()
+        db.refresh(session)
+        return has_resendable
+
+    @staticmethod
     def update_session_mode(
         db: DBSession,
         session: Session,

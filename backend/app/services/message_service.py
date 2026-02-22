@@ -268,6 +268,35 @@ class MessageService:
         return list(reversed(messages))
 
     @staticmethod
+    def build_recovery_context(db, session_id: UUID, max_messages: int = 20) -> str:
+        """Build history string for session recovery."""
+        statement = (
+            select(SessionMessage)
+            .where(SessionMessage.session_id == session_id)
+            .order_by(SessionMessage.sequence_number.desc())
+            .limit(max_messages)
+        )
+        messages = list(reversed(list(db.exec(statement).all())))
+
+        # Filter to user + agent messages only (skip system)
+        filtered = [m for m in messages if m.role in ("user", "agent")]
+        if not filtered:
+            return ""
+
+        lines = []
+        for msg in filtered:
+            role_label = "User" if msg.role == "user" else "Assistant"
+            lines.append(f"{role_label}: {msg.content or ''}")
+
+        return (
+            "[SESSION RECOVERY]\n"
+            "Previous conversation history:\n"
+            + "\n".join(lines)
+            + "\n[END SESSION RECOVERY]\n"
+            "Please continue the conversation. The user's new message follows:"
+        )
+
+    @staticmethod
     def get_last_message(
         session: Session, session_id: UUID
     ) -> SessionMessage | None:
@@ -403,6 +432,19 @@ class MessageService:
                     db.add(chat_session)
                     db.commit()
                     return
+
+                # Check for session recovery
+                if chat_session.session_metadata.get("recovery_pending"):
+                    recovery_context = MessageService.build_recovery_context(db, session_id)
+                    if recovery_context:
+                        concatenated_content = f"{recovery_context}\n\n{concatenated_content}"
+                    # Clear recovery_pending flag
+                    chat_session.session_metadata.pop("recovery_pending", None)
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(chat_session, "session_metadata")
+                    db.add(chat_session)
+                    db.commit()
+                    db.refresh(chat_session)
 
                 # Get environment and agent
                 environment = db.get(AgentEnvironment, chat_session.environment_id)

@@ -7,8 +7,10 @@ import { StreamEventRenderer } from "./StreamEventRenderer"
 import { MessageActions } from "./MessageActions"
 import { AnswerQuestionsModal } from "./AnswerQuestionsModal"
 import { FileBadge } from "./FileBadge"
-import { Info, AlertCircle, ExternalLink, CheckCircle2, HelpCircle, AlertTriangle, Mail } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Info, AlertCircle, ExternalLink, CheckCircle2, HelpCircle, AlertTriangle, Mail, RefreshCw } from "lucide-react"
 import { useToolApproval } from "@/hooks/useToolApproval"
+import { RecoverSessionModal } from "./RecoverSessionModal"
 
 interface MessageBubbleProps {
   message: MessagePublic
@@ -17,10 +19,12 @@ interface MessageBubbleProps {
   conversationModeUi?: string
   agentId?: string
   integrationTyp?: string | null
+  sessionId?: string
 }
 
-export function MessageBubble({ message, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId, integrationTyp }: MessageBubbleProps) {
+export function MessageBubble({ message, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId, integrationTyp, sessionId }: MessageBubbleProps) {
   const [showAnswerModal, setShowAnswerModal] = useState(false)
+  const [showRecoverModal, setShowRecoverModal] = useState(false)
   const approvalMessageSentRef = useRef(false)
 
   // Tool approval hook
@@ -106,42 +110,66 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
 
   if (isSystem) {
     return (
-      <div className="flex justify-center my-4">
-        <div
-          className={`text-sm px-4 py-2 rounded-lg max-w-2xl ${
-            isSystemError
-              ? "bg-destructive/10 text-destructive border border-destructive/20"
-              : isTaskCreatedMessage
-              ? "bg-blue-50/60 dark:bg-blue-950/20 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
-              : "bg-muted/60 text-muted-foreground"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span>{message.content}</span>
-            {isTaskCreatedMessage && isInboxTask && taskId && (
-              <Link
-                to="/task/$taskId"
-                params={{ taskId: taskId }}
-                className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2"
-              >
-                <span>View task</span>
-                <ExternalLink className="h-3 w-3" />
-              </Link>
-            )}
-            {isTaskCreatedMessage && !isInboxTask && taskSessionId && (
-              <Link
-                to="/session/$sessionId"
-                params={{ sessionId: taskSessionId }}
-                search={{ initialMessage: undefined, fileIds: undefined, fileObjects: undefined }}
-                className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2"
-              >
-                <span>View session</span>
-                <ExternalLink className="h-3 w-3" />
-              </Link>
+      <>
+        <div className="flex justify-center my-4">
+          <div className="max-w-2xl">
+            <div
+              className={`text-sm px-4 py-2 rounded-lg ${
+                isSystemError
+                  ? "bg-destructive/10 text-destructive border border-destructive/20"
+                  : isTaskCreatedMessage
+                  ? "bg-blue-50/60 dark:bg-blue-950/20 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
+                  : "bg-muted/60 text-muted-foreground"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span>{message.content}</span>
+                {isTaskCreatedMessage && isInboxTask && taskId && (
+                  <Link
+                    to="/task/$taskId"
+                    params={{ taskId: taskId }}
+                    className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2"
+                  >
+                    <span>View task</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+                )}
+                {isTaskCreatedMessage && !isInboxTask && taskSessionId && (
+                  <Link
+                    to="/session/$sessionId"
+                    params={{ sessionId: taskSessionId }}
+                    search={{ initialMessage: undefined, fileIds: undefined, fileObjects: undefined }}
+                    className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2"
+                  >
+                    <span>View session</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+                )}
+              </div>
+            </div>
+            {isSystemError && sessionId && (
+              <div className="mt-2 flex gap-2 justify-end flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950"
+                  onClick={() => setShowRecoverModal(true)}
+                >
+                  <RefreshCw className="h-4 w-4 mr-1.5" />
+                  Recover Session
+                </Button>
+              </div>
             )}
           </div>
         </div>
-      </div>
+        {isSystemError && sessionId && (
+          <RecoverSessionModal
+            open={showRecoverModal}
+            onOpenChange={setShowRecoverModal}
+            sessionId={sessionId}
+          />
+        )}
+      </>
     )
   }
 

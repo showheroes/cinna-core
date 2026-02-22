@@ -16,9 +16,10 @@ interface MessageListProps {
   conversationModeUi?: string
   agentId?: string
   integrationTyp?: string | null
+  sessionId?: string
 }
 
-export function MessageList({ messages, isLoading, streamingEvents, isStreaming, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId, integrationTyp }: MessageListProps) {
+export function MessageList({ messages, isLoading, streamingEvents, isStreaming, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId, integrationTyp, sessionId }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -88,6 +89,7 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming,
                       conversationModeUi={conversationModeUi}
                       agentId={agentId}
                       integrationTyp={integrationTyp}
+                      sessionId={sessionId}
                     />
                   ))
                 }
@@ -120,6 +122,7 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming,
                         onSendMessage={onSendMessage}
                         conversationModeUi={conversationModeUi}
                         agentId={agentId}
+                        sessionId={sessionId}
                       />
                     ))}
                     <StreamingMessage events={streamingEvents || []} conversationModeUi={conversationModeUi} />
@@ -131,6 +134,7 @@ export function MessageList({ messages, isLoading, streamingEvents, isStreaming,
                         onSendMessage={onSendMessage}
                         conversationModeUi={conversationModeUi}
                         agentId={agentId}
+                        sessionId={sessionId}
                       />
                     ))}
                   </>
