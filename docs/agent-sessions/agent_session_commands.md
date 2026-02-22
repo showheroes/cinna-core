@@ -161,6 +161,52 @@ Uses the public shared workspace endpoint. One token is generated per command in
 - [errors.log](/environment/abc-123/file?path=logs%2Ferrors.log) (1.1 KB)
 ```
 
+## `/session-recover` Command
+
+### Purpose
+
+Recover a session from a lost SDK connection (e.g., after an agent-env container rebuild). This is the command equivalent of the UI "Recover Session" button, enabling A2A clients to trigger recovery without a dedicated API call.
+
+For full details on the session recovery mechanism (recovery context format, auto-resend detection, `recovery_pending` flag lifecycle), see [`agent_sessions_recovery.md`](agent_sessions_recovery.md).
+
+**File:** `backend/app/services/commands/session_recover_command.py`
+
+### Execution Flow
+
+1. Clear SDK session metadata (`external_session_id`, `sdk_type`, `last_sdk_message_id`)
+2. Set `recovery_pending = true` in session metadata (consumed on next message to inject conversation history)
+3. Set session status to `active`
+4. Detect failed-message pattern: skip the command's own user message, then look for trailing system errors followed by a user message
+5. If resendable message found: reset its `sent_to_agent_status` to `"pending"` and call `initiate_stream()` to re-process it
+6. Create a "Session recovered" system message
+7. Return `CommandResult` indicating whether auto-resend was triggered
+
+### Design Note — Command Message Skipping
+
+Unlike the REST endpoint (`POST /sessions/{id}/recover`), the command handler cannot reuse `mark_session_for_recovery()` directly. When a command executes, the framework has already created the command's user message (`/session-recover`) in the DB. This breaks the trailing-error detection pattern because the most recent message is now a user message, not a system error. The handler implements its own detection logic that skips the command message before scanning.
+
+### Behavior
+
+| Scenario | Response | Side Effect |
+|----------|----------|-------------|
+| System error exists, resendable message found | "Session recovered. Resending last message." | Failed message re-sent with recovery context |
+| No system error / no resendable message | "Session recovered. Send a new message to continue with conversation history." | Next user message will include recovery context |
+
+### Example Usage
+
+**A2A client** sends `/session-recover` as a regular message after detecting a session error:
+```
+→ message/send: "/session-recover"
+← Task(state=completed, message="Session recovered. Resending last message.")
+← (streaming resumes automatically for the failed message)
+```
+
+**UI user** types `/session-recover` in the chat input:
+```
+Agent: Session recovered. Resending last message.
+Agent: <response to the re-sent failed message>
+```
+
 ## Agent Workspace View Tokens
 
 ### Purpose
@@ -301,6 +347,7 @@ Extracts `backend_base_url` from `request.base_url` (with `X-Forwarded-Proto` ha
 | `backend/app/services/agent_workspace_token_service.py` | Short-lived JWT for A2A agent workspace file access |
 | `backend/app/services/commands/__init__.py` | Command handler registration |
 | `backend/app/services/commands/files_command.py` | `/files` and `/files-all` command handlers |
+| `backend/app/services/commands/session_recover_command.py` | `/session-recover` command handler |
 | `backend/app/api/routes/shared_workspace.py` | Public file view endpoint |
 
 ### Modified Files
@@ -328,9 +375,15 @@ Extracts `backend_base_url` from `request.base_url` (with `X-Forwarded-Proto` ha
 6. **Unknown command**: Type `/unknown` → passes through to normal LLM flow (not a registered command)
 7. **Empty workspace**: Type `/files` on fresh environment → "No files found in workspace" message
 8. **New session**: First message is `/files` → session created, title auto-generated, response returned
+9. **`/session-recover` with error**: Send message → error → type `/session-recover` → failed message auto-resent with recovery context
+10. **`/session-recover` without error**: Type `/session-recover` on healthy session → next message includes recovery context
+11. **`/session-recover` via A2A**: Send `/session-recover` via A2A `message/send` → completed task returned, streaming resumes
 
 ---
 
-**Document Version:** 1.1
+**Document Version:** 1.2
 **Last Updated:** 2026-02-22
 **Status:** Feature Implemented
+
+**Related Documents:**
+- [`agent_sessions_recovery.md`](agent_sessions_recovery.md) — Session recovery mechanism, context format, auto-resend detection

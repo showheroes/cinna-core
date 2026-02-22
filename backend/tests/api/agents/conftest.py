@@ -34,6 +34,7 @@ def patch_create_session(db):
         patch("app.services.session_service.create_session", factory),
         patch("app.services.environment_service.create_session", factory),
         patch("app.services.commands.files_command.create_session", factory),
+        patch("app.services.commands.session_recover_command.create_db_session", factory),
     ):
         yield
 
