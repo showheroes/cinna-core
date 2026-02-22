@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { WorkspaceService, OpenAPI } from "@/client"
 import { CSVViewer } from "./CSVViewer"
 import { MarkdownViewer } from "./MarkdownViewer"
+import { JSONViewer } from "./JSONViewer"
 import { useEffect } from "react"
 import { usePageHeader } from "@/routes/_layout"
 import type { AxiosRequestConfig } from "axios"
@@ -126,6 +127,10 @@ export function FileViewer({ envId, filePath }: FileViewerProps) {
 
   if (fileExtension === "md") {
     return <MarkdownViewer content={fileContent} />
+  }
+
+  if (fileExtension === "json") {
+    return <JSONViewer content={fileContent} />
   }
 
   // Fallback for unsupported file types
