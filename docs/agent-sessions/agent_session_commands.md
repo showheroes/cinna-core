@@ -207,6 +207,57 @@ Agent: Session recovered. Resending last message.
 Agent: <response to the re-sent failed message>
 ```
 
+## `/session-reset` Command
+
+### Purpose
+
+Reset the SDK session for a clean slate — no recovery context, no auto-resend. Unlike `/session-recover`, this command simply clears the SDK metadata so the next message starts a completely fresh conversation with the agent.
+
+This is useful when:
+- The agent is in a bad state and you want to start fresh without carrying over conversation history
+- You want to force a new SDK session without triggering recovery logic
+- An A2A client needs to reset the session via the message interface (instead of calling `POST /sessions/{id}/reset-sdk`)
+
+**File:** `backend/app/services/commands/session_reset_command.py`
+
+### Execution Flow
+
+1. Clear SDK session metadata via `SessionService.clear_external_session()` (removes `external_session_id`, `sdk_type`, `last_sdk_message_id`)
+2. Create a "Session reset" system message
+3. Return `CommandResult` with reset confirmation
+
+No `recovery_pending` flag is set, no message scanning, no `initiate_stream()`.
+
+### Comparison with `/session-recover`
+
+| Aspect | `/session-recover` | `/session-reset` |
+|--------|-------------------|-----------------|
+| Clears SDK metadata | Yes | Yes |
+| Sets `recovery_pending` | Yes | **No** |
+| Detects failed messages | Yes | **No** |
+| Auto-resends | Yes | **No** |
+| System message | "Session recovered" | "Session reset" |
+| Next message | Includes conversation history | Clean slate |
+
+### Behavior
+
+| Scenario | Response | Side Effect |
+|----------|----------|-------------|
+| Any state | "Session reset. Next message will start a fresh conversation with the agent." | SDK metadata cleared, next message starts fresh |
+
+### Example Usage
+
+**A2A client** sends `/session-reset` to start fresh:
+```
+→ message/send: "/session-reset"
+← Task(state=completed, message="Session reset. Next message will start a fresh conversation with the agent.")
+```
+
+**UI user** types `/session-reset` in the chat input:
+```
+Agent: Session reset. Next message will start a fresh conversation with the agent.
+```
+
 ## Agent Workspace View Tokens
 
 ### Purpose
@@ -348,6 +399,7 @@ Extracts `backend_base_url` from `request.base_url` (with `X-Forwarded-Proto` ha
 | `backend/app/services/commands/__init__.py` | Command handler registration |
 | `backend/app/services/commands/files_command.py` | `/files` and `/files-all` command handlers |
 | `backend/app/services/commands/session_recover_command.py` | `/session-recover` command handler |
+| `backend/app/services/commands/session_reset_command.py` | `/session-reset` command handler |
 | `backend/app/api/routes/shared_workspace.py` | Public file view endpoint |
 
 ### Modified Files
@@ -378,10 +430,13 @@ Extracts `backend_base_url` from `request.base_url` (with `X-Forwarded-Proto` ha
 9. **`/session-recover` with error**: Send message → error → type `/session-recover` → failed message auto-resent with recovery context
 10. **`/session-recover` without error**: Type `/session-recover` on healthy session → next message includes recovery context
 11. **`/session-recover` via A2A**: Send `/session-recover` via A2A `message/send` → completed task returned, streaming resumes
+12. **`/session-reset` basic**: Type `/session-reset` → SDK metadata cleared, "Session reset" system message, no LLM call
+13. **`/session-reset` clean slate**: After `/session-reset`, send follow-up → no `[SESSION RECOVERY]` context, fresh SDK session
+14. **`/session-reset` after error**: Send message → error → `/session-reset` → no auto-resend, no "Session recovered" message
 
 ---
 
-**Document Version:** 1.2
+**Document Version:** 1.3
 **Last Updated:** 2026-02-22
 **Status:** Feature Implemented
 

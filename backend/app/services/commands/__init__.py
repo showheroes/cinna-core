@@ -7,8 +7,10 @@ Import this module at startup to ensure commands are registered.
 from app.services.command_service import CommandService
 from app.services.commands.files_command import FilesCommandHandler, FilesAllCommandHandler
 from app.services.commands.session_recover_command import SessionRecoverCommandHandler
+from app.services.commands.session_reset_command import SessionResetCommandHandler
 
 # Register all command handlers
 CommandService.register(FilesCommandHandler())
 CommandService.register(FilesAllCommandHandler())
 CommandService.register(SessionRecoverCommandHandler())
+CommandService.register(SessionResetCommandHandler())
