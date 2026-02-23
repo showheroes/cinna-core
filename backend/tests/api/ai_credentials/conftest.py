@@ -2,127 +2,46 @@
 AI Credentials test fixtures.
 
 Provides adapter-level environment stubbing so agent creation runs real service
-logic without Docker. Follows the same pattern as tests/api/agents/conftest.py.
+logic without Docker. Uses a persistent adapter so tests can inspect call history.
 """
 import pytest
-from unittest.mock import patch, AsyncMock
-
-from app.core.config import settings
-from app.services.environment_service import EnvironmentService
-from app.services.environment_lifecycle import EnvironmentLifecycleManager
-from tests.stubs.environment_adapter_stub import EnvironmentTestAdapter
-from tests.stubs.socketio_stub import StubSocketIOConnector
-from tests.utils.ai_credential import create_random_ai_credential
-from tests.utils.background_tasks import BackgroundTaskCollector, set_collector
-from tests.utils.db_proxy import NonClosingSessionProxy
+from tests.utils.fixtures import (
+    patch_asyncio_to_thread,
+    setup_default_credentials,
+    patched_create_sessions,
+    patched_background_tasks,
+    patched_external_services,
+    setup_environment_adapter,
+    teardown_environment_adapter,
+)
 
 
 @pytest.fixture(autouse=True)
 def patch_create_session(db):
-    """All internal service session creation returns the test session."""
-    factory = lambda: NonClosingSessionProxy(db)
-    with (
-        patch("app.core.db.create_session", factory),
-        patch("app.services.environment_service.create_session", factory),
-    ):
-        yield
-
-
-@pytest.fixture(autouse=True)
-def patch_asyncio_to_thread():
-    """Run asyncio.to_thread synchronously to avoid cross-thread session issues."""
-    async def _run_sync(func, /, *args, **kwargs):
-        return func(*args, **kwargs)
-
-    with patch("asyncio.to_thread", _run_sync):
+    """Patch create_session at all service import sites."""
+    with patched_create_sessions(db):
         yield
 
 
 @pytest.fixture(autouse=True)
 def patch_environment_adapter(tmp_path_factory):
-    """Patch lifecycle manager to use EnvironmentTestAdapter instead of Docker.
-
-    Uses a single persistent adapter instance so tests can track calls
-    (start, rebuild, set_credentials, etc.) across lifecycle operations.
-    """
-    tmp = tmp_path_factory.mktemp("env")
-    templates_dir = tmp / "templates"
-    instances_dir = tmp / "instances"
-    templates_dir.mkdir()
-    instances_dir.mkdir()
-
-    # Create minimal template with docker-compose.template.yml
-    template_dir = templates_dir / settings.DEFAULT_AGENT_ENV_NAME
-    template_dir.mkdir(parents=True)
-    (template_dir / "docker-compose.template.yml").write_text(
-        "version: '3'\nservices:\n  agent:\n    image: test\n    ports:\n      - '${AGENT_PORT}:8000'\n"
+    """Use persistent adapter so tests can inspect call history."""
+    lm = setup_environment_adapter(
+        tmp_path_factory, persistent_adapter=True, extra_template_dirs=["app/core"],
     )
-    # Create app/core directory (required by rebuild_environment validation)
-    (template_dir / "app" / "core").mkdir(parents=True)
-
-    # Build lifecycle manager with tmp dirs
-    lm = EnvironmentLifecycleManager()
-    lm.templates_dir = templates_dir
-    lm.instances_dir = instances_dir
-
-    # Use a single persistent adapter so tests can inspect call history
-    adapter = EnvironmentTestAdapter()
-
-    def _test_get_adapter(environment):
-        return adapter
-    lm.get_adapter = _test_get_adapter
-    lm._test_adapter = adapter
-
-    # Install as singleton
-    EnvironmentService._lifecycle_manager = lm
     yield lm
-    EnvironmentService._lifecycle_manager = None
+    teardown_environment_adapter()
 
 
 @pytest.fixture(autouse=True)
 def background_tasks():
     """Collect background tasks for deferred execution."""
-    collector = BackgroundTaskCollector()
-    set_collector(collector)
-    with (
-        patch(
-            "app.services.environment_service.create_task_with_error_logging",
-            collector,
-        ),
-        patch(
-            "app.services.event_service.create_task_with_error_logging",
-            collector,
-        ),
-    ):
+    with patched_background_tasks():
         yield
-        collector.cleanup()
-    set_collector(None)
 
 
 @pytest.fixture(autouse=True)
 def patch_external_services():
     """Mock external service calls (OAuth refresh, Socket.IO)."""
-    with (
-        patch(
-            "app.services.credentials_service.CredentialsService.refresh_expiring_credentials_for_agent",
-            new=AsyncMock(return_value=False),
-        ),
-        patch(
-            "app.services.event_service.socketio_connector",
-            StubSocketIOConnector(),
-        ),
-    ):
+    with patched_external_services():
         yield
-
-
-@pytest.fixture(autouse=True)
-def setup_default_credentials(client, superuser_token_headers):
-    """Create a default anthropic AI credential so create_environment validation passes."""
-    cred = create_random_ai_credential(
-        client, superuser_token_headers,
-        credential_type="anthropic",
-        api_key="sk-ant-api03-test-default-key",
-        name="test-default-credential",
-        set_default=True,
-    )
-    yield cred

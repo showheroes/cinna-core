@@ -1,154 +1,51 @@
 """
 A2A integration test fixtures.
 
-Provides the same infrastructure as agents/conftest.py (session proxy,
-environment adapter stub, background task collector, external service mocks)
-plus an additional patch for get_fresh_db_session in a2a.py so that the
-A2A request handler uses the test DB session.
+Same infrastructure as agents/conftest.py plus an additional patch for
+get_fresh_db_session in a2a.py and shared_workspace so that the A2A request
+handler uses the test DB session.
 """
 import pytest
-from unittest.mock import patch, AsyncMock
-
-from app.core.config import settings
-from app.services.environment_service import EnvironmentService
-from app.services.environment_lifecycle import EnvironmentLifecycleManager
-from tests.stubs.environment_adapter_stub import EnvironmentTestAdapter
-from tests.stubs.socketio_stub import StubSocketIOConnector
-from tests.utils.ai_credential import create_random_ai_credential
-from tests.utils.background_tasks import BackgroundTaskCollector, set_collector
-from tests.utils.db_proxy import NonClosingSessionProxy
+from tests.utils.fixtures import (
+    patch_asyncio_to_thread,
+    setup_default_credentials,
+    patched_create_sessions,
+    patched_background_tasks,
+    patched_external_services,
+    setup_environment_adapter,
+    teardown_environment_adapter,
+    CREATE_SESSION_TARGETS_AGENT,
+    BACKGROUND_TASK_TARGETS_FULL,
+)
 
 
 @pytest.fixture(autouse=True)
 def patch_create_session(db):
-    """All internal service session creation returns the test session.
-
-    Must patch at every import site because `from app.core.db import create_session`
-    binds a local reference that isn't updated by patching the source module alone.
-
-    Also patches get_fresh_db_session in a2a.py so the A2A request handler
-    uses the test session instead of creating new ones from the engine.
-    """
-    factory = lambda: NonClosingSessionProxy(db)
-    with (
-        patch("app.core.db.create_session", factory),
-        patch("app.services.email.processing_service.create_session", factory),
-        patch("app.services.session_service.create_session", factory),
-        patch("app.services.environment_service.create_session", factory),
-        patch("app.services.commands.files_command.create_session", factory),
-        patch("app.api.routes.shared_workspace.create_session", factory),
-        patch("app.api.routes.a2a.get_fresh_db_session", factory),
-    ):
-        yield
-
-
-@pytest.fixture(autouse=True)
-def patch_asyncio_to_thread():
-    """Run asyncio.to_thread synchronously to avoid cross-thread session issues."""
-    async def _run_sync(func, /, *args, **kwargs):
-        return func(*args, **kwargs)
-
-    with patch("asyncio.to_thread", _run_sync):
+    """Patch create_session at all service import sites, including A2A handler."""
+    with patched_create_sessions(db, CREATE_SESSION_TARGETS_AGENT + [
+        "app.api.routes.shared_workspace.create_session",
+        "app.api.routes.a2a.get_fresh_db_session",
+    ]):
         yield
 
 
 @pytest.fixture(autouse=True)
 def patch_environment_adapter(tmp_path_factory):
-    """Patch lifecycle manager to use EnvironmentTestAdapter instead of Docker.
-
-    Creates minimal template directory structure so real file I/O works
-    on temp paths without Docker.
-    """
-    tmp = tmp_path_factory.mktemp("env")
-    templates_dir = tmp / "templates"
-    instances_dir = tmp / "instances"
-    templates_dir.mkdir()
-    instances_dir.mkdir()
-
-    # Create minimal template with docker-compose.template.yml
-    template_dir = templates_dir / settings.DEFAULT_AGENT_ENV_NAME
-    template_dir.mkdir(parents=True)
-    (template_dir / "docker-compose.template.yml").write_text(
-        "version: '3'\nservices:\n  agent:\n    image: test\n    ports:\n      - '${AGENT_PORT}:8000'\n"
-    )
-
-    # Build lifecycle manager with tmp dirs
-    lm = EnvironmentLifecycleManager()
-    lm.templates_dir = templates_dir
-    lm.instances_dir = instances_dir
-
-    # Patch get_adapter to return test adapter
-    def _test_get_adapter(environment):
-        return EnvironmentTestAdapter()
-    lm.get_adapter = _test_get_adapter
-
-    # Install as singleton
-    EnvironmentService._lifecycle_manager = lm
+    """Patch lifecycle manager to use EnvironmentTestAdapter instead of Docker."""
+    lm = setup_environment_adapter(tmp_path_factory)
     yield lm
-    EnvironmentService._lifecycle_manager = None
+    teardown_environment_adapter()
 
 
 @pytest.fixture(autouse=True)
 def background_tasks():
-    """Collect background tasks for deferred execution.
-
-    Replaces create_task_with_error_logging at every import site so that
-    fire-and-forget coroutines are captured instead of scheduled.
-    Test utilities (e.g. drain_tasks) drain them automatically.
-    """
-    collector = BackgroundTaskCollector()
-    set_collector(collector)
-    with (
-        patch(
-            "app.services.session_service.create_task_with_error_logging",
-            collector,
-        ),
-        patch(
-            "app.services.event_service.create_task_with_error_logging",
-            collector,
-        ),
-        patch(
-            "app.services.environment_service.create_task_with_error_logging",
-            collector,
-        ),
-    ):
+    """Collect background tasks for deferred execution."""
+    with patched_background_tasks(BACKGROUND_TASK_TARGETS_FULL):
         yield
-        collector.cleanup()
-    set_collector(None)
 
 
 @pytest.fixture(autouse=True)
 def patch_external_services():
     """Mock external service calls (OAuth refresh, Socket.IO, LLM providers)."""
-    with (
-        patch(
-            "app.services.credentials_service.CredentialsService.refresh_expiring_credentials_for_agent",
-            new=AsyncMock(return_value=False),
-        ),
-        patch(
-            "app.services.event_service.socketio_connector",
-            StubSocketIOConnector(),
-        ),
-        patch(
-            "app.services.ai_functions_service.AIFunctionsService.is_available",
-            return_value=False,
-        ),
-        patch(
-            "app.services.agent_service.generate_a2a_skills",
-            return_value=[],
-        ),
-    ):
+    with patched_external_services(mock_ai_functions=True, mock_a2a_skills=True):
         yield
-
-
-@pytest.fixture(autouse=True)
-def setup_default_credentials(client, superuser_token_headers):
-    """Create a default anthropic AI credential so create_environment validation passes."""
-    cred = create_random_ai_credential(
-        client, superuser_token_headers,
-        credential_type="anthropic",
-        api_key="sk-ant-api03-test-default-key",
-        name="test-default-credential",
-        set_default=True,
-    )
-    yield cred
