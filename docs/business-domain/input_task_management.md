@@ -100,6 +100,13 @@ When a task has connected sessions (via `source_task_id`), the task status autom
 - `STREAM_ERROR` → syncs task to `ERROR`
 - `TODO_LIST_UPDATED` → propagates session todo progress to linked task, emits `TASK_TODO_UPDATED`
 
+**Email Task Activity Events:**
+- `TASK_CREATED` → emitted from `EmailProcessingService._process_email_to_task()` after task commit
+- `TASK_STATUS_UPDATED` → emitted from `InputTaskService.update_status()` when `source_email_message_id` is set
+- These events are handled by `ActivityService` to manage `email_task_incoming` and `email_task_reply_pending` activities
+- `send_email_answer()` directly deletes `email_task_reply_pending` activity when reply is queued
+- Task deletion route emits `ACTIVITY_DELETED` for linked activities before CASCADE cleanup
+
 **Session Deletion Reset:**
 - When a session linked to a task is deleted (`DELETE /api/v1/sessions/{id}`), the system checks if any sessions remain for that task
 - If ALL sessions are deleted and the task is in execution phase (`running`, `pending_input`, `completed`, `error`):
@@ -221,7 +228,7 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 - `GET /api/v1/tasks` - List tasks with status filter (uses `list_tasks_extended`)
 - `GET /api/v1/tasks/{id}` - Get single task with agent name (uses `get_task_extended`)
 - `PATCH /api/v1/tasks/{id}` - Update task (uses `get_task_with_ownership_check`, `verify_agent_access`, `update_task`)
-- `DELETE /api/v1/tasks/{id}` - Delete task (uses `get_task_with_ownership_check`, `delete_task`)
+- `DELETE /api/v1/tasks/{id}` - Delete task (async; emits `ACTIVITY_DELETED` for linked activities, then `cleanup_task_files`, `delete_task`)
 
 **Actions:**
 - `POST /api/v1/tasks/{id}/refine` - Refine with AI (uses `get_task_with_ownership_check`, `refine_task`)
@@ -296,6 +303,10 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 - `handle_todo_list_updated()` - Propagates session todo progress to linked task, emits `TASK_TODO_UPDATED` event
 - `handle_session_state_updated()` - Checks auto_feedback flag, calls deliver_feedback_to_source if enabled
 
+*Email Task Activity Methods:*
+- `send_email_answer()` - Also deletes `email_task_reply_pending` activity and emits `ACTIVITY_DELETED`
+- `update_status()` - For email-originated tasks, emits `TASK_STATUS_UPDATED` event (triggers activity lifecycle management in `ActivityService`)
+
 **SessionService Updates:** `backend/app/services/session_service.py`
 - `create_session()` - Now accepts optional `source_task_id` parameter
 - `list_task_sessions()` - List sessions by source_task_id
@@ -304,6 +315,9 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 **ActivityService Updates:** `backend/app/services/activity_service.py`
 - `handle_session_state_updated()` - Maps state to activity type, creates activity for offline notification
 - `create_completion_activities()` - Modified to skip generic activity when `session.result_state` is already set
+- `handle_task_created()` - Creates `email_task_incoming` activity when email task is created (TASK_CREATED event)
+- `handle_task_status_changed()` - Manages email task activity lifecycle: dismisses incoming on execution, creates reply_pending on completion (TASK_STATUS_UPDATED event)
+- `find_activity_by_task_and_type()` / `delete_activity_by_task_and_type()` - Task-specific activity lookup/deletion helpers
 
 **AIFunctionsService:** `backend/app/services/ai_functions_service.py`
 - `refine_task()` - Wrapper that fetches agent workflow_prompt and refiner_prompt, calls task refiner
@@ -356,6 +370,8 @@ When an agent uses the TodoWrite tool during execution, the progress is tracked 
 **File:** `backend/app/main.py`
 
 ```python
+event_service.register_handler(EventType.TASK_CREATED, ActivityService.handle_task_created)
+event_service.register_handler(EventType.TASK_STATUS_UPDATED, ActivityService.handle_task_status_changed)
 event_service.register_handler(EventType.SESSION_STATE_UPDATED, ActivityService.handle_session_state_updated)
 event_service.register_handler(EventType.SESSION_STATE_UPDATED, InputTaskService.handle_session_state_updated)
 ```
@@ -570,6 +586,7 @@ Session state management enables agents to report outcomes and communicate acros
 **Backend - Migration:**
 - `backend/app/alembic/versions/l2g3h4i5j6k7_add_input_task_table.py`
 - `backend/app/alembic/versions/u1p2q3r4s5t6_add_session_state_and_task_feedback.py`
+- `backend/app/alembic/versions/i6d5e7f8g9h0_add_input_task_id_to_activity.py` (adds input_task_id FK to activity table)
 
 **Frontend - Routes:**
 - `frontend/src/routes/_layout/tasks.tsx`
@@ -592,9 +609,21 @@ Session state management enables agents to report outcomes and communicate acros
 
 ---
 
-**Document Version:** 2.7
-**Last Updated:** 2026-01-24
+**Document Version:** 2.8
+**Last Updated:** 2026-02-24
 **Status:** Implementation Complete
+
+**Changes in v2.8:**
+- Added email task activity notifications via event bus
+- New event types: `TASK_CREATED`, `TASK_STATUS_UPDATED` (in `EventType`)
+- Activity model gains `input_task_id` FK (migration `i6d5e7f8g9h0`)
+- `ActivityService` gains `handle_task_created` and `handle_task_status_changed` handlers
+- `email_task_incoming` activity created when email creates a task; dismissed on execution/archive/delete
+- `email_task_reply_pending` activity created when email task completes; dismissed on reply/archive/delete
+- `InputTaskService.update_status()` emits `TASK_STATUS_UPDATED` for email-originated tasks
+- `InputTaskService.send_email_answer()` deletes `email_task_reply_pending` activity directly
+- Delete task route (now async) emits `ACTIVITY_DELETED` for linked activities before CASCADE cleanup
+- Frontend: Mail icon for email task activities, click navigates to task page
 
 **Changes in v2.7:**
 - Added session deletion reset: when all sessions are deleted from a task, task reverts to `NEW` status

@@ -364,6 +364,24 @@ class EmailProcessingService:
         db_session.add(email_msg)
         db_session.commit()
 
+        # Emit TASK_CREATED event for activity tracking
+        from app.utils import create_task_with_error_logging
+        from app.services.event_service import event_service
+        from app.models.event import EventType
+
+        create_task_with_error_logging(
+            event_service.emit_event(
+                event_type=EventType.TASK_CREATED,
+                model_id=task.id,
+                user_id=agent.owner_id,
+                meta={
+                    "source_email_message_id": str(email_msg.id),
+                    "source_agent_id": str(email_msg.agent_id),
+                }
+            ),
+            task_name=f"emit_task_created_{task.id}"
+        )
+
         logger.info(
             f"Email {email_msg.id}: created task {task.id} for agent {email_msg.agent_id} "
             f"owner {agent.owner_id} (process_as=new_task)"

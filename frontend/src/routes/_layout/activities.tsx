@@ -8,7 +8,7 @@ import PendingItems from "@/components/Pending/PendingItems"
 import { usePageHeader } from "@/routes/_layout"
 import { getColorPreset } from "@/utils/colorPresets"
 import { RelativeTime } from "@/components/Common/RelativeTime"
-import { Bell, CheckCircle2, AlertCircle, FileText, MessageCircle, AlertOctagon, Loader2, EllipsisVertical, Trash2, HelpCircle } from "lucide-react"
+import { Bell, CheckCircle2, AlertCircle, FileText, MessageCircle, AlertOctagon, Loader2, EllipsisVertical, Trash2, HelpCircle, Mail } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 import useWorkspace from "@/hooks/useWorkspace"
@@ -215,13 +215,22 @@ function ActivitiesList() {
         return <FileText className="h-4 w-4" />
       case "agent_notification":
         return <Bell className="h-4 w-4" />
+      case "email_task_incoming":
+        return <Mail className="h-4 w-4" />
+      case "email_task_reply_pending":
+        return <Mail className="h-4 w-4" />
       default:
         return <Bell className="h-4 w-4" />
     }
   }
 
   const handleActivityClick = (activity: ActivityPublicExtended) => {
-    if (activity.session_id) {
+    if (activity.input_task_id) {
+      navigate({
+        to: "/task/$taskId",
+        params: { taskId: activity.input_task_id },
+      })
+    } else if (activity.session_id) {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId: activity.session_id },
@@ -314,7 +323,7 @@ function ActivitiesList() {
                       onClick={() => handleActivityClick(activity)}
                       className={cn(
                         "relative p-4 rounded-lg border transition-all",
-                        activity.session_id ? "cursor-pointer hover:bg-muted/50" : "",
+                        (activity.session_id || activity.input_task_id) ? "cursor-pointer hover:bg-muted/50" : "",
                         isRunning
                           ? "bg-emerald-500/10 border-emerald-500/30"
                           : isUnread

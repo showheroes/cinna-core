@@ -837,6 +837,18 @@ export const ActivityCreateSchema = {
             ],
             title: 'Agent Id'
         },
+        input_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Input Task Id'
+        },
         activity_type: {
             type: 'string',
             title: 'Activity Type'
@@ -909,6 +921,18 @@ export const ActivityPublicSchema = {
             ],
             title: 'User Workspace Id'
         },
+        input_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Input Task Id'
+        },
         activity_type: {
             type: 'string',
             title: 'Activity Type'
@@ -932,7 +956,7 @@ export const ActivityPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'user_id', 'session_id', 'agent_id', 'user_workspace_id', 'activity_type', 'text', 'action_required', 'is_read', 'created_at'],
+    required: ['id', 'user_id', 'session_id', 'agent_id', 'user_workspace_id', 'input_task_id', 'activity_type', 'text', 'action_required', 'is_read', 'created_at'],
     title: 'ActivityPublic'
 } as const;
 
@@ -983,6 +1007,18 @@ export const ActivityPublicExtendedSchema = {
                 }
             ],
             title: 'User Workspace Id'
+        },
+        input_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Input Task Id'
         },
         activity_type: {
             type: 'string',
@@ -1040,7 +1076,7 @@ export const ActivityPublicExtendedSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'user_id', 'session_id', 'agent_id', 'user_workspace_id', 'activity_type', 'text', 'action_required', 'is_read', 'created_at'],
+    required: ['id', 'user_id', 'session_id', 'agent_id', 'user_workspace_id', 'input_task_id', 'activity_type', 'text', 'action_required', 'is_read', 'created_at'],
     title: 'ActivityPublicExtended',
     description: 'Activity with extended data (agent name, session title, etc.)'
 } as const;

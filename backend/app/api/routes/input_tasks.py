@@ -182,13 +182,14 @@ def update_task(
 
 
 @router.delete("/{id}")
-def delete_task(
+async def delete_task(
     session: SessionDep, current_user: CurrentUser, id: uuid.UUID
 ) -> Message:
     """
     Delete an input task.
 
     Cleans up any attached files (marks them for garbage collection) before deleting.
+    Emits ACTIVITY_DELETED for any associated activities before CASCADE cleanup.
     """
     try:
         task = InputTaskService.get_task_with_ownership_check(
@@ -196,6 +197,28 @@ def delete_task(
             task_id=id,
             user_id=current_user.id,
         )
+
+        # Emit ACTIVITY_DELETED for any activities linked to this task
+        # (CASCADE will clean up the DB rows, but we need WebSocket notifications)
+        from sqlmodel import select
+        from app.models.activity import Activity
+        from app.services.event_service import event_service
+        from app.models.event import EventType
+
+        activities = session.exec(
+            select(Activity).where(Activity.input_task_id == id)
+        ).all()
+        for activity in activities:
+            await event_service.emit_event(
+                event_type=EventType.ACTIVITY_DELETED,
+                model_id=activity.id,
+                user_id=current_user.id,
+                meta={
+                    "activity_type": activity.activity_type,
+                    "input_task_id": str(id),
+                }
+            )
+
         # Clean up attached files before deleting task
         InputTaskService.cleanup_task_files(
             db_session=session,

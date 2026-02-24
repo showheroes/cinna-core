@@ -27,5 +27,8 @@ class NonClosingSessionProxy:
     def __exit__(self, *args):
         pass  # Don't close — the test fixture handles rollback
 
+    def close(self):
+        pass  # Don't close — the test fixture handles rollback
+
     def __getattr__(self, name):
         return getattr(self._session, name)

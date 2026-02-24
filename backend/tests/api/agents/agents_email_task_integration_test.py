@@ -5,6 +5,11 @@ Tests the "process_as=new_task" flow where incoming emails create InputTasks
 instead of auto-responding sessions. The owner reviews, executes, and sends
 an AI-generated email reply via the task's send-answer endpoint.
 
+Also tests the activity lifecycle that accompanies the email task flow:
+  - email_task_incoming activity created when task is created
+  - email_task_incoming deleted + email_task_reply_pending created when task completes
+  - email_task_reply_pending deleted when email reply is sent
+
 All LLM calls are mocked — no external provider calls occur.
 """
 import uuid
@@ -31,8 +36,27 @@ from tests.utils.mail_server import (
     create_smtp_server,
     process_emails_with_stub,
 )
+from app.services.input_task_service import InputTaskService
+from app.models.input_task import InputTask
 from tests.utils.message import get_messages_by_role
 from tests.utils.session import get_agent_session
+
+
+def _get_activities(
+    client: TestClient,
+    headers: dict[str, str],
+    activity_type: str | None = None,
+) -> list[dict]:
+    """Fetch activities via API, optionally filtering by type."""
+    r = client.get(
+        f"{settings.API_V1_STR}/activities/",
+        headers=headers,
+    )
+    assert r.status_code == 200
+    activities = r.json()["data"]
+    if activity_type:
+        activities = [a for a in activities if a["activity_type"] == activity_type]
+    return activities
 
 
 def _build_raw_email(
@@ -60,10 +84,11 @@ def test_email_task_mode_full_flow(
     Full integration test for email → task → execute → send answer flow:
       1. Setup agent with process_as=new_task + mail servers
       2. Process incoming email → verify InputTask created (not a session)
-      3. Verify task fields: status=new, FKs set, email content preserved
+      3. Verify task fields + email_task_incoming activity created
       4. Execute task → session created, agent responds
-      5. Send answer → AI function mocked, outgoing email queued
-      6. Send outgoing email via SMTP stub → verify delivery
+      5. Simulate task completion → email_task_incoming deleted, email_task_reply_pending created
+      6. Send answer → email_task_reply_pending deleted, outgoing email queued
+      7. Send outgoing email via SMTP stub → verify delivery
     """
     # ── Phase 1: Setup agent + mail servers + email integration (task mode) ──
 
@@ -173,6 +198,20 @@ def test_email_task_mode_full_flow(
     assert email_msg.subject == email_subject
     assert email_msg.processed is True
 
+    # Verify email_task_incoming activity was created by event handler
+    incoming_activities = _get_activities(
+        client, superuser_token_headers, activity_type="email_task_incoming",
+    )
+    assert len(incoming_activities) == 1, (
+        f"Expected 1 email_task_incoming activity, got {len(incoming_activities)}"
+    )
+    incoming_activity = incoming_activities[0]
+    assert incoming_activity["input_task_id"] == task_id
+    assert incoming_activity["agent_id"] == agent_id
+    assert incoming_activity["action_required"] == "task_review_required"
+    assert incoming_activity["is_read"] is False
+    assert incoming_activity["text"] == "New email task received"
+
     # ── Phase 4: Execute task → session created, agent responds ──────────────
 
     agent_response_text = "Order #12345 is currently in transit and expected to arrive by Friday."
@@ -222,7 +261,47 @@ def test_email_task_mode_full_flow(
     assert updated_task["session_id"] == session_id
     assert updated_task["status"] == "running"
 
-    # ── Phase 5: Send answer → AI function mocked → outgoing email queued ────
+    # email_task_incoming activity still present (link_session doesn't fire status events)
+    incoming_activities = _get_activities(
+        client, superuser_token_headers, activity_type="email_task_incoming",
+    )
+    assert len(incoming_activities) == 1, (
+        f"email_task_incoming should persist after execute, got {len(incoming_activities)}"
+    )
+
+    # ── Phase 5: Simulate task completion → activity lifecycle transition ─────
+    #
+    # In production, session completion triggers compute_status_from_sessions
+    # which calls update_status("completed"). Simulate that here.
+
+    task_obj = db.get(InputTask, uuid.UUID(task_id))
+    assert task_obj is not None
+    InputTaskService.update_status(
+        db_session=db, task=task_obj, status="completed",
+    )
+    drain_tasks()
+
+    # email_task_incoming should be deleted (status is no longer "new")
+    incoming_after_complete = _get_activities(
+        client, superuser_token_headers, activity_type="email_task_incoming",
+    )
+    assert len(incoming_after_complete) == 0, (
+        f"email_task_incoming should be deleted after completion, got {len(incoming_after_complete)}"
+    )
+
+    # email_task_reply_pending should be created (status is "completed")
+    reply_pending = _get_activities(
+        client, superuser_token_headers, activity_type="email_task_reply_pending",
+    )
+    assert len(reply_pending) == 1, (
+        f"Expected 1 email_task_reply_pending activity, got {len(reply_pending)}"
+    )
+    assert reply_pending[0]["input_task_id"] == task_id
+    assert reply_pending[0]["agent_id"] == agent_id
+    assert reply_pending[0]["action_required"] == "reply_pending"
+    assert reply_pending[0]["is_read"] is False
+
+    # ── Phase 6: Send answer → reply_pending deleted, outgoing email queued ──
 
     mock_reply_body = (
         "Dear Customer,\n\n"
@@ -271,6 +350,24 @@ def test_email_task_mode_full_flow(
     assert ai_args["original_sender"] == sender_email
     assert "order #12345" in ai_args["original_body"]
 
+    # email_task_reply_pending should be deleted after send-answer
+    drain_tasks()
+    reply_pending_after_send = _get_activities(
+        client, superuser_token_headers, activity_type="email_task_reply_pending",
+    )
+    assert len(reply_pending_after_send) == 0, (
+        f"email_task_reply_pending should be deleted after send-answer, got {len(reply_pending_after_send)}"
+    )
+
+    # No task-related activities should remain
+    all_task_activities = [
+        a for a in _get_activities(client, superuser_token_headers)
+        if a.get("input_task_id") == task_id
+    ]
+    assert len(all_task_activities) == 0, (
+        f"No task activities should remain after send-answer, got {len(all_task_activities)}"
+    )
+
     # Verify outgoing email was queued
     queue_entries = db.exec(
         select(OutgoingEmailQueue).where(
@@ -286,7 +383,7 @@ def test_email_task_mode_full_flow(
     assert queue_entry.status == OutgoingEmailStatus.PENDING
     assert queue_entry.in_reply_to == email_msg.email_message_id
 
-    # ── Phase 6: Send outgoing email via SMTP stub ───────────────────────────
+    # ── Phase 7: Send outgoing email via SMTP stub ───────────────────────────
 
     stub_smtp = StubSMTPConnector()
     with patch(

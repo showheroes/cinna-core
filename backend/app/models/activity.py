@@ -22,6 +22,9 @@ class Activity(SQLModel, table=True):
     user_workspace_id: uuid.UUID | None = Field(
         default=None, foreign_key="user_workspace.id", ondelete="CASCADE"
     )
+    input_task_id: uuid.UUID | None = Field(
+        default=None, foreign_key="input_task.id", ondelete="CASCADE"
+    )
 
     # Activity type: "session_completed", "file_created", "agent_notification", "questions_asked", etc.
     activity_type: str
@@ -42,6 +45,7 @@ class Activity(SQLModel, table=True):
 class ActivityCreate(SQLModel):
     session_id: uuid.UUID | None = None
     agent_id: uuid.UUID | None = None
+    input_task_id: uuid.UUID | None = None
     activity_type: str
     text: str
     action_required: str = ""
@@ -58,6 +62,7 @@ class ActivityPublic(SQLModel):
     session_id: uuid.UUID | None
     agent_id: uuid.UUID | None
     user_workspace_id: uuid.UUID | None
+    input_task_id: uuid.UUID | None
     activity_type: str
     text: str
     action_required: str

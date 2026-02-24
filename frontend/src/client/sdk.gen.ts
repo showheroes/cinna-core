@@ -4277,6 +4277,7 @@ export class TasksService {
      * Delete an input task.
      *
      * Cleans up any attached files (marks them for garbage collection) before deleting.
+     * Emits ACTIVITY_DELETED for any associated activities before CASCADE cleanup.
      * @param data The data for the request.
      * @param data.id
      * @returns Message Successful Response

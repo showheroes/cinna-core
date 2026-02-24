@@ -26,6 +26,7 @@ Each activity has:
 - **user_id**: Owner of the activity
 - **session_id**: Related session (optional, for session-specific events)
 - **agent_id**: Related agent (optional, for agent-specific events)
+- **input_task_id**: Related input task (optional, for email task events)
 - **activity_type**: Type of event (see types below)
 - **text**: Human-readable description
 - **action_required**: Empty string or specific action type (e.g., "answers_required")
@@ -39,6 +40,8 @@ Current types (more can be added):
 - `session_completed`: Background session finished its work
 - `questions_asked`: Agent returned with questions using AskUserQuestion tool
 - `error_occurred`: Session encountered an error
+- `email_task_incoming`: Email created a new task (action_required: "task_review_required")
+- `email_task_reply_pending`: Email task completed, reply not yet sent (action_required: "reply_pending")
 - `file_created`: Agent created a file (future)
 - `agent_notification`: General agent notification (future)
 
@@ -58,6 +61,8 @@ Current types (more can be added):
 **Current Action Types**:
 - `""` (empty): No action needed, informational only
 - `"answers_required"`: Agent asked questions, user needs to answer
+- `"task_review_required"`: Email task arrived, user needs to review
+- `"reply_pending"`: Email task completed, user needs to send reply
 
 **Visual Indicators**:
 - Sidebar bell icon changes color:
@@ -88,12 +93,16 @@ Current types (more can be added):
 - `delete_activity()`: Delete activity
 - `find_activity_by_session_and_type()`: Find activity by session_id and activity_type
 - `delete_activity_by_session_and_type()`: Delete activity by session_id and activity_type
+- `find_activity_by_task_and_type()`: Find activity by input_task_id and activity_type
+- `delete_activity_by_task_and_type()`: Delete activity by input_task_id and activity_type (returns deleted for event emission)
 
 **Event Handlers** (registered in `main.py` startup):
 - `handle_stream_started()`: React to STREAM_STARTED events
 - `handle_stream_completed()`: React to STREAM_COMPLETED events
 - `handle_stream_error()`: React to STREAM_ERROR events
 - `handle_stream_interrupted()`: React to STREAM_INTERRUPTED events
+- `handle_task_created()`: React to TASK_CREATED events (email task incoming activity)
+- `handle_task_status_changed()`: React to TASK_STATUS_UPDATED events (manages email task activity lifecycle)
 
 **API Routes** (`backend/app/api/routes/activities.py`):
 - `POST /activities/`: Create activity
@@ -109,9 +118,10 @@ Current types (more can be added):
 - Main activities list with compact card layout
 - Agent filter sidebar (styled like dashboard agent selector)
 - IntersectionObserver setup for auto-read tracking
-- Click activity to navigate to related session
+- Click activity to navigate to related session or task (email task activities navigate to task page)
 - Visual distinction for action-required items
 - Special rendering for `session_running`: emerald background with emerald border, spinning loader icon
+- Email task activities (`email_task_incoming`, `email_task_reply_pending`) use Mail icon from lucide-react
 
 **Sidebar Integration** (`frontend/src/components/Sidebar/AppSidebar.tsx`):
 - ActivitiesMenu component with bell icon
@@ -171,7 +181,22 @@ Current types (more can be added):
 - Action: Deletes `session_running` activity
 - No completion activities (session can be resumed)
 
-**4. File Created** (Future):
+**5. Email Task Incoming** (`handle_task_created`):
+- Triggered by: `TASK_CREATED` event (from `EmailProcessingService._process_email_to_task`)
+- Filter: Only fires when `meta.source_email_message_id` is set
+- Action: Creates `email_task_incoming` activity with `action_required="task_review_required"`
+- Links to task via `input_task_id`
+- Dismissed when: task is executed (status changes from "new"), archived, or deleted
+
+**6. Email Task Reply Pending** (`handle_task_status_changed`):
+- Triggered by: `TASK_STATUS_UPDATED` event (from `InputTaskService.update_status`)
+- Filter: Only fires when `meta.is_email_task` is true
+- On status != "new": deletes `email_task_incoming` activity
+- On status == "completed": creates `email_task_reply_pending` activity with `action_required="reply_pending"`
+- On status != "completed": deletes `email_task_reply_pending` if exists
+- Reply pending also dismissed directly by `send_email_answer()` and task deletion
+
+**7. File Created** (Future):
 - When: Agent creates file via workspace API
 - Create activity linking to file and session
 
@@ -254,6 +279,13 @@ When testing activities integration:
 10. Test agent filtering works correctly
 11. Test read/unread transitions smoothly
 12. Test `session_running` shows emerald background with spinning icon
+13. Test email task creates `email_task_incoming` activity on arrival
+14. Test executing email task dismisses `email_task_incoming` activity
+15. Test completing email task creates `email_task_reply_pending` activity
+16. Test sending email reply dismisses `email_task_reply_pending` activity
+17. Test archiving email task dismisses all email task activities
+18. Test deleting email task emits ACTIVITY_DELETED for linked activities
+19. Test clicking email task activity navigates to task page
 
 ## File Reference Summary
 
@@ -263,6 +295,7 @@ When testing activities integration:
 - Routes: `backend/app/api/routes/activities.py`
 - Event Registration: `backend/app/main.py` (on_startup)
 - Migration: `backend/app/alembic/versions/*_add_activity_table.py`
+- Migration: `backend/app/alembic/versions/i6d5e7f8g9h0_add_input_task_id_to_activity.py` (adds input_task_id FK)
 
 **Frontend**:
 - Page: `frontend/src/routes/_layout/activities.tsx`

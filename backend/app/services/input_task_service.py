@@ -19,8 +19,17 @@ from app.models import (
     SessionMessage,
     SessionCreate,
 )
+from app.models.event import EventType
+from app.models.email_message import EmailMessage
+from app.models.outgoing_email_queue import OutgoingEmailQueue, OutgoingEmailStatus
+from app.models.agent_email_integration import AgentEmailIntegration
+from app.models.file_upload import FileUpload, FileUploadPublic, InputTaskFile
 from app.core.db import engine, create_session
+from app.utils import create_task_with_error_logging
 from app.services.session_service import SessionService
+from app.services.event_service import event_service
+from app.services.ai_functions_service import AIFunctionsService
+from app.services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
 
@@ -206,8 +215,6 @@ class InputTaskService:
             TaskNotFoundError: If task doesn't exist
             PermissionDeniedError: If user doesn't own the task
         """
-        from app.models.file_upload import FileUploadPublic
-
         result = InputTaskService.get_task_with_agent(db_session=db_session, task_id=task_id)
         if not result:
             raise TaskNotFoundError()
@@ -411,7 +418,6 @@ class InputTaskService:
             Tuple of (task, message_to_send) where message_to_send is the
             possibly-refined task description ready for execution.
         """
-        from app.services.ai_functions_service import AIFunctionsService
 
         # Create the task first
         task = InputTaskService.create_task(
@@ -695,6 +701,23 @@ class InputTaskService:
         db_session.add(task)
         db_session.commit()
         db_session.refresh(task)
+
+        # Emit TASK_STATUS_UPDATED for all tasks (handlers filter by meta as needed)
+
+        create_task_with_error_logging(
+            event_service.emit_event(
+                event_type=EventType.TASK_STATUS_UPDATED,
+                model_id=task.id,
+                user_id=task.owner_id,
+                meta={
+                    "new_status": status,
+                    "is_email_task": bool(task.source_email_message_id),
+                    "source_agent_id": str(task.source_agent_id) if task.source_agent_id else None,
+                }
+            ),
+            task_name=f"emit_task_status_changed_{task.id}"
+        )
+
         return task
 
     @staticmethod
@@ -838,7 +861,6 @@ class InputTaskService:
         Returns:
             Dict with success, refined_description, feedback_message, or error
         """
-        from app.services.ai_functions_service import AIFunctionsService
 
         # Set status to refining if new
         if task.status == InputTaskStatus.NEW:
@@ -1216,9 +1238,6 @@ class InputTaskService:
         Args:
             event_data: Full event dict with type, model_id, meta, user_id, timestamp
         """
-        from app.services.event_service import event_service
-        from app.models.event import EventType
-
         try:
             meta = event_data.get("meta", {})
             session_id = meta.get("session_id")
@@ -1326,8 +1345,6 @@ class InputTaskService:
         Returns:
             True if feedback was delivered successfully
         """
-        from app.services.message_service import MessageService
-
         if not task.source_session_id:
             return False
 
@@ -1344,6 +1361,7 @@ class InputTaskService:
         content = content_map.get(state, f"[Sub-task update] {summary}")
 
         # Create message in source session (role="user" triggers agent processing)
+        from app.services.message_service import MessageService  # circular import
         MessageService.create_message(
             session=db_session,
             session_id=task.source_session_id,
@@ -1364,14 +1382,10 @@ class InputTaskService:
 
         # If source session is idle, trigger agent processing
         if source_session.interaction_status == "":
-            from app.utils import create_task_with_error_logging
-            from app.core.db import engine as db_engine
-            from sqlmodel import Session as FreshDBSession
-
             create_task_with_error_logging(
                 SessionService.initiate_stream(
                     session_id=task.source_session_id,
-                    get_fresh_db_session=lambda: FreshDBSession(db_engine),
+                    get_fresh_db_session=create_session,
                 ),
                 task_name=f"feedback_initiate_stream_{task.source_session_id}"
             )
@@ -1410,11 +1424,6 @@ class InputTaskService:
         Returns:
             dict with success, queue_entry_id, generated_reply, or error
         """
-        from app.models.email_message import EmailMessage
-        from app.models.outgoing_email_queue import OutgoingEmailQueue, OutgoingEmailStatus
-        from app.models.agent_email_integration import AgentEmailIntegration
-        from app.services.ai_functions_service import AIFunctionsService
-
         # Validate task is email-originated
         if not task.source_email_message_id:
             return {
@@ -1505,6 +1514,26 @@ class InputTaskService:
         db_session.commit()
         db_session.refresh(queue_entry)
 
+        # Delete reply_pending activity since reply is being sent
+        deleted_activity = ActivityService.delete_activity_by_task_and_type(
+            db_session=db_session,
+            input_task_id=task.id,
+            activity_type="email_task_reply_pending"
+        )
+        if deleted_activity:
+            create_task_with_error_logging(
+                event_service.emit_event(
+                    event_type=EventType.ACTIVITY_DELETED,
+                    model_id=deleted_activity.id,
+                    user_id=deleted_activity.user_id,
+                    meta={
+                        "activity_type": "email_task_reply_pending",
+                        "input_task_id": str(task.id),
+                    }
+                ),
+                task_name=f"emit_activity_deleted_reply_pending_{task.id}"
+            )
+
         logger.info(
             f"Task {task.id}: queued email reply {queue_entry.id} "
             f"to {email_msg.sender} via agent {source_agent_id}"
@@ -1537,7 +1566,6 @@ class InputTaskService:
         Returns:
             List of InputTaskFile junction records created
         """
-        from app.models.file_upload import FileUpload, InputTaskFile
 
         created_links = []
         for file_id in file_ids:
@@ -1585,7 +1613,6 @@ class InputTaskService:
         Returns:
             List of FileUpload records
         """
-        from app.models.file_upload import FileUpload, InputTaskFile
 
         statement = (
             select(FileUpload)
@@ -1609,7 +1636,6 @@ class InputTaskService:
         Returns:
             List of file ID strings
         """
-        from app.models.file_upload import InputTaskFile
 
         statement = select(InputTaskFile.file_id).where(InputTaskFile.task_id == task_id)
         return [str(fid) for fid in db_session.exec(statement).all()]
@@ -1635,7 +1661,6 @@ class InputTaskService:
         Returns:
             True if file was detached, False otherwise
         """
-        from app.models.file_upload import FileUpload, InputTaskFile
 
         # Find the link
         link = db_session.exec(
@@ -1681,8 +1706,6 @@ class InputTaskService:
         Returns:
             Number of files marked for deletion
         """
-        from app.models.file_upload import FileUpload, InputTaskFile
-
         # Get all attached files
         statement = (
             select(FileUpload)

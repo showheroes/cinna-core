@@ -50,6 +50,10 @@ export const EventTypes = {
   TODO_LIST_UPDATED: "todo_list_updated",    // Session-level to-do update
   TASK_TODO_UPDATED: "task_todo_updated",    // Task-level to-do update
 
+  // Task lifecycle events
+  TASK_CREATED: "task_created",
+  TASK_STATUS_UPDATED: "task_status_changed",
+
   // Generic notification
   NOTIFICATION: "notification",
 } as const

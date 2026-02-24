@@ -4,6 +4,7 @@ import logging
 import asyncio
 from sqlmodel import Session as DBSession, select, and_, func, desc
 from app.models import Activity, ActivityCreate, ActivityUpdate, Agent, Session, AgentEnvironment, SessionMessage
+from app.models.input_task import InputTask
 from app.models.event import EventType
 
 logger = logging.getLogger(__name__)
@@ -15,12 +16,16 @@ class ActivityService:
         db_session: DBSession, user_id: UUID, data: ActivityCreate
     ) -> Activity:
         """Create a new activity"""
-        # Determine workspace_id: inherit from session if provided, otherwise from agent
+        # Determine workspace_id: inherit from session, task, or agent
         workspace_id = None
         if data.session_id:
             session = db_session.get(Session, data.session_id)
             if session:
                 workspace_id = session.user_workspace_id
+        elif data.input_task_id:
+            task = db_session.get(InputTask, data.input_task_id)
+            if task:
+                workspace_id = task.user_workspace_id
         elif data.agent_id:
             agent = db_session.get(Agent, data.agent_id)
             if agent:
@@ -30,6 +35,7 @@ class ActivityService:
             user_id=user_id,
             session_id=data.session_id,
             agent_id=data.agent_id,
+            input_task_id=data.input_task_id,
             user_workspace_id=workspace_id,
             activity_type=data.activity_type,
             text=data.text,
@@ -204,6 +210,58 @@ class ActivityService:
         db_session.delete(activity)
         db_session.commit()
         return True
+
+    # Task-specific activity management methods
+
+    @staticmethod
+    def find_activity_by_task_and_type(
+        db_session: DBSession,
+        input_task_id: UUID,
+        activity_type: str
+    ) -> Activity | None:
+        """Find an activity by input_task_id and activity_type"""
+        statement = (
+            select(Activity)
+            .where(
+                and_(
+                    Activity.input_task_id == input_task_id,
+                    Activity.activity_type == activity_type
+                )
+            )
+            .order_by(Activity.created_at.desc())
+            .limit(1)
+        )
+        return db_session.exec(statement).first()
+
+    @staticmethod
+    def delete_activity_by_task_and_type(
+        db_session: DBSession,
+        input_task_id: UUID,
+        activity_type: str
+    ) -> Activity | None:
+        """Delete an activity by input_task_id and activity_type. Returns deleted activity for event emission."""
+        activity = ActivityService.find_activity_by_task_and_type(
+            db_session=db_session,
+            input_task_id=input_task_id,
+            activity_type=activity_type
+        )
+        if not activity:
+            return None
+
+        deleted_activity = Activity(
+            id=activity.id,
+            user_id=activity.user_id,
+            activity_type=activity.activity_type,
+            text=activity.text,
+            action_required=activity.action_required,
+            input_task_id=activity.input_task_id,
+            agent_id=activity.agent_id,
+            is_read=activity.is_read,
+            created_at=activity.created_at,
+        )
+        db_session.delete(activity)
+        db_session.commit()
+        return deleted_activity
 
     # Streaming-specific activity management methods
 
@@ -756,8 +814,7 @@ class ActivityService:
         - error → error_occurred activity
         """
         try:
-            from app.core.db import engine as db_engine
-            from sqlmodel import Session as DBSession
+            from app.core.db import create_session
             from app.services.event_service import event_service
 
             meta = event_data.get("meta", {})
@@ -783,7 +840,7 @@ class ActivityService:
 
             activity_type, action_required = activity_map[state]
 
-            with DBSession(db_engine) as db:
+            with create_session() as db:
                 # Get session to find agent_id
                 chat_session = db.get(Session, UUID(session_id))
                 if not chat_session:
@@ -830,3 +887,155 @@ class ActivityService:
 
         except Exception as e:
             logger.error(f"Error in handle_session_state_updated: {e}", exc_info=True)
+
+    # Event-driven handlers for email task lifecycle
+
+    @staticmethod
+    async def handle_task_created(event_data: dict[str, Any]):
+        """
+        Event handler for TASK_CREATED events.
+
+        Creates 'email_task_incoming' activity when an email-originated task is created.
+        Only triggers for tasks with source_email_message_id.
+        """
+        try:
+            from app.core.db import create_session
+            from app.services.event_service import event_service
+
+            meta = event_data.get("meta", {})
+            source_email_message_id = meta.get("source_email_message_id")
+            if not source_email_message_id:
+                return  # Not an email-originated task
+
+            task_id = event_data.get("model_id")
+            user_id = event_data.get("user_id")
+            source_agent_id = meta.get("source_agent_id")
+
+            if not task_id or not user_id:
+                logger.warning("TASK_CREATED event missing task_id or user_id")
+                return
+
+            with create_session() as db:
+                activity = ActivityService.create_activity(
+                    db_session=db,
+                    user_id=UUID(user_id),
+                    data=ActivityCreate(
+                        input_task_id=UUID(task_id),
+                        agent_id=UUID(source_agent_id) if source_agent_id else None,
+                        activity_type="email_task_incoming",
+                        text="New email task received",
+                        action_required="task_review_required",
+                        is_read=False,
+                    )
+                )
+
+                await event_service.emit_event(
+                    event_type=EventType.ACTIVITY_CREATED,
+                    model_id=activity.id,
+                    user_id=UUID(user_id),
+                    meta={
+                        "activity_type": "email_task_incoming",
+                        "input_task_id": str(task_id),
+                        "agent_id": source_agent_id,
+                    }
+                )
+
+            logger.info(f"[Event Handler] Created 'email_task_incoming' activity for task {task_id}")
+
+        except Exception as e:
+            logger.error(f"Error in handle_task_created: {e}", exc_info=True)
+
+    @staticmethod
+    async def handle_task_status_changed(event_data: dict[str, Any]):
+        """
+        Event handler for TASK_STATUS_UPDATED events.
+
+        Manages email task activity lifecycle:
+        - When status != "new": deletes email_task_incoming activity
+        - When status == "completed": creates email_task_reply_pending activity
+        - When status != "completed": deletes email_task_reply_pending if exists
+        """
+        try:
+            from app.core.db import create_session
+            from app.services.event_service import event_service
+
+            meta = event_data.get("meta", {})
+            if not meta.get("is_email_task"):
+                return  # Not an email task
+
+            task_id = event_data.get("model_id")
+            user_id = event_data.get("user_id")
+            new_status = meta.get("new_status")
+            source_agent_id = meta.get("source_agent_id")
+
+            if not task_id or not user_id or not new_status:
+                logger.warning("TASK_STATUS_UPDATED event missing required fields")
+                return
+
+            with create_session() as db:
+                # If status is no longer "new", dismiss the incoming activity
+                if new_status != "new":
+                    deleted = ActivityService.delete_activity_by_task_and_type(
+                        db_session=db,
+                        input_task_id=UUID(task_id),
+                        activity_type="email_task_incoming"
+                    )
+                    if deleted:
+                        await event_service.emit_event(
+                            event_type=EventType.ACTIVITY_DELETED,
+                            model_id=deleted.id,
+                            user_id=UUID(user_id),
+                            meta={
+                                "activity_type": "email_task_incoming",
+                                "input_task_id": str(task_id),
+                            }
+                        )
+                        logger.info(f"[Event Handler] Deleted 'email_task_incoming' activity for task {task_id}")
+
+                # If completed, create reply_pending activity
+                if new_status == "completed":
+                    activity = ActivityService.create_activity(
+                        db_session=db,
+                        user_id=UUID(user_id),
+                        data=ActivityCreate(
+                            input_task_id=UUID(task_id),
+                            agent_id=UUID(source_agent_id) if source_agent_id else None,
+                            activity_type="email_task_reply_pending",
+                            text="Task completed. Email reply pending.",
+                            action_required="reply_pending",
+                            is_read=False,
+                        )
+                    )
+
+                    await event_service.emit_event(
+                        event_type=EventType.ACTIVITY_CREATED,
+                        model_id=activity.id,
+                        user_id=UUID(user_id),
+                        meta={
+                            "activity_type": "email_task_reply_pending",
+                            "input_task_id": str(task_id),
+                            "agent_id": source_agent_id,
+                        }
+                    )
+                    logger.info(f"[Event Handler] Created 'email_task_reply_pending' activity for task {task_id}")
+                else:
+                    # If not completed, dismiss reply_pending if exists
+                    deleted = ActivityService.delete_activity_by_task_and_type(
+                        db_session=db,
+                        input_task_id=UUID(task_id),
+                        activity_type="email_task_reply_pending"
+                    )
+                    if deleted:
+                        await event_service.emit_event(
+                            event_type=EventType.ACTIVITY_DELETED,
+                            model_id=deleted.id,
+                            user_id=UUID(user_id),
+                            meta={
+                                "activity_type": "email_task_reply_pending",
+                                "input_task_id": str(task_id),
+                            }
+                        )
+                        logger.info(f"[Event Handler] Deleted 'email_task_reply_pending' activity for task {task_id}")
+
+        except Exception as e:
+            logger.error(f"Error in handle_task_status_changed: {e}", exc_info=True)

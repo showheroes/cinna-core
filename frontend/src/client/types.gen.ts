@@ -28,6 +28,7 @@ export type ActivitiesPublicExtended = {
 export type ActivityCreate = {
     session_id?: (string | null);
     agent_id?: (string | null);
+    input_task_id?: (string | null);
     activity_type: string;
     text: string;
     action_required?: string;
@@ -40,6 +41,7 @@ export type ActivityPublic = {
     session_id: (string | null);
     agent_id: (string | null);
     user_workspace_id: (string | null);
+    input_task_id: (string | null);
     activity_type: string;
     text: string;
     action_required: string;
@@ -56,6 +58,7 @@ export type ActivityPublicExtended = {
     session_id: (string | null);
     agent_id: (string | null);
     user_workspace_id: (string | null);
+    input_task_id: (string | null);
     activity_type: string;
     text: string;
     action_required: string;

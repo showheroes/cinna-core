@@ -142,6 +142,16 @@ async def lifespan(app: FastAPI):
         handler=InputTaskService.handle_todo_list_updated
     )
 
+    # Email task activity handlers
+    event_service.register_handler(
+        event_type=EventType.TASK_CREATED,
+        handler=ActivityService.handle_task_created
+    )
+    event_service.register_handler(
+        event_type=EventType.TASK_STATUS_UPDATED,
+        handler=ActivityService.handle_task_status_changed
+    )
+
     # Session state handlers: activity creation + task feedback delivery
     event_service.register_handler(
         event_type=EventType.SESSION_STATE_UPDATED,
