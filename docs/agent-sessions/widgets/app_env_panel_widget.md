@@ -20,10 +20,10 @@ A user runs an agent that generates a data report. The agent processes data and 
 - Controlled visibility via `isOpen` prop
 
 **Subcomponents**:
-- `TabHeader.tsx` - Dropdown navigation menu with panel width toggle
-- `WorkspaceTabContent.tsx` - Reusable tab content wrapper for workspace sections
+- `TabHeader.tsx` - Dropdown navigation menu with panel width toggle. Accepts `hideCredentials` prop for guest mode.
+- `WorkspaceTabContent.tsx` - Reusable tab content wrapper for workspace sections. Passes `isGuest` to `TreeItemRenderer`.
 - `CredentialsTabContent.tsx` - Credentials share/unshare UI with checkbox list
-- `TreeItemRenderer.tsx` - Recursive tree rendering for files, folders, and SQLite databases
+- `TreeItemRenderer.tsx` - Recursive tree rendering for files, folders, and SQLite databases. Accepts `isGuest` prop to use guest-compatible file viewer URLs and disable owner-only features (database viewer).
 - `StateComponents.tsx` - Loading, error, empty, and no-environment states
 - `FileIcon.tsx` - Type-specific file icons
 
@@ -31,11 +31,9 @@ A user runs an agent that generates a data report. The agent processes data and 
 - `types.ts` - TypeScript interfaces (FileItem, FolderItem, TreeItem, DatabaseTableItem, SQLite types)
 - `utils.ts` - Formatting and conversion functions
 
-**Integration Point**: `frontend/src/routes/_layout/session/$sessionId.tsx`
-- "App" button in session header (line 162-170)
-- Button toggles panel visibility state (`envPanelOpen`)
-- Button variant changes to "secondary" when panel is open
-- Panel rendered within message list container to avoid covering footer
+**Integration Points**:
+- **Authenticated sessions**: `frontend/src/routes/_layout/session/$sessionId.tsx` — "App" button in session header toggles panel visibility (`envPanelOpen`). Button variant changes to "secondary" when panel is open. Panel rendered within message list container to avoid covering footer.
+- **Guest sessions**: `frontend/src/routes/guest/$guestShareToken.tsx` — same "App" button in `GuestChatHeader`. Panel detects guest mode via `useGuestShare()` hook and adapts behavior accordingly. See [Guest Sessions](../agent_guest_sessions.md).
 
 ### Navigation Structure
 
@@ -45,7 +43,7 @@ A user runs an agent that generates a data report. The agent processes data and 
 - **Logs**: Agent execution logs, error logs, debug logs
 - **Docs**: Generated documentation (Markdown files)
 - **Uploads**: User-uploaded files
-- **Credentials**: Manage credentials shared with the agent
+- **Credentials**: Manage credentials shared with the agent (hidden for guest users)
 
 **Layout**: Dropdown selector (flex-1) + Expand/Shrink button (Maximize2/Minimize2 icons)
 - No visual separator between menu and content list
@@ -66,11 +64,14 @@ All sections (Files, Scripts, Logs, Docs, Uploads, Credentials) are accessed thr
 
 **API Integration**:
 Panel fetches workspace data from backend proxy endpoints that communicate with agent environment containers:
-- Workspace tree: `GET /api/v1/environments/{env_id}/workspace/tree`
+- Workspace tree: `GET /api/v1/environments/{env_id}/workspace/tree` — Auth: `CurrentUserOrGuest`
 - Returns: `WorkspaceTreeResponse` with root nodes (files, scripts, logs, docs, uploads)
-- Database tables: `GET /api/v1/environments/{env_id}/workspace/database/{path}/tables`
-- Agent credentials: `GET /api/v1/agents/{agent_id}/credentials`
-- All credentials: `GET /api/v1/credentials`
+- File download: `GET /api/v1/environments/{env_id}/workspace/download/{path}` — Auth: `CurrentUserOrGuest`
+- File view: `GET /api/v1/environments/{env_id}/workspace/view-file/{path}` — Auth: `CurrentUserOrGuest`
+- Database tables: `GET /api/v1/environments/{env_id}/workspace/database/{path}/tables` — Auth: `CurrentUser` (owner-only)
+- Environment details: `GET /api/v1/environments/{env_id}` — Auth: `CurrentUser` (skipped for guests)
+- Agent credentials: `GET /api/v1/agents/{agent_id}/credentials` — Auth: `CurrentUser` (skipped for guests)
+- All credentials: `GET /api/v1/credentials` — Auth: `CurrentUser` (skipped for guests)
 - Cache: 5 seconds (React Query `staleTime`)
 - Loading states: Managed via `useQuery` hook (loading, error, success)
 
@@ -148,6 +149,8 @@ SQLite files (`.sqlite`, `.db`) are expandable to reveal their tables and views:
 - `SQLiteQueryResult` - Query execution results with pagination
 
 ### Credentials Tab
+
+> **Note**: The Credentials tab is hidden for [guest session](../agent_guest_sessions.md) users. Guests cannot view or manage agent credentials.
 
 Quick access to manage which credentials are shared with the agent:
 
@@ -243,6 +246,22 @@ The dropdown menu is extensible for additional sections. Future candidates:
 - **API Requests**: HTTP request history and responses
 - **Environment Variables**: View and manage env vars
 - **Artifacts**: Specialized outputs (charts, visualizations, exports)
+
+## Guest Mode
+
+When rendered within a [guest session](../agent_guest_sessions.md), the panel adapts its behavior to respect the guest access model. Guest mode is detected via the `useGuestShare()` hook.
+
+**Disabled features:**
+- **Credentials tab**: Hidden from dropdown menu (`TabHeader` receives `hideCredentials` prop). Guests cannot view or manage agent credentials.
+- **Environment details query**: `EnvironmentsService.getEnvironment()` is skipped (uses `CurrentUser`, not guest-compatible). The SDK footer is not displayed.
+- **Database viewer**: Clicking SQLite tables is disabled (database query/schema endpoints are owner-only).
+
+**Adapted features:**
+- **File viewing**: Clicking viewable files opens `/guest/file-viewer?envId=...&path=...` (a standalone route without `_layout/`) instead of `/environment/{envId}/file` (which requires the authenticated layout shell). See [File Management](../../file-management/file_management_overview.md).
+- **Workspace tree**: Loads normally — backend `GET /workspace/tree` supports `CurrentUserOrGuest`.
+- **File download**: Works normally — backend `GET /workspace/download/{path}` supports `CurrentUserOrGuest`.
+
+**Prop propagation**: `isGuest` is passed from `EnvironmentPanel` → `WorkspaceTabContent` → `TreeItemRenderer` to control URL generation and feature gating.
 
 ## Design Principles
 

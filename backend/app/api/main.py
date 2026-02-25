@@ -13,6 +13,7 @@ from app.api.routes import (
     environments,
     events,
     files,
+    guest_shares,
     input_tasks,
     items,
     knowledge,
@@ -34,6 +35,7 @@ from app.api.routes import (
     webhooks,
     workspace,
 )
+from app.api.routes.guest_shares import guest_router as guest_share_auth_router
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -45,6 +47,8 @@ api_router.include_router(items.router)
 api_router.include_router(agents.router)
 api_router.include_router(agent_shares.router)
 api_router.include_router(access_tokens.router)
+api_router.include_router(guest_shares.router)
+api_router.include_router(guest_share_auth_router)
 api_router.include_router(credential_shares.router)  # Must be before credentials.router for /shared-with-me
 api_router.include_router(credentials.router)
 api_router.include_router(ai_credentials.router)

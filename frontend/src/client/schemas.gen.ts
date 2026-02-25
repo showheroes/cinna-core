@@ -2070,6 +2070,176 @@ export const AgentEnvironmentsPublicSchema = {
     title: 'AgentEnvironmentsPublic'
 } as const;
 
+export const AgentGuestShareCreateSchema = {
+    properties: {
+        label: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Label'
+        },
+        expires_in_hours: {
+            type: 'integer',
+            maximum: 720,
+            minimum: 1,
+            title: 'Expires In Hours',
+            default: 24
+        }
+    },
+    type: 'object',
+    title: 'AgentGuestShareCreate'
+} as const;
+
+export const AgentGuestShareCreatedSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        label: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Label'
+        },
+        token_prefix: {
+            type: 'string',
+            title: 'Token Prefix'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        is_revoked: {
+            type: 'boolean',
+            title: 'Is Revoked'
+        },
+        session_count: {
+            type: 'integer',
+            title: 'Session Count',
+            default: 0
+        },
+        token: {
+            type: 'string',
+            title: 'Token'
+        },
+        share_url: {
+            type: 'string',
+            title: 'Share Url'
+        }
+    },
+    type: 'object',
+    required: ['id', 'agent_id', 'label', 'token_prefix', 'expires_at', 'created_at', 'is_revoked', 'token', 'share_url'],
+    title: 'AgentGuestShareCreated',
+    description: 'Returned only on creation - includes the actual token and share URL.'
+} as const;
+
+export const AgentGuestSharePublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        label: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Label'
+        },
+        token_prefix: {
+            type: 'string',
+            title: 'Token Prefix'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        is_revoked: {
+            type: 'boolean',
+            title: 'Is Revoked'
+        },
+        session_count: {
+            type: 'integer',
+            title: 'Session Count',
+            default: 0
+        },
+        share_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Share Url',
+            default: null
+        }
+    },
+    type: 'object',
+    required: ['id', 'agent_id', 'label', 'token_prefix', 'expires_at', 'created_at', 'is_revoked'],
+    title: 'AgentGuestSharePublic'
+} as const;
+
+export const AgentGuestSharesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AgentGuestSharePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AgentGuestSharesPublic'
+} as const;
+
 export const AgentPluginLinkCreateSchema = {
     properties: {
         plugin_id: {
@@ -7262,6 +7432,18 @@ export const SessionCreateSchema = {
             type: 'string',
             title: 'Mode',
             default: 'conversation'
+        },
+        guest_share_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Guest Share Id'
         }
     },
     type: 'object',
@@ -7321,6 +7503,18 @@ export const SessionPublicSchema = {
                 }
             ],
             title: 'Source Task Id'
+        },
+        guest_share_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Guest Share Id'
         },
         title: {
             anyOf: [
@@ -7508,6 +7702,18 @@ export const SessionPublicExtendedSchema = {
                 }
             ],
             title: 'Source Task Id'
+        },
+        guest_share_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Guest Share Id'
         },
         title: {
             anyOf: [

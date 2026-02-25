@@ -28,6 +28,17 @@ def create_random_user(client: TestClient) -> dict:
     return result
 
 
+def create_random_user_with_headers(
+    client: TestClient,
+) -> tuple[dict, dict[str, str]]:
+    """Create a random user and return ``(user_data, auth_headers)``."""
+    user = create_random_user(client)
+    headers = user_authentication_headers(
+        client=client, email=user["email"], password=user["_password"],
+    )
+    return user, headers
+
+
 def authentication_token_from_email(
     *, client: TestClient, email: str
 ) -> dict[str, str]:

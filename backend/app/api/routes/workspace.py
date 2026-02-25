@@ -5,12 +5,54 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.api.deps import CurrentUser, SessionDep
-from app.models import AgentEnvironment, Agent
+from app.api.deps import CurrentUser, CurrentUserOrGuest, GuestShareContext, SessionDep
+from app.models import AgentEnvironment, Agent, User
 from app.services.environment_service import EnvironmentService
 from app.services.ai_functions_service import AIFunctionsService
+from app.services.agent_guest_share_service import AgentGuestShareService
 
 router = APIRouter(prefix="/environments", tags=["workspace"])
+
+
+def _verify_workspace_read_access(
+    caller: User | GuestShareContext,
+    agent: Agent,
+    db_session: Any,
+) -> None:
+    """
+    Verify that the caller has read access to the workspace.
+
+    For anonymous guests: agent must match their JWT claims.
+    For authenticated users: they must own the agent, have a guest share
+    grant for the agent, or be a superuser.
+
+    Raises HTTPException if access is denied.
+    """
+    if isinstance(caller, GuestShareContext):
+        if agent.id != caller.agent_id:
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+    else:
+        current_user: User = caller
+        if current_user.is_superuser:
+            return
+        if agent.owner_id == current_user.id:
+            return
+        # Check if user has any grant for this agent's guest shares
+        # (We check all shares for the agent — if user has a grant for any,
+        # they can read the workspace)
+        from app.models import AgentGuestShare, GuestShareGrant
+        from sqlmodel import select
+        grant_exists = db_session.exec(
+            select(GuestShareGrant.id)
+            .join(AgentGuestShare, GuestShareGrant.guest_share_id == AgentGuestShare.id)
+            .where(
+                GuestShareGrant.user_id == current_user.id,
+                AgentGuestShare.agent_id == agent.id,
+            )
+        ).first()
+        if grant_exists:
+            return
+        raise HTTPException(status_code=403, detail="Not enough permissions")
 
 
 # Request/Response models for database endpoints
@@ -34,7 +76,7 @@ class GenerateSQLRequest(BaseModel):
 @router.get("/{env_id}/workspace/tree")
 async def get_workspace_tree(
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     env_id: uuid.UUID
 ) -> Any:
     """
@@ -43,7 +85,7 @@ async def get_workspace_tree(
     Returns tree for 4 folders: files, logs, scripts, docs
     Includes folder summaries (fileCount, totalSize)
 
-    Permissions: User must own the agent
+    Permissions: User must own the agent, or have guest share access
     """
     # Get environment and verify permissions
     environment = session.get(AgentEnvironment, env_id)
@@ -54,8 +96,7 @@ async def get_workspace_tree(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    if not current_user.is_superuser and (agent.owner_id != current_user.id):
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _verify_workspace_read_access(caller, agent, session)
 
     # Check environment is running
     if environment.status != "running":
@@ -82,7 +123,7 @@ async def get_workspace_tree(
 @router.get("/{env_id}/workspace/download/{path:path}")
 async def download_workspace_item(
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     env_id: uuid.UUID,
     path: str
 ):
@@ -101,7 +142,7 @@ async def download_workspace_item(
     - Prevents directory traversal
     - Rejects paths outside workspace
 
-    Permissions: User must own the agent
+    Permissions: User must own the agent, or have guest share access
     """
     # Get environment and verify permissions
     environment = session.get(AgentEnvironment, env_id)
@@ -112,8 +153,7 @@ async def download_workspace_item(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    if not current_user.is_superuser and (agent.owner_id != current_user.id):
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _verify_workspace_read_access(caller, agent, session)
 
     # Check environment is running
     if environment.status != "running":
@@ -161,7 +201,7 @@ async def download_workspace_item(
 @router.get("/{env_id}/workspace/view-file/{path:path}")
 async def view_workspace_file(
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     env_id: uuid.UUID,
     path: str
 ):
@@ -179,7 +219,7 @@ async def view_workspace_file(
     - Prevents directory traversal
     - Rejects paths outside workspace
 
-    Permissions: User must own the agent
+    Permissions: User must own the agent, or have guest share access
     """
     # Get environment and verify permissions
     environment = session.get(AgentEnvironment, env_id)
@@ -190,8 +230,7 @@ async def view_workspace_file(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    if not current_user.is_superuser and (agent.owner_id != current_user.id):
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _verify_workspace_read_access(caller, agent, session)
 
     # Check environment is running
     if environment.status != "running":

@@ -5,32 +5,68 @@ import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, CurrentUserOrGuest, GuestShareContext, SessionDep
 from app.models import (
     Session,
     AgentEnvironment,
     MessageCreate,
     MessagePublic,
     MessagesPublic,
+    User,
 )
 from app.services.message_service import MessageService
 from app.services.active_streaming_manager import active_streaming_manager
+from app.services.agent_guest_share_service import AgentGuestShareService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["messages"])
 
 
+def _verify_message_access(
+    caller: User | GuestShareContext,
+    chat_session: Session,
+    db_session: Any,
+) -> None:
+    """
+    Verify that the caller has access to the session's messages.
+
+    For anonymous guests: session must belong to their guest_share_id.
+    For authenticated users: session must belong to them, OR they must
+    have a grant for the session's guest_share_id, OR they are a superuser.
+
+    Raises HTTPException if access is denied.
+    """
+    if isinstance(caller, GuestShareContext):
+        if chat_session.guest_share_id != caller.guest_share_id:
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+    else:
+        current_user: User = caller
+        if current_user.is_superuser:
+            return
+        if chat_session.user_id == current_user.id:
+            return
+        if chat_session.guest_share_id:
+            has_grant = AgentGuestShareService.check_grant(
+                db_session, current_user.id, chat_session.guest_share_id
+            )
+            if has_grant:
+                return
+        raise HTTPException(status_code=400, detail="Not enough permissions")
+
+
 @router.get("/{session_id}/messages", response_model=MessagesPublic)
 async def get_messages(
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     session_id: uuid.UUID,
     limit: int = 100,
     offset: int = 0,
 ) -> Any:
     """
     Get session messages.
+
+    Supports both authenticated users and guest share callers.
 
     For messages with tools_needing_approval metadata, filters out tools
     that have already been approved in the agent's allowed_tools config.
@@ -41,13 +77,12 @@ async def get_messages(
     """
     from app.models import Agent
 
-    # Verify session exists and user owns it
+    # Verify session exists and caller has access
     chat_session = session.get(Session, session_id)
     if not chat_session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if not current_user.is_superuser and (chat_session.user_id != current_user.id):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
+    _verify_message_access(caller, chat_session, session)
 
     messages = MessageService.get_session_messages(
         session=session, session_id=session_id, limit=limit, offset=offset
@@ -104,12 +139,14 @@ async def get_messages(
 @router.post("/{session_id}/messages/stream")
 async def send_message_stream(
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     session_id: uuid.UUID,
     message_in: MessageCreate,
 ) -> Any:
     """
     Send message to agent environment and stream response via WebSocket.
+
+    Supports both authenticated users and guest share callers.
 
     This endpoint delegates to SessionService.send_session_message() which:
     1. Validates session ownership
@@ -122,10 +159,23 @@ async def send_message_stream(
     """
     from app.services.session_service import SessionService
 
+    # Verify session access for guest callers
+    chat_session = session.get(Session, session_id)
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    _verify_message_access(caller, chat_session, session)
+
+    # Determine user_id for the message
+    if isinstance(caller, GuestShareContext):
+        user_id = caller.owner_id
+    else:
+        user_id = caller.id
+
     # Send message using centralized service method
     result = await SessionService.send_session_message(
         session_id=session_id,
-        user_id=current_user.id,
+        user_id=user_id,
         content=message_in.content,
         file_ids=message_in.file_ids,
         answers_to_message_id=message_in.answers_to_message_id,
@@ -171,14 +221,16 @@ async def send_message_stream(
 @router.post("/{session_id}/messages/interrupt")
 async def interrupt_message(
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     session_id: uuid.UUID,
 ) -> Any:
     """
     Interrupt an active streaming message.
 
+    Supports both authenticated users and guest share callers.
+
     Flow:
-    1. Verify session ownership
+    1. Verify session access
     2. Request interrupt via active_streaming_manager
     3. Forward interrupt to agent environment if external_session_id available
     4. Return status
@@ -186,13 +238,12 @@ async def interrupt_message(
     Note: Interrupt only stops the current stream. Pending messages remain pending
     and will be processed when the user sends the next message.
     """
-    # Verify session exists and user owns it
+    # Verify session exists and caller has access
     chat_session = session.get(Session, session_id)
     if not chat_session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if not current_user.is_superuser and (chat_session.user_id != current_user.id):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
+    _verify_message_access(caller, chat_session, session)
 
     # Request interrupt via active_streaming_manager
     interrupt_info = await active_streaming_manager.request_interrupt(session_id)
@@ -248,11 +299,13 @@ async def interrupt_message(
 @router.get("/{session_id}/messages/streaming-status")
 async def get_streaming_status(
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     session_id: uuid.UUID,
 ) -> Any:
     """
     Check if a session is currently streaming.
+
+    Supports both authenticated users and guest share callers.
 
     Uses DB interaction_status as the primary source of truth, with
     ActiveStreamingManager providing supplementary info (duration, external_session_id).
@@ -263,13 +316,12 @@ async def get_streaming_status(
             "stream_info": dict | None  # Only if streaming
         }
     """
-    # Verify session exists and user owns it
+    # Verify session exists and caller has access
     chat_session = session.get(Session, session_id)
     if not chat_session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if not current_user.is_superuser and (chat_session.user_id != current_user.id):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
+    _verify_message_access(caller, chat_session, session)
 
     # Use DB interaction_status as primary source of truth
     is_streaming = chat_session.interaction_status == "running"

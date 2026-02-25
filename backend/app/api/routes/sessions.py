@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlmodel import select, func
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, CurrentUserOrGuest, GuestShareContext, SessionDep
 from app.models import (
     Session,
     SessionCreate,
@@ -18,10 +18,48 @@ from app.models import (
     Message,
     Agent,
     AgentEnvironment,
+    User,
 )
 from app.services.session_service import SessionService
+from app.services.agent_guest_share_service import AgentGuestShareService
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+def _verify_session_access(
+    caller: User | GuestShareContext,
+    chat_session: Session,
+    db_session: Any,
+) -> None:
+    """
+    Verify that the caller has access to the given session.
+
+    For anonymous guests: session must belong to their guest_share_id.
+    For authenticated users: session must belong to them, OR they must
+    have a grant for the session's guest_share_id, OR they must be a
+    superuser.
+
+    Raises HTTPException if access is denied.
+    """
+    if isinstance(caller, GuestShareContext):
+        # Anonymous guest can only access sessions linked to their guest share
+        if chat_session.guest_share_id != caller.guest_share_id:
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+    else:
+        current_user: User = caller
+        if current_user.is_superuser:
+            return
+        # Owner of the session
+        if chat_session.user_id == current_user.id:
+            return
+        # User with grant for this session's guest share
+        if chat_session.guest_share_id:
+            has_grant = AgentGuestShareService.check_grant(
+                db_session, current_user.id, chat_session.guest_share_id
+            )
+            if has_grant:
+                return
+        raise HTTPException(status_code=400, detail="Not enough permissions")
 
 
 class BulkDeleteRequest(BaseModel):
@@ -34,17 +72,68 @@ class BulkDeleteResponse(BaseModel):
 
 @router.post("/", response_model=SessionPublic)
 def create_session(
-    *, session: SessionDep, current_user: CurrentUser, session_in: SessionCreate
+    *, session: SessionDep, caller: CurrentUserOrGuest, session_in: SessionCreate
 ) -> Any:
     """
     Create new session using agent's active environment.
+
+    Supports both authenticated users and guest share callers.
+    Guest share sessions are forced to conversation mode.
     """
-    # Verify agent exists and user owns it
+    # Verify agent exists
     agent = session.get(Agent, session_in.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    if not current_user.is_superuser and (agent.owner_id != current_user.id):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
+
+    guest_share_id: uuid.UUID | None = None
+
+    if isinstance(caller, GuestShareContext):
+        # Anonymous guest: derive guest_share_id from JWT claims
+        guest_share_id = session_in.guest_share_id or caller.guest_share_id
+        if guest_share_id != caller.guest_share_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Guest share ID mismatch",
+            )
+        # Verify agent matches JWT claims
+        if session_in.agent_id != caller.agent_id:
+            raise HTTPException(status_code=403, detail="Agent ID mismatch with guest share")
+        # Force conversation mode for guest share sessions
+        if session_in.mode != "conversation":
+            raise HTTPException(
+                status_code=400,
+                detail="Guest share sessions only support conversation mode",
+            )
+        # Use the agent owner as the user_id so the session belongs to the
+        # owner's account (guest runs in owner's environment)
+        user_id = caller.owner_id
+    else:
+        # Authenticated user
+        current_user: User = caller
+        guest_share_id = session_in.guest_share_id
+
+        if guest_share_id:
+            # User is creating a session via a guest share grant.
+            # Verify they have a grant OR are the agent owner.
+            is_owner = agent.owner_id == current_user.id
+            has_grant = AgentGuestShareService.check_grant(
+                session, current_user.id, guest_share_id
+            )
+            if not is_owner and not has_grant:
+                raise HTTPException(status_code=403, detail="No active grant for this guest share")
+            # Force conversation mode for guest share sessions
+            if session_in.mode != "conversation":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Guest share sessions only support conversation mode",
+                )
+            # Use the agent owner as user_id (session runs in owner's env)
+            user_id = agent.owner_id
+        else:
+            # Regular user session (existing behavior)
+            if not current_user.is_superuser and (agent.owner_id != current_user.id):
+                raise HTTPException(status_code=400, detail="Not enough permissions")
+            user_id = current_user.id
 
     if not agent.active_environment_id:
         raise HTTPException(
@@ -53,7 +142,8 @@ def create_session(
         )
 
     new_session = SessionService.create_session(
-        db_session=session, user_id=current_user.id, data=session_in
+        db_session=session, user_id=user_id, data=session_in,
+        guest_share_id=guest_share_id,
     )
     if not new_session:
         raise HTTPException(status_code=500, detail="Failed to create session")
@@ -64,13 +154,14 @@ def create_session(
 @router.get("/", response_model=SessionsPublicExtended)
 def list_sessions(
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     skip: int = 0,
     limit: int = 100,
     order_by: str = "created_at",  # "created_at" | "updated_at" | "last_message_at"
     order_desc: bool = True,
     user_workspace_id: str | None = None,
     agent_id: uuid.UUID | None = None,
+    guest_share_id: uuid.UUID | None = None,
 ) -> Any:
     """
     List user's sessions with external session metadata and agent names.
@@ -85,7 +176,38 @@ def list_sessions(
             - Empty string (""): filters for default workspace (NULL)
             - UUID string: filters for that workspace
         agent_id: Optional agent ID filter
+        guest_share_id: Optional guest share ID filter
     """
+    # Determine owner_user_id and guest share filtering based on caller type
+    if isinstance(caller, GuestShareContext):
+        # Anonymous guest: automatically filter by guest_share_id from JWT claims
+        owner_user_id = caller.owner_id
+        guest_share_filter = caller.guest_share_id
+    else:
+        current_user: User = caller
+        owner_user_id = current_user.id
+        guest_share_filter = guest_share_id
+
+        if guest_share_filter:
+            # Authenticated user requesting guest share sessions.
+            # Verify they have a grant or own the agent.
+            # We need the agent_id from the guest share to check ownership.
+            from app.models import AgentGuestShare
+            gs = session.get(AgentGuestShare, guest_share_filter)
+            if gs:
+                agent_obj = session.get(Agent, gs.agent_id)
+                is_owner = agent_obj and agent_obj.owner_id == current_user.id
+                has_grant = AgentGuestShareService.check_grant(
+                    session, current_user.id, guest_share_filter
+                )
+                if not is_owner and not has_grant and not current_user.is_superuser:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="No access to this guest share's sessions",
+                    )
+                # Use the agent owner's user_id to find sessions
+                owner_user_id = gs.owner_id
+
     # Parse workspace filter
     workspace_filter: uuid.UUID | None = None
     apply_filter = False
@@ -103,7 +225,6 @@ def list_sessions(
             workspace_filter = uuid.UUID(user_workspace_id)
             apply_filter = True
         except ValueError:
-            from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="Invalid workspace ID format")
 
     # Subquery for message count per session
@@ -152,8 +273,12 @@ def list_sessions(
         .join(Agent, AgentEnvironment.agent_id == Agent.id)
         .outerjoin(msg_count_subq, Session.id == msg_count_subq.c.session_id)
         .outerjoin(last_msg_subq, Session.id == last_msg_subq.c.session_id)
-        .where(Session.user_id == current_user.id)
+        .where(Session.user_id == owner_user_id)
     )
+
+    # Apply guest share filter
+    if guest_share_filter:
+        statement = statement.where(Session.guest_share_id == guest_share_filter)
 
     # Apply workspace filter
     if apply_filter:
@@ -169,8 +294,10 @@ def list_sessions(
         .select_from(Session)
         .join(AgentEnvironment, Session.environment_id == AgentEnvironment.id)
         .join(Agent, AgentEnvironment.agent_id == Agent.id)
-        .where(Session.user_id == current_user.id)
+        .where(Session.user_id == owner_user_id)
     )
+    if guest_share_filter:
+        count_statement = count_statement.where(Session.guest_share_id == guest_share_filter)
     if apply_filter:
         count_statement = count_statement.where(Session.user_workspace_id == workspace_filter)
     if agent_id is not None:
@@ -207,9 +334,11 @@ def list_sessions(
 
 
 @router.get("/{id}", response_model=SessionPublicExtended)
-def get_session(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
+def get_session(session: SessionDep, caller: CurrentUserOrGuest, id: uuid.UUID) -> Any:
     """
     Get session details with external session metadata and agent name.
+
+    Supports both authenticated users and guest share callers.
     """
     # Join with AgentEnvironment and Agent to get agent name and color
     statement = (
@@ -225,9 +354,8 @@ def get_session(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -
 
     chat_session, agent_id, agent_name, agent_ui_color_preset = result
 
-    # Verify ownership
-    if not current_user.is_superuser and (chat_session.user_id != current_user.id):
-        raise HTTPException(status_code=400, detail="Not enough permissions")
+    # Verify access
+    _verify_session_access(caller, chat_session, session)
 
     return SessionPublicExtended(
         **chat_session.model_dump(),

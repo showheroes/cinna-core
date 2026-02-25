@@ -23,6 +23,10 @@ class Session(SQLModel, table=True):
     source_task_id: uuid.UUID | None = Field(
         default=None, foreign_key="input_task.id", ondelete="SET NULL"
     )
+    # Track which guest share created this session (for guest access)
+    guest_share_id: uuid.UUID | None = Field(
+        default=None, foreign_key="agent_guest_share.id", ondelete="SET NULL"
+    )
     title: str | None = None
     mode: str = "conversation"  # "building" | "conversation"
     status: str = "active"  # "active" | "paused" | "completed" | "error"
@@ -70,6 +74,7 @@ class SessionCreate(SQLModel):
     agent_id: uuid.UUID  # Will use active environment
     title: str | None = None
     mode: str = "conversation"  # "building" | "conversation"
+    guest_share_id: uuid.UUID | None = None  # Optional guest share link
 
 
 class SessionUpdate(SQLModel):
@@ -86,6 +91,7 @@ class SessionPublic(SQLModel):
     user_workspace_id: uuid.UUID | None
     access_token_id: uuid.UUID | None
     source_task_id: uuid.UUID | None
+    guest_share_id: uuid.UUID | None = None
     title: str | None
     mode: str
     status: str

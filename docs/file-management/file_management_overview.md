@@ -55,9 +55,11 @@ Frontend UI → Backend API → Backend Storage → Agent-Env Upload → Agent A
 ### API Routes
 
 **File Operations:** `backend/app/api/routes/files.py`
-- `POST /api/v1/files/upload` - Upload file (creates temporary record)
-- `DELETE /api/v1/files/{file_id}` - Soft delete file
-- `GET /api/v1/files/{file_id}/download` - Download file with auth check
+- `POST /api/v1/files/upload` - Upload file (creates temporary record). Auth: `CurrentUserOrGuest`
+- `DELETE /api/v1/files/{file_id}` - Soft delete file. Auth: `CurrentUserOrGuest`
+- `GET /api/v1/files/{file_id}/download` - Download file with auth check. Auth: `CurrentUserOrGuest`
+
+All file endpoints support guest share access. For guest users, the agent owner is used as the effective user for file ownership and permission checks. See [Guest Sessions](../agent-sessions/agent_guest_sessions.md) for details on the guest auth model.
 
 **Message Updates:** `backend/app/api/routes/messages.py:send_message_stream()`
 - Validates file ownership and status
@@ -164,13 +166,15 @@ Frontend UI → Backend API → Backend Storage → Agent-Env Upload → Agent A
 - Filename sanitization prevents directory traversal
 
 **Access Control:**
-- Upload: Authenticated users only
+- Upload: Authenticated users and guest share users (`CurrentUserOrGuest`)
 - Download: File owner OR session owner (checked in `FileService.check_download_permission()`)
+- Delete: File owner only (for guests, owner is the agent owner)
 - Agent-env upload: Auth token required
+- Guest users: Files are attributed to the agent owner (see [Guest Sessions](../agent-sessions/agent_guest_sessions.md))
 
 **Storage:**
 - UUID-based paths prevent enumeration
-- Files isolated by user_id
+- Files isolated by user_id (guest uploads stored under agent owner's user_id)
 - Soft delete with grace period
 
 ## Key Integration Points
@@ -236,16 +240,18 @@ Enables users to view files directly in the browser by clicking on them in the e
 
 ### Frontend Implementation
 
-**Route:** `frontend/src/routes/_layout/environment/$envId/file.tsx`
-- Accepts `envId` (URL param) and `path` (search param)
-- Opens in new browser tab via `window.open()`
+**Routes:**
+- **Authenticated users:** `frontend/src/routes/_layout/environment/$envId/file.tsx` — under `_layout/` (protected), accepts `envId` (URL param) and `path` (search param)
+- **Guest users:** `frontend/src/routes/guest/file-viewer.tsx` — standalone public route (NOT under `_layout/`), accepts `envId` and `path` as search params. Uses its own header instead of `usePageHeader` from the layout. See [Guest Sessions](../agent-sessions/agent_guest_sessions.md).
+
+Both routes open in a new browser tab via `window.open()`. The `TreeItemRenderer` detects guest mode and generates the appropriate URL.
 
 **Components:**
-- **FileViewer:** `frontend/src/components/Environment/FileViewer.tsx` - Main viewer with header, filename, path, and download button
+- **FileViewer:** `frontend/src/components/Environment/FileViewer.tsx` - Main viewer with header, filename, path, and download button (used by authenticated route)
 - **CSVViewer:** `frontend/src/components/Environment/CSVViewer.tsx` - Renders CSV as table with proper parsing (handles quoted fields, escapes)
 - **MarkdownViewer:** `frontend/src/components/Environment/MarkdownViewer.tsx` - Renders Markdown with GFM support and code syntax highlighting
 - **TextViewer:** `frontend/src/components/Environment/TextViewer.tsx` - Renders plain text and log files as preformatted monospace text
-- **TreeItemRenderer:** `frontend/src/components/Environment/TreeItemRenderer.tsx` - Updated to make viewable files (CSV, Markdown, JSON, TXT, LOG) clickable, opens in new tab
+- **TreeItemRenderer:** `frontend/src/components/Environment/TreeItemRenderer.tsx` - Updated to make viewable files (CSV, Markdown, JSON, TXT, LOG) clickable, opens in new tab. Accepts `isGuest` prop to use the correct file viewer route.
 
 **File Type Renderers:**
 Different file types are handled by specific viewer components located in `frontend/src/components/Environment/`:
@@ -283,6 +289,6 @@ The command reuses the existing `adapter.get_workspace_tree()` method and requir
 
 ---
 
-**Document Version:** 2.6 (Added TXT/LOG file viewer)
-**Last Updated:** 2026-02-22
+**Document Version:** 2.7 (Added guest share support for file endpoints and guest file viewer route)
+**Last Updated:** 2026-02-25
 **Status:** Features Fully Implemented

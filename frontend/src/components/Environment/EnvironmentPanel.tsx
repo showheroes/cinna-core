@@ -13,6 +13,7 @@ import type { TreeItem, DatabaseTableItem } from "./types"
 import useWorkspace from "@/hooks/useWorkspace"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
+import { useGuestShare } from "@/hooks/useGuestShare"
 
 interface WorkspaceTreeResponse {
   files?: FileNode
@@ -41,6 +42,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { activeWorkspaceId } = useWorkspace()
+  const { isGuest } = useGuestShare()
 
   // Fetch agent credentials
   const {
@@ -49,7 +51,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
   } = useQuery({
     queryKey: ["agent-credentials", agentId],
     queryFn: () => AgentsService.readAgentCredentials({ id: agentId! }),
-    enabled: !!agentId && activeTab === "credentials",
+    enabled: !isGuest && !!agentId && activeTab === "credentials",
   })
 
   // Fetch all user credentials
@@ -63,7 +65,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
       limit: 100,
       userWorkspaceId: activeWorkspaceId ?? "",
     }),
-    enabled: activeTab === "credentials",
+    enabled: !isGuest && activeTab === "credentials",
   })
 
   const agentCredentials = agentCredentialsData?.data || []
@@ -73,7 +75,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
   const { data: environmentData } = useQuery({
     queryKey: ["environment", environmentId],
     queryFn: () => EnvironmentsService.getEnvironment({ id: environmentId! }),
-    enabled: isOpen && !!environmentId,
+    enabled: !isGuest && isOpen && !!environmentId,
   })
 
   // Check if a credential is shared with the agent
@@ -254,6 +256,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
           onTabChange={setActiveTab}
           isWidePanelMode={isWidePanelMode}
           onToggleWidePanel={() => setIsWidePanelMode(!isWidePanelMode)}
+          hideCredentials={isGuest}
         />
 
         {/* Credentials tab - separate from workspace tabs */}
@@ -289,6 +292,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
                 envId={environmentId}
                 databaseTables={databaseTables}
                 onFetchDatabaseTables={handleFetchDatabaseTables}
+                isGuest={isGuest}
               />
               <WorkspaceTabContent
                 value="scripts"
@@ -300,6 +304,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
                 envId={environmentId}
                 databaseTables={databaseTables}
                 onFetchDatabaseTables={handleFetchDatabaseTables}
+                isGuest={isGuest}
               />
               <WorkspaceTabContent
                 value="logs"
@@ -311,6 +316,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
                 envId={environmentId}
                 databaseTables={databaseTables}
                 onFetchDatabaseTables={handleFetchDatabaseTables}
+                isGuest={isGuest}
               />
               <WorkspaceTabContent
                 value="docs"
@@ -322,6 +328,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
                 envId={environmentId}
                 databaseTables={databaseTables}
                 onFetchDatabaseTables={handleFetchDatabaseTables}
+                isGuest={isGuest}
               />
               <WorkspaceTabContent
                 value="uploads"
@@ -333,6 +340,7 @@ export function EnvironmentPanel({ isOpen, environmentId, agentId }: Environment
                 envId={environmentId}
                 databaseTables={databaseTables}
                 onFetchDatabaseTables={handleFetchDatabaseTables}
+                isGuest={isGuest}
               />
             </>
           )

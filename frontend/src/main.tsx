@@ -21,6 +21,10 @@ OpenAPI.TOKEN = async () => {
 
 const handleApiError = (error: Error) => {
   if (error instanceof ApiError && [401, 403].includes(error.status)) {
+    // Don't redirect to login if we're on a guest share page
+    if (window.location.pathname.startsWith("/guest/")) {
+      return
+    }
     localStorage.removeItem("access_token")
     window.location.href = "/login"
   }

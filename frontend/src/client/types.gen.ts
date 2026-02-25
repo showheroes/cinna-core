@@ -263,6 +263,44 @@ export type AgentEnvironmentUpdate = {
 } | null);
 };
 
+export type AgentGuestShareCreate = {
+    label?: (string | null);
+    expires_in_hours?: number;
+};
+
+/**
+ * Returned only on creation - includes the actual token and share URL.
+ */
+export type AgentGuestShareCreated = {
+    id: string;
+    agent_id: string;
+    label: (string | null);
+    token_prefix: string;
+    expires_at: string;
+    created_at: string;
+    is_revoked: boolean;
+    session_count?: number;
+    token: string;
+    share_url: string;
+};
+
+export type AgentGuestSharePublic = {
+    id: string;
+    agent_id: string;
+    label: (string | null);
+    token_prefix: string;
+    expires_at: string;
+    created_at: string;
+    is_revoked: boolean;
+    session_count?: number;
+    share_url?: (string | null);
+};
+
+export type AgentGuestSharesPublic = {
+    data: Array<AgentGuestSharePublic>;
+    count: number;
+};
+
 /**
  * Schema for creating an agent plugin link.
  */
@@ -1579,6 +1617,7 @@ export type SessionCreate = {
     agent_id: string;
     title?: (string | null);
     mode?: string;
+    guest_share_id?: (string | null);
 };
 
 export type SessionPublic = {
@@ -1588,6 +1627,7 @@ export type SessionPublic = {
     user_workspace_id: (string | null);
     access_token_id: (string | null);
     source_task_id: (string | null);
+    guest_share_id?: (string | null);
     title: (string | null);
     mode: string;
     status: string;
@@ -1615,6 +1655,7 @@ export type SessionPublicExtended = {
     user_workspace_id: (string | null);
     access_token_id: (string | null);
     source_task_id: (string | null);
+    guest_share_id?: (string | null);
     title: (string | null);
     mode: string;
     status: string;
@@ -2608,6 +2649,51 @@ export type FilesDownloadFileData = {
 
 export type FilesDownloadFileResponse = (unknown);
 
+export type GuestShareGuestShareAuthenticateData = {
+    token: string;
+};
+
+export type GuestShareGuestShareAuthenticateResponse = (unknown);
+
+export type GuestShareGuestShareActivateData = {
+    token: string;
+};
+
+export type GuestShareGuestShareActivateResponse = (unknown);
+
+export type GuestShareGuestShareInfoData = {
+    token: string;
+};
+
+export type GuestShareGuestShareInfoResponse = (unknown);
+
+export type GuestSharesCreateGuestShareData = {
+    agentId: string;
+    requestBody: AgentGuestShareCreate;
+};
+
+export type GuestSharesCreateGuestShareResponse = (AgentGuestShareCreated);
+
+export type GuestSharesListGuestSharesData = {
+    agentId: string;
+};
+
+export type GuestSharesListGuestSharesResponse = (AgentGuestSharesPublic);
+
+export type GuestSharesGetGuestShareData = {
+    agentId: string;
+    guestShareId: string;
+};
+
+export type GuestSharesGetGuestShareResponse = (AgentGuestSharePublic);
+
+export type GuestSharesDeleteGuestShareData = {
+    agentId: string;
+    guestShareId: string;
+};
+
+export type GuestSharesDeleteGuestShareResponse = (Message);
+
 export type ItemsReadItemsData = {
     limit?: number;
     skip?: number;
@@ -2945,6 +3031,7 @@ export type SessionsCreateSessionResponse = (SessionPublic);
 
 export type SessionsListSessionsData = {
     agentId?: (string | null);
+    guestShareId?: (string | null);
     limit?: number;
     orderBy?: string;
     orderDesc?: boolean;

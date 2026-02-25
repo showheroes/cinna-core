@@ -15,6 +15,8 @@ import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
+import { Route as GuestFileViewerRouteImport } from './routes/guest/file-viewer'
+import { Route as GuestGuestShareTokenRouteImport } from './routes/guest/$guestShareToken'
 import { Route as LayoutTasksRouteImport } from './routes/_layout/tasks'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutSessionsRouteImport } from './routes/_layout/sessions'
@@ -68,6 +70,16 @@ const LayoutIndexRoute = LayoutIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => LayoutRoute,
+} as any)
+const GuestFileViewerRoute = GuestFileViewerRouteImport.update({
+  id: '/guest/file-viewer',
+  path: '/guest/file-viewer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuestGuestShareTokenRoute = GuestGuestShareTokenRouteImport.update({
+  id: '/guest/$guestShareToken',
+  path: '/guest/$guestShareToken',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const LayoutTasksRoute = LayoutTasksRouteImport.update({
   id: '/tasks',
@@ -212,6 +224,8 @@ export interface FileRoutesByFullPath {
   '/sessions': typeof LayoutSessionsRouteWithChildren
   '/settings': typeof LayoutSettingsRoute
   '/tasks': typeof LayoutTasksRoute
+  '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
+  '/guest/file-viewer': typeof GuestFileViewerRoute
   '/': typeof LayoutIndexRoute
   '/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/admin/users': typeof LayoutAdminUsersRoute
@@ -242,6 +256,8 @@ export interface FileRoutesByTo {
   '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/settings': typeof LayoutSettingsRoute
   '/tasks': typeof LayoutTasksRoute
+  '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
+  '/guest/file-viewer': typeof GuestFileViewerRoute
   '/': typeof LayoutIndexRoute
   '/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/admin/users': typeof LayoutAdminUsersRoute
@@ -275,6 +291,8 @@ export interface FileRoutesById {
   '/_layout/sessions': typeof LayoutSessionsRouteWithChildren
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/tasks': typeof LayoutTasksRoute
+  '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
+  '/guest/file-viewer': typeof GuestFileViewerRoute
   '/_layout/': typeof LayoutIndexRoute
   '/_layout/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/_layout/admin/users': typeof LayoutAdminUsersRoute
@@ -308,6 +326,8 @@ export interface FileRouteTypes {
     | '/sessions'
     | '/settings'
     | '/tasks'
+    | '/guest/$guestShareToken'
+    | '/guest/file-viewer'
     | '/'
     | '/admin/marketplaces'
     | '/admin/users'
@@ -338,6 +358,8 @@ export interface FileRouteTypes {
     | '/knowledge-sources'
     | '/settings'
     | '/tasks'
+    | '/guest/$guestShareToken'
+    | '/guest/file-viewer'
     | '/'
     | '/admin/marketplaces'
     | '/admin/users'
@@ -370,6 +392,8 @@ export interface FileRouteTypes {
     | '/_layout/sessions'
     | '/_layout/settings'
     | '/_layout/tasks'
+    | '/guest/$guestShareToken'
+    | '/guest/file-viewer'
     | '/_layout/'
     | '/_layout/admin/marketplaces'
     | '/_layout/admin/users'
@@ -395,6 +419,8 @@ export interface RootRouteChildren {
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
+  GuestGuestShareTokenRoute: typeof GuestGuestShareTokenRoute
+  GuestFileViewerRoute: typeof GuestFileViewerRoute
   CredentialsOauthCallbackRoute: typeof CredentialsOauthCallbackRoute
 }
 
@@ -441,6 +467,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof LayoutIndexRouteImport
       parentRoute: typeof LayoutRoute
+    }
+    '/guest/file-viewer': {
+      id: '/guest/file-viewer'
+      path: '/guest/file-viewer'
+      fullPath: '/guest/file-viewer'
+      preLoaderRoute: typeof GuestFileViewerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guest/$guestShareToken': {
+      id: '/guest/$guestShareToken'
+      path: '/guest/$guestShareToken'
+      fullPath: '/guest/$guestShareToken'
+      preLoaderRoute: typeof GuestGuestShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_layout/tasks': {
       id: '/_layout/tasks'
@@ -697,6 +737,8 @@ const rootRouteChildren: RootRouteChildren = {
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
+  GuestGuestShareTokenRoute: GuestGuestShareTokenRoute,
+  GuestFileViewerRoute: GuestFileViewerRoute,
   CredentialsOauthCallbackRoute: CredentialsOauthCallbackRoute,
 }
 export const routeTree = rootRouteImport

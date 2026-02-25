@@ -13,6 +13,7 @@ interface WorkspaceTabContentProps {
   envId?: string
   databaseTables?: Record<string, { tables: DatabaseTableItem[], loading: boolean, error: string | null }>
   onFetchDatabaseTables?: (path: string) => void
+  isGuest?: boolean
 }
 
 export function WorkspaceTabContent({
@@ -25,6 +26,7 @@ export function WorkspaceTabContent({
   envId,
   databaseTables,
   onFetchDatabaseTables,
+  isGuest,
 }: WorkspaceTabContentProps) {
   const firstItem = data[0]
   const hasContent = firstItem && firstItem.type === "folder" && firstItem.children.length > 0
@@ -45,6 +47,7 @@ export function WorkspaceTabContent({
               envId={envId}
               databaseTables={databaseTables}
               onFetchDatabaseTables={onFetchDatabaseTables}
+              isGuest={isGuest}
             />
           ))}
         </div>

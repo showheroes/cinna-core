@@ -13,6 +13,7 @@ interface TreeItemRendererProps {
   envId?: string
   databaseTables?: Record<string, { tables: DatabaseTableItem[], loading: boolean, error: string | null }>
   onFetchDatabaseTables?: (path: string) => void
+  isGuest?: boolean
 }
 
 export function TreeItemRenderer({
@@ -25,6 +26,7 @@ export function TreeItemRenderer({
   envId,
   databaseTables,
   onFetchDatabaseTables,
+  isGuest,
 }: TreeItemRendererProps) {
   const currentPath = path ? `${path}/${item.name}` : item.name
   const isExpanded = expandedFolders.has(currentPath)
@@ -76,6 +78,7 @@ export function TreeItemRenderer({
             envId={envId}
             databaseTables={databaseTables}
             onFetchDatabaseTables={onFetchDatabaseTables}
+            isGuest={isGuest}
           />
         ))}
       </>
@@ -115,14 +118,16 @@ export function TreeItemRenderer({
       onToggleFolder(currentPath)
     } else if (isViewableFile) {
       // Open file viewer in new tab
-      const url = `/environment/${envId}/file?path=${encodeURIComponent(currentPath)}`
+      const url = isGuest
+        ? `/guest/file-viewer?envId=${encodeURIComponent(envId)}&path=${encodeURIComponent(currentPath)}`
+        : `/environment/${envId}/file?path=${encodeURIComponent(currentPath)}`
       window.open(url, '_blank')
     }
   }
 
   const handleTableClick = (tableName: string) => {
-    if (!envId) return
-    // Open database viewer with the specific table selected
+    if (!envId || isGuest) return
+    // Open database viewer with the specific table selected (owner-only)
     const url = `/environment/${envId}/database?path=${encodeURIComponent(currentPath)}&table=${encodeURIComponent(tableName)}`
     window.open(url, '_blank')
   }

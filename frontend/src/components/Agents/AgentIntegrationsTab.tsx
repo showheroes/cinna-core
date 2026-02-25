@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { AccessTokensCard } from "./AccessTokensCard"
 import { EmailIntegrationCard } from "./EmailIntegrationCard"
+import { GuestShareCard } from "./GuestShareCard"
 
 interface AgentIntegrationsTabProps {
   agent: AgentPublic
@@ -136,6 +137,9 @@ export function AgentIntegrationsTab({ agent }: AgentIntegrationsTabProps) {
         </Card>
         {/* Access Tokens Card */}
         <AccessTokensCard agentId={agent.id} />
+
+        {/* Guest Share Links Card */}
+        <GuestShareCard agentId={agent.id} />
 
         {/* Email Integration Card - Half width, only for non-clone agents */}
         {!agent.is_clone && (

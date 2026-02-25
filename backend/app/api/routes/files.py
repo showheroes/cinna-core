@@ -4,8 +4,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, File, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, CurrentUserOrGuest, GuestShareContext, SessionDep
 from app.models.file_upload import FileUploadPublic, FileUpload
+from app.models import User
 from app.services.file_service import FileService
 from app.services.file_storage_service import FileStorageService
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/files", tags=["files"])
 async def upload_file(
     *,
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     file: UploadFile = File(...),
 ) -> Any:
     """
@@ -26,10 +27,13 @@ async def upload_file(
     - File size (max 100MB)
     - Mime type (whitelist)
     - User storage quota (max 10GB)
+
+    For guest users, the file is attributed to the agent owner.
     """
+    user_id = caller.owner_id if isinstance(caller, GuestShareContext) else caller.id
     db_file = await FileService.create_file_upload(
         session=session,
-        user_id=current_user.id,
+        user_id=user_id,
         file=file,
     )
 
@@ -47,22 +51,30 @@ async def upload_file(
 def delete_file(
     *,
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     file_id: uuid.UUID,
 ) -> Any:
     """
     Mark file for deletion (soft delete).
 
     Authorization:
-    - File owner only
+    - File owner only (for guests, owner is the agent owner)
     """
     # Get file record
     file_record = session.get(FileUpload, file_id)
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
+    # For guests, resolve the effective user for permission checks
+    if isinstance(caller, GuestShareContext):
+        effective_user = session.get(User, caller.owner_id)
+        if not effective_user:
+            raise HTTPException(status_code=403, detail="Not authorized")
+    else:
+        effective_user = caller
+
     # Check permission
-    if not FileService.check_delete_permission(file_record, current_user):
+    if not FileService.check_delete_permission(file_record, effective_user):
         raise HTTPException(
             status_code=403, detail="Not authorized to delete this file"
         )
@@ -70,7 +82,7 @@ def delete_file(
     FileService.mark_file_for_deletion(
         session=session,
         file_id=file_id,
-        user_id=current_user.id,
+        user_id=effective_user.id,
     )
     return {"message": "File marked for deletion"}
 
@@ -79,7 +91,7 @@ def delete_file(
 def download_file(
     *,
     session: SessionDep,
-    current_user: CurrentUser,
+    caller: CurrentUserOrGuest,
     file_id: uuid.UUID,
 ) -> StreamingResponse:
     """
@@ -88,14 +100,23 @@ def download_file(
     Authorization:
     - File owner, OR
     - User owns a session with a message referencing this file
+    - Guest users can download files owned by the agent owner
     """
     # Get file record
     file_record = session.get(FileUpload, file_id)
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
+    # For guests, resolve the effective user for permission checks
+    if isinstance(caller, GuestShareContext):
+        effective_user = session.get(User, caller.owner_id)
+        if not effective_user:
+            raise HTTPException(status_code=403, detail="Not authorized")
+    else:
+        effective_user = caller
+
     # Check permission
-    if not FileService.check_download_permission(file_record, current_user, session):
+    if not FileService.check_download_permission(file_record, effective_user, session):
         raise HTTPException(
             status_code=403, detail="Not authorized to download this file"
         )

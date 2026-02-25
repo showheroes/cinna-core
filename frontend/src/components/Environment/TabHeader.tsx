@@ -13,6 +13,7 @@ interface TabHeaderProps {
   onTabChange: (tab: string) => void
   isWidePanelMode: boolean
   onToggleWidePanel: () => void
+  hideCredentials?: boolean
 }
 
 const TAB_LABELS: Record<string, string> = {
@@ -24,7 +25,7 @@ const TAB_LABELS: Record<string, string> = {
   credentials: "Credentials"
 }
 
-export function TabHeader({ activeTab, onTabChange, isWidePanelMode, onToggleWidePanel }: TabHeaderProps) {
+export function TabHeader({ activeTab, onTabChange, isWidePanelMode, onToggleWidePanel, hideCredentials }: TabHeaderProps) {
   const menuLabel = TAB_LABELS[activeTab] || "Files"
 
   return (
@@ -62,11 +63,15 @@ export function TabHeader({ activeTab, onTabChange, isWidePanelMode, onToggleWid
               <Upload className="h-4 w-4 mr-2" />
               Uploads
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onTabChange("credentials")}>
-              <KeyRound className="h-4 w-4 mr-2" />
-              Credentials
-            </DropdownMenuItem>
+            {!hideCredentials && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onTabChange("credentials")}>
+                  <KeyRound className="h-4 w-4 mr-2" />
+                  Credentials
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

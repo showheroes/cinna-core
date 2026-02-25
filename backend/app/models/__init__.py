@@ -228,6 +228,16 @@ from .agent_access_token import (
     AccessTokenScope,
     A2ATokenPayload,
 )
+from .agent_guest_share import (
+    AgentGuestShare,
+    AgentGuestShareBase,
+    AgentGuestShareCreate,
+    AgentGuestSharePublic,
+    AgentGuestShareCreated,
+    AgentGuestSharesPublic,
+    GuestShareGrant,
+    GuestShareTokenPayload,
+)
 from .input_task import (
     InputTask,
     InputTaskCreate,
@@ -499,6 +509,15 @@ __all__ = [
     "AccessTokenMode",
     "AccessTokenScope",
     "A2ATokenPayload",
+    # Agent Guest Shares
+    "AgentGuestShare",
+    "AgentGuestShareBase",
+    "AgentGuestShareCreate",
+    "AgentGuestSharePublic",
+    "AgentGuestShareCreated",
+    "AgentGuestSharesPublic",
+    "GuestShareGrant",
+    "GuestShareTokenPayload",
     # Input Tasks
     "InputTask",
     "InputTaskCreate",
