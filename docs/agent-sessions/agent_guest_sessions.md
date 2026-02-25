@@ -46,28 +46,43 @@ Following the **A2A access token pattern**:
 ```
 User opens guest share link: /guest/{guest_share_token}
         |
-Frontend checks: do I have an existing JWT in localStorage?
+GET /guest-share/{token}/info  (validity, requires_code, is_code_blocked)
         |
-+------------------------+--------------------------------+
-| No existing JWT        | Has existing JWT (logged in)   |
-| (anonymous visitor)    |                                |
-+------------------------+--------------------------------+
-|                        |                                |
-| POST /guest-share/     | POST /guest-share/             |
-|   {token}/auth         |   {token}/activate             |
-|                        | (with user JWT in Auth header) |
-|        |               |          |                     |
-| Backend issues guest   | Backend creates                |
-| JWT (role=chat-guest)  | GuestShareGrant record:        |
-|        |               |   (user_id, guest_share_id)    |
-| Store in localStorage  |          |                     |
-|        |               | User keeps existing JWT        |
-| Use guest JWT for      |          |                     |
-| all API calls          | Frontend redirects to guest    |
-|                        | share page, uses same JWT      |
-+------------------------+--------------------------------+
-                         |
-              Guest chats in conversation mode
+Has valid guest JWT in localStorage?
+        |
++------ YES (page refresh) ------+---------- NO -----------+
+| Reuse existing JWT,            |                          |
+| skip code entry,               | requires_code?           |
+| go straight to ready           |    |                     |
++--------------------------------+ YES → show code screen   |
+                                 |    (auto-submit on       |
+                                 |     first attempt)       |
+                                 |    |                     |
+                                 | NO ↓                     |
+                                 +----+---------------------+
+                                      |
+                     Has existing JWT in localStorage?
+                                      |
+              +------------------------+--------------------------------+
+              | No existing JWT        | Has existing JWT (logged in)   |
+              | (anonymous visitor)    |                                |
+              +------------------------+--------------------------------+
+              |                        |                                |
+              | POST /guest-share/     | POST /guest-share/             |
+              |   {token}/auth         |   {token}/activate             |
+              |                        | (with user JWT in Auth header) |
+              |        |               |          |                     |
+              | Backend issues guest   | Backend creates                |
+              | JWT (role=chat-guest)  | GuestShareGrant record:        |
+              |        |               |   (user_id, guest_share_id)    |
+              | Store in localStorage  |          |                     |
+              |        |               | User keeps existing JWT        |
+              | Use guest JWT for      |          |                     |
+              | all API calls          | Frontend redirects to guest    |
+              |                        | share page, uses same JWT      |
+              +------------------------+--------------------------------+
+                                       |
+                            Guest chats in conversation mode
 ```
 
 ### JWT Token Structure
@@ -152,13 +167,15 @@ backend/app/
 │   └── guest_shares.py                # Owner management + guest auth routers
 │
 └── alembic/versions/
-    └── f53ac2dee553_add_agent_guest_share_tables.py
+    ├── f53ac2dee553_add_agent_guest_share_tables.py
+    └── w3r4s5t6u7v8_add_security_code_to_guest_shares.py
 
 backend/tests/
 ├── api/agents/
 │   ├── guest_shares_test.py           # Owner CRUD tests
 │   ├── guest_shares_auth_test.py      # Anonymous auth + grant activation tests
-│   └── guest_shares_sessions_test.py  # Session access control tests
+│   ├── guest_shares_sessions_test.py  # Session access control tests
+│   └── guest_shares_security_code_test.py  # Security code verification tests
 └── utils/
     └── guest_share.py                 # Test utilities for guest share creation
 
@@ -223,6 +240,9 @@ frontend/src/
 | `expires_at` | datetime, not null | When the link stops working |
 | `created_at` | datetime | |
 | `is_revoked` | boolean, default False | Manual revocation flag |
+| `security_code_encrypted` | string, nullable | Fernet-encrypted 4-digit security code |
+| `failed_code_attempts` | integer, default 0 | Number of failed code entry attempts |
+| `is_code_blocked` | boolean, default False | True after 3 failed attempts |
 
 **Indexes:** `agent_id`, `owner_id`, `token_hash`
 
@@ -250,9 +270,10 @@ frontend/src/
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/` | Create guest share link | CurrentUser (owner) |
-| `GET` | `/` | List guest share links (with session counts) | CurrentUser (owner) |
-| `GET` | `/{guest_share_id}` | Get single guest share | CurrentUser (owner) |
+| `POST` | `/` | Create guest share link (includes generated security code) | CurrentUser (owner) |
+| `GET` | `/` | List guest share links (with session counts, decrypted security codes) | CurrentUser (owner) |
+| `GET` | `/{guest_share_id}` | Get single guest share (with decrypted security code) | CurrentUser (owner) |
+| `PUT` | `/{guest_share_id}` | Update guest share (label, security code; resets block state) | CurrentUser (owner) |
 | `DELETE` | `/{guest_share_id}` | Delete guest share link | CurrentUser (owner) |
 
 ### Guest Auth Flow
@@ -261,9 +282,9 @@ frontend/src/
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/{token}/auth` | Authenticate anonymous guest → returns guest JWT | None |
-| `POST` | `/{token}/activate` | Activate grant for logged-in user | CurrentUser |
-| `GET` | `/{token}/info` | Get public info (agent name, validity) | None |
+| `POST` | `/{token}/auth` | Authenticate anonymous guest → returns guest JWT (accepts optional `security_code` in body) | None |
+| `POST` | `/{token}/activate` | Activate grant for logged-in user (accepts optional `security_code` in body) | CurrentUser |
+| `GET` | `/{token}/info` | Get public info (agent name, validity, `requires_code`, `is_code_blocked`) | None |
 
 ### Modified Endpoints
 
@@ -288,16 +309,18 @@ All methods are `@staticmethod` on `AgentGuestShareService`:
 
 | Method | Description |
 |--------|-------------|
-| `create_guest_share()` | Generate token, hash, store raw token, create DB record, return token + share_url |
-| `list_guest_shares()` | Query by agent_id with session_count subquery, ordered by created_at DESC; includes share_url |
-| `get_guest_share()` | Get single share with session count; includes share_url |
+| `create_guest_share()` | Generate token, hash, security code, store raw token, create DB record, return token + share_url + security_code |
+| `list_guest_shares()` | Query by agent_id with session_count subquery, ordered by created_at DESC; includes share_url, decrypted security_code |
+| `get_guest_share()` | Get single share with session count; includes share_url, decrypted security_code |
+| `update_guest_share()` | Update label and/or security code; new code resets failed_code_attempts and is_code_blocked |
 | `delete_guest_share()` | Ownership check, delete record (CASCADE removes grants, SET NULL on sessions) |
 | `validate_token()` | Hash lookup, check not revoked, check not expired |
-| `authenticate_anonymous()` | Validate token → issue guest JWT (capped at 24h) |
-| `activate_for_user()` | Validate token → UPSERT grant via `INSERT ... ON CONFLICT DO NOTHING` |
-| `get_guest_share_info()` | Public info: agent name, description (first 200 chars), validity |
+| `authenticate_anonymous()` | Validate token → verify security code → issue guest JWT (capped at 24h) |
+| `activate_for_user()` | Validate token → verify security code → UPSERT grant via `INSERT ... ON CONFLICT DO NOTHING` |
+| `get_guest_share_info()` | Public info: agent name, description (first 200 chars), validity, requires_code, is_code_blocked |
 | `check_grant()` | Query grant for (user_id, guest_share_id), verify parent share still valid |
 | `_hash_token()` | SHA256 helper |
+| `_verify_security_code()` | Decrypt stored code, compare, track failed attempts, block after 3 failures |
 | `_create_guest_jwt()` | Build JWT with `role: "chat-guest"`, `sub: guest_share_id`, etc. |
 | `_find_share_by_token()` | Find share by token without validity checks (for error differentiation) |
 
@@ -337,7 +360,7 @@ Each route file that supports guest access has a verification helper:
 **Location**: Agent Integrations tab, third card after Access Tokens
 
 Features:
-- List active guest share links with label, token prefix, expiration, session count, status badges
+- List active guest share links with label, expiration, session count, status badges
 - Create dialog: label input + expiration selector (1h, 24h, 7d, 30d)
 - Token display dialog on creation with copy button
 - Copy share link button on each active share in the list (owner can re-copy at any time)
@@ -353,11 +376,14 @@ Features:
 1. Extract token from URL params
 2. Call `GET /guest-share/{token}/info` for validity check
 3. If invalid → show error screen with appropriate message
-4. Check localStorage for existing JWT:
+4. If link is blocked (`is_code_blocked`) → show blocked error screen
+5. Check localStorage for existing valid guest JWT (handles page refresh after code entry — skips code screen if token is still valid)
+6. If no valid JWT and `requires_code` → show security code entry screen
+7. Authenticate:
    - No JWT → call `POST /guest-share/{token}/auth`, store guest JWT
    - Has JWT → call `POST /guest-share/{token}/activate`, keep existing JWT
    - If activate fails with 401/403 → fallback to anonymous auth
-5. Render guest chat UI
+8. Render guest chat UI
 
 **Component structure**:
 
@@ -400,9 +426,11 @@ Used by child components to detect guest context and hide restricted UI elements
 | State | Display |
 |-------|---------|
 | Loading | Bot icon + "Loading..." spinner |
+| Security code entry | Bot icon + agent name + 4-digit code input + "Continue" button. Auto-submits when all 4 digits are filled (typed or pasted) on the first attempt. After a failed attempt, auto-submit is disabled and the user must press Enter or click "Continue" manually. |
 | Authenticating | Bot icon + "Connecting to {agent}..." spinner |
 | Invalid link | Error icon + "This guest share link is invalid or has been removed." |
 | Expired link | Error icon + "This guest share link has expired. Contact the owner for a new link." |
+| Link blocked | Error icon + "This share link has been blocked due to too many failed attempts." |
 | Generic error | Error icon + "Something went wrong. Please try again." |
 
 ## Security Considerations
@@ -425,12 +453,23 @@ Used by child components to detect guest context and hide restricted UI elements
 - Owner can test own links without losing owner-level access
 - Grants cascade-delete with the guest share link
 
-### 4. Bearer Token Risk
+### 4. Security Code Verification
+- Every new guest share link is created with a random 4-digit security code
+- The code is encrypted (Fernet) and stored in `security_code_encrypted`
+- Guests must provide the correct code before auth/activate succeeds
+- After 3 failed attempts, the link is blocked (`is_code_blocked = True`)
+- The owner can view the current code via the list/get endpoints
+- The owner can set a new code via the PUT update endpoint, which resets `failed_code_attempts` and `is_code_blocked`
+- The info endpoint exposes `requires_code` and `is_code_blocked` (no code value) for the frontend to gate the auth flow
+- Old shares without a code (`security_code_encrypted IS NULL`) are exempt from verification for backward compatibility
+
+### 5. Bearer Token Risk
 - Guest share links are bearer tokens — anyone with the link has access until expiration or revocation
+- The mandatory security code adds a second factor: possession of the link alone is insufficient
 - Deleting a guest share link immediately invalidates all associated access
 - Guest actions execute in the agent owner's environment (owner's resources are used)
 
-### 5. Scope Restrictions
+### 6. Scope Restrictions
 - Guests cannot access credentials, building mode, agent configuration, or environment management
 - Database query/schema endpoints remain owner-only (no guest access)
 - Conversation mode enforced for all guest share sessions
@@ -447,6 +486,9 @@ Used by child components to detect guest context and hide restricted UI elements
 | Guest share ID mismatch | 403 | "Guest share ID mismatch" |
 | Agent ID mismatch | 403 | "Agent ID mismatch with guest share" |
 | Building mode requested | 400 | "Guest share sessions only support conversation mode" |
+| Security code required | 403 | "Security code is required" |
+| Incorrect security code | 403 | "Incorrect security code. N attempt(s) remaining." |
+| Link blocked (3 failures) | 403 | "This share link has been blocked due to too many failed attempts. Contact the owner." |
 
 ### Concurrency
 
@@ -457,7 +499,7 @@ Used by child components to detect guest context and hide restricted UI elements
 ## Implementation References
 
 **Models**:
-- `backend/app/models/agent_guest_share.py` — `AgentGuestShare` (includes raw `token` field), `AgentGuestShareBase`, `AgentGuestShareCreate`, `AgentGuestSharePublic` (includes `share_url`), `AgentGuestShareCreated`, `AgentGuestSharesPublic`, `GuestShareGrant`, `GuestShareTokenPayload`
+- `backend/app/models/agent_guest_share.py` — `AgentGuestShare` (includes raw `token` field, security code fields), `AgentGuestShareBase`, `AgentGuestShareCreate`, `AgentGuestShareUpdate`, `AgentGuestSharePublic` (includes `share_url`, `security_code`, `is_code_blocked`), `AgentGuestShareCreated`, `AgentGuestSharesPublic`, `GuestShareGrant`, `GuestShareTokenPayload`
 - `backend/app/models/session.py` — `Session` (added `guest_share_id`), `SessionCreate` (added `guest_share_id`), `SessionPublic`/`SessionPublicExtended` (added `guest_share_id`)
 
 **Services**:
@@ -483,10 +525,12 @@ Used by child components to detect guest context and hide restricted UI elements
 - `backend/tests/api/agents/guest_shares_test.py` — Owner CRUD tests
 - `backend/tests/api/agents/guest_shares_auth_test.py` — Anonymous auth + grant activation tests
 - `backend/tests/api/agents/guest_shares_sessions_test.py` — Session access control tests
+- `backend/tests/api/agents/guest_shares_security_code_test.py` — Security code verification tests
 - `backend/tests/utils/guest_share.py` — Test utilities
 
 **Migration**:
 - `f53ac2dee553` — `agent_guest_share` table + `guest_share_grant` table + `session.guest_share_id` column
+- `w3r4s5t6u7v8` — `security_code_encrypted`, `failed_code_attempts`, `is_code_blocked` columns on `agent_guest_share`
 
 ## Benefits
 

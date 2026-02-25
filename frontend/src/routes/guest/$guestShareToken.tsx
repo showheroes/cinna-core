@@ -44,6 +44,8 @@ interface GuestShareInfoResponse {
   agent_description: string | null
   is_valid: boolean
   guest_share_id: string | null
+  requires_code: boolean
+  is_code_blocked: boolean
 }
 
 interface GuestShareAuthResponse {
@@ -88,7 +90,7 @@ function GuestChatPage() {
 
   // Auth flow state
   const [authState, setAuthState] = useState<
-    "loading" | "authenticating" | "ready" | "error"
+    "loading" | "code_entry" | "authenticating" | "ready" | "error"
   >("loading")
   const [errorMessage, setErrorMessage] = useState<string>("")
   const [guestShareId, setGuestShareId] = useState<string | null>(null)
@@ -148,80 +150,117 @@ function GuestChatPage() {
 
     setAgentName(shareInfo.agent_name || "Agent")
     setAgentDescription(shareInfo.agent_description || null)
-    authAttempted.current = true
-    setAuthState("authenticating")
 
-    const authenticate = async () => {
-      try {
-        const existingToken = localStorage.getItem("access_token")
+    // Check if code blocked
+    if (shareInfo.is_code_blocked) {
+      authAttempted.current = true
+      setAuthState("error")
+      setErrorMessage("This share link has been blocked due to too many failed attempts. Contact the owner.")
+      return
+    }
 
-        if (existingToken) {
-          // Check if the stored token is a guest JWT (from a previous anonymous visit)
-          const guestClaims = parseGuestJwt(existingToken)
-
-          if (guestClaims) {
-            // Already have a guest JWT — reuse if still valid, otherwise re-auth
-            if (guestClaims.exp * 1000 > Date.now()) {
-              setGuestShareId(guestClaims.sub)
-              setAgentId(guestClaims.agent_id)
-              setAuthState("ready")
-              return
-            }
-            // Guest JWT expired — clear and get a fresh one
-            localStorage.removeItem("access_token")
-            await authenticateAnonymous()
-          } else {
-            // Regular user JWT — call activate to create a grant
-            try {
-              const activateResult = (await GuestShareService.guestShareActivate({
-                token: guestShareToken,
-              })) as unknown as GuestShareActivateResponse
-
-              setGuestShareId(activateResult.guest_share_id)
-              setAgentId(activateResult.agent_id)
-              setAgentName(activateResult.agent_name || shareInfo.agent_name || "Agent")
-              setAuthState("ready")
-            } catch (activateError: any) {
-              // If activation fails (e.g. stale JWT), fall back to anonymous auth
-              if ([401, 403, 404].includes(activateError?.status)) {
-                localStorage.removeItem("access_token")
-                await authenticateAnonymous()
-              } else {
-                throw activateError
-              }
-            }
-          }
-        } else {
-          await authenticateAnonymous()
-        }
-      } catch (error: any) {
-        console.error("Guest auth failed:", error)
-        setAuthState("error")
-        if (error?.status === 410) {
-          setErrorMessage(
-            "This guest share link has expired. Contact the owner for a new link."
-          )
-        } else if (error?.status === 404) {
-          setErrorMessage("This guest share link is invalid or has been removed.")
-        } else {
-          setErrorMessage("Something went wrong. Please try again.")
-        }
+    // Check for an existing valid guest JWT before requiring code entry.
+    // This handles page refresh after the user already entered the code.
+    const existingToken = localStorage.getItem("access_token")
+    if (existingToken) {
+      const guestClaims = parseGuestJwt(existingToken)
+      if (guestClaims && guestClaims.exp * 1000 > Date.now()) {
+        authAttempted.current = true
+        setAuthState("authenticating")
+        performAuth()
+        return
       }
     }
 
-    const authenticateAnonymous = async () => {
-      const authResult = (await GuestShareService.guestShareAuthenticate({
-        token: guestShareToken,
-      })) as unknown as GuestShareAuthResponse
-
-      localStorage.setItem("access_token", authResult.access_token)
-      setGuestShareId(authResult.guest_share_id)
-      setAgentId(authResult.agent_id)
-      setAuthState("ready")
+    // If code is required and no valid token exists, go to code entry state
+    if (shareInfo.requires_code) {
+      authAttempted.current = true
+      setAuthState("code_entry")
+      return
     }
 
-    authenticate()
+    // No code required — proceed with auth
+    authAttempted.current = true
+    setAuthState("authenticating")
+    performAuth()
   }, [shareInfo, infoLoading, infoError, guestShareToken])
+
+  const performAuth = useCallback(async (securityCode?: string) => {
+    try {
+      const existingToken = localStorage.getItem("access_token")
+
+      if (existingToken) {
+        const guestClaims = parseGuestJwt(existingToken)
+
+        if (guestClaims) {
+          if (guestClaims.exp * 1000 > Date.now()) {
+            setGuestShareId(guestClaims.sub)
+            setAgentId(guestClaims.agent_id)
+            setAuthState("ready")
+            return
+          }
+          localStorage.removeItem("access_token")
+          await authenticateAnonymous(securityCode)
+        } else {
+          try {
+            const activateResult = (await GuestShareService.guestShareActivate({
+              token: guestShareToken,
+              requestBody: securityCode ? { security_code: securityCode } : undefined,
+            })) as unknown as GuestShareActivateResponse
+
+            setGuestShareId(activateResult.guest_share_id)
+            setAgentId(activateResult.agent_id)
+            setAgentName(activateResult.agent_name || agentName || "Agent")
+            setAuthState("ready")
+          } catch (activateError: any) {
+            if (activateError?.status === 403) {
+              throw activateError
+            }
+            if ([401, 404].includes(activateError?.status)) {
+              localStorage.removeItem("access_token")
+              await authenticateAnonymous(securityCode)
+            } else {
+              throw activateError
+            }
+          }
+        }
+      } else {
+        await authenticateAnonymous(securityCode)
+      }
+    } catch (error: any) {
+      console.error("Guest auth failed:", error)
+      if (error?.status === 403) {
+        const detail = error?.body?.detail || ""
+        if (detail.toLowerCase().includes("blocked")) {
+          setAuthState("error")
+          setErrorMessage("This share link has been blocked due to too many failed attempts. Contact the owner.")
+        } else {
+          throw error // Re-throw so code entry can handle it
+        }
+      } else if (error?.status === 410) {
+        setAuthState("error")
+        setErrorMessage("This guest share link has expired. Contact the owner for a new link.")
+      } else if (error?.status === 404) {
+        setAuthState("error")
+        setErrorMessage("This guest share link is invalid or has been removed.")
+      } else {
+        setAuthState("error")
+        setErrorMessage("Something went wrong. Please try again.")
+      }
+    }
+  }, [guestShareToken, agentName])
+
+  const authenticateAnonymous = async (securityCode?: string) => {
+    const authResult = (await GuestShareService.guestShareAuthenticate({
+      token: guestShareToken,
+      requestBody: securityCode ? { security_code: securityCode } : undefined,
+    })) as unknown as GuestShareAuthResponse
+
+    localStorage.setItem("access_token", authResult.access_token)
+    setGuestShareId(authResult.guest_share_id)
+    setAgentId(authResult.agent_id)
+    setAuthState("ready")
+  }
 
   // Handle info loading error
   useEffect(() => {
@@ -237,6 +276,22 @@ function GuestChatPage() {
       <GuestLoadingScreen
         agentName={agentName || "the agent"}
         isAuthenticating={authState === "authenticating"}
+      />
+    )
+  }
+
+  if (authState === "code_entry") {
+    return (
+      <SecurityCodeScreen
+        agentName={agentName || "Agent"}
+        onSubmit={async (code) => {
+          try {
+            await performAuth(code)
+          } catch (error: any) {
+            const detail = error?.body?.detail || ""
+            throw new Error(detail || "Incorrect security code")
+          }
+        }}
       />
     )
   }
@@ -334,6 +389,137 @@ function GuestErrorScreen({ message }: { message: string }) {
         </div>
         <h1 className="text-xl font-semibold">Unable to access</h1>
         <p className="text-muted-foreground">{message}</p>
+      </div>
+    </div>
+  )
+}
+
+// ── Security Code Screen ─────────────────────────────────────────────────
+
+function SecurityCodeScreen({
+  agentName,
+  onSubmit,
+}: {
+  agentName: string
+  onSubmit: (code: string) => Promise<void>
+}) {
+  const [digits, setDigits] = useState(["", "", "", ""])
+  const [error, setError] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([null, null, null, null])
+
+  const handleDigitChange = (index: number, value: string) => {
+    if (value && !/^\d$/.test(value)) return
+
+    const newDigits = [...digits]
+    newDigits[index] = value
+    setDigits(newDigits)
+    setError("")
+
+    if (value && index < 3) {
+      inputRefs.current[index + 1]?.focus()
+    }
+
+    // Auto-submit on first attempt when all digits are filled
+    if (!error && newDigits.every((d) => d !== "")) {
+      submitCode(newDigits.join(""))
+    }
+  }
+
+  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === "Backspace" && !digits[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus()
+    }
+    if (e.key === "Enter") {
+      submitCode(digits.join(""))
+    }
+  }
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault()
+    const text = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 4)
+    if (text.length > 0) {
+      const newDigits = ["", "", "", ""]
+      for (let i = 0; i < text.length; i++) {
+        newDigits[i] = text[i]
+      }
+      setDigits(newDigits)
+      const focusIndex = Math.min(text.length, 3)
+      inputRefs.current[focusIndex]?.focus()
+
+      // Auto-submit on first attempt when all digits are pasted
+      if (!error && newDigits.every((d) => d !== "")) {
+        submitCode(newDigits.join(""))
+      }
+    }
+  }
+
+  const submitCode = async (code: string) => {
+    if (code.length !== 4 || isSubmitting) return
+
+    setIsSubmitting(true)
+    setError("")
+    try {
+      await onSubmit(code)
+    } catch (err: any) {
+      setError(err.message || "Incorrect security code")
+      setIsSubmitting(false)
+    }
+  }
+
+  const isFilled = digits.every((d) => d !== "")
+
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-background">
+      <div className="flex flex-col items-center gap-6 max-w-sm w-full px-4">
+        <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+          <Bot className="h-8 w-8 text-primary" />
+        </div>
+
+        <div className="text-center">
+          <h1 className="text-xl font-semibold">{agentName}</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Enter the 4-digit security code to continue
+          </p>
+        </div>
+
+        <div className="flex gap-3" onPaste={handlePaste}>
+          {digits.map((digit, i) => (
+            <input
+              key={i}
+              ref={(el) => { inputRefs.current[i] = el }}
+              type="text"
+              inputMode="numeric"
+              maxLength={1}
+              value={digit}
+              onChange={(e) => handleDigitChange(i, e.target.value)}
+              onKeyDown={(e) => handleKeyDown(i, e)}
+              autoFocus={i === 0}
+              className="w-14 h-16 text-center text-2xl font-bold font-mono border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+              disabled={isSubmitting}
+            />
+          ))}
+        </div>
+
+        {error && (
+          <p className="text-sm text-destructive text-center">{error}</p>
+        )}
+
+        <Button
+          onClick={() => submitCode(digits.join(""))}
+          disabled={!isFilled || isSubmitting}
+          className="w-full"
+          size="lg"
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Verifying...
+            </>
+          ) : (
+            "Continue"
+          )}
+        </Button>
       </div>
     </div>
   )

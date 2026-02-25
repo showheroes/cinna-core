@@ -62,7 +62,7 @@ def test_anonymous_guest_session_lifecycle(
 
     # ── Phase 2: Anonymous guest authenticates ───────────────────────────
 
-    guest_hdrs = guest_headers(client, share["token"])
+    guest_hdrs = guest_headers(client, share["token"], security_code=share["security_code"])
 
     # ── Phase 3: Guest creates a session ─────────────────────────────────
 
@@ -114,7 +114,7 @@ def test_anonymous_guest_cannot_create_building_mode_session(
         client, superuser_token_headers,
         name="No Building Guest Agent",
     )
-    guest_hdrs = guest_headers(client, share["token"])
+    guest_hdrs = guest_headers(client, share["token"], security_code=share["security_code"])
 
     r = client.post(
         f"{API}/sessions/",
@@ -141,7 +141,7 @@ def test_anonymous_guest_session_uses_jwt_guest_share_id(
         client, superuser_token_headers,
         name="Auto Share ID Agent",
     )
-    guest_hdrs = guest_headers(client, share["token"])
+    guest_hdrs = guest_headers(client, share["token"], security_code=share["security_code"])
 
     # Create session WITHOUT specifying guest_share_id
     guest_session = create_session_via_api(client, guest_hdrs, agent["id"])
@@ -170,8 +170,8 @@ def test_anonymous_guest_cannot_access_other_shares_sessions(
     agent_id = agent["id"]
     share_b = create_guest_share(client, superuser_token_headers, agent_id, label="Share B")
 
-    guest_a_hdrs = guest_headers(client, share_a["token"])
-    guest_b_hdrs = guest_headers(client, share_b["token"])
+    guest_a_hdrs = guest_headers(client, share_a["token"], security_code=share_a["security_code"])
+    guest_b_hdrs = guest_headers(client, share_b["token"], security_code=share_b["security_code"])
 
     # ── Guest A creates a session ─────────────────────────────────────────
 
@@ -226,7 +226,7 @@ def test_anonymous_guest_cannot_misuse_share_id(
         client, superuser_token_headers, agent["id"], label="Share B",
     )
 
-    guest_a_hdrs = guest_headers(client, share_a["token"])
+    guest_a_hdrs = guest_headers(client, share_a["token"], security_code=share_a["security_code"])
 
     # Guest A tries to create session with share B's ID → 403
     r = client.post(
@@ -255,7 +255,7 @@ def test_anonymous_guest_cannot_access_wrong_agent(
         client, superuser_token_headers, name="Agent B",
     )
 
-    guest_a_hdrs = guest_headers(client, share_a["token"])
+    guest_a_hdrs = guest_headers(client, share_a["token"], security_code=share_a["security_code"])
 
     # Guest with share for agent_a tries to create session on agent_b → 403
     r = client.post(
@@ -295,7 +295,7 @@ def test_grant_user_session_lifecycle(
     # ── Phase 2: User B activates grant ──────────────────────────────────
 
     _, user_b_headers = create_random_user_with_headers(client)
-    activate_guest_grant(client, user_b_headers, share["token"])
+    activate_guest_grant(client, user_b_headers, share["token"], security_code=share["security_code"])
 
     # ── Phase 3: User B creates session with guest_share_id ──────────────
 
@@ -348,7 +348,7 @@ def test_grant_user_cannot_create_building_mode_session(
     )
 
     _, user_headers = create_random_user_with_headers(client)
-    activate_guest_grant(client, user_headers, share["token"])
+    activate_guest_grant(client, user_headers, share["token"], security_code=share["security_code"])
 
     r = client.post(
         f"{API}/sessions/",
@@ -375,7 +375,7 @@ def test_anonymous_guest_blocked_from_restricted_endpoints(
         client, superuser_token_headers,
         name="Restricted Agent",
     )
-    guest_hdrs = guest_headers(client, share["token"])
+    guest_hdrs = guest_headers(client, share["token"], security_code=share["security_code"])
 
     # Create a valid guest session first
     guest_session = create_session_via_api(client, guest_hdrs, agent["id"])
@@ -445,7 +445,7 @@ def test_owner_session_list_includes_guest_sessions(
     owner_session = create_session_via_api(client, superuser_token_headers, agent_id)
 
     # Guest creates a guest session
-    guest_hdrs = guest_headers(client, share["token"])
+    guest_hdrs = guest_headers(client, share["token"], security_code=share["security_code"])
     guest_session = create_session_via_api(
         client, guest_hdrs, agent_id, guest_share_id=share["id"],
     )

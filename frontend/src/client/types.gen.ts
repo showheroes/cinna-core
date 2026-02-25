@@ -280,8 +280,10 @@ export type AgentGuestShareCreated = {
     created_at: string;
     is_revoked: boolean;
     session_count?: number;
-    token: string;
     share_url: string;
+    security_code: string;
+    is_code_blocked?: boolean;
+    token: string;
 };
 
 export type AgentGuestSharePublic = {
@@ -294,11 +296,18 @@ export type AgentGuestSharePublic = {
     is_revoked: boolean;
     session_count?: number;
     share_url?: (string | null);
+    security_code?: (string | null);
+    is_code_blocked?: boolean;
 };
 
 export type AgentGuestSharesPublic = {
     data: Array<AgentGuestSharePublic>;
     count: number;
+};
+
+export type AgentGuestShareUpdate = {
+    label?: (string | null);
+    security_code?: (string | null);
 };
 
 /**
@@ -1007,6 +1016,13 @@ export type GenerateSQLRequest = {
 export type GoogleCallbackRequest = {
     code: string;
     state: string;
+};
+
+/**
+ * Optional body for guest share auth/activate endpoints.
+ */
+export type GuestShareAuthRequest = {
+    security_code?: (string | null);
 };
 
 /**
@@ -2650,12 +2666,14 @@ export type FilesDownloadFileData = {
 export type FilesDownloadFileResponse = (unknown);
 
 export type GuestShareGuestShareAuthenticateData = {
+    requestBody?: (GuestShareAuthRequest | null);
     token: string;
 };
 
 export type GuestShareGuestShareAuthenticateResponse = (unknown);
 
 export type GuestShareGuestShareActivateData = {
+    requestBody?: (GuestShareAuthRequest | null);
     token: string;
 };
 
@@ -2693,6 +2711,14 @@ export type GuestSharesDeleteGuestShareData = {
 };
 
 export type GuestSharesDeleteGuestShareResponse = (Message);
+
+export type GuestSharesUpdateGuestShareData = {
+    agentId: string;
+    guestShareId: string;
+    requestBody: AgentGuestShareUpdate;
+};
+
+export type GuestSharesUpdateGuestShareResponse = (AgentGuestSharePublic);
 
 export type ItemsReadItemsData = {
     limit?: number;

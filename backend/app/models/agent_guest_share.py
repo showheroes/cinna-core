@@ -5,8 +5,10 @@ Guest shares provide time-limited, token-based access to agents
 for unauthenticated or guest users. Each share generates a unique
 URL that can be distributed to allow chat-only access.
 """
+import re
 import uuid
 from datetime import datetime, UTC
+from pydantic import field_validator
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
@@ -34,6 +36,9 @@ class AgentGuestShare(AgentGuestShareBase, table=True):
     expires_at: datetime = Field(nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     is_revoked: bool = Field(default=False)
+    security_code_encrypted: str | None = Field(default=None)
+    failed_code_attempts: int = Field(default=0)
+    is_code_blocked: bool = Field(default=False)
 
 
 # Properties to return via API (without sensitive data)
@@ -47,6 +52,8 @@ class AgentGuestSharePublic(SQLModel):
     is_revoked: bool
     session_count: int = 0  # Computed field, set by service layer
     share_url: str | None = None  # Computed from stored token, for owner to copy link
+    security_code: str | None = None  # Decrypted by service for owner
+    is_code_blocked: bool = False
 
 
 # Properties to return when creating a guest share (includes the actual token once)
@@ -54,6 +61,20 @@ class AgentGuestShareCreated(AgentGuestSharePublic):
     """Returned only on creation - includes the actual token and share URL."""
     token: str  # The raw token - only shown once on creation
     share_url: str  # The full guest URL
+    security_code: str  # The plaintext security code - shown on creation
+
+
+# Properties to receive on guest share update
+class AgentGuestShareUpdate(SQLModel):
+    label: str | None = None
+    security_code: str | None = Field(default=None, min_length=4, max_length=4)
+
+    @field_validator("security_code")
+    @classmethod
+    def validate_security_code(cls, v: str | None) -> str | None:
+        if v is not None and not re.match(r"^\d{4}$", v):
+            raise ValueError("Security code must be exactly 4 digits")
+        return v
 
 
 # Properties to return via API with list of guest shares

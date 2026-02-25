@@ -20,7 +20,7 @@ def create_guest_share(
 ) -> dict:
     """Create a guest share via POST /agents/{id}/guest-shares/.
 
-    Returns the full response including ``token`` and ``share_url``.
+    Returns the full response including ``token``, ``share_url``, and ``security_code``.
     """
     payload: dict = {"expires_in_hours": expires_in_hours}
     if label is not None:
@@ -82,16 +82,50 @@ def delete_guest_share(
     return r.json()
 
 
-def guest_auth(client: TestClient, token: str) -> dict:
+def update_guest_share(
+    client: TestClient,
+    token_headers: dict[str, str],
+    agent_id: str,
+    share_id: str,
+    label: str | None = None,
+    security_code: str | None = None,
+) -> dict:
+    """Update a guest share via PUT /agents/{id}/guest-shares/{share_id}."""
+    payload: dict = {}
+    if label is not None:
+        payload["label"] = label
+    if security_code is not None:
+        payload["security_code"] = security_code
+    r = client.put(
+        f"{API}/agents/{agent_id}/guest-shares/{share_id}",
+        headers=token_headers,
+        json=payload,
+    )
+    assert r.status_code == 200, f"Update guest share failed: {r.text}"
+    return r.json()
+
+
+def guest_auth(
+    client: TestClient,
+    token: str,
+    security_code: str | None = None,
+) -> dict:
     """Authenticate anonymously via POST /guest-share/{token}/auth. Returns JWT info."""
-    r = client.post(f"{API}/guest-share/{token}/auth")
+    body = {}
+    if security_code is not None:
+        body["security_code"] = security_code
+    r = client.post(f"{API}/guest-share/{token}/auth", json=body if body else None)
     assert r.status_code == 200, f"Guest auth failed: {r.text}"
     return r.json()
 
 
-def guest_headers(client: TestClient, token: str) -> dict[str, str]:
+def guest_headers(
+    client: TestClient,
+    token: str,
+    security_code: str | None = None,
+) -> dict[str, str]:
     """Get Authorization headers for an anonymous guest."""
-    auth = guest_auth(client, token)
+    auth = guest_auth(client, token, security_code=security_code)
     return {"Authorization": f"Bearer {auth['access_token']}"}
 
 
@@ -99,11 +133,16 @@ def activate_guest_grant(
     client: TestClient,
     user_headers: dict[str, str],
     token: str,
+    security_code: str | None = None,
 ) -> dict:
     """Activate a guest share grant for an authenticated user via POST /guest-share/{token}/activate."""
+    body = {}
+    if security_code is not None:
+        body["security_code"] = security_code
     r = client.post(
         f"{API}/guest-share/{token}/activate",
         headers=user_headers,
+        json=body if body else None,
     )
     assert r.status_code == 200, f"Grant activation failed: {r.text}"
     return r.json()
@@ -126,7 +165,7 @@ def setup_guest_share_agent(
     """Create agent + guest share in one call.
 
     Returns ``(agent_dict, share_data_dict)``.
-    ``share_data_dict`` contains ``token``, ``share_url``, ``id``, and other fields.
+    ``share_data_dict`` contains ``token``, ``share_url``, ``security_code``, ``id``, and other fields.
     """
     agent = create_agent_via_api(client, token_headers, name=name)
     drain_tasks()

@@ -70,6 +70,9 @@ def test_guest_share_full_lifecycle(
     assert created["session_count"] == 0
     assert "expires_at" in created
     assert "created_at" in created
+    assert "security_code" in created, "Security code must be returned on creation"
+    assert len(created["security_code"]) == 4, "Security code must be 4 digits"
+    assert created["security_code"].isdigit(), "Security code must be numeric"
 
     # ── Phase 2: List guest shares → share is present ─────────────────────
 

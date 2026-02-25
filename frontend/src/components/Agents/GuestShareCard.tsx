@@ -1,10 +1,12 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Copy, Check, Trash2, Plus, Link2, Users } from "lucide-react"
+import { formatDistanceToNow } from "date-fns"
+import { Copy, Check, Trash2, Plus, Link2, Users, Pencil, ShieldAlert } from "lucide-react"
 
 import type {
   AgentGuestSharePublic,
   AgentGuestShareCreate,
+  AgentGuestShareUpdate,
 } from "@/client"
 import { GuestSharesService } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -69,26 +71,22 @@ const EXPIRATION_OPTIONS: ExpirationOption[] = [
   { label: "30 days", hours: 720 },
 ]
 
-function getShareStatus(share: AgentGuestSharePublic): "active" | "expired" | "revoked" {
+function getShareStatus(share: AgentGuestSharePublic): "active" | "expired" | "revoked" | "blocked" {
   if (share.is_revoked) return "revoked"
   if (new Date(share.expires_at) < new Date()) return "expired"
+  if (share.is_code_blocked) return "blocked"
   return "active"
 }
 
 function formatRelativeExpiry(expiresAt: string): string {
-  const now = new Date()
-  const expiry = new Date(expiresAt)
-  const diffMs = expiry.getTime() - now.getTime()
-
-  if (diffMs <= 0) return "Expired"
-
-  const diffMinutes = Math.floor(diffMs / (1000 * 60))
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-
-  if (diffDays > 0) return `${diffDays}d remaining`
-  if (diffHours > 0) return `${diffHours}h remaining`
-  return `${diffMinutes}m remaining`
+  try {
+    const ts = expiresAt.endsWith("Z") ? expiresAt : expiresAt + "Z"
+    const expiry = new Date(ts)
+    if (isNaN(expiry.getTime()) || expiry <= new Date()) return "Expired"
+    return formatDistanceToNow(expiry) + " remaining"
+  } catch {
+    return "Expired"
+  }
 }
 
 export function GuestShareCard({ agentId }: GuestShareCardProps) {
@@ -96,8 +94,16 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
   const [shareLabel, setShareLabel] = useState("")
   const [expirationHours, setExpirationHours] = useState<string>("24")
   const [createdShareUrl, setCreatedShareUrl] = useState<string | null>(null)
+  const [createdSecurityCode, setCreatedSecurityCode] = useState<string | null>(null)
   const [copiedUrl, setCopiedUrl] = useState(false)
+  const [copiedCode, setCopiedCode] = useState(false)
   const [copiedShareId, setCopiedShareId] = useState<string | null>(null)
+
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingShare, setEditingShare] = useState<AgentGuestSharePublic | null>(null)
+  const [editLabel, setEditLabel] = useState("")
+  const [editSecurityCode, setEditSecurityCode] = useState("")
 
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -118,6 +124,7 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
     onSuccess: (response) => {
       showSuccessToast("Guest share link created successfully")
       setCreatedShareUrl(response.share_url)
+      setCreatedSecurityCode(response.security_code)
       queryClient.invalidateQueries({ queryKey: ["guest-shares", agentId] })
     },
     onError: (error: any) => {
@@ -135,6 +142,24 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
     },
     onError: (error: any) => {
       showErrorToast(error.message || "Failed to delete guest share link")
+    },
+  })
+
+  // Update guest share mutation
+  const updateShareMutation = useMutation({
+    mutationFn: ({ guestShareId, data }: { guestShareId: string; data: AgentGuestShareUpdate }) =>
+      GuestSharesService.updateGuestShare({
+        agentId,
+        guestShareId,
+        requestBody: data,
+      }),
+    onSuccess: () => {
+      showSuccessToast("Guest share updated successfully")
+      setEditDialogOpen(false)
+      queryClient.invalidateQueries({ queryKey: ["guest-shares", agentId] })
+    },
+    onError: (error: any) => {
+      showErrorToast(error.message || "Failed to update guest share")
     },
   })
 
@@ -156,6 +181,17 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
     }
   }
 
+  const handleCopyCode = async () => {
+    if (!createdSecurityCode) return
+    try {
+      await navigator.clipboard.writeText(createdSecurityCode)
+      setCopiedCode(true)
+      setTimeout(() => setCopiedCode(false), 2000)
+    } catch {
+      showErrorToast("Failed to copy code")
+    }
+  }
+
   const handleCopyShareLink = async (shareUrl: string, shareId: string) => {
     try {
       await navigator.clipboard.writeText(shareUrl)
@@ -168,13 +204,33 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
 
   const handleDialogClose = (open: boolean) => {
     if (!open) {
-      // Reset form state when closing
       setShareLabel("")
       setExpirationHours("24")
       setCreatedShareUrl(null)
+      setCreatedSecurityCode(null)
       setCopiedUrl(false)
+      setCopiedCode(false)
     }
     setCreateDialogOpen(open)
+  }
+
+  const handleEditOpen = (share: AgentGuestSharePublic) => {
+    setEditingShare(share)
+    setEditLabel(share.label || "")
+    setEditSecurityCode("")
+    setEditDialogOpen(true)
+  }
+
+  const handleEditSave = () => {
+    if (!editingShare) return
+    const data: AgentGuestShareUpdate = {}
+    if (editLabel !== (editingShare.label || "")) {
+      data.label = editLabel
+    }
+    if (editSecurityCode.length === 4) {
+      data.security_code = editSecurityCode
+    }
+    updateShareMutation.mutate({ guestShareId: editingShare.id, data })
   }
 
   const shares = sharesData?.data || []
@@ -206,7 +262,7 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
                 </DialogTitle>
                 <DialogDescription>
                   {createdShareUrl
-                    ? "Copy this link and share it with your guests."
+                    ? "Copy this link and security code, then share them with your guest."
                     : "Create a shareable link that allows guests to chat with this agent."}
                 </DialogDescription>
               </DialogHeader>
@@ -234,10 +290,40 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
                         )}
                       </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      You can also copy this link later from the share list.
-                    </p>
                   </div>
+
+                  {createdSecurityCode && (
+                    <div className="space-y-2">
+                      <Label>Security Code</Label>
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1 flex items-center justify-center gap-2 py-3 bg-muted rounded-lg">
+                          {createdSecurityCode.split("").map((digit, i) => (
+                            <span
+                              key={i}
+                              className="w-10 h-12 flex items-center justify-center text-2xl font-bold font-mono bg-background border rounded-md"
+                            >
+                              {digit}
+                            </span>
+                          ))}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={handleCopyCode}
+                          title="Copy code"
+                        >
+                          {copiedCode ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Share this code separately with your guest. They will need it to access the link.
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -312,7 +398,7 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
                     status !== "active" ? "opacity-50 bg-muted" : ""
                   }`}
                 >
-                  {/* Left: label and status badge */}
+                  {/* Left: label, status badge, code, blocked */}
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="font-medium text-sm truncate">
                       {share.label || "Untitled"}
@@ -332,12 +418,20 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
                         Revoked
                       </Badge>
                     )}
+                    {status === "blocked" && (
+                      <Badge variant="destructive" className="text-xs shrink-0 flex items-center gap-1">
+                        <ShieldAlert className="h-3 w-3" />
+                        Blocked
+                      </Badge>
+                    )}
+                    {share.security_code && (
+                      <span className="font-mono text-xs text-muted-foreground shrink-0">
+                        Code: {share.security_code}
+                      </span>
+                    )}
                   </div>
-                  {/* Right: token prefix, session count, expiry, and actions */}
+                  {/* Right: session count, expiry, and actions */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {share.token_prefix}...
-                    </span>
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -361,6 +455,25 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
                       </span>
                     )}
                     <div className="flex items-center gap-0.5 ml-1 border-l pl-2">
+                      {status === "active" && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => handleEditOpen(share)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              Edit share
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
                       {share.share_url && status === "active" && (
                         <TooltipProvider>
                           <Tooltip>
@@ -423,6 +536,72 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
           </div>
         )}
       </CardContent>
+
+      {/* Edit Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Guest Share</DialogTitle>
+            <DialogDescription>
+              Update the label or security code for this share link.
+              {editingShare?.is_code_blocked && (
+                <span className="block mt-1 text-destructive">
+                  This link is currently blocked. Setting a new security code will unblock it.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-label">Label</Label>
+              <Input
+                id="edit-label"
+                placeholder="e.g., Demo for client X"
+                value={editLabel}
+                onChange={(e) => setEditLabel(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-code">
+                New Security Code
+                {editingShare?.security_code && (
+                  <span className="font-normal text-muted-foreground ml-2">
+                    (current: {editingShare.security_code})
+                  </span>
+                )}
+              </Label>
+              <Input
+                id="edit-code"
+                placeholder="4-digit code (leave empty to keep current)"
+                value={editSecurityCode}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "").slice(0, 4)
+                  setEditSecurityCode(val)
+                }}
+                maxLength={4}
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter a new 4-digit code to replace the current one. This will also reset the attempt counter.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEditSave}
+              disabled={updateShareMutation.isPending}
+            >
+              {updateShareMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

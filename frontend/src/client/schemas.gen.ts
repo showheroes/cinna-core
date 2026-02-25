@@ -2142,17 +2142,26 @@ export const AgentGuestShareCreatedSchema = {
             title: 'Session Count',
             default: 0
         },
-        token: {
-            type: 'string',
-            title: 'Token'
-        },
         share_url: {
             type: 'string',
             title: 'Share Url'
+        },
+        security_code: {
+            type: 'string',
+            title: 'Security Code'
+        },
+        is_code_blocked: {
+            type: 'boolean',
+            title: 'Is Code Blocked',
+            default: false
+        },
+        token: {
+            type: 'string',
+            title: 'Token'
         }
     },
     type: 'object',
-    required: ['id', 'agent_id', 'label', 'token_prefix', 'expires_at', 'created_at', 'is_revoked', 'token', 'share_url'],
+    required: ['id', 'agent_id', 'label', 'token_prefix', 'expires_at', 'created_at', 'is_revoked', 'share_url', 'security_code', 'token'],
     title: 'AgentGuestShareCreated',
     description: 'Returned only on creation - includes the actual token and share URL.'
 } as const;
@@ -2212,13 +2221,59 @@ export const AgentGuestSharePublicSchema = {
                     type: 'null'
                 }
             ],
-            title: 'Share Url',
-            default: null
+            title: 'Share Url'
+        },
+        security_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Security Code'
+        },
+        is_code_blocked: {
+            type: 'boolean',
+            title: 'Is Code Blocked',
+            default: false
         }
     },
     type: 'object',
     required: ['id', 'agent_id', 'label', 'token_prefix', 'expires_at', 'created_at', 'is_revoked'],
     title: 'AgentGuestSharePublic'
+} as const;
+
+export const AgentGuestShareUpdateSchema = {
+    properties: {
+        label: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Label'
+        },
+        security_code: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 4,
+                    minLength: 4
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Security Code'
+        }
+    },
+    type: 'object',
+    title: 'AgentGuestShareUpdate'
 } as const;
 
 export const AgentGuestSharesPublicSchema = {
@@ -4579,6 +4634,25 @@ export const GoogleCallbackRequestSchema = {
     type: 'object',
     required: ['code', 'state'],
     title: 'GoogleCallbackRequest'
+} as const;
+
+export const GuestShareAuthRequestSchema = {
+    properties: {
+        security_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Security Code'
+        }
+    },
+    type: 'object',
+    title: 'GuestShareAuthRequest',
+    description: 'Optional body for guest share auth/activate endpoints.'
 } as const;
 
 export const HTTPValidationErrorSchema = {

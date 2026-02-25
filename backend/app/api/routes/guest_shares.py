@@ -9,16 +9,23 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
     AgentGuestShareCreate,
+    AgentGuestShareUpdate,
     AgentGuestSharePublic,
     AgentGuestShareCreated,
     AgentGuestSharesPublic,
     Message,
 )
 from app.services.agent_guest_share_service import AgentGuestShareService
+
+
+class GuestShareAuthRequest(BaseModel):
+    """Optional body for guest share auth/activate endpoints."""
+    security_code: str | None = None
 
 router = APIRouter(prefix="/agents/{agent_id}/guest-shares", tags=["guest-shares"])
 
@@ -109,6 +116,32 @@ def delete_guest_share(
     return Message(message="Guest share deleted successfully")
 
 
+@router.put("/{guest_share_id}", response_model=AgentGuestSharePublic)
+def update_guest_share(
+    agent_id: uuid.UUID,
+    guest_share_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+    share_in: AgentGuestShareUpdate,
+) -> Any:
+    """
+    Update a guest share link (label and/or security code).
+
+    If a new security code is provided, the failed attempt counter and
+    blocked state are reset automatically.
+    """
+    try:
+        share = AgentGuestShareService.update_guest_share(
+            session, current_user.id, agent_id, guest_share_id, share_in
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    if not share:
+        raise HTTPException(status_code=404, detail="Guest share not found")
+    return share
+
+
 # ── Guest auth flow router ──────────────────────────────────────────────
 # These endpoints are used by guests (unauthenticated or authenticated)
 # to interact with guest share links.
@@ -120,17 +153,26 @@ guest_router = APIRouter(prefix="/guest-share", tags=["guest-share"])
 def guest_share_authenticate(
     token: str,
     session: SessionDep,
+    body: GuestShareAuthRequest | None = None,
 ) -> Any:
     """
     Authenticate anonymously via a guest share token.
 
     No authentication required. Returns a short-lived guest JWT
     for anonymous chat access to the agent.
+
+    If the share has a security code, include it in the request body.
     """
+    security_code = body.security_code if body else None
     try:
-        result = AgentGuestShareService.authenticate_anonymous(session, token)
+        result = AgentGuestShareService.authenticate_anonymous(
+            session, token, security_code=security_code
+        )
     except ValueError as e:
-        raise HTTPException(status_code=410, detail=str(e))
+        detail = str(e)
+        if "security code" in detail.lower() or "blocked" in detail.lower():
+            raise HTTPException(status_code=403, detail=detail)
+        raise HTTPException(status_code=410, detail=detail)
 
     if result is None:
         raise HTTPException(status_code=404, detail="Guest share not found")
@@ -143,6 +185,7 @@ def guest_share_activate(
     token: str,
     session: SessionDep,
     current_user: CurrentUser,
+    body: GuestShareAuthRequest | None = None,
 ) -> Any:
     """
     Activate a guest share grant for the current authenticated user.
@@ -150,13 +193,19 @@ def guest_share_activate(
     Requires a valid user JWT. Creates a persistent grant record
     so the user can access the agent without the share link.
     Idempotent — calling twice with the same user and token is safe.
+
+    If the share has a security code, include it in the request body.
     """
+    security_code = body.security_code if body else None
     try:
         result = AgentGuestShareService.activate_for_user(
-            session, token, current_user.id
+            session, token, current_user.id, security_code=security_code
         )
     except ValueError as e:
-        raise HTTPException(status_code=410, detail=str(e))
+        detail = str(e)
+        if "security code" in detail.lower() or "blocked" in detail.lower():
+            raise HTTPException(status_code=403, detail=detail)
+        raise HTTPException(status_code=410, detail=detail)
 
     if result is None:
         raise HTTPException(status_code=404, detail="Guest share not found")

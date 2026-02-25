@@ -47,10 +47,11 @@ def test_guest_share_anonymous_auth_lifecycle(
         expires_in_hours=48,
     )
     token = share["token"]
+    security_code = share["security_code"]
 
     # ── Phase 2: Anonymous auth with valid token ─────────────────────────
 
-    body = guest_auth(client, token)
+    body = guest_auth(client, token, security_code=security_code)
 
     assert "access_token" in body
     assert body["token_type"] == "bearer"
@@ -78,13 +79,17 @@ def test_guest_share_anonymous_auth_expired_token(
         expires_in_hours=1,
     )
     token = share["token"]
+    security_code = share["security_code"]
 
     # Confirm it works now
-    guest_auth(client, token)
+    guest_auth(client, token, security_code=security_code)
 
     # Simulate expiration
     with mock_expired_guest_share():
-        r = client.post(f"{API}/guest-share/{token}/auth")
+        r = client.post(
+            f"{API}/guest-share/{token}/auth",
+            json={"security_code": security_code},
+        )
     assert r.status_code == 410
     assert "expired" in r.json()["detail"].lower() or "revoked" in r.json()["detail"].lower()
 
@@ -105,9 +110,10 @@ def test_guest_share_anonymous_auth_revoked_token(
         share_label="Will Be Deleted",
     )
     token = share["token"]
+    security_code = share["security_code"]
 
     # Confirm auth works
-    guest_auth(client, token)
+    guest_auth(client, token, security_code=security_code)
 
     # Delete the share
     r = client.delete(
@@ -117,7 +123,10 @@ def test_guest_share_anonymous_auth_revoked_token(
     assert r.status_code == 200
 
     # Auth should now fail
-    r = client.post(f"{API}/guest-share/{token}/auth")
+    r = client.post(
+        f"{API}/guest-share/{token}/auth",
+        json={"security_code": security_code},
+    )
     assert r.status_code == 404
 
 
@@ -143,11 +152,12 @@ def test_guest_share_activate_grant(
         share_label="Activate Test",
     )
     token = share["token"]
+    security_code = share["security_code"]
 
     # ── Phase 2: Create second user + activate grant ─────────────────────
 
     _, user_headers = create_random_user_with_headers(client)
-    body = activate_guest_grant(client, user_headers, token)
+    body = activate_guest_grant(client, user_headers, token, security_code=security_code)
 
     assert body["guest_share_id"] == share["id"]
     assert body["agent_id"] == agent["id"]
@@ -155,7 +165,7 @@ def test_guest_share_activate_grant(
 
     # ── Phase 3: Idempotent — activate again ─────────────────────────────
 
-    body2 = activate_guest_grant(client, user_headers, token)
+    body2 = activate_guest_grant(client, user_headers, token, security_code=security_code)
     assert body2["guest_share_id"] == share["id"]
     assert body2["agent_id"] == agent["id"]
 
@@ -174,15 +184,20 @@ def test_guest_share_activate_expired_token(
         expires_in_hours=1,
     )
     token = share["token"]
+    security_code = share["security_code"]
 
     _, user_headers = create_random_user_with_headers(client)
 
     # Confirm it works now
-    activate_guest_grant(client, user_headers, token)
+    activate_guest_grant(client, user_headers, token, security_code=security_code)
 
     # Simulate expiration
     with mock_expired_guest_share():
-        r = client.post(f"{API}/guest-share/{token}/activate", headers=user_headers)
+        r = client.post(
+            f"{API}/guest-share/{token}/activate",
+            headers=user_headers,
+            json={"security_code": security_code},
+        )
     assert r.status_code == 410
 
 
@@ -222,6 +237,8 @@ def test_guest_share_info_valid_token(
     assert body["agent_name"] == "Info Agent"
     assert body["is_valid"] is True
     assert body["guest_share_id"] == share["id"]
+    assert body["requires_code"] is True
+    assert body["is_code_blocked"] is False
 
 
 def test_guest_share_info_invalid_token(
