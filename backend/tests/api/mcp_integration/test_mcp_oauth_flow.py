@@ -2,17 +2,20 @@
 MCP OAuth integration tests — full user-scenario tests.
 
 Covers the complete OAuth 2.1 flow for MCP integration:
-  - AS metadata discovery
-  - Dynamic Client Registration (DCR)
+  - AS metadata discovery (router-level and root-level well-known endpoints)
+  - RFC 9728 Protected Resource Metadata (root-level)
+  - Dynamic Client Registration (DCR) — with and without resource URL
   - Authorization → consent → code exchange → token issuance
   - Token refresh
-  - Token revocation
+  - Token revocation (form-encoded per RFC 7009)
   - PKCE verification
+  - Form-encoded token endpoint (OAuth 2.1 compliance)
+  - Transport security (DNS rebinding protection with external hostnames)
   - Error cases: expired nonce, wrong credentials, cross-connector tokens,
     DCR limit enforcement, email ACL on consent
 """
-import hashlib
 import uuid
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
@@ -27,9 +30,12 @@ from tests.utils.mcp import (
     exchange_auth_code,
     generate_pkce_pair,
     get_as_metadata,
+    get_as_metadata_root_level,
     get_consent_info,
+    get_protected_resource_metadata,
     refresh_access_token,
     register_oauth_client,
+    register_oauth_client_without_resource,
     revoke_token,
     run_full_oauth_flow,
     start_authorize,
@@ -233,9 +239,9 @@ def test_pkce_wrong_verifier_rejected(
     approval = approve_consent(client, superuser_token_headers, nonce)
     auth_code = approval["redirect_url"].split("code=")[1].split("&")[0]
 
-    # Exchange with WRONG code_verifier
+    # Exchange with WRONG code_verifier (form-encoded per OAuth 2.1)
     resource = f"{MCP_BASE_URL}/{connector_id}/mcp"
-    r = client.post("/mcp/oauth/token", json={
+    r = client.post("/mcp/oauth/token", data={
         "grant_type": "authorization_code",
         "code": auth_code,
         "redirect_uri": "http://localhost:3000/callback",
@@ -306,7 +312,7 @@ def test_token_revocation(
     assert status == 200
 
     # Try to refresh with revoked token → 400
-    r = client.post("/mcp/oauth/token", json={
+    r = client.post("/mcp/oauth/token", data={
         "grant_type": "refresh_token",
         "refresh_token": flow["refresh_token"],
         "client_id": flow["oauth_client_id"],
@@ -392,17 +398,24 @@ def test_dcr_inactive_connector_rejected(
     assert r.status_code == 404
 
 
-def test_dcr_invalid_resource_url(
+def test_dcr_invalid_resource_url_registers_globally(
     client: TestClient,
     superuser_token_headers: dict[str, str],
 ) -> None:
-    """DCR with invalid resource URL returns 400."""
+    """DCR with unrecognized resource URL registers a global client (201).
+
+    After error #4 fix: an invalid/unrecognized resource URL is treated
+    the same as no resource — the client is registered globally.
+    Connector binding happens later during the authorize step.
+    """
     r = client.post("/mcp/oauth/register", json={
         "client_name": "Bad Resource Client",
         "redirect_uris": ["http://localhost:3000/callback"],
         "resource": "http://evil.com/not-a-real-resource",
     })
-    assert r.status_code == 400
+    assert r.status_code == 201
+    assert "client_id" in r.json()
+    assert "client_secret" in r.json()
 
 
 def test_authorize_unknown_client_rejected(
@@ -508,7 +521,7 @@ def test_auth_code_reuse_rejected(
 
     # Second exchange → 400
     resource = f"{MCP_BASE_URL}/{connector_id}/mcp"
-    r = client.post("/mcp/oauth/token", json={
+    r = client.post("/mcp/oauth/token", data={
         "grant_type": "authorization_code",
         "code": auth_code,
         "redirect_uri": "http://localhost:3000/callback",
@@ -539,7 +552,7 @@ def test_wrong_client_secret_rejected(
     auth_code = approval["redirect_url"].split("code=")[1].split("&")[0]
 
     resource = f"{MCP_BASE_URL}/{connector_id}/mcp"
-    r = client.post("/mcp/oauth/token", json={
+    r = client.post("/mcp/oauth/token", data={
         "grant_type": "authorization_code",
         "code": auth_code,
         "redirect_uri": "http://localhost:3000/callback",
@@ -636,7 +649,7 @@ def test_unsupported_grant_type(
     superuser_token_headers: dict[str, str],
 ) -> None:
     """Token endpoint with unsupported grant_type returns 400."""
-    r = client.post("/mcp/oauth/token", json={
+    r = client.post("/mcp/oauth/token", data={
         "grant_type": "client_credentials",
         "client_id": "some-client",
         "client_secret": "some-secret",
@@ -737,7 +750,7 @@ def test_full_scenario_agent_mcp_enable_oauth_connect(
     assert status == 200
 
     # ── Phase 12: Refresh attempt fails ───────────────────────────────────
-    r = client.post("/mcp/oauth/token", json={
+    r = client.post("/mcp/oauth/token", data={
         "grant_type": "refresh_token",
         "refresh_token": refresh_token_val,
         "client_id": oauth_client_id,
@@ -805,7 +818,7 @@ def test_wrong_client_id_on_refresh_rejected(
     )
 
     # Try to refresh client A's token using client B's credentials → 400
-    r = client.post("/mcp/oauth/token", json={
+    r = client.post("/mcp/oauth/token", data={
         "grant_type": "refresh_token",
         "refresh_token": flow_a["refresh_token"],
         "client_id": flow_b["oauth_client_id"],
@@ -826,4 +839,244 @@ def test_dcr_on_nonexistent_connector(
         "redirect_uris": ["http://localhost:3000/callback"],
         "resource": resource,
     })
+    assert r.status_code == 404
+
+
+# ── Tests for discovered errors (live testing fixes) ─────────────────────────
+
+
+def test_protected_resource_metadata_root_level(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    RFC 9728: Protected resource metadata served at server origin root.
+    (Covers discovered error #2)
+
+      1. Create agent + connector
+      2. GET /.well-known/oauth-protected-resource/mcp/{connector_id}/mcp → 200
+      3. Verify resource URL and authorization_servers fields
+    """
+    agent, connector = _setup_agent_with_connector(
+        client, superuser_token_headers,
+        agent_name="PRM Agent",
+    )
+    connector_id = connector["id"]
+
+    metadata = get_protected_resource_metadata(client, connector_id)
+    assert metadata["resource"] == f"{MCP_BASE_URL}/{connector_id}/mcp"
+    assert f"{MCP_BASE_URL}/oauth" in metadata["authorization_servers"]
+    assert "header" in metadata["bearer_methods_supported"]
+    assert "mcp:tools" in metadata["scopes_supported"]
+
+
+def test_as_metadata_root_level_with_issuer_path(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    RFC 8414: AS metadata at root-level well-known URL with issuer path.
+    (Covers discovered error #3)
+
+    MCP clients discover the AS by requesting:
+      GET /.well-known/oauth-authorization-server/mcp/oauth
+    """
+    metadata = get_as_metadata_root_level(client, path="mcp/oauth")
+
+    assert metadata["issuer"] == f"{MCP_BASE_URL}/oauth"
+    assert metadata["authorization_endpoint"] == f"{MCP_BASE_URL}/oauth/authorize"
+    assert metadata["token_endpoint"] == f"{MCP_BASE_URL}/oauth/token"
+    assert metadata["registration_endpoint"] == f"{MCP_BASE_URL}/oauth/register"
+    assert "code" in metadata["response_types_supported"]
+    assert "S256" in metadata["code_challenge_methods_supported"]
+
+
+def test_as_metadata_root_level_no_path(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    RFC 8414: AS metadata at exact root-level path (no suffix).
+    (Covers discovered error #10)
+
+    Some MCP clients request /.well-known/oauth-authorization-server without
+    appending the issuer path. Must return 200 (not 307 redirect).
+    """
+    metadata = get_as_metadata_root_level(client)
+
+    assert metadata["issuer"] == f"{MCP_BASE_URL}/oauth"
+    assert metadata["token_endpoint"] == f"{MCP_BASE_URL}/oauth/token"
+    assert metadata["registration_endpoint"] == f"{MCP_BASE_URL}/oauth/register"
+
+
+def test_dcr_without_resource(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    DCR without resource URL registers a global client.
+    (Covers discovered error #4)
+
+      1. Register client without resource field → 201
+      2. Verify client_id and client_secret returned
+      3. Client can still be used in authorize step with resource
+    """
+    # ── Phase 1: DCR without resource → 201 ──────────────────────────────
+    oauth_client = register_oauth_client_without_resource(
+        client, client_name="Claude Desktop (no resource)",
+    )
+    assert "client_id" in oauth_client
+    assert "client_secret" in oauth_client
+    assert oauth_client["client_name"] == "Claude Desktop (no resource)"
+
+    # ── Phase 2: Use globally-registered client in authorize step ─────────
+    agent, connector = _setup_agent_with_connector(
+        client, superuser_token_headers,
+        agent_name="DCR No Resource Agent",
+    )
+    connector_id = connector["id"]
+
+    # Start authorize with the globally-registered client
+    nonce = start_authorize(
+        client, oauth_client["client_id"], connector_id,
+    )
+    assert len(nonce) > 10
+
+    # Approve consent → get auth code
+    approval = approve_consent(client, superuser_token_headers, nonce)
+    assert "redirect_url" in approval
+    auth_code = approval["redirect_url"].split("code=")[1].split("&")[0]
+
+    # Exchange code for tokens
+    tokens = exchange_auth_code(
+        client, auth_code, oauth_client["client_id"], oauth_client["client_secret"],
+        connector_id,
+    )
+    assert "access_token" in tokens
+    assert "refresh_token" in tokens
+
+
+def test_token_exchange_form_encoded(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Token endpoint accepts application/x-www-form-urlencoded (not JSON).
+    (Covers discovered error #5)
+
+      1. Complete OAuth flow up to auth code
+      2. Exchange code with form-encoded POST → 200
+      3. Verify scope field in response (covers error #6)
+      4. Refresh with form-encoded POST → 200
+      5. Revoke with form-encoded POST → 200
+    """
+    agent, connector = _setup_agent_with_connector(
+        client, superuser_token_headers,
+        agent_name="Form Encoded Agent",
+    )
+    connector_id = connector["id"]
+
+    oauth_client = register_oauth_client(client, connector_id)
+    nonce = start_authorize(
+        client, oauth_client["client_id"], connector_id,
+        scope="mcp:tools",
+    )
+    approval = approve_consent(client, superuser_token_headers, nonce)
+    auth_code = approval["redirect_url"].split("code=")[1].split("&")[0]
+
+    # ── Token exchange with form-encoded body ─────────────────────────────
+    resource = f"{MCP_BASE_URL}/{connector_id}/mcp"
+    r = client.post("/mcp/oauth/token", data={
+        "grant_type": "authorization_code",
+        "code": auth_code,
+        "redirect_uri": "http://localhost:3000/callback",
+        "client_id": oauth_client["client_id"],
+        "client_secret": oauth_client["client_secret"],
+        "resource": resource,
+    })
+    assert r.status_code == 200
+    tokens = r.json()
+    assert "access_token" in tokens
+    assert "refresh_token" in tokens
+    # Error #6: scope field must be present (DetachedInstanceError fix)
+    assert tokens["scope"] == "mcp:tools"
+
+    # ── Refresh with form-encoded body ────────────────────────────────────
+    r = client.post("/mcp/oauth/token", data={
+        "grant_type": "refresh_token",
+        "refresh_token": tokens["refresh_token"],
+        "client_id": oauth_client["client_id"],
+        "client_secret": oauth_client["client_secret"],
+    })
+    assert r.status_code == 200
+    refreshed = r.json()
+    assert "access_token" in refreshed
+    assert refreshed["scope"] == "mcp:tools"
+
+    # ── Revoke with form-encoded body ─────────────────────────────────────
+    r = client.post("/mcp/oauth/revoke", data={
+        "token": tokens["access_token"],
+    })
+    assert r.status_code == 200
+
+
+def test_token_exchange_json_body_rejected(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Token endpoint rejects JSON body (must be form-encoded).
+    (Validates discovered error #5 fix)
+
+    OAuth 2.1 mandates application/x-www-form-urlencoded for the token endpoint.
+    Sending JSON results in 422 because Form(...) params are not populated.
+    """
+    r = client.post("/mcp/oauth/token", json={
+        "grant_type": "authorization_code",
+        "code": "fake-code",
+        "client_id": "fake-client",
+        "client_secret": "fake-secret",
+    })
+    assert r.status_code == 422
+
+
+def test_transport_security_includes_external_hostname(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Transport security allows configured external hostname.
+    (Covers discovered error #9)
+
+    When MCP_SERVER_BASE_URL is a tunnel URL, the hostname must be in
+    allowed_hosts so requests with that Host header are not rejected (421).
+    """
+    from app.mcp.server import _build_transport_security
+
+    # Default test config: MCP_SERVER_BASE_URL = "http://localhost:8000/mcp"
+    ts = _build_transport_security()
+    assert any("localhost" in h for h in ts.allowed_hosts)
+    assert any("127.0.0.1" in h for h in ts.allowed_hosts)
+
+    # With a tunnel hostname
+    with patch(
+        "app.mcp.server.settings.MCP_SERVER_BASE_URL",
+        "https://my-tunnel.pinggy.link/mcp",
+    ):
+        ts = _build_transport_security()
+        assert any("my-tunnel.pinggy.link" in h for h in ts.allowed_hosts)
+        assert any("my-tunnel.pinggy.link" in o for o in ts.allowed_origins)
+        # localhost variants still present
+        assert any("localhost" in h for h in ts.allowed_hosts)
+        assert any("127.0.0.1" in h for h in ts.allowed_hosts)
+
+
+def test_protected_resource_metadata_nonexistent_connector(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    RFC 9728: Protected resource metadata for unknown resource path returns 404.
+    """
+    r = client.get("/.well-known/oauth-protected-resource/mcp/nonexistent/mcp")
     assert r.status_code == 404

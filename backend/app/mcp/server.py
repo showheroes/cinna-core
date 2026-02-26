@@ -210,39 +210,37 @@ class MCPServerRegistry:
             await response(scope, receive, send)
             return
 
-        # Strip stale mcp-session-id headers so the SDK creates a fresh session
-        # instead of returning 404 "Session not found" after a server restart.
-        scope = dict(scope)
-        headers = list(scope.get("headers", []))
-        session_id = None
-        for name, value in headers:
-            if name == b"mcp-session-id":
-                session_id = value.decode("ascii", errors="replace")
-                break
-
-        if session_id:
-            mcp_instance = self._mcp_instances.get(connector_id_str)
-            if mcp_instance:
-                # Check if the session actually exists in the session manager
+        # Per MCP spec §Session Management: return 404 for stale session IDs
+        # so the client re-initializes with a fresh InitializeRequest.
+        mcp_instance = self._mcp_instances.get(connector_id_str)
+        if mcp_instance:
+            session_id = None
+            for name, value in scope.get("headers", []):
+                if name == b"mcp-session-id":
+                    session_id = value.decode("ascii", errors="replace")
+                    break
+            if session_id:
                 known_sessions = getattr(
                     mcp_instance.session_manager, "_server_instances", {}
                 )
                 if session_id not in known_sessions:
                     logger.warning(
-                        "Stripped stale MCP session ID %s for connector %s",
+                        "Stale MCP session %s for connector %s — returning 404",
                         session_id,
                         connector_id_str,
                     )
-                    headers = [
-                        (n, v) for n, v in headers if n != b"mcp-session-id"
-                    ]
-                    scope["headers"] = headers
+                    response = JSONResponse(
+                        {"detail": "Session not found"}, status_code=404
+                    )
+                    await response(scope, receive, send)
+                    return
 
         # Set context var for tool handlers
         token = mcp_connector_id_var.set(connector_id_str)
         try:
             # Rewrite path to strip the connector_id prefix
             remaining_path = f"/{parts[1]}" if len(parts) > 1 else "/"
+            scope = dict(scope)
             scope["path"] = remaining_path
             original_root_path = scope.get("root_path", "")
             scope["root_path"] = f"{original_root_path}/mcp/{connector_id_str}"

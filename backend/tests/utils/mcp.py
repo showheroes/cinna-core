@@ -200,7 +200,7 @@ def exchange_auth_code(
     redirect_uri: str = "http://localhost:3000/callback",
     code_verifier: str = "",
 ) -> dict:
-    """Exchange auth code for tokens via POST /mcp/oauth/token."""
+    """Exchange auth code for tokens via POST /mcp/oauth/token (form-encoded)."""
     resource = f"{MCP_BASE_URL}/{connector_id}/mcp"
     data = {
         "grant_type": "authorization_code",
@@ -211,7 +211,7 @@ def exchange_auth_code(
         "code_verifier": code_verifier,
         "resource": resource,
     }
-    r = client.post("/mcp/oauth/token", json=data)
+    r = client.post("/mcp/oauth/token", data=data)
     assert r.status_code == 200, f"Token exchange failed: {r.text}"
     return r.json()
 
@@ -222,14 +222,14 @@ def refresh_access_token(
     oauth_client_id: str,
     oauth_client_secret: str,
 ) -> dict:
-    """Refresh an access token via POST /mcp/oauth/token with grant_type=refresh_token."""
+    """Refresh an access token via POST /mcp/oauth/token (form-encoded)."""
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
         "client_id": oauth_client_id,
         "client_secret": oauth_client_secret,
     }
-    r = client.post("/mcp/oauth/token", json=data)
+    r = client.post("/mcp/oauth/token", data=data)
     assert r.status_code == 200, f"Token refresh failed: {r.text}"
     return r.json()
 
@@ -240,13 +240,13 @@ def revoke_token(
     oauth_client_id: str = "",
     oauth_client_secret: str = "",
 ) -> int:
-    """Revoke a token via POST /mcp/oauth/revoke. Returns HTTP status code."""
+    """Revoke a token via POST /mcp/oauth/revoke (form-encoded). Returns HTTP status code."""
     data = {
         "token": token,
         "client_id": oauth_client_id,
         "client_secret": oauth_client_secret,
     }
-    r = client.post("/mcp/oauth/revoke", json=data)
+    r = client.post("/mcp/oauth/revoke", data=data)
     return r.status_code
 
 
@@ -304,3 +304,59 @@ def run_full_oauth_flow(
         "nonce": nonce,
         "auth_code": auth_code,
     }
+
+
+# ── Root-level well-known endpoint helpers ────────────────────────────────────
+
+
+def get_as_metadata_root_level(
+    client: TestClient,
+    path: str = "",
+) -> dict:
+    """Get OAuth AS metadata via root-level well-known URL (RFC 8414).
+
+    Args:
+        path: Optional issuer path suffix (e.g. "mcp/oauth"). If empty,
+              hits the exact path /.well-known/oauth-authorization-server.
+    """
+    if path:
+        url = f"/.well-known/oauth-authorization-server/{path}"
+    else:
+        url = "/.well-known/oauth-authorization-server"
+    r = client.get(url)
+    assert r.status_code == 200, f"Root-level AS metadata fetch failed: {r.text}"
+    return r.json()
+
+
+def get_protected_resource_metadata(
+    client: TestClient,
+    connector_id: str,
+) -> dict:
+    """Get OAuth Protected Resource Metadata via root-level well-known URL (RFC 9728).
+
+    Fetches: /.well-known/oauth-protected-resource/mcp/{connector_id}/mcp
+    """
+    r = client.get(f"/.well-known/oauth-protected-resource/mcp/{connector_id}/mcp")
+    assert r.status_code == 200, f"Protected resource metadata fetch failed: {r.text}"
+    return r.json()
+
+
+def register_oauth_client_without_resource(
+    client: TestClient,
+    client_name: str = "Test MCP Client",
+    redirect_uris: list[str] | None = None,
+) -> dict:
+    """Register an OAuth client via DCR without a resource URL.
+
+    Some MCP clients (e.g. Claude Desktop) don't send the `resource`
+    field during DCR. The client is registered globally.
+    """
+    data = {
+        "client_name": client_name,
+        "redirect_uris": redirect_uris or ["http://localhost:3000/callback"],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+    }
+    r = client.post("/mcp/oauth/register", json=data)
+    assert r.status_code == 201, f"OAuth client registration (no resource) failed: {r.text}"
+    return r.json()
