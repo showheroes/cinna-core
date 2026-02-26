@@ -11,6 +11,8 @@ from app.api.routes import (
     credential_shares,
     email_integration,
     environments,
+    mcp_connectors,
+    mcp_consent,
     events,
     files,
     guest_shares,
@@ -72,6 +74,8 @@ api_router.include_router(mail_servers.router)
 api_router.include_router(email_integration.router)
 api_router.include_router(shared_workspace.router)
 api_router.include_router(a2a.router)
+api_router.include_router(mcp_connectors.router)
+api_router.include_router(mcp_consent.router)
 
 
 if settings.ENVIRONMENT == "local":

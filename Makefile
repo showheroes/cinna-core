@@ -116,6 +116,25 @@ start: # starts app
 dev-tunnel: # starts dev web tunnel to send queries to local DB
 	ssh -p 443 -R0:localhost:8000 free.pinggy.io
 
+.PHONY: mcp-tunnel
+mcp-tunnel: # starts tunnel for MCP connector testing, updates .env, recreates backend
+	@echo "Starting pinggy tunnel for MCP..."
+	@echo "1) Copy the HTTPS URL from the tunnel output"
+	@echo "2) In another terminal, run:"
+	@echo "   make mcp-set-url URL=https://YOUR-TUNNEL.a.free.pinggy.link"
+	@echo ""
+	ssh -p 443 -R0:localhost:8000 free.pinggy.io
+
+.PHONY: mcp-set-url
+mcp-set-url: # sets MCP_SERVER_BASE_URL in .env and recreates backend (usage: make mcp-set-url URL=https://xxx.pinggy.link)
+	@if [ -z "$(URL)" ]; then echo "Usage: make mcp-set-url URL=https://xxx.a.free.pinggy.link"; exit 1; fi
+	@sed -i '' 's|^MCP_SERVER_BASE_URL=.*|MCP_SERVER_BASE_URL=$(URL)/mcp|' .env
+	@echo "Updated .env: MCP_SERVER_BASE_URL=$(URL)/mcp"
+	docker compose up -d backend
+	@echo "Backend recreated. Verifying..."
+	@sleep 3
+	@curl -sf -o /dev/null -w "" $(URL)/mcp/oauth/.well-known/oauth-authorization-server && echo "MCP OAuth endpoint is reachable!" || echo "Warning: Could not reach MCP endpoint. Check tunnel is running."
+
 .PHONY: prestart
 prestart: # run initial app/db setup
 	@echo "Setting up the application:"

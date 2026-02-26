@@ -15,6 +15,7 @@ import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
+import { Route as OauthMcpConsentRouteImport } from './routes/oauth/mcp-consent'
 import { Route as GuestFileViewerRouteImport } from './routes/guest/file-viewer'
 import { Route as GuestGuestShareTokenRouteImport } from './routes/guest/$guestShareToken'
 import { Route as LayoutTasksRouteImport } from './routes/_layout/tasks'
@@ -70,6 +71,11 @@ const LayoutIndexRoute = LayoutIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => LayoutRoute,
+} as any)
+const OauthMcpConsentRoute = OauthMcpConsentRouteImport.update({
+  id: '/oauth/mcp-consent',
+  path: '/oauth/mcp-consent',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const GuestFileViewerRoute = GuestFileViewerRouteImport.update({
   id: '/guest/file-viewer',
@@ -226,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/tasks': typeof LayoutTasksRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
+  '/oauth/mcp-consent': typeof OauthMcpConsentRoute
   '/': typeof LayoutIndexRoute
   '/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/admin/users': typeof LayoutAdminUsersRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/tasks': typeof LayoutTasksRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
+  '/oauth/mcp-consent': typeof OauthMcpConsentRoute
   '/': typeof LayoutIndexRoute
   '/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/admin/users': typeof LayoutAdminUsersRoute
@@ -293,6 +301,7 @@ export interface FileRoutesById {
   '/_layout/tasks': typeof LayoutTasksRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
+  '/oauth/mcp-consent': typeof OauthMcpConsentRoute
   '/_layout/': typeof LayoutIndexRoute
   '/_layout/admin/marketplaces': typeof LayoutAdminMarketplacesRoute
   '/_layout/admin/users': typeof LayoutAdminUsersRoute
@@ -328,6 +337,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/guest/$guestShareToken'
     | '/guest/file-viewer'
+    | '/oauth/mcp-consent'
     | '/'
     | '/admin/marketplaces'
     | '/admin/users'
@@ -360,6 +370,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/guest/$guestShareToken'
     | '/guest/file-viewer'
+    | '/oauth/mcp-consent'
     | '/'
     | '/admin/marketplaces'
     | '/admin/users'
@@ -394,6 +405,7 @@ export interface FileRouteTypes {
     | '/_layout/tasks'
     | '/guest/$guestShareToken'
     | '/guest/file-viewer'
+    | '/oauth/mcp-consent'
     | '/_layout/'
     | '/_layout/admin/marketplaces'
     | '/_layout/admin/users'
@@ -421,6 +433,7 @@ export interface RootRouteChildren {
   SignupRoute: typeof SignupRoute
   GuestGuestShareTokenRoute: typeof GuestGuestShareTokenRoute
   GuestFileViewerRoute: typeof GuestFileViewerRoute
+  OauthMcpConsentRoute: typeof OauthMcpConsentRoute
   CredentialsOauthCallbackRoute: typeof CredentialsOauthCallbackRoute
 }
 
@@ -467,6 +480,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof LayoutIndexRouteImport
       parentRoute: typeof LayoutRoute
+    }
+    '/oauth/mcp-consent': {
+      id: '/oauth/mcp-consent'
+      path: '/oauth/mcp-consent'
+      fullPath: '/oauth/mcp-consent'
+      preLoaderRoute: typeof OauthMcpConsentRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/guest/file-viewer': {
       id: '/guest/file-viewer'
@@ -739,6 +759,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignupRoute: SignupRoute,
   GuestGuestShareTokenRoute: GuestGuestShareTokenRoute,
   GuestFileViewerRoute: GuestFileViewerRoute,
+  OauthMcpConsentRoute: OauthMcpConsentRoute,
   CredentialsOauthCallbackRoute: CredentialsOauthCallbackRoute,
 }
 export const routeTree = rootRouteImport

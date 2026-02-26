@@ -295,6 +295,24 @@ from .outgoing_email_queue import (
     OutgoingEmailQueuePublic,
     OutgoingEmailStatus,
 )
+from .mcp_connector import (
+    MCPConnector,
+    MCPConnectorCreate,
+    MCPConnectorUpdate,
+    MCPConnectorPublic,
+    MCPConnectorsPublic,
+)
+from .mcp_oauth_client import (
+    MCPOAuthClient,
+    MCPOAuthClientPublic,
+)
+from .mcp_auth_code import (
+    MCPAuthCode,
+    MCPAuthRequest,
+)
+from .mcp_token import (
+    MCPToken,
+)
 
 __all__ = [
     # Core
@@ -570,4 +588,16 @@ __all__ = [
     "OutgoingEmailQueue",
     "OutgoingEmailQueuePublic",
     "OutgoingEmailStatus",
+    # MCP Connectors
+    "MCPConnector",
+    "MCPConnectorCreate",
+    "MCPConnectorUpdate",
+    "MCPConnectorPublic",
+    "MCPConnectorsPublic",
+    # MCP OAuth
+    "MCPOAuthClient",
+    "MCPOAuthClientPublic",
+    "MCPAuthCode",
+    "MCPAuthRequest",
+    "MCPToken",
 ]

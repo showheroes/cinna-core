@@ -43,6 +43,11 @@ class Session(SQLModel, table=True):
     integration_type: str | None = None  # "email" | "a2a" | null
     sender_email: str | None = None  # Original sender email (owner mode only)
     streaming_started_at: datetime | None = None
+    # MCP integration fields
+    mcp_connector_id: uuid.UUID | None = Field(
+        default=None, foreign_key="mcp_connector.id", ondelete="SET NULL"
+    )
+    mcp_session_id: str | None = Field(default=None, unique=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_message_at: datetime | None = None
@@ -104,6 +109,8 @@ class SessionPublic(SQLModel):
     integration_type: str | None = None
     sender_email: str | None = None
     streaming_started_at: datetime | None = None
+    mcp_connector_id: uuid.UUID | None = None
+    mcp_session_id: str | None = None
     created_at: datetime
     updated_at: datetime
     last_message_at: datetime | None

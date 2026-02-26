@@ -728,6 +728,22 @@ export type CloneUpdateRequestsPublic = {
     count: number;
 };
 
+export type ConsentApproveResponse = {
+    redirect_url: string;
+};
+
+/**
+ * Non-sensitive info displayed on the consent page.
+ */
+export type ConsentInfo = {
+    agent_name: string;
+    connector_name: string;
+    connector_mode: string;
+    client_name: string;
+    scopes: Array<(string)>;
+    expires_at: string;
+};
+
 /**
  * Request to create a task (with or without target agent).
  *
@@ -863,6 +879,14 @@ export type DatabaseQueryRequest = {
     page?: (number | null);
     page_size?: (number | null);
     timeout_seconds?: number;
+};
+
+export type DCRRequest = {
+    client_name?: string;
+    redirect_uris?: Array<(string)>;
+    grant_types?: Array<(string)>;
+    response_types?: Array<(string)>;
+    resource?: string;
 };
 
 /**
@@ -1351,6 +1375,40 @@ export type MailServerType = 'imap' | 'smtp';
  */
 export type MarketplaceStatus = 'pending' | 'connected' | 'error' | 'disconnected';
 
+export type MCPConnectorCreate = {
+    name: string;
+    mode?: string;
+    allowed_emails?: Array<(string)>;
+    max_clients?: number;
+};
+
+export type MCPConnectorPublic = {
+    id: string;
+    agent_id: string;
+    owner_id: string;
+    name: string;
+    mode: string;
+    is_active: boolean;
+    allowed_emails: Array<(string)>;
+    max_clients: number;
+    mcp_server_url?: (string | null);
+    created_at: string;
+    updated_at: string;
+};
+
+export type MCPConnectorsPublic = {
+    data: Array<MCPConnectorPublic>;
+    count: number;
+};
+
+export type MCPConnectorUpdate = {
+    name?: (string | null);
+    mode?: (string | null);
+    is_active?: (boolean | null);
+    allowed_emails?: (Array<(string)> | null);
+    max_clients?: (number | null);
+};
+
 export type Message = {
     message: string;
 };
@@ -1575,6 +1633,12 @@ export type RespondToTaskRequest = {
     source_session_id: string;
 };
 
+export type RevokeRequest = {
+    token: string;
+    client_id?: string;
+    client_secret?: string;
+};
+
 /**
  * Response for revoke action.
  */
@@ -1656,6 +1720,8 @@ export type SessionPublic = {
     integration_type?: (string | null);
     sender_email?: (string | null);
     streaming_started_at?: (string | null);
+    mcp_connector_id?: (string | null);
+    mcp_session_id?: (string | null);
     created_at: string;
     updated_at: string;
     last_message_at: (string | null);
@@ -1684,6 +1750,8 @@ export type SessionPublicExtended = {
     integration_type?: (string | null);
     sender_email?: (string | null);
     streaming_started_at?: (string | null);
+    mcp_connector_id?: (string | null);
+    mcp_session_id?: (string | null);
     created_at: string;
     updated_at: string;
     last_message_at: (string | null);
@@ -1874,6 +1942,17 @@ export type TaskTriggerUpdate = {
 export type Token = {
     access_token: string;
     token_type?: string;
+};
+
+export type TokenRequest = {
+    grant_type: string;
+    code?: string;
+    redirect_uri?: string;
+    client_id?: string;
+    client_secret?: string;
+    code_verifier?: string;
+    resource?: string;
+    refresh_token?: string;
 };
 
 export type UpdatePassword = {
@@ -2995,6 +3074,86 @@ export type MailServersTestMailServerConnectionData = {
 };
 
 export type MailServersTestMailServerConnectionResponse = (Message);
+
+export type McpConnectorsCreateMcpConnectorData = {
+    agentId: string;
+    requestBody: MCPConnectorCreate;
+};
+
+export type McpConnectorsCreateMcpConnectorResponse = (MCPConnectorPublic);
+
+export type McpConnectorsListMcpConnectorsData = {
+    agentId: string;
+};
+
+export type McpConnectorsListMcpConnectorsResponse = (MCPConnectorsPublic);
+
+export type McpConnectorsGetMcpConnectorData = {
+    agentId: string;
+    connectorId: string;
+};
+
+export type McpConnectorsGetMcpConnectorResponse = (MCPConnectorPublic);
+
+export type McpConnectorsUpdateMcpConnectorData = {
+    agentId: string;
+    connectorId: string;
+    requestBody: MCPConnectorUpdate;
+};
+
+export type McpConnectorsUpdateMcpConnectorResponse = (MCPConnectorPublic);
+
+export type McpConnectorsDeleteMcpConnectorData = {
+    agentId: string;
+    connectorId: string;
+};
+
+export type McpConnectorsDeleteMcpConnectorResponse = (Message);
+
+export type McpConsentGetConsentInfoData = {
+    nonce: string;
+};
+
+export type McpConsentGetConsentInfoResponse = (ConsentInfo);
+
+export type McpConsentApproveConsentData = {
+    nonce: string;
+};
+
+export type McpConsentApproveConsentResponse = (ConsentApproveResponse);
+
+export type McpOauthGetAsMetadataResponse = (unknown);
+
+export type McpOauthRegisterClientData = {
+    requestBody: DCRRequest;
+};
+
+export type McpOauthRegisterClientResponse = (unknown);
+
+export type McpOauthAuthorizeData = {
+    clientId: string;
+    codeChallenge?: string;
+    codeChallengeMethod?: string;
+    redirectUri: string;
+    resource?: string;
+    responseType: string;
+    scope?: string;
+    state?: string;
+};
+
+export type McpOauthAuthorizeResponse = (unknown);
+
+export type McpOauthExchangeTokenData = {
+    requestBody: TokenRequest;
+};
+
+export type McpOauthExchangeTokenResponse = (unknown);
+
+export type McpOauthRevokeTokenData = {
+    requestBody: RevokeRequest;
+};
+
+export type McpOauthRevokeTokenResponse = (unknown);
 
 export type MessagesGetMessagesData = {
     limit?: number;

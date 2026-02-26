@@ -3534,6 +3534,55 @@ export const CloneUpdateRequestsPublicSchema = {
     description: 'List response for clone update requests'
 } as const;
 
+export const ConsentApproveResponseSchema = {
+    properties: {
+        redirect_url: {
+            type: 'string',
+            title: 'Redirect Url'
+        }
+    },
+    type: 'object',
+    required: ['redirect_url'],
+    title: 'ConsentApproveResponse'
+} as const;
+
+export const ConsentInfoSchema = {
+    properties: {
+        agent_name: {
+            type: 'string',
+            title: 'Agent Name'
+        },
+        connector_name: {
+            type: 'string',
+            title: 'Connector Name'
+        },
+        connector_mode: {
+            type: 'string',
+            title: 'Connector Mode'
+        },
+        client_name: {
+            type: 'string',
+            title: 'Client Name'
+        },
+        scopes: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Scopes'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        }
+    },
+    type: 'object',
+    required: ['agent_name', 'connector_name', 'connector_mode', 'client_name', 'scopes', 'expires_at'],
+    title: 'ConsentInfo',
+    description: 'Non-sensitive info displayed on the consent page.'
+} as const;
+
 export const CreateAgentTaskRequestSchema = {
     properties: {
         task_message: {
@@ -4092,6 +4141,47 @@ export const CredentialsPublicSchema = {
     type: 'object',
     required: ['data', 'count'],
     title: 'CredentialsPublic'
+} as const;
+
+export const DCRRequestSchema = {
+    properties: {
+        client_name: {
+            type: 'string',
+            title: 'Client Name',
+            default: ''
+        },
+        redirect_uris: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Redirect Uris',
+            default: []
+        },
+        grant_types: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Grant Types',
+            default: ['authorization_code', 'refresh_token']
+        },
+        response_types: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Response Types',
+            default: ['code']
+        },
+        resource: {
+            type: 'string',
+            title: 'Resource',
+            default: ''
+        }
+    },
+    type: 'object',
+    title: 'DCRRequest'
 } as const;
 
 export const DatabaseQueryRequestSchema = {
@@ -6095,6 +6185,191 @@ export const LLMPluginMarketplacesPublicSchema = {
     description: 'List response for plugin marketplaces.'
 } as const;
 
+export const MCPConnectorCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        mode: {
+            type: 'string',
+            title: 'Mode',
+            default: 'conversation'
+        },
+        allowed_emails: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Allowed Emails',
+            default: []
+        },
+        max_clients: {
+            type: 'integer',
+            title: 'Max Clients',
+            default: 10
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'MCPConnectorCreate'
+} as const;
+
+export const MCPConnectorPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        mode: {
+            type: 'string',
+            title: 'Mode'
+        },
+        is_active: {
+            type: 'boolean',
+            title: 'Is Active'
+        },
+        allowed_emails: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Allowed Emails'
+        },
+        max_clients: {
+            type: 'integer',
+            title: 'Max Clients'
+        },
+        mcp_server_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mcp Server Url'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'agent_id', 'owner_id', 'name', 'mode', 'is_active', 'allowed_emails', 'max_clients', 'created_at', 'updated_at'],
+    title: 'MCPConnectorPublic'
+} as const;
+
+export const MCPConnectorUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        mode: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mode'
+        },
+        is_active: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Is Active'
+        },
+        allowed_emails: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Allowed Emails'
+        },
+        max_clients: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Max Clients'
+        }
+    },
+    type: 'object',
+    title: 'MCPConnectorUpdate'
+} as const;
+
+export const MCPConnectorsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/MCPConnectorPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'MCPConnectorsPublic'
+} as const;
+
 export const MailServerConfigCreateSchema = {
     properties: {
         name: {
@@ -7177,6 +7452,28 @@ export const RespondToTaskRequestSchema = {
     description: 'Request to respond to a sub-task from source agent.'
 } as const;
 
+export const RevokeRequestSchema = {
+    properties: {
+        token: {
+            type: 'string',
+            title: 'Token'
+        },
+        client_id: {
+            type: 'string',
+            title: 'Client Id',
+            default: ''
+        },
+        client_secret: {
+            type: 'string',
+            title: 'Client Secret',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['token'],
+    title: 'RevokeRequest'
+} as const;
+
 export const RevokeResponseSchema = {
     properties: {
         status: {
@@ -7696,6 +7993,29 @@ export const SessionPublicSchema = {
             ],
             title: 'Streaming Started At'
         },
+        mcp_connector_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mcp Connector Id'
+        },
+        mcp_session_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mcp Session Id'
+        },
         created_at: {
             type: 'string',
             format: 'date-time',
@@ -7894,6 +8214,29 @@ export const SessionPublicExtendedSchema = {
                 }
             ],
             title: 'Streaming Started At'
+        },
+        mcp_connector_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mcp Connector Id'
+        },
+        mcp_session_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mcp Session Id'
         },
         created_at: {
             type: 'string',
@@ -8781,6 +9124,53 @@ export const TokenSchema = {
     type: 'object',
     required: ['access_token'],
     title: 'Token'
+} as const;
+
+export const TokenRequestSchema = {
+    properties: {
+        grant_type: {
+            type: 'string',
+            title: 'Grant Type'
+        },
+        code: {
+            type: 'string',
+            title: 'Code',
+            default: ''
+        },
+        redirect_uri: {
+            type: 'string',
+            title: 'Redirect Uri',
+            default: ''
+        },
+        client_id: {
+            type: 'string',
+            title: 'Client Id',
+            default: ''
+        },
+        client_secret: {
+            type: 'string',
+            title: 'Client Secret',
+            default: ''
+        },
+        code_verifier: {
+            type: 'string',
+            title: 'Code Verifier',
+            default: ''
+        },
+        resource: {
+            type: 'string',
+            title: 'Resource',
+            default: ''
+        },
+        refresh_token: {
+            type: 'string',
+            title: 'Refresh Token',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['grant_type'],
+    title: 'TokenRequest'
 } as const;
 
 export const UpdatePasswordSchema = {

@@ -6,6 +6,8 @@ from fastapi.routing import APIRoute
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.main import api_router
+from app.mcp.oauth_routes import router as mcp_oauth_router, wellknown_router as mcp_wellknown_router
+from app.mcp.server import mcp_registry
 from app.core.config import settings
 
 # Configure logging
@@ -173,7 +175,11 @@ async def lifespan(app: FastAPI):
     logger.info("Registered backend event handlers (EnvironmentService, ActivityService, SessionService, InputTaskService, EmailSendingService)")
     logger.info("Application startup complete")
 
-    yield
+    # MCP registry manages per-connector session manager lifecycles.
+    # Its run() context creates a parent anyio task group; each connector's
+    # session_manager.run() is started within it on first request.
+    async with mcp_registry.run():
+        yield
 
     # --- Shutdown ---
     shutdown_file_cleanup_scheduler()
@@ -204,6 +210,15 @@ if settings.all_cors_origins:
     )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# RFC 9728 Protected Resource Metadata (must be at root level)
+app.include_router(mcp_wellknown_router)
+
+# MCP OAuth routes (must be before any /mcp mount)
+app.include_router(mcp_oauth_router, prefix="/mcp/oauth")
+
+# Per-connector MCP server mount (must be after /mcp/oauth routes)
+app.mount("/mcp", mcp_registry)
 
 # Mount the Socket.IO ASGI app at /ws
 socket_app = event_service.get_asgi_app()

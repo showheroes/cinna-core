@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { AccessTokensCard } from "./AccessTokensCard"
 import { EmailIntegrationCard } from "./EmailIntegrationCard"
 import { GuestShareCard } from "./GuestShareCard"
+import { McpConnectorsCard } from "./McpConnectorsCard"
 
 interface AgentIntegrationsTabProps {
   agent: AgentPublic
@@ -140,6 +141,9 @@ export function AgentIntegrationsTab({ agent }: AgentIntegrationsTabProps) {
 
         {/* Guest Share Links Card */}
         <GuestShareCard agentId={agent.id} />
+
+        {/* MCP Connectors Card */}
+        <McpConnectorsCard agentId={agent.id} />
 
         {/* Email Integration Card - Half width, only for non-clone agents */}
         {!agent.is_clone && (
