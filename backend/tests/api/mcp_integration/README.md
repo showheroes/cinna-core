@@ -7,7 +7,7 @@ Tests the MCP (Model Context Protocol) integration feature end-to-end: connector
 Same infrastructure as `tests/api/agents/conftest.py` (session proxy, environment adapter stub, background task collector, external service mocks) plus:
 
 - **`patch_mcp_server_base_url`** — Sets `MCP_SERVER_BASE_URL` to `http://localhost:8000/mcp` so resource URLs are predictable in tests.
-- **`patch_create_session` (extended)** — Patches `app.mcp.oauth_routes._get_db` and `app.mcp.server.DBSession` so MCP OAuth routes and the server registry stay on the test transaction.
+- **`patch_create_session` (extended)** — Patches `app.mcp.oauth_routes._get_db` and `app.mcp.tools.create_session` so MCP OAuth routes and the tool handler stay on the test transaction.
 - **`patch_mcp_registry_remove`** — Prevents `mcp_registry.remove()` calls (during connector deactivation/deletion) from crashing since no real MCP servers exist in tests.
 
 See `tests/api/agents/README.md` for shared fixture details.
@@ -18,6 +18,7 @@ See `tests/api/agents/README.md` for shared fixture details.
 |------|-------------|
 | `test_mcp_connector_crud.py` | CRUD lifecycle, multiple connectors, ownership enforcement, partial updates, edge cases |
 | `test_mcp_oauth_flow.py` | Full OAuth flow (with/without PKCE), DCR (with/without resource), consent, token refresh/revocation, form-encoded token endpoint, root-level well-known endpoints, transport security, error cases, end-to-end scenarios |
+| `test_mcp_send_message.py` | MCP tool handler: session creation with correct fields, user+agent message storage, session reuse, external session ID preservation, inactive connector rejection, agent response metadata |
 
 ## Live Testing Fix Coverage
 

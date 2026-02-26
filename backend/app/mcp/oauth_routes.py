@@ -8,10 +8,10 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
-from sqlmodel import Session as DBSession, select
+from sqlmodel import select
 
 from app.core.config import settings
-from app.core.db import engine
+from app.core.db import create_session
 from app.models.mcp_connector import MCPConnector
 from app.models.mcp_oauth_client import MCPOAuthClient
 from app.models.mcp_auth_code import MCPAuthCode, MCPAuthRequest
@@ -21,10 +21,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["mcp-oauth"])
 
-
-def _get_db() -> DBSession:
-    """Create a new DB session for OAuth routes."""
-    return DBSession(engine)
 
 
 def _extract_connector_id_from_resource(resource_url: str) -> str | None:
@@ -180,7 +176,7 @@ def register_client(body: DCRRequest) -> JSONResponse:
 
     if connector_id_str:
         connector_id = uuid.UUID(connector_id_str)
-        with _get_db() as db:
+        with create_session() as db:
             connector = db.get(MCPConnector, connector_id)
             if not connector or not connector.is_active:
                 raise HTTPException(status_code=404, detail="Connector not found or inactive")
@@ -192,7 +188,7 @@ def register_client(body: DCRRequest) -> JSONResponse:
             if len(existing_count) >= connector.max_clients:
                 raise HTTPException(status_code=429, detail="Maximum number of clients reached")
 
-    with _get_db() as db:
+    with create_session() as db:
         # Generate credentials
         client_id = str(uuid.uuid4())
         client_secret = secrets.token_urlsafe(48)
@@ -245,7 +241,7 @@ def authorize(
 
     connector_id = uuid.UUID(connector_id_str)
 
-    with _get_db() as db:
+    with create_session() as db:
         # Validate client exists (may be global or connector-specific)
         oauth_client = db.exec(
             select(MCPOAuthClient).where(MCPOAuthClient.client_id == client_id)
@@ -319,7 +315,7 @@ def _handle_authorization_code(
     *, grant_type: str, code: str, redirect_uri: str,
     client_id: str, client_secret: str, code_verifier: str, resource: str,
 ) -> JSONResponse:
-    with _get_db() as db:
+    with create_session() as db:
         # Validate client credentials
         oauth_client = db.exec(
             select(MCPOAuthClient).where(MCPOAuthClient.client_id == client_id)
@@ -394,7 +390,7 @@ def _handle_authorization_code(
 def _handle_refresh_token(
     *, client_id: str, client_secret: str, refresh_token: str,
 ) -> JSONResponse:
-    with _get_db() as db:
+    with create_session() as db:
         # Validate client credentials
         oauth_client = db.exec(
             select(MCPOAuthClient).where(MCPOAuthClient.client_id == client_id)
@@ -453,7 +449,7 @@ def revoke_token(
     client_secret: str = Form(""),
 ) -> JSONResponse:
     """Revoke an access or refresh token (application/x-www-form-urlencoded)."""
-    with _get_db() as db:
+    with create_session() as db:
         token_record = db.exec(
             select(MCPToken).where(MCPToken.token == token)
         ).first()

@@ -325,16 +325,10 @@ class A2ARequestHandler:
                 yield self._format_sse_event(request_id, error_event)
                 return
 
-            # Get environment base URL and auth using refreshed environment
-            env_base_url = MessageService.get_environment_url(environment)
-            auth_headers = MessageService.get_auth_headers(environment)
-
             # Stream from environment via SSE (instead of background WebSocket)
             async for event in MessageService.stream_message_with_events(
                 session_id=session_id,
                 environment_id=environment.id,
-                base_url=env_base_url,
-                auth_headers=auth_headers,
                 user_message_content=content,
                 session_mode="conversation",
                 external_session_id=external_session_id,

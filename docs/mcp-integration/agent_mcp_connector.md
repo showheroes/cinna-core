@@ -288,6 +288,7 @@ Mounted at `/mcp/oauth` in `backend/app/main.py`.
 - `get_connector(db_session, connector_id)` — Get by ID
 - `update_connector(db_session, connector_id, owner_id, data)` — Update with ownership check; evicts MCP server if deactivated
 - `delete_connector(db_session, connector_id, owner_id)` — Delete with ownership check; evicts MCP server from registry
+- `resolve_connector_context(db_session, connector_id)` — Load and validate connector, agent, environment for tool requests (used by tools.py entry point)
 - `check_email_access(db_session, connector_id, email)` — Check email in `allowed_emails`
 - `get_registered_client_count(db_session, connector_id)` — Count registered OAuth clients
 - `to_public(connector)` — Convert to public dict with computed `mcp_server_url`
@@ -349,27 +350,40 @@ Starlette routing precedence ensures `/mcp/oauth/...` routes match before the `/
 
 **Lifespan:** `mcp_registry.clear()` called on shutdown.
 
-### Tool Handlers
+### Tool Handlers & Request Handler
 
-**File:** `backend/app/mcp/tools.py`
+**Architecture:** Follows the same isolation pattern as `A2ARequestHandler`:
+- `tools.py` is a thin MCP-specific entry point (analogous to A2A route)
+- `MCPRequestHandler` handles business logic through service layer (analogous to A2ARequestHandler)
+- No direct database queries in the request handler — all data access through `SessionService` and `MessageService`
 
-**`send_message` Tool:**
+**File:** `backend/app/mcp/tools.py` (MCP-specific entry point)
 
 `handle_send_message(message, ctx)` logic:
-1. Get `connector_id` from `mcp_connector_id_var` contextvar
-2. Load connector, agent, and environment from DB
-3. Get or create platform session:
-   - Query for active session linked to `mcp_connector_id`
-   - If not found → create via `SessionService.create_session()` with `integration_type="mcp"`
-   - Link session to connector via `mcp_connector_id` field
-4. Acquire per-session `asyncio.Lock` for sequential processing
-5. Stream response via `agent_env_connector.stream_chat()`
-6. Collect response parts (assistant text, tool outputs)
-7. Update external session ID for multi-turn continuity
-8. Return full response or error
+1. Extract `connector_id` from `mcp_connector_id_var` contextvar
+2. Extract MCP transport session ID from contextvar and/or tool context
+3. Resolve connector, agent, environment via `MCPConnectorService.resolve_connector_context()`
+4. Create `MCPRequestHandler` with resolved entities
+5. Delegate to `handler.handle_send_message()`
+
+**File:** `backend/app/mcp/request_handler.py` (business logic handler)
+
+**Class:** `MCPRequestHandler`
+
+`handle_send_message(message, mcp_session_id)` logic:
+1. Get or create platform session via `SessionService.get_or_create_mcp_session()`
+2. Create user message via `MessageService.create_message()`
+3. Trigger title generation for new sessions via `SessionService.auto_generate_session_title()`
+4. Ensure environment is ready via `SessionService.ensure_environment_ready_for_streaming()`
+5. Acquire per-session `asyncio.Lock` for sequential processing
+6. Stream response via `MessageService.stream_message_with_events()` (resolves environment URL/auth internally from `environment_id`)
+7. Collect response parts and return full response or error
+
+**Service Layer:** `backend/app/services/mcp_connector_service.py`
+- `MCPConnectorService.resolve_connector_context()` — Loads and validates connector, agent, environment for tool requests
 
 **Message Queuing:**
-- Per-session locks via `_session_locks` dict
+- Per-session locks via `_session_locks` dict in request handler
 - Returns error if lock is already held (another message in progress)
 
 **`register_mcp_tools(server)`:** Registers `send_message` on the FastMCP instance via `@server.tool()`.
@@ -530,7 +544,8 @@ Uses direct `fetch()` calls with JWT auth headers (not auto-generated client).
 - `backend/app/mcp/__init__.py` — Package init
 - `backend/app/mcp/server.py` — FastMCP factory, MCPServerRegistry, mcp_connector_id_var
 - `backend/app/mcp/token_verifier.py` — MCPTokenVerifier
-- `backend/app/mcp/tools.py` — send_message tool handler, register_mcp_tools()
+- `backend/app/mcp/tools.py` — MCP-specific entry point, register_mcp_tools()
+- `backend/app/mcp/request_handler.py` — MCPRequestHandler (business logic, service layer delegation)
 - `backend/app/mcp/oauth_routes.py` — Shared OAuth Authorization Server
 
 ### Backend — Configuration
@@ -556,6 +571,7 @@ Uses direct `fetch()` calls with JWT auth headers (not auto-generated client).
 - `backend/tests/api/mcp_integration/conftest.py` — Test fixtures
 - `backend/tests/api/mcp_integration/test_mcp_connector_crud.py` — Connector CRUD tests
 - `backend/tests/api/mcp_integration/test_mcp_oauth_flow.py` — OAuth flow tests
+- `backend/tests/api/mcp_integration/test_mcp_send_message.py` — send_message tool handler tests
 - `backend/tests/utils/mcp.py` — Test utilities
 
 ## Related Documentation
@@ -565,6 +581,6 @@ Uses direct `fetch()` calls with JWT auth headers (not auto-generated client).
 
 ---
 
-**Document Version:** 1.0
+**Document Version:** 1.1
 **Last Updated:** 2026-02-26
-**Status:** Implemented (Phase 1-7 complete, Phase 8 in progress)
+**Status:** Implemented (Phase 1-7 complete, Phase 8 in progress, tool handler refactored for service isolation)

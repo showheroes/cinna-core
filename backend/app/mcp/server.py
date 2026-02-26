@@ -22,8 +22,9 @@ from app.mcp.token_verifier import MCPTokenVerifier
 
 logger = logging.getLogger(__name__)
 
-# Context var to pass connector_id to tool handlers
+# Context vars to pass connector_id and MCP session_id to tool handlers
 mcp_connector_id_var: ContextVar[str] = ContextVar("mcp_connector_id")
+mcp_session_id_var: ContextVar[str | None] = ContextVar("mcp_session_id", default=None)
 
 
 def _build_transport_security() -> TransportSecuritySettings:
@@ -98,6 +99,7 @@ class MCPServerRegistry:
         self._servers: dict[str, ASGIApp] = {}
         self._mcp_instances: dict[str, FastMCP] = {}
         self._task_group: anyio.abc.TaskGroup | None = None
+        self._base_url_validated: bool = False
 
     @asynccontextmanager
     async def run(self):
@@ -110,7 +112,7 @@ class MCPServerRegistry:
         """
         async with anyio.create_task_group() as tg:
             self._task_group = tg
-            logger.info("MCP server registry started")
+            self._validate_base_url_config()
             try:
                 yield
             finally:
@@ -119,6 +121,85 @@ class MCPServerRegistry:
                 self._servers.clear()
                 self._mcp_instances.clear()
                 logger.info("MCP server registry shut down")
+
+    def _validate_base_url_config(self) -> None:
+        """Validate MCP_SERVER_BASE_URL at startup."""
+        base_url = settings.MCP_SERVER_BASE_URL
+        if not base_url:
+            logger.error(
+                "[MCP] MCP_SERVER_BASE_URL is not configured. "
+                "MCP connectors will not work. Set it to the external URL "
+                "that proxies to the backend's /mcp/ path "
+                "(e.g. https://mcp.example.com or https://tunnel.example.com/mcp)."
+            )
+            return
+
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ("http", "https"):
+            logger.error("[MCP] MCP_SERVER_BASE_URL has invalid scheme: %r (expected http or https)", base_url)
+            return
+
+        logger.info(
+            "[MCP] MCP server registry started | MCP_SERVER_BASE_URL=%s | "
+            "MCP server URLs will be: %s/{connector_id}/mcp",
+            base_url, base_url.rstrip("/"),
+        )
+
+    def _validate_base_url_on_request(self, scope: Scope) -> None:
+        """One-time check on the first MCP request: verify that the Host header
+        and path prefix are consistent with MCP_SERVER_BASE_URL.
+
+        Catches common misconfiguration where the base URL doesn't match the
+        actual proxy routing (e.g. missing /mcp suffix).
+        """
+        if self._base_url_validated:
+            return
+        self._base_url_validated = True
+
+        base_url = settings.MCP_SERVER_BASE_URL
+        if not base_url:
+            return
+
+        parsed = urlparse(base_url)
+        expected_host = parsed.hostname or ""
+        expected_path = parsed.path.rstrip("/")  # e.g. "/mcp" or ""
+
+        # Extract Host header from the request
+        request_host = ""
+        for name, value in scope.get("headers", []):
+            if name == b"host":
+                # Strip port if present
+                request_host = value.decode("ascii", errors="replace").split(":")[0]
+                break
+
+        # The registry is mounted at /mcp, so scope["root_path"] should end
+        # with the path portion of MCP_SERVER_BASE_URL.
+        # e.g. if MCP_SERVER_BASE_URL=https://host/mcp, root_path should be "/mcp"
+        root_path = scope.get("root_path", "")
+
+        issues = []
+        if expected_host and request_host and expected_host != request_host:
+            issues.append(
+                f"Host header '{request_host}' does not match "
+                f"MCP_SERVER_BASE_URL hostname '{expected_host}'"
+            )
+        if expected_path and not root_path.endswith(expected_path):
+            issues.append(
+                f"Mount root_path '{root_path}' does not end with "
+                f"MCP_SERVER_BASE_URL path '{expected_path}'. "
+                f"Check that your reverse proxy forwards to the backend's /mcp/ path"
+            )
+
+        if issues:
+            logger.error(
+                "[MCP] MCP_SERVER_BASE_URL may be misconfigured (%s):\n  - %s\n"
+                "  Configured: MCP_SERVER_BASE_URL=%s\n"
+                "  The MCP client OAuth flow will likely fail. Ensure the external URL "
+                "matches the proxy routing to the backend's /mcp/ mount point.",
+                base_url, "\n  - ".join(issues), base_url,
+            )
+        else:
+            logger.info("[MCP] MCP_SERVER_BASE_URL validated against incoming request (host=%s, root_path=%s)", request_host, root_path)
 
     async def get_or_create(self, connector_id: str) -> ASGIApp | None:
         """Get or lazily create an ASGI app for the given connector.
@@ -183,6 +264,8 @@ class MCPServerRegistry:
         if scope["type"] not in ("http", "websocket"):
             return
 
+        self._validate_base_url_on_request(scope)
+
         # Use get_route_path to get the effective path with root_path prefix stripped
         # (Starlette Mount sets root_path but does NOT modify scope["path"])
         path = get_route_path(scope)
@@ -210,33 +293,47 @@ class MCPServerRegistry:
             await response(scope, receive, send)
             return
 
+        # Extract MCP session ID from headers (used for stale check + context var)
+        mcp_session_id_from_header = None
+        for name, value in scope.get("headers", []):
+            if name == b"mcp-session-id":
+                mcp_session_id_from_header = value.decode("ascii", errors="replace")
+                break
+
+        method = scope.get("method", "?")
+        logger.info(
+            "[MCP] %s %s | connector=%s | mcp_session_id=%s",
+            method, path, connector_id_str, mcp_session_id_from_header or "(none)",
+        )
+
         # Per MCP spec §Session Management: return 404 for stale session IDs
         # so the client re-initializes with a fresh InitializeRequest.
         mcp_instance = self._mcp_instances.get(connector_id_str)
-        if mcp_instance:
-            session_id = None
-            for name, value in scope.get("headers", []):
-                if name == b"mcp-session-id":
-                    session_id = value.decode("ascii", errors="replace")
-                    break
-            if session_id:
-                known_sessions = getattr(
-                    mcp_instance.session_manager, "_server_instances", {}
+        if mcp_instance and mcp_session_id_from_header:
+            known_sessions = getattr(
+                mcp_instance.session_manager, "_server_instances", {}
+            )
+            logger.debug(
+                "[MCP] Stale check: session=%s | known_sessions=%s",
+                mcp_session_id_from_header, list(known_sessions.keys()),
+            )
+            if mcp_session_id_from_header not in known_sessions:
+                logger.warning(
+                    "[MCP] Stale MCP session %s for connector %s — returning 404 "
+                    "(known: %s)",
+                    mcp_session_id_from_header,
+                    connector_id_str,
+                    list(known_sessions.keys()),
                 )
-                if session_id not in known_sessions:
-                    logger.warning(
-                        "Stale MCP session %s for connector %s — returning 404",
-                        session_id,
-                        connector_id_str,
-                    )
-                    response = JSONResponse(
-                        {"detail": "Session not found"}, status_code=404
-                    )
-                    await response(scope, receive, send)
-                    return
+                response = JSONResponse(
+                    {"detail": "Session not found"}, status_code=404
+                )
+                await response(scope, receive, send)
+                return
 
-        # Set context var for tool handlers
-        token = mcp_connector_id_var.set(connector_id_str)
+        # Set context vars for tool handlers
+        token_conn = mcp_connector_id_var.set(connector_id_str)
+        token_sess = mcp_session_id_var.set(mcp_session_id_from_header)
         try:
             # Rewrite path to strip the connector_id prefix
             remaining_path = f"/{parts[1]}" if len(parts) > 1 else "/"
@@ -247,7 +344,8 @@ class MCPServerRegistry:
 
             await app(scope, receive, send)
         finally:
-            mcp_connector_id_var.reset(token)
+            mcp_connector_id_var.reset(token_conn)
+            mcp_session_id_var.reset(token_sess)
 
 
 # Singleton registry instance

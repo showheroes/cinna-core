@@ -458,8 +458,6 @@ class MessageService:
                     return
 
                 # Prepare streaming parameters
-                base_url = MessageService.get_environment_url(environment)
-                auth_headers = MessageService.get_auth_headers(environment)
                 external_session_id = chat_session.session_metadata.get("external_session_id")
                 session_mode = chat_session.mode or "conversation"
                 environment_id = environment.id
@@ -483,8 +481,6 @@ class MessageService:
             async for event in MessageService.stream_message_with_events(
                 session_id=session_id,
                 environment_id=environment_id,
-                base_url=base_url,
-                auth_headers=auth_headers,
                 user_message_content=concatenated_content,
                 session_mode=session_mode,
                 external_session_id=external_session_id,
@@ -683,8 +679,6 @@ class MessageService:
     async def stream_message_with_events(
         session_id: UUID,
         environment_id: UUID,
-        base_url: str,
-        auth_headers: dict,
         user_message_content: str,
         session_mode: str,
         external_session_id: str | None,
@@ -694,6 +688,7 @@ class MessageService:
         Stream message to environment and handle all business logic.
 
         This method:
+        - Resolves environment URL and auth headers from environment_id
         - Streams message to environment
         - Handles session ID capture
         - Saves messages to database
@@ -703,9 +698,7 @@ class MessageService:
 
         Args:
             session_id: Session UUID
-            environment_id: Environment UUID (for refetching in fresh sessions)
-            base_url: Environment base URL
-            auth_headers: Environment auth headers
+            environment_id: Environment UUID (used to resolve base_url and auth)
             user_message_content: User's message
             session_mode: "building" or "conversation"
             external_session_id: External SDK session ID (None for new)
@@ -722,7 +715,8 @@ class MessageService:
             external_session_id=external_session_id
         )
 
-        # Get user_id, agent's allowed_tools, reset result_state, and session context
+        # Get user_id, agent's allowed_tools, reset result_state, session context,
+        # and resolve environment base_url + auth_headers
         def _get_session_context_and_reset_state():
             with get_fresh_db_session() as db:
                 session_db = db.get(ChatSession, session_id)
@@ -730,14 +724,21 @@ class MessageService:
                 allowed_tools = set()
                 previous_result_state = None
                 session_context = None
+                env_base_url = ""
+                env_auth_headers = {}
 
                 if session_db:
                     env = db.get(AgentEnvironment, environment_id)
                     agent = None
-                    if env and env.agent_id:
-                        agent = db.get(Agent, env.agent_id)
-                        if agent and agent.agent_sdk_config:
-                            allowed_tools = set(agent.agent_sdk_config.get("allowed_tools", []))
+                    if env:
+                        # Resolve environment URL and auth headers
+                        env_base_url = MessageService.get_environment_url(env)
+                        env_auth_headers = MessageService.get_auth_headers(env)
+
+                        if env.agent_id:
+                            agent = db.get(Agent, env.agent_id)
+                            if agent and agent.agent_sdk_config:
+                                allowed_tools = set(agent.agent_sdk_config.get("allowed_tools", []))
 
                     # Build session context for agent-env
                     session_context = {
@@ -765,8 +766,8 @@ class MessageService:
                                 db_session=db, task_id=session_db.source_task_id
                             )
 
-                return user_id, allowed_tools, previous_result_state, session_context
-        user_id, agent_allowed_tools, previous_result_state, session_context = await asyncio.to_thread(
+                return user_id, allowed_tools, previous_result_state, session_context, env_base_url, env_auth_headers
+        user_id, agent_allowed_tools, previous_result_state, session_context, base_url, auth_headers = await asyncio.to_thread(
             _get_session_context_and_reset_state
         )
 

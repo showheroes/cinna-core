@@ -6,6 +6,8 @@ from sqlmodel import Session as DBSession, select, func
 
 from app.models.mcp_connector import MCPConnector, MCPConnectorCreate, MCPConnectorUpdate
 from app.models.mcp_oauth_client import MCPOAuthClient
+from app.models import Agent
+from app.models.environment import AgentEnvironment
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -124,6 +126,41 @@ class MCPConnectorService:
             MCPOAuthClient.connector_id == connector_id
         )
         return db_session.exec(statement).one()
+
+    @staticmethod
+    def resolve_connector_context(
+        db_session: DBSession,
+        connector_id: uuid.UUID,
+    ) -> tuple[MCPConnector, Agent, AgentEnvironment]:
+        """
+        Load and validate connector, agent, and environment for a tool request.
+
+        Used by the MCP tool handler to resolve all entities needed before
+        delegating to MCPRequestHandler (same pattern as A2A route resolution).
+
+        Args:
+            db_session: Database session
+            connector_id: MCP connector UUID
+
+        Returns:
+            (connector, agent, environment) tuple
+
+        Raises:
+            ValueError: If any entity is missing or inactive
+        """
+        connector = db_session.get(MCPConnector, connector_id)
+        if not connector or not connector.is_active:
+            raise ValueError("Connector not found or inactive")
+
+        agent = db_session.get(Agent, connector.agent_id)
+        if not agent or not agent.active_environment_id:
+            raise ValueError("Agent not found or has no active environment")
+
+        environment = db_session.get(AgentEnvironment, agent.active_environment_id)
+        if not environment:
+            raise ValueError("Agent environment not found")
+
+        return connector, agent, environment
 
     @staticmethod
     def to_public(connector: MCPConnector) -> dict:

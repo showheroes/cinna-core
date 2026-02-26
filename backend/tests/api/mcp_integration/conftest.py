@@ -2,8 +2,8 @@
 MCP integration test fixtures.
 
 Same infrastructure as agents/conftest.py plus patches for:
-- MCP OAuth routes `_get_db` so they use the test DB session
-- MCP server registry `DBSession(engine)` so connector lookups stay on the test tx
+- MCP OAuth routes `create_session` so they use the test DB session
+- MCP tools `create_session` so tool handlers stay on the test tx
 - MCP_SERVER_BASE_URL so resource URLs are predictable
 """
 import pytest
@@ -34,9 +34,10 @@ def patch_mcp_server_base_url():
 
 @pytest.fixture(autouse=True)
 def patch_create_session(db):
-    """Patch create_session at all service import sites, including MCP OAuth routes."""
+    """Patch create_session at all service import sites, including MCP routes."""
     with patched_create_sessions(db, CREATE_SESSION_TARGETS_AGENT + [
-        "app.mcp.oauth_routes._get_db",
+        "app.mcp.oauth_routes.create_session",
+        "app.mcp.tools.create_session",
     ]):
         yield
 
@@ -52,7 +53,9 @@ def patch_environment_adapter(tmp_path_factory):
 @pytest.fixture(autouse=True)
 def background_tasks():
     """Collect background tasks for deferred execution."""
-    with patched_background_tasks(BACKGROUND_TASK_TARGETS_FULL):
+    with patched_background_tasks(BACKGROUND_TASK_TARGETS_FULL + [
+        "app.mcp.request_handler.create_task_with_error_logging",
+    ]):
         yield
 
 

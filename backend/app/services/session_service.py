@@ -6,7 +6,8 @@ from typing import Any
 from sqlmodel import Session as DBSession, select
 from sqlalchemy.orm.attributes import flag_modified
 from app.models import Session, SessionCreate, SessionUpdate, Agent, AgentEnvironment
-from app.core.db import engine, create_session
+from app.models.mcp_connector import MCPConnector
+from app.core.db import create_session
 from app.utils import create_task_with_error_logging
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,65 @@ class SessionService:
         if result:
             return result[0]
         return None
+
+    @staticmethod
+    def get_or_create_mcp_session(
+        db_session: DBSession,
+        connector: MCPConnector,
+        mcp_session_id: str | None = None,
+    ) -> tuple[Session, bool]:
+        """
+        Find or create a platform session for an MCP connector.
+
+        Lookup strategy:
+        1. By mcp_session_id (exact match) — no status filter
+        2. If not found: create a new session
+
+        Returns:
+            (session, is_new) tuple
+        """
+        connector_id = connector.id
+
+        # Lookup by exact mcp_session_id
+        if mcp_session_id:
+            session = db_session.exec(
+                select(Session).where(
+                    Session.mcp_session_id == mcp_session_id,
+                )
+            ).first()
+            if session:
+                logger.info(
+                    "[MCP] Found session by mcp_session_id=%s -> session=%s (status=%s)",
+                    mcp_session_id, session.id, session.status,
+                )
+                return session, False
+
+        # 3. Create new session
+        session_data = SessionCreate(
+            agent_id=connector.agent_id,
+            mode=connector.mode,
+        )
+        session = SessionService.create_session(
+            db_session=db_session,
+            user_id=connector.owner_id,
+            data=session_data,
+            integration_type="mcp",
+        )
+        if not session:
+            raise ValueError(f"Failed to create session for connector {connector_id}")
+
+        session.mcp_connector_id = connector_id
+        if mcp_session_id:
+            session.mcp_session_id = mcp_session_id
+        db_session.add(session)
+        db_session.commit()
+        db_session.refresh(session)
+
+        logger.info(
+            "[MCP] Created new session=%s | mcp_session_id=%s | connector=%s",
+            session.id, mcp_session_id or "(none)", connector_id,
+        )
+        return session, True
 
     @staticmethod
     def get_session(db_session: DBSession, session_id: UUID) -> Session | None:
@@ -507,7 +567,7 @@ class SessionService:
                 return
 
             # Use fresh database session to avoid conflicts
-            with DBSession(engine) as db:
+            with create_session() as db:
                 session = db.get(Session, UUID(session_id))
                 if not session:
                     logger.warning(f"Session {session_id} not found for STREAM_STARTED event")
@@ -570,7 +630,7 @@ class SessionService:
                 return
 
             # Use fresh database session to avoid conflicts
-            with DBSession(engine) as db:
+            with create_session() as db:
                 session = db.get(Session, UUID(session_id))
                 if not session:
                     logger.warning(f"Session {session_id} not found for STREAM_COMPLETED event")
@@ -578,14 +638,26 @@ class SessionService:
 
                 session.interaction_status = ""
                 session.streaming_started_at = None
-                session.status = "active" if was_interrupted else "completed"
+
+                # Integration sessions (MCP, email, A2A) stay "active" for
+                # multi-turn conversation.  Only web-UI sessions (no
+                # integration_type) transition to "completed".
+                if session.integration_type:
+                    session.status = "active"
+                else:
+                    session.status = "active" if was_interrupted else "completed"
+
                 session.updated_at = datetime.now(UTC)
                 user_id = session.user_id
 
                 db.add(session)
                 db.commit()
 
-                status_msg = f"'active' (interrupted)" if was_interrupted else "'completed'"
+                status_msg = (
+                    f"'active' (integration={session.integration_type})"
+                    if session.integration_type
+                    else f"'active' (interrupted)" if was_interrupted else "'completed'"
+                )
                 logger.info(f"Session {session_id} status updated to {status_msg} with interaction_status cleared (STREAM_COMPLETED)")
 
             # Emit session_interaction_status_changed WS event to user room
@@ -630,7 +702,7 @@ class SessionService:
                 return
 
             # Use fresh database session to avoid conflicts
-            with DBSession(engine) as db:
+            with create_session() as db:
                 session = db.get(Session, UUID(session_id))
                 if not session:
                     logger.warning(f"Session {session_id} not found for STREAM_ERROR event")
@@ -688,7 +760,7 @@ class SessionService:
                 return
 
             # Use fresh database session to avoid conflicts
-            with DBSession(engine) as db:
+            with create_session() as db:
                 session = db.get(Session, UUID(session_id))
                 if not session:
                     logger.warning(f"Session {session_id} not found for STREAM_INTERRUPTED event")
@@ -1639,7 +1711,7 @@ class SessionService:
             logger.info(f"Processing ENVIRONMENT_ACTIVATED event for environment {environment_id}")
 
             # Find all sessions with pending messages for this environment
-            with DBSession(engine) as db:
+            with create_session() as db:
                 sessions_with_pending = db.exec(
                     select(Session).where(
                         Session.environment_id == UUID(environment_id),
@@ -1660,7 +1732,7 @@ class SessionService:
                     create_task_with_error_logging(
                         SessionService.initiate_stream(
                             session_id=session_id,
-                            get_fresh_db_session=lambda: DBSession(engine)
+                            get_fresh_db_session=create_session
                         ),
                         task_name=f"initiate_stream_{session_id}"
                     )

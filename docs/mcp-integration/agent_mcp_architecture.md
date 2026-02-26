@@ -37,6 +37,8 @@ This is the MCP counterpart of our A2A integration. While A2A is agent-to-agent 
                                                              │       │  └──MCPServer(C)──┘ │     │
                                                              │       └─────────┬──────────┘     │
                                                              │                 │                │
+                                                             │       tools.py → MCPRequestHandler│
+                                                             │                 │                │
                                                              │       SessionService /           │
                                                              │       MessageService             │
                                                              │                 │                │
@@ -116,6 +118,23 @@ The agent exposes a single primary tool:
 **`send_message`** — Send a message to the agent and receive a response. The agent processes the request using its configured capabilities, tools, and knowledge.
 
 Session continuity is automatic — all `send_message` calls within the same MCP session go to the same platform chat session. New MCP session = new conversation.
+
+### Service Layer Architecture
+
+The tool handler follows the same isolation pattern as `A2ARequestHandler`:
+
+```
+tools.py (thin MCP entry point)
+    ├─ Extract MCP context vars (connector_id, mcp_session_id)
+    ├─ MCPConnectorService.resolve_connector_context() → (connector, agent, environment)
+    └─ MCPRequestHandler.handle_send_message()
+            ├─ SessionService.get_or_create_mcp_session()
+            ├─ MessageService.create_message()
+            ├─ SessionService.ensure_environment_ready_for_streaming()
+            └─ MessageService.stream_message_with_events()
+```
+
+**Key principle:** No direct database queries in `MCPRequestHandler` — all data access goes through `SessionService` and `MessageService`, matching the A2A handler pattern.
 
 ---
 
@@ -217,27 +236,30 @@ MCP Client connects (initialize → Mcp-Session-Id assigned by SDK)
     │
     ├─ tools/call "send_message" {message: "..."}       ← first call
     │   │
-    │   ├─ Look up platform session by connector → not found
-    │   ├─ Create new platform session (mode from connector, integration_type="mcp")
-    │   ├─ Link session to connector
-    │   ├─ Send message to agent environment
-    │   ├─ Stream response back
-    │   └─ Return agent response
+    │   ├─ tools.py: extract context vars, resolve entities via MCPConnectorService
+    │   ├─ MCPRequestHandler.handle_send_message():
+    │   │   ├─ SessionService.get_or_create_mcp_session() → not found → create
+    │   │   ├─ MessageService.create_message() (user message)
+    │   │   ├─ SessionService.ensure_environment_ready_for_streaming()
+    │   │   ├─ MessageService.stream_message_with_events() → stream from agent env
+    │   │   └─ Return agent response text
+    │   └─ Return to MCP client
     │
     ├─ tools/call "send_message" {message: "..."}       ← subsequent call
     │   │
-    │   ├─ Look up platform session by connector → found (conversation continues)
-    │   └─ Send message to existing session
+    │   ├─ MCPRequestHandler: look up session by mcp_session_id → found
+    │   └─ Same flow, reusing existing session
     │
     └─ [New MCP connection] → new platform session (no cross-session visibility)
 ```
 
 **Key behaviors:**
-- Each connector maintains one active platform session at a time
+- Each MCP transport session maps to one platform session (via `mcp_session_id`)
 - Session belongs to the connector owner (like guest sessions)
-- Agent environment auto-starts if not running
-- Sequential message processing with per-session locking (concurrent calls queued)
+- Agent environment auto-starts if suspended/stopped (via `ensure_environment_ready_for_streaming`)
+- Sequential message processing with per-session locking (concurrent calls rejected)
 - `mcp_token.user_id` tracks who authenticated (audit trail)
+- Same service layer isolation as A2A: `MCPRequestHandler` delegates to `SessionService`/`MessageService` (no direct DB queries)
 
 ---
 
@@ -403,6 +425,6 @@ All three share the same underlying services: SessionService, MessageService, ag
 
 ---
 
-**Document Version:** 1.0
+**Document Version:** 1.1
 **Last Updated:** 2026-02-26
-**Status:** Implemented (Phase 1 MVP)
+**Status:** Implemented (Phase 1 MVP, tool handler refactored for service isolation)

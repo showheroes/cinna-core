@@ -47,7 +47,7 @@ class Session(SQLModel, table=True):
     mcp_connector_id: uuid.UUID | None = Field(
         default=None, foreign_key="mcp_connector.id", ondelete="SET NULL"
     )
-    mcp_session_id: str | None = Field(default=None, unique=True)
+    mcp_session_id: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_message_at: datetime | None = None
