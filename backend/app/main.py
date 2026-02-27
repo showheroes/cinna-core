@@ -278,7 +278,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Set all CORS enabled origins
+# Reflect Origin for /mcp/ paths — MCP OAuth and protocol endpoints are
+# accessed by external clients whose origins aren't known ahead of time.
+# Added FIRST so it ends up outermost (Starlette's add_middleware inserts
+# at position 0; the first call's middleware lands last in the list and
+# becomes the outermost wrapper after build_middleware_stack iterates it).
+app.add_middleware(MCPCORSMiddleware)
+
+# Set all CORS enabled origins (for non-MCP routes — /api/v1/*, frontend, etc.)
 if settings.all_cors_origins:
     cors_kwargs: dict = dict(
         allow_origins=settings.all_cors_origins,
@@ -289,12 +296,6 @@ if settings.all_cors_origins:
     if settings.ENVIRONMENT == "local":
         cors_kwargs["allow_origin_regex"] = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
     app.add_middleware(CORSMiddleware, **cors_kwargs)
-
-# Reflect Origin for /mcp/ paths — MCP OAuth and protocol endpoints are
-# accessed by external clients whose origins aren't known ahead of time.
-# Must be added AFTER CORSMiddleware so it's the outermost middleware
-# and processes /mcp/ requests before CORSMiddleware sees them.
-app.add_middleware(MCPCORSMiddleware)
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
