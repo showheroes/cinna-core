@@ -47,6 +47,7 @@ When the MCP client connects, it will automatically:
 4. Open your browser for OAuth consent (`GET /mcp/oauth/authorize` → redirect to frontend)
 5. After you log in and approve, exchange the auth code for tokens
 6. List available tools: `send_message`, `get_file_upload_url`
+7. Discover workspace resources: `workspace://tree` and folder templates (`workspace://files/{path}`, etc.)
 
 ---
 
@@ -79,6 +80,34 @@ curl -X POST "https://your-domain.example.com/mcp/{connector-id}/upload" \
 ```
 
 The temporary JWT is valid for 15 minutes and is scoped to the specific connector. The file is proxied through the backend to the agent environment's `/files/upload` endpoint, which places it in the workspace's `uploads/` directory.
+
+---
+
+## Workspace Resources
+
+MCP clients can browse and read files from the agent's workspace using the standard MCP resources protocol. This is automatic — no additional configuration is needed beyond connecting the MCP client.
+
+### Available Resources
+
+Workspace files are listed dynamically in `resources/list`. Each file in an allowed folder appears as a concrete resource:
+
+| URI Pattern | Folder |
+|-------------|--------|
+| `workspace://files/{path}` | Agent-created files |
+| `workspace://uploads/{path}` | User-uploaded files |
+| `workspace://scripts/{path}` | Script files |
+
+### Security
+
+Only safe folders are exposed. Sensitive folders (`credentials/`, `databases/`, `docs/`, `knowledge/`, `logs/`) are excluded. Individual file reads are capped at 10MB — larger files should use the file upload/download tools instead.
+
+### How It Works
+
+1. MCP client calls `resources/list` → gets a dynamic list of all workspace files (e.g., `workspace://files/report.csv`, `workspace://uploads/data.json`, etc.)
+2. MCP client calls `resources/read("workspace://files/report.csv")` → gets file content (text or base64-encoded binary)
+3. If the agent environment is not running, `resources/list` returns an empty list gracefully
+
+Nested paths are supported: `workspace://scripts/subfolder/run.sh` works correctly.
 
 ---
 

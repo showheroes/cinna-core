@@ -50,6 +50,7 @@ class AgentUpdate(SQLModel):
     show_on_dashboard: bool | None = None
     conversation_mode_ui: str | None = None
     a2a_config: dict | None = None
+    example_prompts: list[str] | None = None
     # Clone owners can update these
     update_mode: str | None = None  # "automatic" | "manual"
 
@@ -98,6 +99,7 @@ class Agent(AgentBase, table=True):
     conversation_mode_ui: str = Field(default="detailed")  # "detailed" or "compact"
     agent_sdk_config: dict = Field(default_factory=dict, sa_column=Column(JSON))  # SDK config: sdk_tools, allowed_tools
     a2a_config: dict = Field(default_factory=dict, sa_column=Column(JSON))  # A2A config: skills, version, generated_at
+    example_prompts: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -152,6 +154,7 @@ class AgentPublic(SQLModel):
     conversation_mode_ui: str
     agent_sdk_config: dict | None = None
     a2a_config: dict | None = None
+    example_prompts: list[str] = []
     created_at: datetime
     updated_at: datetime
     owner_id: uuid.UUID

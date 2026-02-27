@@ -79,6 +79,14 @@ def create_mcp_server_for_connector(connector_id: str) -> FastMCP:
     from app.mcp.tools import register_mcp_tools
     register_mcp_tools(server)
 
+    # Register workspace resources
+    from app.mcp.resources import register_mcp_resources
+    register_mcp_resources(server)
+
+    # Register agent example prompts
+    from app.mcp.prompts import register_mcp_prompts
+    register_mcp_prompts(server)
+
     return server
 
 

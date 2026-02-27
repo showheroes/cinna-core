@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import { useState, useEffect } from "react"
 import { z } from "zod"
 import { isLoggedIn } from "@/hooks/useAuth"
 import { Button } from "@/components/ui/button"
@@ -12,7 +13,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, ShieldCheck, ShieldX, AlertTriangle } from "lucide-react"
+import {
+  Loader2,
+  ShieldCheck,
+  ShieldX,
+  AlertTriangle,
+  CheckCircle2,
+} from "lucide-react"
 
 const searchSchema = z.object({
   nonce: z.string(),
@@ -66,6 +73,8 @@ async function approveConsent(nonce: string) {
 
 function McpConsentPage() {
   const { nonce } = Route.useSearch()
+  const [authorized, setAuthorized] = useState(false)
+  const [denied, setDenied] = useState(false)
 
   const {
     data: consentInfo,
@@ -79,14 +88,60 @@ function McpConsentPage() {
   const approveMutation = useMutation({
     mutationFn: () => approveConsent(nonce),
     onSuccess: (data: { redirect_url: string }) => {
+      setAuthorized(true)
       window.location.href = data.redirect_url
     },
   })
+
+  // After authorization or denial, try to close the tab.
+  // Wait long enough for the browser to dispatch the redirect URL
+  // (especially custom protocol URLs like claude-desktop://) before
+  // attempting to close. window.close() only works for script-opened
+  // tabs; if it fails, the user sees a fallback message.
+  useEffect(() => {
+    if (!authorized && !denied) return
+    const timer = setTimeout(() => {
+      window.close()
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [authorized, denied])
 
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (authorized) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CheckCircle2 className="mx-auto h-12 w-12 text-green-500" />
+            <CardTitle className="mt-2">Authorization Successful</CardTitle>
+            <CardDescription>
+              You can close this tab and return to the application.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    )
+  }
+
+  if (denied) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <ShieldX className="mx-auto h-12 w-12 text-muted-foreground" />
+            <CardTitle className="mt-2">Authorization Denied</CardTitle>
+            <CardDescription>
+              You can close this tab.
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </div>
     )
   }
@@ -106,14 +161,13 @@ function McpConsentPage() {
   }
 
   const handleDeny = () => {
-    // Redirect back to the client with an error.
-    // The consent info should include the redirect_uri for the deny case.
     if (consentInfo?.redirect_uri) {
       const url = new URL(consentInfo.redirect_uri)
       url.searchParams.set("error", "access_denied")
       if (consentInfo.state) {
         url.searchParams.set("state", consentInfo.state)
       }
+      setDenied(true)
       window.location.href = url.toString()
     } else {
       window.close()

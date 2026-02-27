@@ -2706,6 +2706,14 @@ export const AgentPublicSchema = {
             ],
             title: 'A2A Config'
         },
+        example_prompts: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Example Prompts',
+            default: []
+        },
         created_at: {
             type: 'string',
             format: 'date-time',
@@ -3156,6 +3164,20 @@ export const AgentUpdateSchema = {
             ],
             title: 'A2A Config'
         },
+        example_prompts: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Example Prompts'
+        },
         update_mode: {
             anyOf: [
                 {
@@ -3380,6 +3402,93 @@ export const Body_login_login_access_tokenSchema = {
     type: 'object',
     required: ['username', 'password'],
     title: 'Body_login-login_access_token'
+} as const;
+
+export const Body_mcp_oauth_exchange_tokenSchema = {
+    properties: {
+        grant_type: {
+            type: 'string',
+            title: 'Grant Type'
+        },
+        code: {
+            type: 'string',
+            title: 'Code',
+            default: ''
+        },
+        redirect_uri: {
+            type: 'string',
+            title: 'Redirect Uri',
+            default: ''
+        },
+        client_id: {
+            type: 'string',
+            title: 'Client Id',
+            default: ''
+        },
+        client_secret: {
+            type: 'string',
+            title: 'Client Secret',
+            default: ''
+        },
+        code_verifier: {
+            type: 'string',
+            title: 'Code Verifier',
+            default: ''
+        },
+        resource: {
+            type: 'string',
+            title: 'Resource',
+            default: ''
+        },
+        refresh_token: {
+            type: 'string',
+            title: 'Refresh Token',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['grant_type'],
+    title: 'Body_mcp-oauth-exchange_token'
+} as const;
+
+export const Body_mcp_oauth_revoke_tokenSchema = {
+    properties: {
+        token: {
+            type: 'string',
+            title: 'Token'
+        },
+        client_id: {
+            type: 'string',
+            title: 'Client Id',
+            default: ''
+        },
+        client_secret: {
+            type: 'string',
+            title: 'Client Secret',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['token'],
+    title: 'Body_mcp-oauth-revoke_token'
+} as const;
+
+export const Body_mcp_upload_upload_file_to_mcpSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File'
+        },
+        workspace_path: {
+            type: 'string',
+            title: 'Workspace Path',
+            default: 'uploads'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_mcp-upload-upload_file_to_mcp'
 } as const;
 
 export const BulkDeleteRequestSchema = {
@@ -6363,6 +6472,17 @@ export const MCPConnectorsPublicSchema = {
         count: {
             type: 'integer',
             title: 'Count'
+        },
+        mcp_server_base_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mcp Server Base Url'
         }
     },
     type: 'object',
@@ -7450,28 +7570,6 @@ export const RespondToTaskRequestSchema = {
     required: ['task_id', 'message', 'source_session_id'],
     title: 'RespondToTaskRequest',
     description: 'Request to respond to a sub-task from source agent.'
-} as const;
-
-export const RevokeRequestSchema = {
-    properties: {
-        token: {
-            type: 'string',
-            title: 'Token'
-        },
-        client_id: {
-            type: 'string',
-            title: 'Client Id',
-            default: ''
-        },
-        client_secret: {
-            type: 'string',
-            title: 'Client Secret',
-            default: ''
-        }
-    },
-    type: 'object',
-    required: ['token'],
-    title: 'RevokeRequest'
 } as const;
 
 export const RevokeResponseSchema = {
@@ -9124,53 +9222,6 @@ export const TokenSchema = {
     type: 'object',
     required: ['access_token'],
     title: 'Token'
-} as const;
-
-export const TokenRequestSchema = {
-    properties: {
-        grant_type: {
-            type: 'string',
-            title: 'Grant Type'
-        },
-        code: {
-            type: 'string',
-            title: 'Code',
-            default: ''
-        },
-        redirect_uri: {
-            type: 'string',
-            title: 'Redirect Uri',
-            default: ''
-        },
-        client_id: {
-            type: 'string',
-            title: 'Client Id',
-            default: ''
-        },
-        client_secret: {
-            type: 'string',
-            title: 'Client Secret',
-            default: ''
-        },
-        code_verifier: {
-            type: 'string',
-            title: 'Code Verifier',
-            default: ''
-        },
-        resource: {
-            type: 'string',
-            title: 'Resource',
-            default: ''
-        },
-        refresh_token: {
-            type: 'string',
-            title: 'Refresh Token',
-            default: ''
-        }
-    },
-    type: 'object',
-    required: ['grant_type'],
-    title: 'TokenRequest'
 } as const;
 
 export const UpdatePasswordSchema = {

@@ -78,6 +78,7 @@ class AgentCloneService:
             conversation_mode_ui=original_agent.conversation_mode_ui,
             agent_sdk_config=original_agent.agent_sdk_config.copy() if original_agent.agent_sdk_config else {},
             a2a_config=original_agent.a2a_config.copy() if original_agent.a2a_config else {},
+            example_prompts=list(original_agent.example_prompts) if original_agent.example_prompts else [],
             user_workspace_id=None,  # Clones don't inherit workspace
 
             # Clone-specific fields

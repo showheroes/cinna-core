@@ -394,6 +394,7 @@ export type AgentPublic = {
     a2a_config?: ({
     [key: string]: unknown;
 } | null);
+    example_prompts?: Array<(string)>;
     created_at: string;
     updated_at: string;
     owner_id: string;
@@ -488,6 +489,7 @@ export type AgentUpdate = {
     a2a_config?: ({
     [key: string]: unknown;
 } | null);
+    example_prompts?: (Array<(string)> | null);
     update_mode?: (string | null);
 };
 
@@ -685,6 +687,28 @@ export type Body_login_login_access_token = {
     scope?: string;
     client_id?: (string | null);
     client_secret?: (string | null);
+};
+
+export type Body_mcp_oauth_exchange_token = {
+    grant_type: string;
+    code?: string;
+    redirect_uri?: string;
+    client_id?: string;
+    client_secret?: string;
+    code_verifier?: string;
+    resource?: string;
+    refresh_token?: string;
+};
+
+export type Body_mcp_oauth_revoke_token = {
+    token: string;
+    client_id?: string;
+    client_secret?: string;
+};
+
+export type Body_mcp_upload_upload_file_to_mcp = {
+    file: (Blob | File);
+    workspace_path?: string;
 };
 
 export type BulkDeleteRequest = {
@@ -1399,6 +1423,7 @@ export type MCPConnectorPublic = {
 export type MCPConnectorsPublic = {
     data: Array<MCPConnectorPublic>;
     count: number;
+    mcp_server_base_url?: (string | null);
 };
 
 export type MCPConnectorUpdate = {
@@ -1631,12 +1656,6 @@ export type RespondToTaskRequest = {
     task_id: string;
     message: string;
     source_session_id: string;
-};
-
-export type RevokeRequest = {
-    token: string;
-    client_id?: string;
-    client_secret?: string;
 };
 
 /**
@@ -1942,17 +1961,6 @@ export type TaskTriggerUpdate = {
 export type Token = {
     access_token: string;
     token_type?: string;
-};
-
-export type TokenRequest = {
-    grant_type: string;
-    code?: string;
-    redirect_uri?: string;
-    client_id?: string;
-    client_secret?: string;
-    code_verifier?: string;
-    resource?: string;
-    refresh_token?: string;
 };
 
 export type UpdatePassword = {
@@ -3122,6 +3130,20 @@ export type McpConsentApproveConsentData = {
 
 export type McpConsentApproveConsentResponse = (ConsentApproveResponse);
 
+export type McpOauthGetProtectedResourceMetadataData = {
+    resourcePath: string;
+};
+
+export type McpOauthGetProtectedResourceMetadataResponse = (unknown);
+
+export type McpOauthGetAsMetadataWellknownRootResponse = (unknown);
+
+export type McpOauthGetAsMetadataWellknownData = {
+    issuerPath: string;
+};
+
+export type McpOauthGetAsMetadataWellknownResponse = (unknown);
+
 export type McpOauthGetAsMetadataResponse = (unknown);
 
 export type McpOauthRegisterClientData = {
@@ -3144,16 +3166,24 @@ export type McpOauthAuthorizeData = {
 export type McpOauthAuthorizeResponse = (unknown);
 
 export type McpOauthExchangeTokenData = {
-    requestBody: TokenRequest;
+    formData: Body_mcp_oauth_exchange_token;
 };
 
 export type McpOauthExchangeTokenResponse = (unknown);
 
 export type McpOauthRevokeTokenData = {
-    requestBody: RevokeRequest;
+    formData: Body_mcp_oauth_revoke_token;
 };
 
 export type McpOauthRevokeTokenResponse = (unknown);
+
+export type McpUploadUploadFileToMcpData = {
+    authorization?: (string | null);
+    connectorId: string;
+    formData: Body_mcp_upload_upload_file_to_mcp;
+};
+
+export type McpUploadUploadFileToMcpResponse = (unknown);
 
 export type MessagesGetMessagesData = {
     limit?: number;

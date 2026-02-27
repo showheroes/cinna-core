@@ -107,16 +107,56 @@ This is more secure than URL-as-security-boundary because URLs can leak inadvert
 | MCP Primitive | Platform Mapping |
 |---------------|-----------------|
 | **Tool** (`send_message`) | Send a message to the agent, receive a JSON response with `response` and `context_id` |
+| **Tool** (`get_file_upload_url`) | Get a temporary CURL command to upload a file to the agent's workspace |
 | **`context_id`** | Platform Session UUID — echoed by LLM to maintain per-chat continuity |
 | **MCP Session** | Transport-level session (shared across chats); stored as metadata, not used for routing |
-| **Resource** (future) | Agent workspace files |
-| **Prompt** (future) | Agent prompt templates |
+| **Resource** (`workspace://{folder}/{path}`) | Individual workspace files from `files/`, `uploads/`, `scripts/` — dynamically listed |
+| **Prompt** (`prompts/list`, `prompts/get`) | Agent example prompts — defined as `slug: text` lines on the agent model, exposed as MCP slash commands |
+
+### Resource Design
+
+The agent exposes workspace files as **MCP resources**, allowing clients to browse and read files from safe workspace folders.
+
+**URI scheme:** `workspace://{folder}/{path}` — e.g., `workspace://files/report.csv`, `workspace://scripts/run.sh`
+
+**Dynamic listing:** The `resources/list` response is generated dynamically by fetching the workspace tree from the agent environment and enumerating all files in allowed folders. This ensures Claude Desktop and other MCP clients that only read `resources/list` (not `resources/templates/list`) can see every file. If the environment is not running, the list gracefully returns empty.
+
+**Security:** Only `files`, `uploads`, and `scripts` folders are exposed. Sensitive folders (`credentials/`, `databases/`, `docs/`, `knowledge/`, `logs/`) are excluded. File reads are capped at 10MB.
+
+**Content handling:** Text files (`.md`, `.py`, `.csv`, `.json`, `.txt`, etc.) are returned as `TextResourceContents`. Binary files (`.pdf`, `.png`, `.jpg`, etc.) are returned as `BlobResourceContents` (base64-encoded by the MCP SDK).
+
+**Multi-segment paths:** The custom `WorkspaceResourceManager` subclass handles nested paths like `scripts/sub/folder/run.sh` that the default SDK template matching (which uses `[^/]+` regex) cannot match.
+
+### Prompt Design
+
+The agent exposes **example prompts** as MCP prompts, allowing clients like Claude Desktop to show them as slash commands or suggestions.
+
+**Agent model field:** `example_prompts: list[str]` — each line follows the format `slug: prompt text`. Example:
+```
+report_status: Send me status report for the current month
+check_email: Check my email for urgent items
+```
+
+**MCP mapping:**
+- `prompts/list` → returns each line as a `Prompt` with `name=slug`, `description=prompt_text`
+- `prompts/get` → returns a single user message: `[{role: "user", content: {type: "text", text: prompt_text}}]`
+
+**Dynamic resolution:** Like resources, prompts are fetched from the database on every `prompts/list` and `prompts/get` call. Updates to `example_prompts` take effect immediately without server restart or cache eviction.
+
+**Parsing rules:**
+- Lines with `:` → split on first colon: slug (before) and prompt text (after)
+- Lines without `:` → full line used as both name and text
+- Empty lines are skipped
+
+**Configuration:** Agent owners edit example prompts via the "Example Prompts" button in the agent's Config tab (Information card). The frontend sends the list as `example_prompts: [...]` via the standard agent update endpoint.
 
 ### Tool Design
 
-The agent exposes a single primary tool:
+The agent exposes two tools:
 
 **`send_message(message, context_id)`** — Send a message to the agent and receive a response. Returns a JSON object with `response` and `context_id` fields.
+
+**`get_file_upload_url(filename, workspace_path)`** — Get a temporary CURL command with a short-lived JWT to upload a file to the agent's workspace.
 
 **Per-chat session isolation via `context_id`:**
 - On the first call in a new chat, `context_id` is empty → a new platform session is created → the response includes the session's `context_id` (its UUID)
@@ -130,7 +170,7 @@ This solves a fundamental problem: Claude Desktop (and similar MCP clients) reus
 The tool handler follows the same isolation pattern as `A2ARequestHandler`:
 
 ```
-tools.py (thin MCP entry point)
+tools.py (thin MCP entry point — tool handlers)
     ├─ Extract MCP context vars (connector_id, mcp_session_id)
     ├─ MCPConnectorService.resolve_connector_context() → (connector, agent, environment)
     └─ MCPRequestHandler.handle_send_message(message, mcp_session_id, context_id)
@@ -139,6 +179,19 @@ tools.py (thin MCP entry point)
             ├─ SessionService.ensure_environment_ready_for_streaming()
             ├─ MessageService.stream_message_with_events()
             └─ Return JSON: {"response": "...", "context_id": "<session_uuid>"}
+
+resources.py (MCP resource handlers)
+    ├─ WorkspaceResourceManager (custom ResourceManager subclass)
+    │   ├─ list_resources_async() → dynamic file enumeration from workspace tree
+    │   └─ get_resource() → intercepts workspace:// URIs for multi-segment paths
+    ├─ _get_adapter_for_connector() → resolve context var → adapter
+    ├─ _collect_files_from_tree() → walk tree, extract files from allowed folders
+    └─ _read_workspace_file(path) → adapter.download_workspace_item() → str | bytes
+
+prompts.py (MCP prompt handlers)
+    ├─ _get_agent_example_prompts() → resolve context var → connector → agent → example_prompts
+    ├─ _parse_prompt_line(line) → (slug, prompt_text) | None
+    └─ register_mcp_prompts(server) → patches prompts/list and prompts/get handlers
 ```
 
 **Key principle:** No direct database queries in `MCPRequestHandler` — all data access goes through `SessionService` and `MessageService`, matching the A2A handler pattern.
@@ -239,7 +292,14 @@ When the OAuth `/authorize` endpoint is hit:
 ```
 MCP Client connects (initialize → Mcp-Session-Id assigned by SDK)
     │
-    ├─ tools/list → Returns [send_message(message, context_id)]
+    ├─ resources/list → Returns dynamic list of workspace files [workspace://files/data.csv, ...]
+    ├─ resources/templates/list → Returns [workspace://files/{path}, workspace://uploads/{path}, ...]
+    ├─ resources/read("workspace://files/data.csv") → File content (text or base64)
+    │
+    ├─ prompts/list → Returns agent example prompts [{name: "report_status", description: "..."}, ...]
+    ├─ prompts/get("report_status") → {messages: [{role: "user", content: {text: "..."}}]}
+    │
+    ├─ tools/list → Returns [send_message(message, context_id), get_file_upload_url(filename, workspace_path)]
     │
     ├─ Chat 1: tools/call "send_message" {message: "...", context_id: ""}    ← first call
     │   │
@@ -404,13 +464,8 @@ All three share the same underlying services: SessionService, MessageService, ag
 
 ## Future Phases
 
-### Phase 2: Enhanced Tools & Resources
-- Workspace resources: `resources/list` and `resources/read` for agent workspace files
+### Phase 2: Advanced Features
 - Session management tools: `list_sessions`, `get_session_status`
-- Interrupt support, file upload
-
-### Phase 3: Advanced Features
-- Prompt templates via MCP `prompts/list`
 - External OAuth providers (Auth0/Keycloak) — swap AS, keep TokenVerifier
 - Per-connector rate limiting and usage tracking
 
@@ -441,6 +496,6 @@ All three share the same underlying services: SessionService, MessageService, ag
 
 ---
 
-**Document Version:** 1.2
-**Last Updated:** 2026-02-26
-**Status:** Implemented (Phase 1 MVP, per-chat session isolation via context_id)
+**Document Version:** 1.4
+**Last Updated:** 2026-02-27
+**Status:** Implemented (Phase 1 MVP + workspace resources, per-chat session isolation via context_id, example prompts)

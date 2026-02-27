@@ -294,13 +294,10 @@ When working on this project:
 - [ ] Use React Query for all API calls in frontend
 - [ ] Reference `Makefile` for common operations
 - [ ] See `docs/development/backend_development_llm.md` for detailed patterns
+- [ ] See `docs/development/frontend_development_llm.md` for detailed frontend development patterns
+- [ ] See `backend/tests/README.md` for detailed backend test writing patterns and recommendations
 
 ---
 
-**Last Updated**: 2026-01-08
+**Last Updated**: 2026-02-26
 **Project Version**: Full Stack FastAPI + React with Google OAuth
-
-**Recent Updates:**
-- Clarified models are in `backend/app/models/` directory (not single file)
-- Updated database migration commands to use Docker (`make migrate`, `docker compose exec backend`)
-- Added references to `Makefile` and `docs/development/backend_development_llm.md`

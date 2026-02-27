@@ -17,6 +17,7 @@ import { EditDescriptionModal } from "./EditDescriptionModal"
 import { EditEntrypointPromptModal } from "./EditEntrypointPromptModal"
 import { EditWorkflowPromptModal } from "./EditWorkflowPromptModal"
 import { EditRefinerPromptModal } from "./EditRefinerPromptModal"
+import { EditExamplePromptsModal } from "./EditExamplePromptsModal"
 
 interface AgentConfigTabProps {
   agent: AgentPublic
@@ -29,6 +30,7 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
   const [entrypointModalOpen, setEntrypointModalOpen] = useState(false)
   const [workflowModalOpen, setWorkflowModalOpen] = useState(false)
   const [refinerModalOpen, setRefinerModalOpen] = useState(false)
+  const [examplePromptsModalOpen, setExamplePromptsModalOpen] = useState(false)
 
   // Scheduler state
   const [schedulerEnabled, setSchedulerEnabled] = useState(false)
@@ -64,12 +66,20 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button
-              variant="outline"
-              onClick={() => setDescriptionModalOpen(true)}
-            >
-              Description
-            </Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                onClick={() => setDescriptionModalOpen(true)}
+              >
+                Description
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setExamplePromptsModalOpen(true)}
+              >
+                Example Prompts
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -184,6 +194,13 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
         currentPrompt={agent.refiner_prompt}
         open={refinerModalOpen}
         onClose={() => setRefinerModalOpen(false)}
+        readOnly={readOnly}
+      />
+      <EditExamplePromptsModal
+        agentId={agent.id}
+        currentPrompts={agent.example_prompts}
+        open={examplePromptsModalOpen}
+        onClose={() => setExamplePromptsModalOpen(false)}
         readOnly={readOnly}
       />
     </div>
