@@ -8,11 +8,6 @@ Every time when via stream we receive any costs info in the message meta info,
 we should collect it that amount and make a record in the costs tracking to see when and how much user spent.
 That should be disconnected data (meaning if session / message is deleted, we still have records of costs).
 
-### Improved visibility of Workspace Content
-
-On the main dashboard, in the header, show the name of the Workspace (if its not Default)
-Show with icons how much agents / credentials are available in that workspace (or maybe what credentials are set).
-
 ### Improved sandboxing for Agent-Env
 
 Original articles shows main points used by the original Claude so far: https://support.claude.com/en/articles/12111783-create-and-edit-files-with-claude
@@ -88,6 +83,27 @@ User story 1:
 Required features:
 - connection of knowledge database that is providing details from external sources (Confluence ROVO API?)
 
+
+### Multi-Worker MCP Session Support
+
+Currently MCP sessions (`StreamableHTTPSessionManager._server_instances`) are held **in-memory per-worker process**. When the backend runs with multiple uvicorn workers (`--workers N`), the `initialize` request may hit worker A while subsequent requests (`notifications/initialized`, `tools/call`, etc.) hit worker B, which doesn't have the session — causing `"Session not found"` errors.
+
+**Current workaround:** `docker-compose.yml` overrides CMD to `--workers 1`.
+
+**Future fix — shared MCP session store:**
+
+1. **Custom `EventStore` / session registry backed by Redis** — The MCP Python SDK's `StreamableHTTPSessionManager` accepts an optional `event_store: EventStore` parameter for resumability. Implement a Redis-backed `EventStore` so all workers share session state and can resume any session regardless of which worker created it.
+
+2. **Alternative: sticky sessions at the load balancer** — Run N separate uvicorn processes on different ports (instead of `--workers N` on one port) and use nginx `hash $http_mcp_session_id consistent;` upstream routing. Requires changing the Dockerfile entrypoint to a process supervisor (e.g. supervisord) that starts multiple uvicorn instances.
+
+3. **Scope of changes:**
+   - `MCPServerRegistry` stale-session check (`server.py:346-363`) would need to query the shared store instead of the local `_server_instances` dict
+   - `MCPServerRegistry._active_sessions` (used for resource change notification broadcasts) would also need to be shared or replaced with a pub/sub mechanism (Redis Pub/Sub)
+   - Session manager lifecycle (`get_or_create` / `remove`) needs distributed locking
+
+4. **Reference implementation:** https://github.com/bh-rat/mcp-db — investigate as a potential solution or starting point for DB/Redis-backed MCP session persistence.
+
+**Priority:** Medium — only affects deployments with multiple workers. Single-worker deployments (current demo/prod) are unaffected.
 
 ## RANDOM UNSTRUCTURED NOTES
 
