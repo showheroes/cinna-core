@@ -4,8 +4,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import Response as StarletteResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.main import api_router
 from app.mcp.oauth_routes import router as mcp_oauth_router, wellknown_router as mcp_wellknown_router
@@ -195,82 +193,6 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutdown complete")
 
 
-class MCPCORSMiddleware:
-    """Reflect the incoming Origin header for /mcp/ paths.
-
-    MCP OAuth and protocol endpoints are accessed by external MCP clients
-    whose origins are not known ahead of time. Rather than maintaining a
-    static allowlist, this middleware reflects the request Origin back as
-    Access-Control-Allow-Origin for any /mcp/ request.
-
-    It strips the Origin header from the inner scope so that neither the
-    standard CORSMiddleware nor the MCP SDK TransportSecurityMiddleware
-    add conflicting headers (the SDK treats absent Origin as same-origin).
-    """
-
-    def __init__(self, app: ASGIApp):
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not scope.get("path", "").startswith("/mcp/"):
-            await self.app(scope, receive, send)
-            return
-
-        # Extract Origin header
-        origin: str | None = None
-        for name, value in scope.get("headers", []):
-            if name == b"origin":
-                origin = value.decode("latin-1")
-                break
-
-        if not origin:
-            await self.app(scope, receive, send)
-            return
-
-        cors_headers = {
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Expose-Headers": "mcp-session-id, mcp-protocol-version",
-            "Vary": "Origin",
-        }
-
-        # Handle CORS preflight
-        if scope.get("method") == "OPTIONS":
-            response = StarletteResponse(
-                status_code=204,
-                headers={
-                    **cors_headers,
-                    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-                    "Access-Control-Allow-Headers": "*",
-                    "Access-Control-Max-Age": "86400",
-                },
-            )
-            await response(scope, receive, send)
-            return
-
-        # Strip Origin so inner CORSMiddleware and MCP SDK TransportSecurity
-        # don't see it — our send wrapper handles CORS headers instead.
-        modified_scope = dict(scope)
-        modified_scope["headers"] = [
-            (name, value) for name, value in scope["headers"]
-            if name != b"origin"
-        ]
-
-        cors_header_pairs = [
-            (k.lower().encode("latin-1"), v.encode("latin-1"))
-            for k, v in cors_headers.items()
-        ]
-
-        async def send_with_cors(message: dict) -> None:
-            if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
-                headers.extend(cors_header_pairs)
-                message = {**message, "headers": headers}
-            await send(message)
-
-        await self.app(modified_scope, receive, send_with_cors)
-
-
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
@@ -278,24 +200,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Reflect Origin for /mcp/ paths — MCP OAuth and protocol endpoints are
-# accessed by external clients whose origins aren't known ahead of time.
-# Added FIRST so it ends up outermost (Starlette's add_middleware inserts
-# at position 0; the first call's middleware lands last in the list and
-# becomes the outermost wrapper after build_middleware_stack iterates it).
-app.add_middleware(MCPCORSMiddleware)
-
-# Set all CORS enabled origins (for non-MCP routes — /api/v1/*, frontend, etc.)
-if settings.all_cors_origins:
-    cors_kwargs: dict = dict(
-        allow_origins=settings.all_cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    if settings.ENVIRONMENT == "local":
-        cors_kwargs["allow_origin_regex"] = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
-    app.add_middleware(CORSMiddleware, **cors_kwargs)
+# CORS: MCP OAuth and protocol endpoints are accessed by external MCP clients
+# whose origins aren't known ahead of time. Using allow_origin_regex to reflect
+# any incoming Origin (CORSMiddleware reflects the actual value, not "*", so it
+# works with allow_credentials). The regex is unconditional — MCP requires it in
+# both local dev and production. API endpoints remain protected by JWT auth.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.all_cors_origins,
+    allow_origin_regex=r".*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["mcp-session-id", "mcp-protocol-version"],
+)
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 

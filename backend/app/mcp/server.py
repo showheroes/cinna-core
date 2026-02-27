@@ -373,6 +373,15 @@ class MCPServerRegistry:
             original_root_path = scope.get("root_path", "")
             scope["root_path"] = f"{original_root_path}/mcp/{connector_id_str}"
 
+            # Strip Origin header so the MCP SDK's TransportSecurityMiddleware
+            # doesn't reject cross-origin requests from browser-based MCP clients.
+            # CORS is handled by FastAPI's CORSMiddleware; the SDK treats absent
+            # Origin as same-origin and accepts the request.
+            scope["headers"] = [
+                (name, value) for name, value in scope["headers"]
+                if name != b"origin"
+            ]
+
             await app(scope, receive, send)
         finally:
             mcp_connector_id_var.reset(token_conn)
