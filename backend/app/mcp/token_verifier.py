@@ -45,7 +45,7 @@ class MCPTokenVerifier(TokenVerifier):
 
             # Verify connector match
             if str(token_record.connector_id) != self.connector_id:
-                logger.debug(f"Token connector mismatch: {token_record.connector_id} != {self.connector_id}")
+                logger.debug("Token connector mismatch: %s != %s", token_record.connector_id, self.connector_id)
                 return None
 
             # Verify connector is still active

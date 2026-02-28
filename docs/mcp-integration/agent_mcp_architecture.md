@@ -112,6 +112,8 @@ This is more secure than URL-as-security-boundary because URLs can leak inadvert
 | **MCP Session** | Transport-level session (shared across chats); stored as metadata, not used for routing |
 | **Resource** (`workspace://{folder}/{path}`) | Individual workspace files from `files/`, `uploads/`, `scripts/` — dynamically listed |
 | **Notification** (`resources/list_changed`) | Sent after `send_message` completes and after file uploads to trigger client resource re-fetch |
+| **Notification** (`notifications/progress`) | Progress updates during `send_message` streaming — phase labels (Thinking, Processing, Using tool: X) with monotonic progress 0→100 |
+| **Notification** (`notifications/message` / log) | Partial content streaming during `send_message` — assistant response chunks sent via `ctx.info()`, throttled at 0.5s |
 | **Prompt** (`prompts/list`, `prompts/get`) | Agent example prompts — defined as `slug: text` lines on the agent model, exposed as MCP slash commands |
 
 ### Resource Design
@@ -180,6 +182,43 @@ File upload:
 - **Non-fatal** — all notification errors are caught and logged at debug level; they never affect tool responses or upload results
 - **Per-session exception isolation** — `broadcast_resource_list_changed` catches exceptions per session so one disconnected client doesn't block others
 
+### Progress & Content Streaming Notifications
+
+During `send_message` processing, the handler sends MCP notifications so clients can show real-time progress instead of a spinner. This uses two MCP notification mechanisms:
+
+**Progress notifications (`notifications/progress`):**
+- Sent via `ctx.report_progress(progress, total, message)` from the MCP SDK's `Context` object
+- Client must include `_meta.progressToken` in the request to receive these; if absent, `report_progress` is a silent no-op
+- Progress increments by 10 per streaming event, capped at 100 (monotonically increasing per MCP spec)
+- Phase labels identify what the agent is doing: "Preparing agent environment...", "Thinking...", "Processing...", "Using tool: {name}"
+
+**Log notifications (`notifications/message`):**
+- Sent via `ctx.info(content)` — always works, no token needed
+- Streams partial assistant response content to the client
+- Throttled to every 0.5s to avoid flooding
+
+**Notification flow during `send_message`:**
+```
+Client -> Server: tools/call "send_message"
+  Server -> Client: notifications/progress (0/100, "Preparing agent environment...")
+  [environment readiness check]
+  Server -> Client: notifications/progress (10/100, "Thinking...")
+  Server -> Client: notifications/progress (20/100, "Processing...")
+  Server -> Client: notifications/message (info: "First part of the response...")
+  Server -> Client: notifications/progress (30/100, "Using tool: Bash")
+  Server -> Client: notifications/progress (40/100, "Processing...")
+  Server -> Client: notifications/message (info: "Second part of the response...")
+  [progress caps at 100; further events don't send progress]
+Server -> Client: tool result (complete JSON response)
+Server -> Client: notifications/resources/list_changed
+```
+
+**Design decisions:**
+- **Purely additive** — the final tool result is unchanged; notifications are extra
+- **Non-fatal** — all notification errors are caught and logged at debug level; they never affect the tool response
+- **Graceful degradation** — if the client doesn't support progress tokens or log notifications, everything still works
+- **No forced completion** — progress is not forced to 100 at the end; the tool result itself signals completion
+
 ### Tool Design
 
 The agent exposes two tools:
@@ -197,18 +236,28 @@ This solves a fundamental problem: Claude Desktop (and similar MCP clients) reus
 
 ### Service Layer Architecture
 
-The tool handler follows the same isolation pattern as `A2ARequestHandler`:
+The tool handler follows the same isolation pattern as `A2ARequestHandler`. All OAuth and connector logic is delegated to the service layer:
 
 ```
 tools.py (thin MCP entry point — tool handlers)
     ├─ Extract MCP context vars (connector_id, mcp_session_id)
     ├─ MCPConnectorService.resolve_connector_context() → (connector, agent, environment)
-    └─ MCPRequestHandler.handle_send_message(message, mcp_session_id, context_id)
+    │   └─ Raises: ConnectorNotFoundError, ConnectorInactiveError, AgentNotAvailableError, EnvironmentNotFoundError
+    └─ MCPRequestHandler.handle_send_message(message, mcp_session_id, context_id, mcp_ctx)
             ├─ SessionService.get_or_create_mcp_session(context_id=...)
             ├─ MessageService.create_message()
+            ├─ mcp_ctx.report_progress(0, 100, "Preparing agent environment...")
             ├─ SessionService.ensure_environment_ready_for_streaming()
             ├─ MessageService.stream_message_with_events()
+            │   └─ _send_mcp_progress() per event → report_progress + ctx.info
             └─ Return JSON: {"response": "...", "context_id": "<session_uuid>"}
+
+oauth_routes.py (thin OAuth route handlers)
+    ├─ All routes delegate to MCPOAuthService or MCPConsentService
+    ├─ MCPOAuthService (register_client, create_authorization, exchange_authorization_code, refresh_access_token, revoke_token)
+    │   └─ Raises: ConnectorNotFoundError, ConnectorInactiveError, InvalidClientError, InvalidGrantError, MaxClientsReachedError
+    └─ MCPConsentService (get_consent_details, approve_consent)
+        └─ Raises: AuthRequestNotFoundError, AuthRequestExpiredError, AuthRequestUsedError, MCPPermissionDeniedError
 
 notifications.py (resource change notifications)
     ├─ notify_resource_list_changed(session) → session.send_resource_list_changed()
@@ -228,7 +277,10 @@ prompts.py (MCP prompt handlers)
     └─ register_mcp_prompts(server) → patches prompts/list and prompts/get handlers
 ```
 
-**Key principle:** No direct database queries in `MCPRequestHandler` — all data access goes through `SessionService` and `MessageService`, matching the A2A handler pattern.
+**Key principles:**
+- No direct database queries in `MCPRequestHandler` — all data access goes through `SessionService` and `MessageService`, matching the A2A handler pattern
+- All OAuth and connector validation delegates to service layer; route handlers are thin wrappers that convert domain exceptions (`MCPError` subclasses from `mcp_errors.py`) to HTTP responses
+- Domain exceptions carry `status_code` for direct HTTP conversion via `_handle_mcp_error()` helpers
 
 ---
 
@@ -530,6 +582,6 @@ All three share the same underlying services: SessionService, MessageService, ag
 
 ---
 
-**Document Version:** 1.5
-**Last Updated:** 2026-02-27
-**Status:** Implemented (Phase 1 MVP + workspace resources, per-chat session isolation via context_id, example prompts, resource change notifications)
+**Document Version:** 1.7
+**Last Updated:** 2026-02-28
+**Status:** Implemented (Phase 1 MVP + workspace resources, per-chat session isolation via context_id, example prompts, resource change notifications, progress & content streaming notifications, service layer refactoring)

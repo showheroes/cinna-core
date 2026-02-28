@@ -261,7 +261,7 @@ class MCPServerRegistry:
 
         self._servers[connector_id] = asgi_app
         self._mcp_instances[connector_id] = mcp_server
-        logger.info(f"Created MCP server for connector {connector_id}")
+        logger.info("Created MCP server for connector %s", connector_id)
         return asgi_app
 
     def remove(self, connector_id: str) -> None:
@@ -275,7 +275,7 @@ class MCPServerRegistry:
             removed = True
         self._active_sessions.pop(connector_id, None)
         if removed:
-            logger.info(f"Removed MCP server for connector {connector_id}")
+            logger.info("Removed MCP server for connector %s", connector_id)
 
     def clear(self) -> None:
         """Clear all servers (for shutdown). Called by the run() context on exit."""

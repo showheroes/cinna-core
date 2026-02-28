@@ -9,6 +9,13 @@ from app.models.mcp_oauth_client import MCPOAuthClient
 from app.models import Agent
 from app.models.environment import AgentEnvironment
 from app.core.config import settings
+from app.services.mcp_errors import (
+    ConnectorNotFoundError,
+    ConnectorInactiveError,
+    MCPPermissionDeniedError,
+    AgentNotAvailableError,
+    EnvironmentNotFoundError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +71,7 @@ class MCPConnectorService:
         if not connector:
             return None
         if connector.owner_id != owner_id:
-            raise ValueError("Not authorized")
+            raise MCPPermissionDeniedError()
 
         update_dict = data.model_dump(exclude_unset=True)
         connector.sqlmodel_update(update_dict)
@@ -91,7 +98,7 @@ class MCPConnectorService:
         if not connector:
             return False
         if connector.owner_id != owner_id:
-            raise ValueError("Not authorized")
+            raise MCPPermissionDeniedError()
 
         db_session.delete(connector)
 
@@ -146,19 +153,24 @@ class MCPConnectorService:
             (connector, agent, environment) tuple
 
         Raises:
-            ValueError: If any entity is missing or inactive
+            ConnectorNotFoundError: If connector doesn't exist.
+            ConnectorInactiveError: If connector is inactive.
+            AgentNotAvailableError: If agent is missing or has no environment.
+            EnvironmentNotFoundError: If the agent environment doesn't exist.
         """
         connector = db_session.get(MCPConnector, connector_id)
-        if not connector or not connector.is_active:
-            raise ValueError("Connector not found or inactive")
+        if not connector:
+            raise ConnectorNotFoundError()
+        if not connector.is_active:
+            raise ConnectorInactiveError()
 
         agent = db_session.get(Agent, connector.agent_id)
         if not agent or not agent.active_environment_id:
-            raise ValueError("Agent not found or has no active environment")
+            raise AgentNotAvailableError()
 
         environment = db_session.get(AgentEnvironment, agent.active_environment_id)
         if not environment:
-            raise ValueError("Agent environment not found")
+            raise EnvironmentNotFoundError()
 
         return connector, agent, environment
 

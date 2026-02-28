@@ -774,7 +774,7 @@ def test_get_adapter_inactive_connector(
     superuser_token_headers: dict[str, str],
     db,
 ) -> None:
-    """_get_adapter_for_connector raises ValueError for inactive connector."""
+    """_get_adapter_for_connector raises ConnectorInactiveError for inactive connector."""
     agent, connector = _setup_agent_with_connector(
         client, superuser_token_headers,
         agent_name="Inactive Resource Agent",
@@ -789,7 +789,8 @@ def test_get_adapter_inactive_connector(
     )
 
     import pytest
-    with pytest.raises(ValueError, match="not found or inactive"):
+    from app.services.mcp_errors import ConnectorInactiveError
+    with pytest.raises(ConnectorInactiveError):
         _run_with_connector_context(
             connector_id,
             _get_adapter_for_connector,

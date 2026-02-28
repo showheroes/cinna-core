@@ -16,6 +16,7 @@ from app.models.mcp_connector import (
 )
 from app.core.config import settings
 from app.services.mcp_connector_service import MCPConnectorService
+from app.services.mcp_errors import MCPError
 
 router = APIRouter(prefix="/agents", tags=["mcp-connectors"])
 
@@ -117,8 +118,8 @@ def update_mcp_connector(
             owner_id=current_user.id,
             data=connector_in,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+    except MCPError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
     return MCPConnectorService.to_public(connector)
@@ -139,8 +140,8 @@ def delete_mcp_connector(
             connector_id=connector_id,
             owner_id=current_user.id,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+    except MCPError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
     if not deleted:
         raise HTTPException(status_code=404, detail="Connector not found")
     return Message(message="Connector deleted successfully")

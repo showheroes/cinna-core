@@ -16,6 +16,7 @@ import logging
 from app.core.config import settings
 from app.core.db import create_session
 from app.services.mcp_connector_service import MCPConnectorService
+from app.services.mcp_errors import MCPError
 from app.mcp.request_handler import MCPRequestHandler
 from app.mcp.upload_token import create_file_upload_token
 from app.mcp.server import mcp_connector_id_var, mcp_session_id_var
@@ -77,7 +78,7 @@ async def _handle_send_message_inner(message: str, context_id: str = "", ctx=Non
             connector, agent, environment = MCPConnectorService.resolve_connector_context(
                 db, connector_id,
             )
-        except ValueError as e:
+        except MCPError as e:
             logger.warning("[MCP] Context resolution failed for connector %s: %s", connector_id_str, e)
             return f"Error: {e}"
 
@@ -92,6 +93,7 @@ async def _handle_send_message_inner(message: str, context_id: str = "", ctx=Non
         message,
         effective_mcp_session_id,
         context_id=context_id or None,
+        mcp_ctx=ctx,
     )
 
 
@@ -105,7 +107,7 @@ async def handle_get_file_upload_url(filename: str, workspace_path: str = "uploa
     try:
         return _handle_get_file_upload_url_inner(filename, workspace_path)
     except Exception as e:
-        logger.exception(f"Unhandled error in MCP get_file_upload_url tool: {e}")
+        logger.exception("Unhandled error in MCP get_file_upload_url tool: %s", e)
         return f"Error: {str(e)}"
 
 
@@ -120,7 +122,7 @@ def _handle_get_file_upload_url_inner(filename: str, workspace_path: str = "uplo
     with create_session() as db:
         try:
             MCPConnectorService.resolve_connector_context(db, connector_id)
-        except ValueError as e:
+        except MCPError as e:
             return f"Error: {e}"
 
     # Build upload URL

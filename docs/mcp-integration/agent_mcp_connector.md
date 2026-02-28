@@ -210,9 +210,11 @@ Two new nullable fields added to the `session` table:
 
 **Router Registration:** `backend/app/api/main.py` (tag: `mcp-consent`)
 
+**Service Layer:** Route handlers delegate to `MCPConsentService` (`backend/app/services/mcp_consent_service.py`). Domain exceptions are converted to HTTP responses via `_handle_mcp_error()`.
+
 **Consent Info Response (`ConsentInfo`):** agent name, connector name/mode, client name, scopes, expiry.
 
-**Approval Logic:**
+**Approval Logic** (in `MCPConsentService.approve_consent()`):
 1. Validate nonce exists, not used, not expired
 2. Check email ACL: user is connector owner OR email in `allowed_emails`
 3. Mark auth request as used
@@ -223,7 +225,7 @@ Two new nullable fields added to the `session` table:
 
 **File:** `backend/app/mcp/oauth_routes.py`
 
-Mounted at `/mcp/oauth` in `backend/app/main.py`.
+Mounted at `/mcp/oauth` in `backend/app/main.py`. Route handlers are thin wrappers that delegate all business logic to `MCPOAuthService` (`backend/app/services/mcp_oauth_service.py`) and convert domain exceptions to HTTP responses.
 
 | Endpoint | Purpose | Spec |
 |----------|---------|------|
@@ -250,7 +252,8 @@ Mounted at `/mcp/oauth` in `backend/app/main.py`.
 ```
 
 **DCR (`/register`):**
-- Extracts `connector_id` from `resource` URL via `_extract_connector_id_from_resource()`
+- Delegates to `MCPOAuthService.register_client()`
+- Extracts `connector_id` from `resource` URL via `extract_connector_id_from_resource()`
 - Validates connector exists and is active
 - Enforces `max_clients` limit (429 if exceeded)
 - Generates `client_id` (UUID) + `client_secret` (48 bytes, base64url)
@@ -289,10 +292,12 @@ Mounted at `/mcp/oauth` in `backend/app/main.py`.
 - `get_connector(db_session, connector_id)` — Get by ID
 - `update_connector(db_session, connector_id, owner_id, data)` — Update with ownership check; evicts MCP server if deactivated
 - `delete_connector(db_session, connector_id, owner_id)` — Delete with ownership check; evicts MCP server from registry
-- `resolve_connector_context(db_session, connector_id)` — Load and validate connector, agent, environment for tool requests (used by tools.py entry point)
+- `resolve_connector_context(db_session, connector_id)` — Load and validate connector, agent, environment for tool requests. Raises: `ConnectorNotFoundError`, `ConnectorInactiveError`, `AgentNotAvailableError`, `EnvironmentNotFoundError`
 - `check_email_access(db_session, connector_id, email)` — Check email in `allowed_emails`
 - `get_registered_client_count(db_session, connector_id)` — Count registered OAuth clients
 - `to_public(connector)` — Convert to public dict with computed `mcp_server_url`
+
+**Exception Handling:** All service methods raise domain exceptions from `mcp_errors.py` (e.g., `MCPPermissionDeniedError` for ownership violations) instead of generic `ValueError`. Route handlers catch `MCPError` and convert to `HTTPException` using `status_code` from the exception.
 
 ### MCP Server Infrastructure
 
@@ -367,30 +372,53 @@ Starlette routing precedence ensures `/mcp/oauth/...` routes match before the `/
 2. Extract MCP transport session ID from contextvar and/or tool context
 3. Resolve connector, agent, environment via `MCPConnectorService.resolve_connector_context()`
 4. Create `MCPRequestHandler` with resolved entities
-5. Delegate to `handler.handle_send_message(message, mcp_session_id, context_id)`
+5. Delegate to `handler.handle_send_message(message, mcp_session_id, context_id, mcp_ctx=ctx)`
+   - `ctx` (MCP `Context` object) is passed through as `mcp_ctx` to enable progress/log notifications during streaming
 
 **File:** `backend/app/mcp/request_handler.py` (business logic handler)
 
 **Class:** `MCPRequestHandler`
 
-`handle_send_message(message, mcp_session_id, context_id)` logic:
+`handle_send_message(message, mcp_session_id, context_id, mcp_ctx)` logic:
 1. Get or create platform session via `SessionService.get_or_create_mcp_session(context_id=...)`
    - If `context_id` provided → look up session by UUID, verify it belongs to this connector
    - If not provided or invalid → create new session
    - `mcp_session_id` is stored as metadata on new sessions but NOT used for session lookup
 2. Create user message via `MessageService.create_message()`
 3. Trigger title generation for new sessions via `SessionService.auto_generate_session_title()`
-4. Ensure environment is ready via `SessionService.ensure_environment_ready_for_streaming()`
-5. Acquire per-session `asyncio.Lock` for sequential processing
-6. Stream response via `MessageService.stream_message_with_events()` (resolves environment URL/auth internally from `environment_id`)
-7. Collect response parts and return JSON: `{"response": "...", "context_id": "<session_uuid>"}`
+4. Send initial progress notification: `mcp_ctx.report_progress(0, 100, "Preparing agent environment...")`
+5. Ensure environment is ready via `SessionService.ensure_environment_ready_for_streaming()`
+6. Acquire per-session `asyncio.Lock` for sequential processing
+7. Stream response via `MessageService.stream_message_with_events()` (resolves environment URL/auth internally from `environment_id`)
+   - For each streaming event, `_send_mcp_progress()` sends progress and content notifications (see below)
+8. Collect response parts and return JSON: `{"response": "...", "context_id": "<session_uuid>"}`
    - Error responses also JSON: `{"error": "...", "context_id": "..."}`
 
-**Service Layer:** `backend/app/services/mcp_connector_service.py`
-- `MCPConnectorService.resolve_connector_context()` — Loads and validates connector, agent, environment for tool requests
+**Progress & Content Streaming (`_send_mcp_progress` static method):**
+
+During the streaming loop, the handler sends MCP notifications to keep the client informed:
+
+| Event Type | Progress Notification | Content Notification |
+|------------|----------------------|---------------------|
+| `thinking` | `report_progress(+10, 100, "Thinking...")` | — |
+| `assistant` | `report_progress(+10, 100, "Processing...")` | `ctx.info(content)` (throttled at 0.5s) |
+| `tool` | `report_progress(+10, 100, "Using tool: {name}")` | — |
+
+**Behavior:**
+- Progress increments by 10 per event, capped at 100 (monotonically increasing per MCP spec)
+- Once progress reaches 100, `report_progress` calls stop (further events are silent)
+- Content chunks (`ctx.info`) are throttled to every 0.5s to avoid flooding the client
+- If `mcp_ctx` is `None` (no MCP context), all notifications are silently skipped
+- The MCP SDK's `report_progress` auto-detects whether the client sent a `progressToken`; if not, it's a no-op
+- All notification calls are wrapped in try/except — failures are logged at debug level and never affect the tool response
+
+**Service Layer:**
+- `backend/app/services/mcp_connector_service.py` — `MCPConnectorService.resolve_connector_context()` loads and validates connector, agent, environment for tool requests
+- `backend/app/services/mcp_consent_service.py` — `MCPConsentService` handles OAuth consent flow (get_consent_details, approve_consent)
+- `backend/app/services/mcp_oauth_service.py` — `MCPOAuthService` handles OAuth 2.1 logic (register_client, create_authorization, exchange_authorization_code, refresh_access_token, revoke_token)
 
 **Message Queuing:**
-- Per-session locks via `_session_locks` dict in request handler
+- Per-session locks via `_session_locks` dict in request handler (bounded: evicts idle entries when exceeding 1000 to prevent unbounded memory growth)
 - Returns error if lock is already held (another message in progress)
 
 **`register_mcp_tools(server)`:** Registers `send_message(message, context_id)` and `get_file_upload_url(filename, workspace_path)` on the FastMCP instance via `@server.tool()`. The tool description instructs the LLM to always pass back the `context_id` from the previous response to maintain conversation continuity. After `send_message` completes, the wrapper sends a `notifications/resources/list_changed` notification to the client (the agent may have created or modified workspace files) and registers the session in the registry for broadcast reuse by the upload route. Notification failures are non-fatal.
@@ -629,7 +657,10 @@ Uses direct `fetch()` calls with JWT auth headers (not auto-generated client).
 
 ### Backend — Services
 
-- `backend/app/services/mcp_connector_service.py` — Connector CRUD logic
+- `backend/app/services/mcp_errors.py` — MCPError exception hierarchy (ConnectorNotFoundError, ConnectorInactiveError, MCPPermissionDeniedError, AgentNotAvailableError, EnvironmentNotFoundError, AuthRequestNotFoundError/Expired/Used, InvalidClientError, InvalidGrantError, MaxClientsReachedError)
+- `backend/app/services/mcp_connector_service.py` — Connector CRUD logic; raises domain exceptions from `mcp_errors.py`
+- `backend/app/services/mcp_consent_service.py` — OAuth consent flow (get_consent_details, approve_consent, _validate_auth_request)
+- `backend/app/services/mcp_oauth_service.py` — OAuth 2.1 logic (register_client, create_authorization, exchange_authorization_code, refresh_access_token, revoke_token) plus helpers (get_as_metadata_dict, extract_connector_id_from_resource)
 
 ### Backend — MCP Infrastructure
 
@@ -673,6 +704,7 @@ Uses direct `fetch()` calls with JWT auth headers (not auto-generated client).
 - `backend/tests/api/mcp_integration/test_mcp_resources.py` — Workspace resource tests (URI parsing, tree filtering, file reading, WorkspaceResourceManager, registration)
 - `backend/tests/api/mcp_integration/test_mcp_prompts.py` — Agent example prompts tests (parsing, DB fetch, handler registration, list/get/not-found/empty)
 - `backend/tests/api/mcp_integration/test_mcp_notifications.py` — Resource change notification tests (capability, send_message notification, broadcast, session tracking)
+- `backend/tests/api/mcp_integration/test_mcp_progress_notifications.py` — Progress and content streaming notification tests (multi-step progress, capping, throttling, failure resilience)
 - `backend/tests/utils/mcp.py` — Test utilities
 
 ## Related Documentation
@@ -682,6 +714,6 @@ Uses direct `fetch()` calls with JWT auth headers (not auto-generated client).
 
 ---
 
-**Document Version:** 1.5
-**Last Updated:** 2026-02-27
-**Status:** Implemented (Phase 1-7 complete + workspace resources, per-chat session isolation via context_id, example prompts, resource change notifications)
+**Document Version:** 1.7
+**Last Updated:** 2026-02-28
+**Status:** Implemented (Phase 1-7 complete + workspace resources, per-chat session isolation via context_id, example prompts, resource change notifications, progress & content streaming notifications, service layer refactoring)

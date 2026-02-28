@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.db import create_session
 from app.mcp.upload_token import verify_file_upload_token
 from app.services.mcp_connector_service import MCPConnectorService
+from app.services.mcp_errors import MCPError
 from app.services.environment_service import EnvironmentService
 
 logger = logging.getLogger(__name__)
@@ -82,8 +83,8 @@ async def upload_file_to_mcp(
             connector, agent, environment = MCPConnectorService.resolve_connector_context(
                 db, connector_uuid,
             )
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+        except MCPError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.message)
 
         # Validate environment is running
         if environment.status != "running":
@@ -99,7 +100,7 @@ async def upload_file_to_mcp(
     try:
         result = await adapter.upload_file_to_agent_env(filename, content)
     except Exception as e:
-        logger.exception(f"[MCP Upload] Failed to upload file to agent-env: {e}")
+        logger.exception("[MCP Upload] Failed to upload file to agent-env: %s", e)
         raise HTTPException(status_code=502, detail=f"Failed to upload file to agent environment: {e}")
 
     logger.info(

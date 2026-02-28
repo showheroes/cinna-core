@@ -10,6 +10,7 @@ rather than direct database queries (following the same pattern as A2ARequestHan
 import asyncio
 import json
 import logging
+import time
 from typing import Callable
 from uuid import UUID
 
@@ -24,12 +25,23 @@ from app.utils import create_task_with_error_logging
 
 logger = logging.getLogger(__name__)
 
-# Per-session locks for sequential message processing
+# Per-session locks for sequential message processing.
+# Bounded: evict unlocked entries when the dict exceeds _MAX_SESSION_LOCKS
+# to prevent unbounded memory growth from orphaned sessions.
 _session_locks: dict[str, asyncio.Lock] = {}
+_MAX_SESSION_LOCKS = 1000
 
 
 def _get_session_lock(session_id: str) -> asyncio.Lock:
     if session_id not in _session_locks:
+        # Evict unlocked (idle) entries if we've exceeded the limit
+        if len(_session_locks) >= _MAX_SESSION_LOCKS:
+            to_remove = [
+                sid for sid, lock in _session_locks.items()
+                if not lock.locked()
+            ]
+            for sid in to_remove:
+                del _session_locks[sid]
         _session_locks[session_id] = asyncio.Lock()
     return _session_locks[session_id]
 
@@ -65,11 +77,53 @@ class MCPRequestHandler:
         self.connector = connector
         self.get_db_session = get_db_session
 
+    @staticmethod
+    async def _send_mcp_progress(mcp_ctx, event: dict, progress: int, last_info_time: float) -> tuple[int, float]:
+        """
+        Send MCP progress and log notifications for a streaming event.
+
+        Returns updated (progress, last_info_time) tuple.
+        Failures are silently caught — notifications must never crash the tool.
+        """
+        if mcp_ctx is None:
+            return progress, last_info_time
+
+        event_type = event.get("type", "")
+        now = time.monotonic()
+
+        try:
+            # Send progress notification for phase labels (capped at 100)
+            if event_type == "assistant" and progress < 100:
+                progress = min(progress + 10, 100)
+                await mcp_ctx.report_progress(progress, 100, "Processing...")
+            elif event_type == "tool" and progress < 100:
+                tool_name = event.get("name", "tool")
+                progress = min(progress + 10, 100)
+                await mcp_ctx.report_progress(progress, 100, f"Using tool: {tool_name}")
+            elif event_type == "thinking" and progress < 100:
+                progress = min(progress + 10, 100)
+                await mcp_ctx.report_progress(progress, 100, "Thinking...")
+        except Exception:
+            logger.debug("[MCP] Failed to send progress notification (non-fatal)", exc_info=True)
+
+        try:
+            # Stream partial content via log notifications (throttled to 0.5s)
+            if event_type == "assistant":
+                content = event.get("content", "")
+                if content and (now - last_info_time) >= 0.5:
+                    await mcp_ctx.info(content)
+                    last_info_time = now
+        except Exception:
+            logger.debug("[MCP] Failed to send log notification (non-fatal)", exc_info=True)
+
+        return progress, last_info_time
+
     async def handle_send_message(
         self,
         message: str,
         mcp_session_id: str | None = None,
         context_id: str | None = None,
+        mcp_ctx=None,
     ) -> str:
         """
         Handle send_message tool call.
@@ -128,6 +182,12 @@ class MCPRequestHandler:
 
         # Phase 2: Ensure environment is ready for streaming
         # (activates suspended environments, same as A2A handler)
+        if mcp_ctx is not None:
+            try:
+                await mcp_ctx.report_progress(0, 100, "Preparing agent environment...")
+            except Exception:
+                logger.debug("[MCP] Failed to send initial progress notification (non-fatal)", exc_info=True)
+
         try:
             environment, _agent = await SessionService.ensure_environment_ready_for_streaming(
                 session_id=session_id,
@@ -145,6 +205,8 @@ class MCPRequestHandler:
             return json.dumps({"error": "Another message is being processed. Please wait.", "context_id": result_context_id})
 
         response_parts: list[str] = []
+        mcp_progress = 0
+        mcp_last_info_time = 0.0
         async with lock:
             try:
                 async for event in MessageService.stream_message_with_events(
@@ -156,6 +218,11 @@ class MCPRequestHandler:
                     get_fresh_db_session=self.get_db_session,
                 ):
                     event_type = event.get("type", "")
+
+                    # Send MCP progress/log notifications for partial content streaming
+                    mcp_progress, mcp_last_info_time = await self._send_mcp_progress(
+                        mcp_ctx, event, mcp_progress, mcp_last_info_time,
+                    )
 
                     if event_type == "assistant":
                         content = event.get("content", "")

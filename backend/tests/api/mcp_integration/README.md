@@ -19,6 +19,7 @@ See `tests/api/agents/README.md` for shared fixture details.
 | `test_mcp_connector_crud.py` | CRUD lifecycle, multiple connectors, ownership enforcement, partial updates, edge cases |
 | `test_mcp_oauth_flow.py` | Full OAuth flow (with/without PKCE), DCR (with/without resource), consent, token refresh/revocation, form-encoded token endpoint, root-level well-known endpoints, transport security, error cases, end-to-end scenarios |
 | `test_mcp_send_message.py` | MCP tool handler: session creation with correct fields, user+agent message storage, session reuse, external session ID preservation, inactive connector rejection, agent response metadata |
+| `test_mcp_progress_notifications.py` | MCP progress and content streaming notifications: multi-step agent progress tracking, progress capping at 100, content throttling at 0.5s, notification failure resilience, error event handling |
 
 ## Live Testing Fix Coverage
 
