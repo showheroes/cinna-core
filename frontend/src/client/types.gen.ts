@@ -416,14 +416,23 @@ export type AgentPublic = {
 export type AgentSchedulePublic = {
     id: string;
     agent_id: string;
+    name: string;
     cron_string: string;
-    timezone: string;
     description: string;
     enabled: boolean;
+    prompt: (string | null);
     last_execution: (string | null);
     next_execution: string;
     created_at: string;
     updated_at: string;
+};
+
+/**
+ * List response model for AgentSchedule.
+ */
+export type AgentSchedulesPublic = {
+    data: Array<AgentSchedulePublic>;
+    count: number;
 };
 
 /**
@@ -792,6 +801,18 @@ export type CreateAgentTaskResponse = {
     session_id?: (string | null);
     message?: (string | null);
     error?: (string | null);
+};
+
+/**
+ * Request to create a new schedule.
+ */
+export type CreateScheduleRequest = {
+    name: string;
+    cron_string: string;
+    timezone: string;
+    description: string;
+    prompt?: (string | null);
+    enabled?: boolean;
 };
 
 export type CredentialCreate = {
@@ -1669,16 +1690,6 @@ export type RevokeResponse = {
 };
 
 /**
- * Request to save schedule configuration.
- */
-export type SaveScheduleRequest = {
-    cron_string: string;
-    timezone: string;
-    description: string;
-    enabled?: boolean;
-};
-
-/**
  * Request to generate schedule from natural language.
  */
 export type ScheduleRequest = {
@@ -1968,6 +1979,18 @@ export type Token = {
 export type UpdatePassword = {
     current_password: string;
     new_password: string;
+};
+
+/**
+ * Request to update an existing schedule. All fields optional.
+ */
+export type UpdateScheduleRequest = {
+    name?: (string | null);
+    cron_string?: (string | null);
+    timezone?: (string | null);
+    description?: (string | null);
+    prompt?: (string | null);
+    enabled?: (boolean | null);
 };
 
 /**
@@ -2292,21 +2315,30 @@ export type AgentsGenerateScheduleData = {
 
 export type AgentsGenerateScheduleResponse = (ScheduleResponse);
 
-export type AgentsSaveScheduleData = {
+export type AgentsCreateScheduleData = {
     id: string;
-    requestBody: SaveScheduleRequest;
+    requestBody: CreateScheduleRequest;
 };
 
-export type AgentsSaveScheduleResponse = (AgentSchedulePublic);
+export type AgentsCreateScheduleResponse = (AgentSchedulePublic);
 
-export type AgentsGetScheduleData = {
+export type AgentsListSchedulesData = {
     id: string;
 };
 
-export type AgentsGetScheduleResponse = ((AgentSchedulePublic | null));
+export type AgentsListSchedulesResponse = (AgentSchedulesPublic);
+
+export type AgentsUpdateScheduleData = {
+    id: string;
+    requestBody: UpdateScheduleRequest;
+    scheduleId: string;
+};
+
+export type AgentsUpdateScheduleResponse = (AgentSchedulePublic);
 
 export type AgentsDeleteScheduleData = {
     id: string;
+    scheduleId: string;
 };
 
 export type AgentsDeleteScheduleResponse = (Message);

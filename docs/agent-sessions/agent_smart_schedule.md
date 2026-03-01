@@ -2,94 +2,88 @@
 
 ## Overview
 
-The **Agent Smart Scheduler** allows users to configure automatic execution of agents using natural language instead of manually crafting CRON expressions. Users can type phrases like "every workday in the morning at 7" and an AI function converts this to a proper CRON string with timezone awareness.
+The **Agent Smart Scheduler** allows users to configure multiple automatic execution schedules per agent using natural language instead of manually crafting CRON expressions. Users can type phrases like "every workday in the morning at 7" and an AI function converts this to a proper CRON string with timezone awareness.
+
+Each agent can have **multiple schedules**, each with its own timing, description, and optional custom prompt. This enables agents that perform different actions on different cadences (e.g., collect data snapshots daily, produce a weekly summary).
 
 ## User Experience Flow
 
 ### 1. Scheduler Configuration UI
 
-**Location**: `frontend/src/routes/_layout/agent/$agentId.tsx` → Config Tab (first tab) → Above prompts section
+**Location**: Agent Config Tab → "Schedules" card (side by side with Handovers)
 
-**Components**:
-- **Enable/Disable Toggle** - Switch to enable scheduler feature (similar to mode toggle in `frontend/src/routes/_layout/index.tsx:334`)
-- **Scheduler Form** (appears only when toggle is enabled):
-  - **Text input field** - For natural language schedule input
-  - **"Schedule Smart" button** - Triggers AI conversion (also triggered by Enter key)
-  - **Explanation display** - Shows AI's interpretation in human-readable format
-  - **Next execution display** - Shows when the agent will run next
-  - **"Apply" button** - Saves scheduler configuration (appears only when changes detected)
+**Component**: `frontend/src/components/Agents/AgentSchedulesCard.tsx`
 
-### 2. User Interaction Sequence
+The Schedules card follows the same pattern as MCP Connectors — a card with a list of items and create/edit dialogs.
+
+**Card Layout**:
+- **Header**: CalendarClock icon + "Schedules" title + description + "New" button
+- **Content**: List of schedule rows, each showing:
+  - Name (bold), description (muted), next execution time
+  - Badges: enabled/disabled, "Custom prompt" if prompt is set
+  - Action buttons: edit, toggle enabled/disabled, delete with confirmation
+
+### 2. Creating a Schedule
 
 ```
-1. User navigates to Agent Config page → Config tab
-2. User sees "Scheduler" section above prompts with enable/disable toggle
-3. User toggles the switch to enable scheduler
-4. Scheduler form appears below the toggle
-5. User types: "every workday in the morning at 7"
-6. User clicks "Schedule Smart" (or presses Enter)
-7. AI function processes input with user's timezone (e.g., CET from browser)
-   - AI returns: CRON string and refined description
-8. Backend calculates next execution time from CRON string
-9. System displays:
+1. User clicks "New" button in Schedules card header
+2. Create dialog opens with:
+   a. Name input (required) — e.g., "Daily data collection"
+   b. Timing input + "Generate" button (AI CRON generation)
+   c. Prompt textarea (optional — leave empty to use agent's entrypoint prompt)
+3. User types timing: "every workday in the morning at 7"
+4. User clicks "Generate"
+5. AI processes input with user's timezone (from browser)
+   - Returns: CRON string and refined description
+6. Backend calculates next execution time
+7. Preview displays:
    - Description: "Every weekday at 7:00 AM, Central European Time"
-   - Next execution: "Monday, December 30, 2025 at 7:00 AM CET" (calculated by backend)
-   - CRON string: "0 6 * * 1-5" (in UTC, optionally shown)
-10. User clicks "Apply" to save the schedule
-11. AgentSchedule record is created/updated in database with enabled=true
+   - Next execution: "Monday, March 3, 2026 at 7:00 AM CET"
+8. User clicks "Create" to save
+9. New AgentSchedule record is created in database
 ```
 
-**Disabling Scheduler**:
+### 3. Editing a Schedule
+
 ```
-1. User toggles the switch to disable
-2. Confirmation dialog may appear (if schedule exists)
-3. Schedule is updated with enabled=false (or deleted based on UX preference)
-4. Scheduler form collapses
+1. User clicks edit (pencil) button on a schedule row
+2. Edit dialog opens pre-populated with current values:
+   a. Name input
+   b. Current schedule info display (description, next execution)
+   c. Timing input + "Generate" button (to change timing)
+   d. Prompt textarea (pre-populated)
+3. User can change name, prompt, and/or regenerate timing
+4. User clicks "Save"
 ```
 
-### 3. Visual Layout Example
+### 4. Toggling and Deleting
 
-**When Scheduler is Disabled**:
-```
-┌─────────────────────────────────────────────────────────┐
-│ Config Tab                                              │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│ Scheduler                                               │
-│ Enable automatic execution  [○─────]  (OFF)             │
-│                                                         │
-│ ─────────────────────────────────────────────────────── │
-│                                                         │
-│ Prompts                                                 │
-│ ...                                                     │
-└─────────────────────────────────────────────────────────┘
-```
+- **Toggle**: Click power button to enable/disable without deleting
+- **Delete**: Click trash button → confirmation dialog → permanently removed
 
-**When Scheduler is Enabled**:
+### 5. Visual Layout
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│ Config Tab                                              │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│ Scheduler                                               │
-│ Enable automatic execution  [─────●]  (ON)              │
-│                                                         │
-│ ┌─────────────────────────────────────────────────────┐ │
-│ │ every workday in the morning at 7                   │ │
-│ └─────────────────────────────────────────────────────┘ │
-│ [Schedule Smart]                                        │
-│                                                         │
-│ ✓ Schedule: Every weekday at 7:00 AM, Central European │
-│   Time                                                  │
-│ ⏰ Next run: Monday, December 30, 2025 at 7:00 AM CET  │
-│                                                         │
-│ [Apply]                                                 │
-│                                                         │
-│ ─────────────────────────────────────────────────────── │
-│                                                         │
-│ Prompts                                                 │
-│ ...                                                     │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ 🕐 Schedules                                          [New] │
+│ Schedule execution times for this agent with different      │
+│ prompts and cadences                                        │
+├─────────────────────────────────────────────────────────────┤
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Daily data collection    [Enabled] [Custom prompt]  ✏⚡🗑│ │
+│ │ Every weekday at 7:00 AM, CET                          │ │
+│ │ 🕐 Next: Monday, March 3, 2026 at 7:00 AM CET         │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Weekly summary           [Enabled]                  ✏⚡🗑│ │
+│ │ Every Friday at 5:00 PM, CET                           │ │
+│ │ 🕐 Next: Friday, March 7, 2026 at 5:00 PM CET         │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Hourly monitoring        [Disabled]                 ✏⚡🗑│ │
+│ │ Every hour from 9 AM to 5 PM, Mon-Fri                  │ │
+│ └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Business Rules
@@ -117,31 +111,36 @@ This prevents:
 
 ### Timezone Handling
 
-**User timezone is passed from browser to AI function**
+**User timezone is passed from browser to API for CRON conversion only — it is NOT stored.**
 
 - Frontend extracts timezone: `Intl.DateTimeFormat().resolvedOptions().timeZone`
 - Example values: `"America/New_York"`, `"Europe/Berlin"`, `"Asia/Tokyo"`
 - AI function interprets schedule in user's timezone
-- CRON string is stored in UTC for consistent execution
-- Next execution time is displayed in user's local timezone
+- CRON string is converted to UTC before storage
+- Timezone is provided transiently in create/update requests for conversion
+- Next execution time is displayed in user's browser timezone
 
 **Example**:
 ```
 User input: "every day at 7 AM"
 User timezone: "Europe/Berlin" (UTC+1)
-CRON string: "0 6 * * *" (6 AM UTC = 7 AM CET)
+CRON stored: "0 6 * * *" (6 AM UTC = 7 AM CET)
 Display: "Every day at 7:00 AM, Central European Time"
 ```
 
-### Configuration Decoupling
+### Schedule-Specific Prompts
 
-**Scheduler configuration is independent from prompts**
+Each schedule can have its own **prompt** field:
+- If `prompt` is set: that prompt is used as the starting message when the schedule fires
+- If `prompt` is null: the agent's `entrypoint_prompt` is used as fallback
+- If both are null: "Start scheduled execution." is used as final fallback
 
-- Scheduler has its own "Apply" button
-- Prompts section has separate "Save prompts" button
-- User can update scheduler without affecting prompts
-- User can update prompts without affecting scheduler
-- Both can be updated in the same session but saved separately
+This enables different actions on different cadences:
+```
+Agent: "Market Analyst"
+├── Schedule: "Daily data collection" (prompt: "Collect today's market data snapshots")
+└── Schedule: "Weekly summary" (prompt: "Produce a weekly market summary report")
+```
 
 ### Cloned Agents and Scheduler
 
@@ -150,68 +149,17 @@ Display: "Every day at 7:00 AM, Central European Time"
 **Clone Owner Capabilities**:
 - Clone owners (both "user" and "builder" modes) can create, edit, and delete their own schedules
 - Scheduler UI is always available in the Configuration tab for clone owners
-- Clone's schedule is completely independent from parent's schedule
+- Clone's schedules are completely independent from parent's schedules
 
 **Behavior During Agent Sharing**:
-- When an agent is shared/cloned, the scheduler configuration is **NOT copied** to the clone
-- The clone starts with **no scheduler** configured
-- Clone owner must set up their own schedule if needed
+- When an agent is shared/cloned, scheduler configurations are **NOT copied** to the clone
+- The clone starts with **no schedules** configured
+- Clone owner must set up their own schedules if needed
 
 **Behavior During Push Updates**:
 - When the parent agent owner pushes updates to clones, **scheduler configs are NOT synced**
 - Push updates only sync workspace files (scripts, docs, knowledge)
 - Each clone's scheduler configuration remains completely independent
-- This is intentional: clone owners may have different:
-  - Automation needs and frequencies
-  - Timezones
-  - Business hours and availability
-
-**Example Scenario**:
-```
-Original Agent (Owner: Alice, Timezone: US/Eastern)
-├── Schedule: "Every weekday at 9 AM Eastern"
-│
-└── Clone (Owner: Bob, Timezone: Europe/Berlin)
-    ├── Initially: No schedule configured
-    └── Bob creates: "Every weekday at 8 AM Berlin time"
-
-When Alice pushes updates:
-- Bob's prompts and scripts are updated
-- Bob's schedule remains unchanged (still "Every weekday at 8 AM Berlin time")
-```
-
-### State Management
-
-**Changes are not auto-saved**
-
-- User must explicitly click "Apply" to save scheduler changes
-- "Apply" button only appears when changes are detected
-- Changes detected when:
-  - AI generates new CRON string different from saved one
-  - User clears the scheduler (removes schedule)
-  - User modifies and re-processes the input
-
-### Enable/Disable Toggle Behavior
-
-**Initial State**:
-- If agent has no schedule: toggle is OFF, form is hidden
-- If agent has schedule with `enabled=true`: toggle is ON, form is visible with schedule details
-- If agent has schedule with `enabled=false`: toggle is OFF, form is hidden
-
-**Enabling Scheduler** (toggle OFF → ON):
-- Scheduler form appears
-- If previous schedule exists, load it into the form
-- Otherwise, show empty form for new schedule
-
-**Disabling Scheduler** (toggle ON → OFF):
-- Immediate action: delete the schedule or set `enabled=false` in database
-- Scheduler form collapses
-- User confirmation recommended if active schedule exists
-
-**UX Considerations**:
-- Toggle state should persist across page reloads
-- Disabling should be quick (no confirmation for better UX, unless there are active executions)
-- Re-enabling should restore previous configuration if available
 
 ## AI Function Specification
 
@@ -228,166 +176,32 @@ When Alice pushes updates:
 }
 ```
 
-**Example**:
-```json
-{
-    "natural_language": "every workday in the morning at 7",
-    "timezone": "Europe/Berlin"
-}
-```
-
 ### Output
 
 **Success Response**:
-```python
-{
-    "success": True,
-    "description": str,        # Human-readable interpretation
-    "cron_string": str,        # Standard CRON expression (in UTC)
-}
-```
-
-**Example Success**:
 ```json
 {
     "success": true,
     "description": "Every weekday at 7:00 AM, Central European Time",
-    "cron_string": "0 6 * * 1-5"
+    "cron_string": "0 7 * * 1-5"
 }
 ```
 
-**Note**: The backend will calculate `next_execution` from the CRON string after receiving the AI function response.
+**Note**: The CRON string from the AI is in **local time**. The backend converts it to UTC before storing. The backend also calculates `next_execution` from the UTC CRON string.
 
 **Error Response**:
-```python
-{
-    "success": False,
-    "error": str,              # Explanation of why conversion failed
-}
-```
-
-**Example Errors**:
 ```json
 {
     "success": false,
-    "error": "Cannot extract schedule: the phrase 'sometimes' is too vague. Please specify exact time or frequency."
-}
-
-{
-    "success": false,
-    "error": "Execution frequency too high: minimum interval is 30 minutes. Your input 'every 5 minutes' is not allowed."
-}
-
-{
-    "success": false,
-    "error": "Cannot extract schedule: please specify when you want the agent to run (e.g., time of day, day of week)."
+    "error": "Execution frequency too high: minimum interval is 30 minutes."
 }
 ```
 
-### AI Function Behavior
-
-**The AI function should**:
-
-1. **Parse natural language with timezone context**
-   - Understand common phrases: "morning" (7-9 AM), "evening" (6-8 PM), "noon" (12 PM)
-   - Interpret "workday" as Monday-Friday
-   - Handle relative terms: "every hour", "daily", "weekly"
-
-2. **Generate valid CRON string in UTC**
-   - Convert user's local time to UTC
-   - Use standard CRON format: `minute hour day month day_of_week`
-   - Example: `0 6 * * 1-5` = Every weekday at 6 AM UTC (7 AM CET)
-
-3. **Validate minimum frequency (30 minutes)**
-   - Reject schedules that run more frequently than once per 30 minutes
-   - Return error with clear explanation
-
-4. **Return precise human-readable description**
-   - Include exact time (not vague terms like "morning")
-   - Include timezone name or abbreviation
-   - Use natural language: "Every weekday at 7:00 AM, Central European Time"
-
-5. **Handle ambiguous or incomplete input**
-   - Identify missing information (e.g., "every day" without time)
-   - Request clarification in error message
-   - Suggest what information is needed
-
-### Implementation Pattern
-
-Following the **AI Functions Development Guide** pattern:
+### Implementation
 
 **File**: `backend/app/agents/schedule_generator.py`
 
-```python
-from google.genai import Client
-from pathlib import Path
-import json
-from datetime import datetime
-import pytz
-
-PROMPTS_DIR = Path(__file__).parent / "prompts"
-SCHEDULE_PROMPT = PROMPTS_DIR / "schedule_generator_prompt.md"
-
-def generate_agent_schedule(
-    natural_language: str,
-    timezone: str,
-    api_key: str
-) -> dict:
-    """
-    Convert natural language schedule to CRON string.
-
-    Args:
-        natural_language: User's input (e.g., "every workday at 7 AM")
-        timezone: IANA timezone (e.g., "Europe/Berlin")
-        api_key: Google API key
-
-    Returns:
-        Dict with success, description, cron_string, or error
-    """
-    client = Client(api_key=api_key)
-
-    # Load prompt template
-    template = SCHEDULE_PROMPT.read_text(encoding="utf-8")
-
-    # Construct prompt with user input
-    prompt = f"""{template}
-
----
-
-## User Input
-
-Natural language: {natural_language}
-User timezone: {timezone}
-Current time: {datetime.now(pytz.timezone(timezone)).isoformat()}
-
-Generate the schedule configuration in JSON format.
-"""
-
-    # Call LLM
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
-        contents=prompt,
-    )
-
-    # Parse response (expected to be JSON)
-    result = json.loads(response.text.strip())
-
-    return result
-```
-
-**Note**: The AI function only returns the CRON string and description. The backend service (`agent_scheduler_service.py`) will calculate `next_execution` time.
-
-**Prompt Template**: `backend/app/agents/prompts/schedule_generator_prompt.md`
-
-Should include:
-- Task description
-- CRON format explanation
-- Timezone conversion instructions
-- Minimum frequency validation (30 minutes)
-- Examples of good vs bad interpretations
-- JSON output format specification
-- Common time phrases and their meanings
-- Error handling guidelines
+Uses the provider manager for cascade LLM selection. Loads prompt template from `backend/app/agents/prompts/schedule_generator_prompt.md`.
 
 ## Backend Implementation
 
@@ -396,728 +210,313 @@ Should include:
 **Component Responsibilities**:
 
 1. **AI Function** (`backend/app/agents/schedule_generator.py`)
-   - Converts natural language to CRON string
+   - Converts natural language to CRON string (in local time)
    - Returns: `{ success, description, cron_string }` OR `{ success: false, error }`
    - Does NOT calculate next execution time
 
 2. **Scheduler Service** (`backend/app/services/agent_scheduler_service.py`)
-   - Calculates next execution time from CRON string
-   - Creates/updates `AgentSchedule` records
-   - Manages schedule CRUD operations
+   - Converts CRON from local time to UTC
+   - Calculates next execution time from UTC CRON string
+   - Full multi-schedule CRUD: create, list, get, update, delete
    - Business logic layer between API and database
 
 3. **API Routes** (`backend/app/api/routes/agents.py`)
-   - `POST /{agent_id}/schedule` - Generate schedule from natural language
-   - `PUT /{agent_id}/schedule` - Save schedule configuration
-   - `GET /{agent_id}/schedule` - Get current schedule
-   - `DELETE /{agent_id}/schedule` - Delete schedule
+   - `POST /{id}/schedules/generate` — AI CRON generation (stateless)
+   - `POST /{id}/schedules` — Create schedule
+   - `GET /{id}/schedules` — List all schedules
+   - `PUT /{id}/schedules/{schedule_id}` — Update schedule
+   - `DELETE /{id}/schedules/{schedule_id}` — Delete schedule
 
-4. **Database Model** (`AgentSchedule`)
-   - Stores schedule configuration
+4. **Background Scheduler** (`backend/app/services/agent_schedule_scheduler.py`)
+   - Polls every minute for due schedules
+   - Creates sessions and sends messages using schedule-specific or agent entrypoint prompt
+   - Updates execution times after each run
+
+5. **Database Model** (`AgentSchedule`)
+   - Stores schedule configuration per agent
    - Tracks execution times
    - Many-to-one relationship with Agent
 
-**Data Flow**:
+### Data Flow
+
+**Creating a schedule**:
 ```
-User Input ("every workday at 7 AM")
+User types "every workday at 7 AM" + name + optional prompt
   ↓
-Frontend → POST /api/v1/agents/{id}/schedule
+Frontend → POST /api/v1/agents/{id}/schedules/generate
   ↓
-API Route → AIFunctionsService.generate_schedule()
+AI Function → Returns { description, cron_string } (local time)
   ↓
-AI Function → Returns { description, cron_string }
+Backend converts CRON to UTC, calculates next_execution
   ↓
-API Route → AgentSchedulerService.calculate_next_execution()
+Frontend displays preview → User clicks "Create"
   ↓
-API Route → Returns { description, cron_string, next_execution }
+Frontend → POST /api/v1/agents/{id}/schedules
   ↓
-Frontend → Displays to user
+Service converts CRON to UTC, creates AgentSchedule record
+```
+
+**Schedule execution** (background):
+```
+Background scheduler polls every minute
   ↓
-User clicks "Apply"
+Finds schedules where next_execution <= now AND enabled = true
   ↓
-Frontend → PUT /api/v1/agents/{id}/schedule
+For each due schedule:
+  message = schedule.prompt OR agent.entrypoint_prompt OR fallback
   ↓
-API Route → AgentSchedulerService.create_or_update_schedule()
-  ↓
-Database → AgentSchedule record created/updated
+Creates session, sends message, updates last/next execution
 ```
 
 ### Database Schema
 
-**New Model** (`backend/app/models.py`):
-
-Create a separate `AgentSchedule` model with **many-to-one** relationship to `Agent`:
+**Model**: `backend/app/models/agent_schedule.py`
 
 ```python
-from datetime import datetime
-import uuid
-from sqlmodel import Field, SQLModel, Relationship
-
 class AgentSchedule(SQLModel, table=True):
-    """
-    Agent execution schedule configuration.
+    __tablename__ = "agent_schedule"
 
-    Relationship: Many AgentSchedule → One Agent
-    (An agent can have multiple schedules, though initially only one will be used)
-    """
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     agent_id: uuid.UUID = Field(foreign_key="agent.id", ondelete="CASCADE")
 
+    # Schedule identity
+    name: str  # User-friendly label (e.g., "Daily data collection")
+
     # Schedule configuration
-    cron_string: str  # CRON expression in UTC (e.g., "0 6 * * 1-5")
-    timezone: str  # User's IANA timezone (e.g., "Europe/Berlin")
+    cron_string: str  # CRON expression in UTC
     description: str  # Human-readable description from AI
-    enabled: bool = Field(default=True)  # Allow disabling without deleting
+    enabled: bool = Field(default=True)
+
+    # Schedule-specific prompt (null = use agent's entrypoint_prompt)
+    prompt: str | None = Field(default=None, sa_type=Text)
 
     # Execution tracking
-    last_execution: datetime | None = Field(default=None)  # Last run timestamp
-    next_execution: datetime  # Calculated next run timestamp
+    last_execution: datetime | None = Field(default=None)
+    next_execution: datetime
 
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime
+    updated_at: datetime
 
     # Relationship
     agent: "Agent" = Relationship(back_populates="schedules")
 ```
 
-**Update Agent model** to add relationship:
-
-```python
-class Agent(AgentBase, table=True):
-    # ... existing fields ...
-
-    # Relationship
-    schedules: list["AgentSchedule"] = Relationship(
-        back_populates="agent",
-        cascade_delete=True
-    )
-```
-
-**Note**: By default, agents have no schedules (the relationship list will be empty).
+**Key changes from original single-schedule model**:
+- Added `name: str` — required user-friendly label
+- Added `prompt: str | None` — schedule-specific prompt (TEXT column)
+- Removed `timezone: str` — timezone is transient, used only during CRON conversion
 
 ### Scheduler Service
 
 **File**: `backend/app/services/agent_scheduler_service.py`
 
-This service handles all scheduler-related business logic:
+**Methods**:
 
-```python
-from datetime import datetime
-import pytz
-from croniter import croniter
-from sqlmodel import Session
-import uuid
-from app.models import AgentSchedule
-
-class AgentSchedulerService:
-    @staticmethod
-    def calculate_next_execution(cron_string: str, timezone: str) -> datetime:
-        """
-        Calculate next execution time from CRON string.
-
-        Args:
-            cron_string: CRON expression in UTC
-            timezone: User's IANA timezone
-
-        Returns:
-            Next execution datetime in user's timezone
-        """
-        user_tz = pytz.timezone(timezone)
-        cron = croniter(cron_string, datetime.now(pytz.utc))
-        next_run_utc = cron.get_next(datetime)
-        next_run_local = next_run_utc.astimezone(user_tz)
-        return next_run_local
-
-    @staticmethod
-    def create_or_update_schedule(
-        *,
-        session: Session,
-        agent_id: uuid.UUID,
-        cron_string: str,
-        timezone: str,
-        description: str,
-        enabled: bool = True
-    ) -> AgentSchedule:
-        """
-        Create or update agent schedule.
-
-        For now, we only support one schedule per agent, so this will
-        update the existing one or create new one.
-        """
-        # Check if schedule exists
-        existing = session.query(AgentSchedule).filter(
-            AgentSchedule.agent_id == agent_id
-        ).first()
-
-        next_exec = AgentSchedulerService.calculate_next_execution(
-            cron_string, timezone
-        )
-
-        if existing:
-            # Update existing
-            existing.cron_string = cron_string
-            existing.timezone = timezone
-            existing.description = description
-            existing.enabled = enabled
-            existing.next_execution = next_exec
-            existing.updated_at = datetime.utcnow()
-            schedule = existing
-        else:
-            # Create new
-            schedule = AgentSchedule(
-                agent_id=agent_id,
-                cron_string=cron_string,
-                timezone=timezone,
-                description=description,
-                enabled=enabled,
-                next_execution=next_exec
-            )
-            session.add(schedule)
-
-        session.commit()
-        session.refresh(schedule)
-        return schedule
-
-    @staticmethod
-    def get_agent_schedule(
-        session: Session,
-        agent_id: uuid.UUID
-    ) -> AgentSchedule | None:
-        """Get active schedule for an agent."""
-        return session.query(AgentSchedule).filter(
-            AgentSchedule.agent_id == agent_id
-        ).first()
-
-    @staticmethod
-    def delete_schedule(
-        session: Session,
-        agent_id: uuid.UUID
-    ) -> bool:
-        """Delete agent schedule."""
-        schedule = AgentSchedulerService.get_agent_schedule(session, agent_id)
-        if schedule:
-            session.delete(schedule)
-            session.commit()
-            return True
-        return False
-```
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `convert_local_cron_to_utc` | `(cron_string, timezone) → str` | Convert local CRON to UTC |
+| `calculate_next_execution` | `(cron_string) → datetime` | Next run from UTC CRON |
+| `create_schedule` | `(session, agent_id, name, cron_string, timezone, description, prompt, enabled) → AgentSchedule` | Create new schedule |
+| `get_agent_schedules` | `(session, agent_id) → list[AgentSchedule]` | List all, ordered by created_at |
+| `get_schedule_by_id` | `(session, schedule_id) → AgentSchedule | None` | Get single schedule |
+| `update_schedule` | `(session, schedule_id, **fields) → AgentSchedule` | Partial update; recalculates next_execution if cron_string changes |
+| `delete_schedule` | `(session, schedule_id) → bool` | Delete by schedule ID |
+| `get_all_enabled_schedules` | `(session) → list[AgentSchedule]` | All enabled schedules (for background runner) |
+| `update_execution_time` | `(session, schedule_id, last_execution) → None` | Update after execution |
 
 ### API Endpoints
 
-**New routes**: `backend/app/api/routes/agents.py`
+**Routes in** `backend/app/api/routes/agents.py`:
 
-```python
-from app.services.agent_scheduler_service import AgentSchedulerService
-from app.services.ai_functions_service import AIFunctionsService
+| Method | Path | Purpose | Request Body | Response |
+|--------|------|---------|--------------|----------|
+| POST | `/{id}/schedules/generate` | AI CRON generation (stateless) | `ScheduleRequest` | `ScheduleResponse` |
+| POST | `/{id}/schedules` | Create schedule | `CreateScheduleRequest` | `AgentSchedulePublic` |
+| GET | `/{id}/schedules` | List all schedules | — | `AgentSchedulesPublic` |
+| PUT | `/{id}/schedules/{schedule_id}` | Update schedule | `UpdateScheduleRequest` | `AgentSchedulePublic` |
+| DELETE | `/{id}/schedules/{schedule_id}` | Delete schedule | — | `Message` |
 
-@router.post("/{agent_id}/schedule", response_model=ScheduleResponse)
-def generate_schedule(
-    *,
-    session: SessionDep,
-    current_user: CurrentUser,
-    agent_id: uuid.UUID,
-    data: ScheduleRequest
-) -> ScheduleResponse:
-    """Generate CRON schedule from natural language using AI."""
-    agent = crud.get_agent(session=session, id=agent_id)
-    if not agent or agent.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Agent not found")
+All endpoints verify agent ownership. PUT/DELETE also verify `schedule.agent_id == id`.
 
-    # Call AI function to generate CRON string
-    ai_result = AIFunctionsService.generate_schedule(
-        natural_language=data.natural_language,
-        timezone=data.timezone
-    )
+### Request/Response Models
 
-    # If successful, calculate next execution
-    if ai_result.get("success"):
-        next_exec = AgentSchedulerService.calculate_next_execution(
-            ai_result["cron_string"],
-            data.timezone
-        )
-        ai_result["next_execution"] = next_exec.isoformat()
-
-    return ScheduleResponse(**ai_result)
-
-@router.put("/{agent_id}/schedule", response_model=AgentSchedulePublic)
-def save_schedule(
-    *,
-    session: SessionDep,
-    current_user: CurrentUser,
-    agent_id: uuid.UUID,
-    data: SaveScheduleRequest
-) -> AgentSchedule:
-    """Save schedule configuration for agent."""
-    agent = crud.get_agent(session=session, id=agent_id)
-    if not agent or agent.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
-    # Create or update schedule using service
-    schedule = AgentSchedulerService.create_or_update_schedule(
-        session=session,
-        agent_id=agent_id,
-        cron_string=data.cron_string,
-        timezone=data.timezone,
-        description=data.description,
-        enabled=data.enabled
-    )
-
-    return schedule
-
-@router.get("/{agent_id}/schedule", response_model=AgentSchedulePublic | None)
-def get_schedule(
-    *,
-    session: SessionDep,
-    current_user: CurrentUser,
-    agent_id: uuid.UUID,
-) -> AgentSchedule | None:
-    """Get current schedule for agent."""
-    agent = crud.get_agent(session=session, id=agent_id)
-    if not agent or agent.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
-    return AgentSchedulerService.get_agent_schedule(session, agent_id)
-
-@router.delete("/{agent_id}/schedule")
-def delete_schedule(
-    *,
-    session: SessionDep,
-    current_user: CurrentUser,
-    agent_id: uuid.UUID,
-) -> dict:
-    """Delete agent schedule."""
-    agent = crud.get_agent(session=session, id=agent_id)
-    if not agent or agent.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
-    deleted = AgentSchedulerService.delete_schedule(session, agent_id)
-    return {"success": deleted}
-```
-
-**Request/Response Models**:
 ```python
 class ScheduleRequest(SQLModel):
-    """Request to generate schedule from natural language."""
+    """Request for AI generation (stateless)."""
     natural_language: str
     timezone: str
 
 class ScheduleResponse(SQLModel):
     """Response from AI schedule generation."""
     success: bool
-    description: str | None = None  # Human-readable explanation
-    cron_string: str | None = None  # CRON expression in UTC
-    next_execution: str | None = None  # ISO 8601 timestamp (calculated by backend)
-    error: str | None = None  # Error message if failed
+    description: str | None = None
+    cron_string: str | None = None
+    next_execution: str | None = None  # ISO 8601, calculated by backend
+    error: str | None = None
 
-class SaveScheduleRequest(SQLModel):
-    """Request to save schedule configuration."""
+class CreateScheduleRequest(SQLModel):
+    """Request to create a new schedule."""
+    name: str
     cron_string: str
-    timezone: str
+    timezone: str  # For CRON conversion, not stored
     description: str
+    prompt: str | None = None
     enabled: bool = True
 
+class UpdateScheduleRequest(SQLModel):
+    """Partial update. All fields optional."""
+    name: str | None = None
+    cron_string: str | None = None
+    timezone: str | None = None  # Required when cron_string changes
+    description: str | None = None
+    prompt: str | None = None
+    enabled: bool | None = None
+
 class AgentSchedulePublic(SQLModel):
-    """Public response model for AgentSchedule."""
+    """Public response for a single schedule."""
     id: uuid.UUID
     agent_id: uuid.UUID
+    name: str
     cron_string: str
-    timezone: str
     description: str
     enabled: bool
+    prompt: str | None
     last_execution: datetime | None
     next_execution: datetime
     created_at: datetime
     updated_at: datetime
+
+class AgentSchedulesPublic(SQLModel):
+    """List response."""
+    data: list[AgentSchedulePublic]
+    count: int
 ```
+
+### Background Scheduler
+
+**File**: `backend/app/services/agent_schedule_scheduler.py`
+
+Polls every minute for due schedules. The prompt fallback chain is:
+
+```python
+message = schedule.prompt or agent.entrypoint_prompt or "Start scheduled execution."
+```
+
+This means each schedule can fire with its own custom prompt, enabling different actions on different cadences from the same agent.
 
 ## Frontend Implementation
 
-### Component Structure
+### Component: AgentSchedulesCard
 
-**File**: `frontend/src/components/Agent/SmartScheduler.tsx`
+**File**: `frontend/src/components/Agents/AgentSchedulesCard.tsx`
 
-```typescript
-interface SmartSchedulerProps {
-    agentId: string;
-    currentSchedule?: {
-        id: string;
-        cron_string: string;
-        timezone: string;
-        description: string;
-        enabled: boolean;
-        next_execution: string;
-    };
-}
+Follows the `McpConnectorsCard` pattern (same state management, dialog approach, list layout).
 
-export function SmartScheduler({ agentId, currentSchedule }: SmartSchedulerProps) {
-    // State management
-    const [enabled, setEnabled] = useState(currentSchedule?.enabled || false);
-    const [input, setInput] = useState("");
-    const [schedule, setSchedule] = useState(currentSchedule);
-    const [hasChanges, setHasChanges] = useState(false);
+**Props**: `{ agentId: string }`
 
-    // Get user timezone
-    const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+**Query**: `useQuery` with key `["agent-schedules", agentId]`, calls `AgentsService.listSchedules()`
 
-    // API calls
-    const generateMutation = useMutation({
-        mutationFn: (naturalLanguage: string) =>
-            AgentsService.generateSchedule({
-                agentId,
-                requestBody: { natural_language: naturalLanguage, timezone: userTimezone }
-            }),
-        onSuccess: (data) => {
-            if (data.success) {
-                setSchedule(data);
-                setHasChanges(true);
-            }
-        }
-    });
+**Mutations**: create, update, toggle (update with `{enabled: !current}`), delete — all invalidate the query key
 
-    const saveMutation = useMutation({
-        mutationFn: (data: { cron_string: string; description: string; enabled: boolean }) =>
-            AgentsService.saveSchedule({
-                agentId,
-                requestBody: {
-                    cron_string: data.cron_string,
-                    timezone: userTimezone,
-                    description: data.description,
-                    enabled: data.enabled
-                }
-            }),
-        onSuccess: () => {
-            setHasChanges(false);
-            toast.success("Schedule saved successfully");
-        }
-    });
+**Create Dialog**:
+1. Name input (required)
+2. Natural language input + "Generate" button (AI CRON generation, shows preview)
+3. Prompt textarea (optional, placeholder: "Leave empty to use agent's entrypoint prompt")
+4. "Create" button (disabled until name + generated schedule present)
 
-    const deleteMutation = useMutation({
-        mutationFn: () => AgentsService.deleteSchedule({ agentId }),
-        onSuccess: () => {
-            setSchedule(null);
-            setEnabled(false);
-            setInput("");
-            toast.success("Schedule disabled");
-        }
-    });
+**Edit Dialog**:
+1. Name input (pre-populated)
+2. Current schedule info display (description, next execution)
+3. Natural language input + "Generate" button (to change timing)
+4. Prompt textarea (pre-populated)
+5. "Save" button
 
-    const handleSchedule = () => {
-        generateMutation.mutate(input);
-    };
+### Integration in AgentConfigTab
 
-    const handleApply = () => {
-        if (schedule?.cron_string) {
-            saveMutation.mutate({
-                cron_string: schedule.cron_string,
-                description: schedule.description,
-                enabled: true
-            });
-        }
-    };
+**File**: `frontend/src/components/Agents/AgentConfigTab.tsx`
 
-    const handleToggle = (checked: boolean) => {
-        setEnabled(checked);
-
-        if (!checked && currentSchedule) {
-            // Disable existing schedule
-            deleteMutation.mutate();
-        }
-    };
-
-    return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <Label>Scheduler</Label>
-
-                {/* Enable/Disable Toggle (similar to mode toggle in index.tsx:334) */}
-                <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                        {enabled ? "Enabled" : "Disabled"}
-                    </span>
-                    <label className="flex cursor-pointer select-none items-center">
-                        <div className="relative">
-                            <input
-                                type="checkbox"
-                                checked={enabled}
-                                onChange={(e) => handleToggle(e.target.checked)}
-                                className="sr-only"
-                            />
-                            <div
-                                className={`block h-6 w-11 rounded-full transition-colors ${
-                                    enabled ? "bg-orange-400" : "bg-gray-300 dark:bg-gray-600"
-                                }`}
-                            ></div>
-                            <div
-                                className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                                    enabled ? "translate-x-5" : ""
-                                }`}
-                            ></div>
-                        </div>
-                    </label>
-                </div>
-            </div>
-
-            {/* Scheduler form - only visible when enabled */}
-            {enabled && (
-                <div className="space-y-4">
-                    <div className="flex gap-2">
-                        <Input
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && handleSchedule()}
-                            placeholder="e.g., every workday in the morning at 7"
-                        />
-                        <Button onClick={handleSchedule} disabled={!input || generateMutation.isPending}>
-                            Schedule Smart
-                        </Button>
-                    </div>
-
-                    {schedule?.success && (
-                        <div className="bg-secondary p-4 rounded-md space-y-2">
-                            <div className="flex items-center gap-2">
-                                <Check className="h-4 w-4 text-green-600" />
-                                <span className="font-medium">{schedule.description}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                <Clock className="h-4 w-4" />
-                                <span>Next run: {formatNextExecution(schedule.next_execution)}</span>
-                            </div>
-                        </div>
-                    )}
-
-                    {schedule?.error && (
-                        <Alert variant="destructive">
-                            <AlertCircle className="h-4 w-4" />
-                            <AlertDescription>{schedule.error}</AlertDescription>
-                        </Alert>
-                    )}
-
-                    {hasChanges && (
-                        <Button onClick={handleApply} className="w-full" disabled={saveMutation.isPending}>
-                            Apply Schedule
-                        </Button>
-                    )}
-                </div>
-            )}
-        </div>
-    );
-}
+```tsx
+<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <AgentSchedulesCard agentId={agent.id} />
+    <AgentHandovers agent={agent} />
+</div>
 ```
 
-### Integration in Agent Config Page
-
-**File**: `frontend/src/routes/_layout/agent/$agentId.tsx`
-
-Add SmartScheduler component in Config tab, above prompts section:
-
-```typescript
-<TabsContent value="config">
-    <div className="space-y-6">
-        {/* Smart Scheduler Section */}
-        <SmartScheduler
-            agentId={agent.id}
-            currentSchedule={agent.schedule}  // Fetched from GET /agents/{id}/schedule
-        />
-
-        <Separator />
-
-        {/* Existing Prompts Section */}
-        <PromptsEditor
-            agentId={agent.id}
-            prompts={agent.prompts}
-        />
-    </div>
-</TabsContent>
-```
-
-**Loading Initial Schedule State**:
-
-When the agent config page loads, it should:
-1. Fetch agent data (existing functionality)
-2. Call `GET /api/v1/agents/{id}/schedule` to get current schedule (if exists)
-3. Pass schedule data to `SmartScheduler` component
-4. Component initializes:
-   - If schedule exists and `enabled=true`: toggle ON, form visible with schedule details
-   - If schedule exists and `enabled=false`: toggle OFF, form hidden
-   - If no schedule: toggle OFF, form hidden
-
-```typescript
-// Example in agent config page
-const { data: agent } = useQuery({
-    queryKey: ["agent", agentId],
-    queryFn: () => AgentsService.getAgent({ agentId })
-});
-
-const { data: schedule } = useQuery({
-    queryKey: ["agentSchedule", agentId],
-    queryFn: () => AgentsService.getSchedule({ agentId }),
-    enabled: !!agentId
-});
-
-// Pass to component
-<SmartScheduler agentId={agentId} currentSchedule={schedule} />
-```
-
-## Future: Schedule Execution
-
-**Note**: The current implementation focuses on **schedule configuration**. Actual automated execution will be handled by a separate backend script.
-
-### Execution Script (Future Implementation)
-
-**File**: `backend/scripts/schedule_runner.py`
-
-This script will:
-1. Run as a background service (cron daemon or systemd timer)
-2. Query all `AgentSchedule` records with `enabled=True`
-3. For each schedule:
-   - Check if `next_execution` time has passed
-   - If yes, trigger agent execution:
-     - Create a new session for automated execution
-     - Send initial message (from agent's entrypoint_prompt)
-     - Update `last_execution` to current time
-     - Calculate and update `next_execution` using `AgentSchedulerService.calculate_next_execution()`
-4. Log execution results in `ScheduledExecution` table (see below)
-
-**Database additions** (future):
-```python
-class ScheduledExecution(SQLModel, table=True):
-    """
-    Audit log for scheduled agent executions.
-    """
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    schedule_id: uuid.UUID = Field(foreign_key="agentschedule.id", ondelete="CASCADE")
-    agent_id: uuid.UUID = Field(foreign_key="agent.id", ondelete="CASCADE")
-    session_id: uuid.UUID | None = Field(
-        foreign_key="session.id",
-        ondelete="SET NULL"
-    )  # Session created for this execution
-
-    scheduled_time: datetime  # When it was supposed to run (from next_execution)
-    actual_time: datetime  # When it actually ran
-    status: str  # success, failed, skipped
-    error_message: str | None
-
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-```
-
-**Key Workflow**:
-1. Script queries: `SELECT * FROM agentschedule WHERE enabled = true AND next_execution <= NOW()`
-2. For each record found:
-   - Execute agent → create session
-   - Log to `ScheduledExecution` table
-   - Update `AgentSchedule.last_execution` and `AgentSchedule.next_execution`
+The old `SmartScheduler` component has been removed and replaced with `AgentSchedulesCard`.
 
 ## Common Use Cases
 
-### Example 1: Daily Morning Report
+### Example 1: Daily Data Collection + Weekly Summary
 
-**User Input**: "every day at 8 AM"
-**Timezone**: "America/New_York"
-
-**AI Function Response**:
-```json
-{
-  "success": true,
-  "description": "Every day at 8:00 AM, Eastern Time",
-  "cron_string": "0 13 * * *"
-}
 ```
-(8 AM EST = 1 PM UTC)
+Agent: "Market Analyst"
 
-**Backend Calculation**:
-- Next execution: "2025-12-30T08:00:00-05:00" (calculated by `AgentSchedulerService`)
+Schedule 1: "Daily data collection"
+  Timing: "every workday at 7 AM"
+  Prompt: "Collect today's market data snapshots for all tracked symbols"
+  CRON (UTC): "0 6 * * 1-5"
 
----
-
-### Example 2: Weekly Summary
-
-**User Input**: "every Monday at noon"
-**Timezone**: "Europe/London"
-
-**AI Function Response**:
-```json
-{
-  "success": true,
-  "description": "Every Monday at 12:00 PM, Greenwich Mean Time",
-  "cron_string": "0 12 * * 1"
-}
+Schedule 2: "Weekly summary"
+  Timing: "every Friday at 5 PM"
+  Prompt: "Produce a weekly market summary report based on collected data"
+  CRON (UTC): "0 16 * * 5"
 ```
 
-**Backend Calculation**:
-- Next execution: "2025-12-30T12:00:00+00:00"
+### Example 2: Different Monitoring Cadences
 
----
-
-### Example 3: Business Hours Check
-
-**User Input**: "every hour during work hours on weekdays"
-**Timezone**: "Europe/Berlin"
-
-**AI Function Response**:
-```json
-{
-  "success": true,
-  "description": "Every hour from 9:00 AM to 5:00 PM, Monday through Friday, Central European Time",
-  "cron_string": "0 8-16 * * 1-5"
-}
 ```
-(9 AM-5 PM CET = 8 AM-4 PM UTC)
+Agent: "Infrastructure Monitor"
 
-**Backend Calculation**:
-- Next execution: "2025-12-30T09:00:00+01:00"
+Schedule 1: "Hourly health check"
+  Timing: "every hour during work hours"
+  Prompt: null (uses agent's entrypoint_prompt)
+  CRON (UTC): "0 8-16 * * 1-5"
 
----
+Schedule 2: "Daily incident report"
+  Timing: "every day at 6 PM"
+  Prompt: "Generate daily incident summary and send to team"
+  CRON (UTC): "0 17 * * *"
+```
 
-### Example 4: Error - Too Frequent
+### Example 3: Error Cases
 
-**User Input**: "every 10 minutes"
-**Timezone**: "Asia/Tokyo"
-
-**AI Function Response**:
+**Too frequent**:
 ```json
 {
   "success": false,
-  "error": "Execution frequency too high: minimum interval is 30 minutes. Your input 'every 10 minutes' is not allowed."
+  "error": "Execution frequency too high: minimum interval is 30 minutes."
 }
 ```
 
----
-
-### Example 5: Error - Ambiguous
-
-**User Input**: "sometimes in the afternoon"
-**Timezone**: "America/Los_Angeles"
-
-**AI Function Response**:
+**Ambiguous**:
 ```json
 {
   "success": false,
-  "error": "Cannot extract schedule: the phrase 'sometimes' is too vague. Please specify exact time or frequency (e.g., 'every day at 3 PM')."
+  "error": "Cannot extract schedule: 'sometimes' is too vague. Please specify exact time or frequency."
 }
 ```
 
 ## Key Design Principles
 
-1. **User-Friendly**: Natural language input instead of complex CRON syntax
-2. **Smart**: AI understands context and common phrases
-3. **Transparent**: Show exactly what the AI understood
-4. **Safe**: Validate frequency to prevent abuse
-5. **Timezone-Aware**: Handle user's local time correctly
-6. **Decoupled**: Scheduler is independent from prompts configuration
-7. **Explicit**: Changes require user confirmation (Apply button)
-8. **Informative**: Show next execution time for verification
-9. **Progressive Disclosure**: Form only appears when toggle is enabled, reducing UI clutter
-10. **Quick Enable/Disable**: Toggle provides instant on/off control without complex forms
+1. **Multi-Schedule**: Each agent can have multiple schedules with different timings and prompts
+2. **User-Friendly**: Natural language input instead of complex CRON syntax
+3. **Smart**: AI understands context and common phrases
+4. **Transparent**: Show exactly what the AI understood with preview
+5. **Safe**: Validate frequency to prevent abuse
+6. **Timezone-Aware**: Handle user's local time correctly (convert to UTC for storage)
+7. **Per-Schedule Prompts**: Different schedules can trigger different agent actions
+8. **Individual Control**: Each schedule can be enabled/disabled or deleted independently
+9. **Informative**: Show next execution time for verification
 
 ## Success Metrics
 
 A successful implementation should allow users to:
-- ✅ Enable/disable scheduling with a single toggle click
-- ✅ Configure schedules in under 30 seconds (once enabled)
-- ✅ Understand exactly when their agent will run
-- ✅ Modify schedules without technical knowledge of CRON
-- ✅ See schedule changes before committing them
+- ✅ Create multiple schedules per agent with different cadences
+- ✅ Assign custom prompts to individual schedules
+- ✅ Configure each schedule in under 30 seconds
+- ✅ Understand exactly when each schedule will fire
+- ✅ Toggle individual schedules on/off without deleting
+- ✅ Modify schedule timing, name, or prompt independently
 - ✅ Avoid accidentally creating high-frequency executions
 - ✅ Work in their local timezone naturally
-- ✅ Have clean UI when scheduler is not needed (toggle off = form hidden)

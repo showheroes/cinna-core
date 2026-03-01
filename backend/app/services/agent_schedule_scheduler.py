@@ -52,8 +52,8 @@ async def _poll_due_schedules() -> None:
                     )
                     continue
 
-                # Determine the message to send
-                message = agent.entrypoint_prompt or "Start scheduled execution."
+                # Determine the message to send (schedule prompt → agent entrypoint → fallback)
+                message = schedule.prompt or agent.entrypoint_prompt or "Start scheduled execution."
 
                 # Create session and send message
                 result = await SessionService.send_session_message(
@@ -73,13 +73,14 @@ async def _poll_due_schedules() -> None:
                         f"Schedule {schedule.id}: failed to execute agent {agent.id}: "
                         f"{result.get('message')}"
                     )
-                else:
-                    logger.info(
-                        f"Schedule {schedule.id}: fired agent {agent.id}, "
-                        f"session={session_id}, action={action}"
-                    )
+                    continue  # Don't advance schedule on failure
 
-                # Update execution times
+                logger.info(
+                    f"Schedule {schedule.id}: fired agent {agent.id}, "
+                    f"session={session_id}, action={action}"
+                )
+
+                # Update execution times only on success
                 AgentSchedulerService.update_execution_time(
                     session=db_session,
                     schedule_id=schedule.id,

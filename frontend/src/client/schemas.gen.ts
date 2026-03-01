@@ -2841,13 +2841,13 @@ export const AgentSchedulePublicSchema = {
             format: 'uuid',
             title: 'Agent Id'
         },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
         cron_string: {
             type: 'string',
             title: 'Cron String'
-        },
-        timezone: {
-            type: 'string',
-            title: 'Timezone'
         },
         description: {
             type: 'string',
@@ -2856,6 +2856,17 @@ export const AgentSchedulePublicSchema = {
         enabled: {
             type: 'boolean',
             title: 'Enabled'
+        },
+        prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt'
         },
         last_execution: {
             anyOf: [
@@ -2886,9 +2897,29 @@ export const AgentSchedulePublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'agent_id', 'cron_string', 'timezone', 'description', 'enabled', 'last_execution', 'next_execution', 'created_at', 'updated_at'],
+    required: ['id', 'agent_id', 'name', 'cron_string', 'description', 'enabled', 'prompt', 'last_execution', 'next_execution', 'created_at', 'updated_at'],
     title: 'AgentSchedulePublic',
     description: 'Public response model for AgentSchedule.'
+} as const;
+
+export const AgentSchedulesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AgentSchedulePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AgentSchedulesPublic',
+    description: 'List response model for AgentSchedule.'
 } as const;
 
 export const AgentSdkConfigSchema = {
@@ -3815,6 +3846,47 @@ export const CreateAgentTaskResponseSchema = {
     required: ['success'],
     title: 'CreateAgentTaskResponse',
     description: 'Response from task creation.'
+} as const;
+
+export const CreateScheduleRequestSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        cron_string: {
+            type: 'string',
+            title: 'Cron String'
+        },
+        timezone: {
+            type: 'string',
+            title: 'Timezone'
+        },
+        description: {
+            type: 'string',
+            title: 'Description'
+        },
+        prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt'
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled',
+            default: true
+        }
+    },
+    type: 'object',
+    required: ['name', 'cron_string', 'timezone', 'description'],
+    title: 'CreateScheduleRequest',
+    description: 'Request to create a new schedule.'
 } as const;
 
 export const CredentialCreateSchema = {
@@ -7734,32 +7806,6 @@ export const SSHKeysPublicSchema = {
     title: 'SSHKeysPublic'
 } as const;
 
-export const SaveScheduleRequestSchema = {
-    properties: {
-        cron_string: {
-            type: 'string',
-            title: 'Cron String'
-        },
-        timezone: {
-            type: 'string',
-            title: 'Timezone'
-        },
-        description: {
-            type: 'string',
-            title: 'Description'
-        },
-        enabled: {
-            type: 'boolean',
-            title: 'Enabled',
-            default: true
-        }
-    },
-    type: 'object',
-    required: ['cron_string', 'timezone', 'description'],
-    title: 'SaveScheduleRequest',
-    description: 'Request to save schedule configuration.'
-} as const;
-
 export const ScheduleRequestSchema = {
     properties: {
         natural_language: {
@@ -9264,6 +9310,80 @@ export const UpdatePasswordSchema = {
     type: 'object',
     required: ['current_password', 'new_password'],
     title: 'UpdatePassword'
+} as const;
+
+export const UpdateScheduleRequestSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        cron_string: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Cron String'
+        },
+        timezone: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Timezone'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt'
+        },
+        enabled: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Enabled'
+        }
+    },
+    type: 'object',
+    title: 'UpdateScheduleRequest',
+    description: 'Request to update an existing schedule. All fields optional.'
 } as const;
 
 export const UpdateSessionStateRequestSchema = {

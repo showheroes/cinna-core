@@ -144,8 +144,10 @@ from .agent_schedule import (
     AgentSchedule,
     ScheduleRequest,
     ScheduleResponse,
-    SaveScheduleRequest,
+    CreateScheduleRequest,
+    UpdateScheduleRequest,
     AgentSchedulePublic,
+    AgentSchedulesPublic,
 )
 from .agent_handover import (
     AgentHandoverConfig,
@@ -451,8 +453,10 @@ __all__ = [
     "AgentSchedule",
     "ScheduleRequest",
     "ScheduleResponse",
-    "SaveScheduleRequest",
+    "CreateScheduleRequest",
+    "UpdateScheduleRequest",
     "AgentSchedulePublic",
+    "AgentSchedulesPublic",
     # Agent Handovers / Task Creation
     "AgentHandoverConfig",
     "HandoverConfigCreate",
