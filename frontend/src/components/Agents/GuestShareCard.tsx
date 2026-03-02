@@ -252,7 +252,7 @@ export function GuestShareCard({ agentId }: GuestShareCardProps) {
             <DialogTrigger asChild>
               <Button size="sm">
                 <Plus className="h-4 w-4 mr-1" />
-                New Link
+                New
               </Button>
             </DialogTrigger>
             <DialogContent>

@@ -188,7 +188,7 @@ export function AccessTokensCard({ agentId }: AccessTokensCardProps) {
             <DialogTrigger asChild>
               <Button size="sm">
                 <Plus className="h-4 w-4 mr-1" />
-                New Token
+                New
               </Button>
             </DialogTrigger>
             <DialogContent>
