@@ -155,6 +155,10 @@ migration: # create a new migration (will prompt for migration name)
 test-backend: # run backend pytest suite inside the backend container
 	docker compose exec backend python -m pytest tests/ -v
 
+.PHONY: check-docs
+check-docs: # check documentation for broken file references
+	python3 .runnerkit/scripts/check_docs_references.py
+
 .PHONY: mcp-inspector
 mcp-inspector: # run mcp inspector for local development and testing
 	cd tools && npx --prefix . @modelcontextprotocol/inspector

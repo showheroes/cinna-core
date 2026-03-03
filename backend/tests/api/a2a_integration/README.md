@@ -20,6 +20,6 @@ See `tests/api/agents/README.md` for fixture details.
 
 ## Related Documentation
 
-- `docs/a2a/a2a_integration.md` — Architecture, data mapping, SSE event flow
-- `docs/a2a/a2a_v1_support.md` — v1.0 adapter layer and method name transformations
-- `docs/a2a/agent_integration_access_tokens.md` — Token modes, scopes, and auth flow
+- `docs/application/a2a_integration/a2a_protocol/a2a_protocol.md` — Architecture, data mapping, SSE event flow
+- `docs/application/a2a_integration/a2a_protocol/a2a_v1_support.md` — v1.0 adapter layer and method name transformations
+- `docs/application/a2a_integration/a2a_access_tokens/a2a_access_tokens.md` — Token modes, scopes, and auth flow

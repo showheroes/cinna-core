@@ -64,6 +64,6 @@ Helpers in `tests/utils/mcp.py`:
 
 ## Related Documentation
 
-- `docs/mcp-integration/agent_mcp_connector.md` — Implementation reference
-- `docs/mcp-integration/implementation_plan.md` — Phased implementation plan
+- `docs/application/mcp_integration/agent_mcp_connector.md` — Implementation reference
+- `docs/application/mcp_integration/agent_mcp_architecture.md` — Architecture overview
 - `discovered_errors_to_update_in_tests.md` — Live testing issues with test coverage mapping

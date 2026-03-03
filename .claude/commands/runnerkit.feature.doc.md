@@ -36,10 +36,14 @@ docs/
 ├── README.md                              # Layer 1 - Project index
 ├── {domain}/                              # Domain folder (e.g., agents, tasks, mcp_integration)
 │   └── {feature}/                         # Feature folder
-│       ├── {feature}.md                   # Business logic (Layer 3a)
-│       ├── {feature}_tech.md              # Technical details (Layer 3b)
+│       ├── {feature}.md                   # Business logic (Layer 3a) - always required
+│       ├── {feature}_tech.md              # Technical details (Layer 3b, optional)
 │       ├── {feature}_widget.md            # Widget docs (Layer 3c, optional)
-│       └── {aspect}.md                    # Other aspect docs (optional)
+│       ├── {aspect}.md                    # Other aspect docs (optional)
+│       └── {aspect}_tech.md              # Aspect technical details (optional)
+├── development/                           # Development guides (LLM-targeted)
+│   └── backend/
+│       └── {topic}.md                     # LLM reference doc (concise, project-specific only)
 ```
 
 **Domain examples:** `agents`, `tasks`, `file_management`, `mcp_integration`, `email_integration`, `agent_environments`, `credentials`, `knowledge`, `realtime`, `a2a`, `development`
@@ -98,6 +102,26 @@ Documents specific UI widgets/wizards related to the feature. Only create if the
 
 For complex features that need additional documentation on specific aspects (e.g., `recovery.md`, `scheduling.md`, `docker_setup.md`). These are supplementary to the main business logic and tech files.
 
+Aspects can also have their own tech files following the same pattern: `{aspect_name}_tech.md`. Use this when an aspect has enough technical depth to warrant separating business logic from implementation details, just like the main feature files.
+
+#### 3e. LLM-Targeted Documentation: `{name}_llm.md` (optional)
+
+Documentation files suffixed with `_llm.md` are intended **exclusively for LLM consumption**, not for humans. These files serve as concise reference sheets that help LLMs work with project-specific patterns, conventions, and structures.
+
+**Key principles:**
+- **Concise, not explanatory** - No verbose explanations, tutorials, or background context. LLMs already know common programming patterns, frameworks, and libraries.
+- **Project-specific data only** - Focus exclusively on information the LLM cannot infer: project conventions, custom patterns, file locations, naming rules, config quirks, domain-specific mappings.
+- **Skip common knowledge** - Don't explain what FastAPI is, how SQLModel works, or standard REST conventions. Only document where this project deviates from or extends common patterns.
+- **Dense reference format** - Bullet points, tables, path lists. Optimize for token efficiency.
+
+**Example:** `docs/development/backend/ai_functions_development.md` could document project-specific patterns for implementing AI-related backend functions — custom decorators, service conventions, model naming — without explaining Python or FastAPI basics.
+
+### Minimal Documentation (Simple Features)
+
+Not every feature needs the full 3-layer treatment. For simple features or standalone topics, a single `{feature}.md` description file is sufficient. The `_tech.md` file is **optional** — only create it when the feature has enough technical depth (multiple files, complex flows, non-obvious implementation details) to warrant a separate technical reference. Similarly, some documentation may just be a descriptive document without the full required sections structure.
+
+**Guideline:** Start with a single `{feature}.md`. Add `_tech.md` only if technical details would clutter the main doc or if the feature spans many files.
+
 ## Documentation Style Rules
 
 **DO:**
@@ -120,14 +144,23 @@ For complex features that need additional documentation on specific aspects (e.g
 2. **Identify domain and feature name**: Map to the correct `docs/{domain}/{feature}/` path
 3. **Explore codebase**: Read relevant models, services, routes, components to understand the feature
 4. **Write/split documentation**:
-   - Always create `{feature}.md` (business logic)
-   - Always create `{feature}_tech.md` (technical details)
+   - Always create `{feature}.md` (business logic / description)
+   - Create `{feature}_tech.md` only if the feature has enough technical depth (multiple files, complex flows, non-obvious implementation)
    - Create `{feature}_widget.md` only if there are notable widgets
    - Create aspect files only if needed for complex sub-topics
+   - Create `{name}_llm.md` when the target audience is LLMs, not humans (e.g., development guides, coding conventions)
 5. **Update `docs/README.md`**: Add/update the feature entry in the registry
 6. **If refactoring**: After creating new files, note which old files were replaced (don't delete them automatically - report to user)
+7. **Verify references**: Run the docs reference checker on all created/updated files:
+   ```
+   python3 .runnerkit/scripts/check_docs_references.py --files docs/{domain}/{feature}/{feature}.md docs/{domain}/{feature}/{feature}_tech.md
+   ```
+   If broken references are found, fix them before finishing. Common issues:
+   - Typos in file paths (verify paths exist with glob/grep)
+   - References to files that were renamed or moved
+   - Links to other feature docs that don't exist yet (use placeholder comment: `<!-- TODO: create {feature} docs -->` next to the link)
 
 ## Output
 
 Write documentation to `docs/{domain}/{feature}/` following the structure above.
-Report what was created/updated and any old files that can be removed.
+Report what was created/updated, any old files that can be removed, and the reference check results.
