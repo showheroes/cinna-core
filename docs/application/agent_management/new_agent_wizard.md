@@ -307,13 +307,7 @@ When extending the wizard, test these scenarios:
 
 ## Related Documentation
 
-- Agent Environment Management: `docs/agent-sessions/agent_env_core.md`
-- Credentials System: `docs/agent-sessions/agent_env_credentials_management.md`
-- SSE Streaming: `docs/agent-sessions/frontend_backend_agentenv_streaming.md`
-- Multi-Agent SDK Management: `docs/agent-sessions/multi_agent_sdk_management.md`
-
----
-
-**Document Version:** 1.1
-**Last Updated:** 2026-01-15
-**Status:** Fully Implemented (SDK Pre-Configuration Added)
+- [Agent Environments](../../agents/agent_environments/agent_environments.md)
+- [Agent Credentials](../../agents/agent_credentials/agent_credentials.md)
+- [Multi-SDK](../../agents/agent_environment_core/multi_sdk.md)
+- [Real-time Streaming](../../application/realtime_events/frontend_backend_agentenv_streaming.md)

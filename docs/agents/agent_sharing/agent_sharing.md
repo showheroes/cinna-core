@@ -203,5 +203,5 @@ Share → Pending → Accept → Clone Created → Active Use
 - **[Agent Credentials](../agent_credentials/agent_credentials.md)** - Credential sharing/placeholder creation during clone setup. See [credential sharing](../agent_credentials/credential_sharing.md)
 - **[AI Credentials](../../application/ai_credentials/ai_credentials.md)** - AI credential sharing via `AICredentialShare` model
 - **[Agent Environment Data Management](../agent_environment_data_management/agent_environment_data_management.md)** - Workspace file copying during clone creation and updates
-- **[Email Sessions](../../email_integration/email_sessions/email_sessions.md)** - Auto-share creation for email integration agents <!-- TODO: create email_sessions docs -->
+- **[Email Sessions](../../application/email_integration/email_sessions.md)** - Auto-share creation for email integration agents
 - **[Guest Sharing](guest_sharing.md)** - Token-based anonymous access to agents (separate sharing mechanism)

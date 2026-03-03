@@ -126,7 +126,7 @@ Token in Header --> get_a2a_auth_context() --> Decode JWT
 ## Integration Points
 
 - **[A2A Protocol](../a2a_protocol/a2a_protocol.md)** - Access tokens are used for A2A authentication
-- **[Agent Sessions](../../../agents/agent_sessions/agent_sessions.md)** - Sessions track `access_token_id` for scope enforcement <!-- TODO: create agent_sessions docs -->
+- **[Agent Sessions](../../agent_sessions/agent_sessions.md)** - Sessions track `access_token_id` for scope enforcement
 
 ---
 

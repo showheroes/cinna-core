@@ -3,8 +3,21 @@
 This document provides context and instructions for LLM assistants working on this Full Stack FastAPI + React project.
 
 **Quick References:**
-- Detailed backend patterns: `docs/development/backend_development_llm.md`
+- Feature map & business context: `docs/README.md` ← start here when planning or exploring unfamiliar features
+- Detailed backend patterns: `docs/development/backend/backend_development_llm.md`
 - Common operations: See `Makefile` in project root
+
+## Documentation Strategy
+
+`docs/README.md` is the entrypoint to all feature documentation. When planning a task or exploring unfamiliar territory, start there to identify which features are involved and how they relate.
+
+From the README, pick the most relevant feature docs and read those business logic files first. If something remains unclear, follow the integration point links to adjacent features and read those next. Expand only as far as needed — not every feature requires full coverage.
+
+Each feature has two doc types:
+- **Business logic file** (`feature_name.md`) — what the feature does, user flows, business rules, integration points
+- **Tech file** (`feature_name_tech.md`) — models, routes, service layer, implementation details
+
+Prefer business logic files. Go into tech files only when you already understand what needs to happen and need to know how it is implemented.
 
 ## Project Overview
 
@@ -92,7 +105,7 @@ workflow-runner-core/
 - Database models in `backend/app/models/` (separate files: `agent.py`, `user.py`, etc.)
 - Models with `table=True` are database tables
 - Models without `table=True` are Pydantic schemas (API request/response)
-- See `docs/development/backend_development_llm.md` for detailed patterns
+- See `docs/development/backend/backend_development_llm.md` for detailed patterns
 
 **Authentication**:
 - JWT tokens (HS256, 8-day expiry by default)
@@ -148,7 +161,7 @@ workflow-runner-core/
 4. Regenerate client: `bash scripts/generate-client.sh`
 5. Use in frontend: `import { ServiceName } from "@/client"`
 
-**Details**: See `docs/development/backend_development_llm.md`
+**Details**: See `docs/development/backend/backend_development_llm.md`
 
 ### Database Schema Changes
 1. Modify models in `backend/app/models/[entity].py`
@@ -157,7 +170,7 @@ workflow-runner-core/
 4. Apply: `make migrate` or `docker compose exec backend alembic upgrade head`
 5. Regenerate frontend client
 
-**Details**: See `Makefile` and `docs/development/backend_development_llm.md`
+**Details**: See `Makefile` and `docs/development/backend/backend_development_llm.md`
 
 ### Frontend Component Organization
 - `src/components/Auth/` - Authentication
@@ -227,7 +240,7 @@ See `Makefile` for: `make prestart`, `make migrate`, `make migration`, `make dev
 - Use `SessionDep`, `CurrentUser` for dependency injection
 - Service layer (`backend/app/services/`) for business logic
 - Models: Base (shared), Database (`table=True`), Public (API response), Update/Create (API input)
-- See `docs/development/backend_development_llm.md` for detailed patterns
+- See `docs/development/backend/backend_development_llm.md` for detailed patterns
 
 ### Frontend
 - React Query: `useQuery` for GET, `useMutation` for POST/PUT/DELETE
@@ -293,8 +306,8 @@ When working on this project:
 - [ ] Follow dependency injection pattern in backend
 - [ ] Use React Query for all API calls in frontend
 - [ ] Reference `Makefile` for common operations
-- [ ] See `docs/development/backend_development_llm.md` for detailed patterns
-- [ ] See `docs/development/frontend_development_llm.md` for detailed frontend development patterns
+- [ ] See `docs/development/backend/backend_development_llm.md` for detailed patterns
+- [ ] See `docs/development/frontend/frontend_development_llm.md` for detailed frontend development patterns
 - [ ] See `backend/tests/README.md` for detailed backend test writing patterns and recommendations
 
 ---

@@ -100,12 +100,13 @@ Activities are created/managed by event handlers registered at app startup:
 
 ## Integration Points
 
-- [Event Bus](../../application/realtime_events/event_bus_system.md) - All activity creation is event-driven via `EventService.register_handler()`
-- [Agent Sessions](../agent_sessions/agent_sessions.md) - Activities track session lifecycle (running, completed, error, interrupted) <!-- TODO: create agent_sessions docs -->
-- [Input Tasks](../../tasks/input_tasks/input_tasks.md) - Email task activities link to tasks via `input_task_id` <!-- TODO: create input_tasks docs -->
-- [Email Integration](../../email_integration/email_sessions/email_sessions.md) - Email task incoming/reply pending activities <!-- TODO: create email_sessions docs -->
-- [Streaming](../../application/realtime_events/frontend_backend_agentenv_streaming.md) - `MessageService` emits streaming events that trigger activity creation
-- [Agent Environments](../agent_environments/agent_environments.md) - Activities resolve agent_id through environment lookup
+- [Event Bus](../realtime_events/event_bus_system.md) - All activity creation is event-driven via `EventService.register_handler()`
+- [Agent Sessions](../agent_sessions/agent_sessions.md) - Activities track session lifecycle (running, completed, error, interrupted)
+- [Input Tasks](../input_tasks/input_tasks.md) - Email task activities link to tasks via `input_task_id`
+- [Email Sessions](../email_integration/email_sessions.md) - Email task incoming/reply pending activities
+- [Streaming](../realtime_events/frontend_backend_agentenv_streaming.md) - `MessageService` emits streaming events that trigger activity creation
+- [Agent Environments](../../agents/agent_environments/agent_environments.md) - Activities resolve agent_id through environment lookup
+- [Agent Handover](../../agents/agent_handover/agent_handover.md) - Direct handovers create target-agent sessions that generate the full session activity lifecycle (running → completed/error), notifying target agent owners of delegated work
 
 ## Statistics & Polling
 

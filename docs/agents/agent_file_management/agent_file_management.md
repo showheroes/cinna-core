@@ -99,7 +99,7 @@ Environment Panel → Frontend Route (new tab) → Backend Workspace API → Age
 
 ## Integration Points
 
-- **Agent Sessions** - File upload is part of the message send flow; files are attached to messages <!-- TODO: create agent_sessions docs -->
+- **[Agent Sessions](../../application/agent_sessions/agent_sessions.md)** - File upload is part of the message send flow; files are attached to messages
 - **Agent Environments** - Files are transferred to Docker workspace via adapter; agent-env has upload endpoint. See [Agent Environments](../agent_environments/agent_environments.md)
 - **Agent Environment Core** - Agent-env server handles file upload reception, filename sanitization, workspace tree updates, and prompt generation for uploaded files. See [Agent Environment Core](../agent_environment_core/agent_environment_core.md)
 - **Guest Sessions** - File endpoints support guest access; guest file viewer uses a standalone route <!-- TODO: create guest_sessions docs -->

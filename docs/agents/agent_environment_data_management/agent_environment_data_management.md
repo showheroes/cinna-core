@@ -174,9 +174,9 @@ Agent Model (DB) → Environment Lifecycle Manager → Docker Adapter → Docker
 ## Integration Points
 
 - **[Agent Environments](../agent_environments/agent_environments.md)** - Lifecycle operations (start, rebuild, suspend/activate) trigger data sync; two-layer architecture separates system code from workspace data
-- **[Agent Sharing](../../sharing/agent_sharing/agent_sharing.md)** - Clone creation copies workspace data; push updates sync changes to all clones
-- **[Credential Management](../../credentials/credential_management/credential_management.md)** - Integration credentials synced dynamically to `workspace/credentials/` on every start
-- **[AI Credentials](../../credentials/ai_credentials/ai_credentials.md)** - AI provider keys resolved and injected as environment variables during start
+- **[Agent Sharing](../agent_sharing/agent_sharing.md)** - Clone creation copies workspace data; push updates sync changes to all clones
+- **[Credential Management](../agent_credentials/agent_credentials.md)** - Integration credentials synced dynamically to `workspace/credentials/` on every start
+- **[AI Credentials](../../application/ai_credentials/ai_credentials.md)** - AI provider keys resolved and injected as environment variables during start
 - **[Agent Plugins](../agent_plugins/agent_plugins.md)** - Plugins synced dynamically to `workspace/plugins/` on every start
-- **[Knowledge Management](../../knowledge/knowledge_management/knowledge_management.md)** - Knowledge files synced on-demand during clone/switch, template knowledge updated during rebuild
+- **[Knowledge Management](../../application/knowledge_sources/knowledge_sources.md)** - Knowledge files synced on-demand during clone/switch, template knowledge updated during rebuild
 

@@ -165,3 +165,4 @@ Sending Scheduler (2 min)
 - [Agent Sharing](../../agents/agent_sharing/agent_sharing.md) — Auto-share and clone creation for email senders
 - [Agent Environment Core](../../agents/agent_environment_core/agent_environment_core.md) — Session context injection, prompt generation, helper scripts
 - [Input Tasks](../../application/input_task_management.md) — Task creation from emails, "Send Answer" flow
+- [Agent Activities](../agent_activities/agent_activities.md) — Email-originated tasks create `email_task_incoming` and `email_task_reply_pending` activities that notify the agent owner via the sidebar bell indicator

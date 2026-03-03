@@ -11,8 +11,22 @@ Usage:
     python3 .runnerkit/scripts/check_docs_references.py --files docs/agents/foo.md docs/agents/bar.md
 
 Options:
-    --verbose, -v     Show each broken reference as it's found
-    --files FILE...   Check only specific files (paths relative to project root)
+    --verbose, -v        Show each broken reference as it's found
+    --files FILE...      Check only specific files (paths relative to project root)
+    --include-incomplete Also scan docs/drafts/ (excluded by default)
+
+Suppressing false positives:
+    1. Pattern-based (automatic) — path segments that look like template/direction
+       placeholders are skipped automatically:
+         - starts with 'your_'  → your_entity.py, your_model.py
+         - starts with '$'      → $entityId.tsx  (TanStack Router dynamic params)
+         - starts with 'entit'  → entity.py, entities.tsx, EntityCard.tsx (case-insensitive)
+         - contains '...'       → abbreviated paths
+         - contains '[' or ']'  → generic placeholder syntax like [domain].py
+
+    2. Inline annotation — add <!-- nocheck --> anywhere on a line to skip all
+       reference checks on that line:
+         ### CRUD (`backend/app/crud.py`) <!-- nocheck -->
 
 Exit codes:
     0 - all references valid
@@ -41,10 +55,16 @@ def find_project_root():
     return os.path.abspath(os.path.join(script_dir, "..", ".."))
 
 
-def find_markdown_files(docs_dir):
-    """Recursively find all .md files under docs/."""
+def find_markdown_files(docs_dir, exclude_dirs=None):
+    """Recursively find all .md files under docs/, optionally excluding subdirectories."""
+    exclude_dirs = set(exclude_dirs or [])
     md_files = []
-    for root, _dirs, files in os.walk(docs_dir):
+    for root, dirs, files in os.walk(docs_dir):
+        # Prune excluded directories in-place to prevent os.walk from descending
+        dirs[:] = [
+            d for d in dirs
+            if os.path.join(root, d) not in exclude_dirs
+        ]
         for f in files:
             if f.endswith(".md"):
                 md_files.append(os.path.join(root, f))
@@ -56,6 +76,11 @@ def find_markdown_files(docs_dir):
 REFERENCE_PREFIXES = ("backend/", "frontend/", "docs/")
 
 
+# Matches path segments that are clearly template/placeholder names, not real files.
+# Covers: your_entity, $entityId (TanStack dynamic params), entity/entities/EntityCard/etc.
+_PLACEHOLDER_SEGMENT_RE = re.compile(r"^your_|^\$|^entit", re.IGNORECASE)
+
+
 def is_skippable_path(path):
     """
     Return True for paths that should be skipped (not real file references).
@@ -63,12 +88,21 @@ def is_skippable_path(path):
     Skips:
     - Paths with '...' ellipsis (abbreviated paths like backend/app/env-templates/.../routes.py)
     - Paths with '[' brackets (placeholder syntax like backend/app/api/routes/[domain].py)
-    - Paths that are clearly generic examples (your_entity.py, entity.py, entities.py)
+    - Paths where any segment is a template/direction placeholder:
+        - Starts with 'your_'  (e.g. your_entity.py)
+        - Starts with '$'      (e.g. $entityId.tsx — TanStack Router dynamic params)
+        - Starts with 'entit'  (e.g. entity.py, entities.tsx, EntityCard.tsx — case-insensitive)
+
+    Lines can also be individually suppressed with an inline <!-- nocheck --> comment.
     """
     if "..." in path:
         return True
     if "[" in path or "]" in path:
         return True
+    for segment in path.replace("\\", "/").split("/"):
+        stem = segment.rsplit(".", 1)[0] if "." in segment else segment
+        if _PLACEHOLDER_SEGMENT_RE.match(stem):
+            return True
     return False
 
 
@@ -175,6 +209,9 @@ def scan_file(filepath, project_root, verbose=False):
         return issues
 
     for line_num, line in enumerate(lines, start=1):
+        # Allow per-line suppression via inline <!-- nocheck --> comment
+        if "<!-- nocheck -->" in line:
+            continue
         refs = extract_references(line, filepath, project_root)
         for ref in refs:
             if not check_reference(ref, project_root):
@@ -195,12 +232,15 @@ def scan_file(filepath, project_root, verbose=False):
 def parse_args(argv):
     """Simple argument parser (Python 3.9 compatible, no argparse needed)."""
     verbose = False
+    include_incomplete = False
     specific_files = []
     i = 1
     while i < len(argv):
         arg = argv[i]
         if arg in ("--verbose", "-v"):
             verbose = True
+        elif arg == "--include-incomplete":
+            include_incomplete = True
         elif arg == "--files":
             i += 1
             while i < len(argv) and not argv[i].startswith("--"):
@@ -208,11 +248,11 @@ def parse_args(argv):
                 i += 1
             continue
         i += 1
-    return verbose, specific_files
+    return verbose, include_incomplete, specific_files
 
 
 def main():
-    verbose, specific_files = parse_args(sys.argv)
+    verbose, include_incomplete, specific_files = parse_args(sys.argv)
 
     project_root = find_project_root()
     docs_dir = os.path.join(project_root, "docs")
@@ -233,7 +273,12 @@ def main():
             print("No valid markdown files provided.")
             sys.exit(0)
     else:
-        md_files = find_markdown_files(docs_dir)
+        exclude_dirs = []
+        if not include_incomplete:
+            drafts_dir = os.path.join(docs_dir, "drafts")
+            if os.path.isdir(drafts_dir):
+                exclude_dirs.append(drafts_dir)
+        md_files = find_markdown_files(docs_dir, exclude_dirs=exclude_dirs)
 
         # Also include CLAUDE.md at project root
         claude_md = os.path.join(project_root, "CLAUDE.md")
@@ -252,6 +297,8 @@ def main():
     print("Scanning %d markdown files ..." % len(md_files))
     if verbose:
         print("Project root: %s" % project_root)
+        if not specific_files and not include_incomplete:
+            print("Note: docs/drafts/ excluded (use --include-incomplete to scan it)")
         print()
 
     all_issues = []

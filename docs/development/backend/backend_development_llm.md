@@ -4,7 +4,6 @@
 - **Models**: `backend/app/models/` (one file per entity)
 - **Routes**: `backend/app/api/routes/` (one file per domain)
 - **Services**: `backend/app/services/` (business logic)
-- **CRUD**: `backend/app/crud.py` (database operations)
 - **Migrations**: `backend/app/alembic/versions/`
 
 ## Database Models (SQLModel)

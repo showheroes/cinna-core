@@ -68,6 +68,3 @@ Set in the container `.env` file by `backend/app/services/environment_lifecycle.
 - [Knowledge Sources Tech](../../application/knowledge_sources/knowledge_sources_tech.md) - Backend services, database schema, API endpoints
 - [Agent Environment Core](agent_environment_core.md) - Parent feature: server running inside Docker containers
 
----
-
-*Aspect of: Agent Environment Core. Content sourced from: `docs/agent-sessions/agent_solutions_knowledge_tool.md`*

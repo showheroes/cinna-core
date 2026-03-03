@@ -195,9 +195,10 @@ A2A Event Mapper ---------> Centralized A2A protocol mapping logic
 
 - **[A2A Access Tokens](../a2a_access_tokens/a2a_access_tokens.md)** - Scoped JWT tokens for external A2A client authentication
 - **[A2A v1.0 Support](./a2a_v1_support.md)** - Protocol version adapter layer
-- **[Agent Sessions](../../../agents/agent_sessions/agent_sessions.md)** - Session lifecycle and management <!-- TODO: create agent_sessions docs -->
+- **[Agent Sessions](../../agent_sessions/agent_sessions.md)** - Session lifecycle and management
 - **[Agent Environments](../../../agents/agent_environments/agent_environments.md)** - Docker container architecture
 - **[MCP Integration](../../mcp_integration/agent_mcp_architecture.md)** - Comparable protocol integration (MCP)
+- **[Agent Prompts](../../../agents/agent_prompts/agent_prompts.md)** - `workflow_prompt` is the source document for A2A skills extraction; changes to it (via UI edit or building session sync) trigger automatic skill regeneration
 
 ---
 

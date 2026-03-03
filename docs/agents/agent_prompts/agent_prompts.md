@@ -136,11 +136,12 @@ Sync Flow:
 
 ## Integration Points
 
-- **[Agent Sessions](../agent_sessions/agent_sessions.md)** - Session mode determines which prompt assembly path is used <!-- TODO: create agent_sessions docs -->
+- **[Agent Sessions](../../application/agent_sessions/agent_sessions.md)** - Session mode determines which prompt assembly path is used
 - **[Agent Environments](../agent_environments/agent_environments.md)** - Prompts live as files inside Docker containers; environment lifecycle initializes prompt templates
 - **[Agent Environment Core](../agent_environment_core/agent_environment_core.md)** - PromptGenerator and SDK Manager run inside the container, assembling and applying prompts at runtime
 - **[Agent Credentials](../agent_credentials/agent_credentials.md)** - credentials/README.md is loaded into prompts for credential awareness
-- **[Input Tasks](../../tasks/input_tasks/input_tasks.md)** - REFINER_PROMPT.md guides task refinement before execution; ENTRYPOINT_PROMPT.md serves as trigger for scheduled tasks <!-- TODO: create input_tasks docs -->
+- **[Input Tasks](../../application/input_tasks/input_tasks.md)** - REFINER_PROMPT.md guides task refinement before execution; ENTRYPOINT_PROMPT.md serves as trigger for scheduled tasks
+- **[Agent Schedulers](../agent_schedulers/agent_schedulers.md)** - ENTRYPOINT_PROMPT.md is the default trigger message for scheduler executions when no custom schedule prompt is configured
 - **[A2A Protocol](../../application/a2a_integration/a2a_protocol/a2a_protocol.md)** - Workflow prompt changes trigger A2A skills regeneration
-- **[Multi SDK](../multi_sdk/multi_sdk.md)** - SDK adapter selection determines model and prompt format per mode <!-- TODO: create multi_sdk docs -->
-- **[Knowledge Management](../../knowledge/knowledge_management/knowledge_management.md)** - Knowledge topic folders listed in prompts; agents read files on-demand <!-- TODO: create knowledge_management docs -->
+- **[Multi SDK](../agent_environment_core/multi_sdk.md)** - SDK adapter selection determines model and prompt format per mode
+- **[Knowledge Management](../../application/knowledge_sources/knowledge_sources.md)** - Knowledge topic folders listed in prompts; agents read files on-demand

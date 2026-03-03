@@ -66,7 +66,7 @@ AI_FUNCTIONS_PROVIDERS=gemini
    - Refines task descriptions based on user feedback for task queue execution
    - Takes context: current description, agent workflow prompt, agent refiner prompt, user comment, refinement history, selected text
    - Returns JSON: `{success: true, refined_description: "...", feedback_message: "..."}` or `{success: false, error: "..."}`
-   - Used in: `backend/app/api/routes/tasks.py` (POST `/api/v1/tasks/refine-task`)
+   - Used in: `backend/app/api/routes/input_tasks.py` (POST `/api/v1/tasks/refine-task`)
    - **Agent-aware refinement**: Uses agent's `refiner_prompt` for context-specific task enhancement:
      - Default values for common parameters
      - Mandatory fields that must be clarified
@@ -404,7 +404,7 @@ See existing implementations:
 - Auto-triggered generation: `backend/app/agents/description_generator.py`
 - Prompt templates: `backend/app/agents/prompts/`
 - Service integration: `backend/app/services/ai_functions_service.py`
-- Usage in routes: `backend/app/api/routes/messages.py:155-175`, `backend/app/api/routes/workspace.py`, `backend/app/api/routes/utils.py`, `backend/app/api/routes/tasks.py`
+- Usage in routes: `backend/app/api/routes/messages.py:155-175`, `backend/app/api/routes/workspace.py`, `backend/app/api/routes/utils.py`, `backend/app/api/routes/input_tasks.py`
 - Usage in services: `backend/app/services/agent_service.py` (see `handle_workflow_prompt_change` and `update_agent`)
 
 ## Future Enhancements

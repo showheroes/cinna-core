@@ -313,7 +313,7 @@ def create_entity(*, session: SessionDep, current_user: CurrentUser, entity_in: 
     return entity
 ```
 
-### 3. CRUD Operations (`backend/app/crud.py`) - DEPRECATED FOR NEW CODE
+### 3. CRUD Operations (`backend/app/crud.py`) - DEPRECATED FOR NEW CODE <!-- nocheck -->
 
 ```python
 def create_entity(*, session: Session, entity_in: EntityCreate, owner_id: uuid.UUID) -> Entity:

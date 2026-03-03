@@ -155,9 +155,9 @@ GuestChatPage
 ## Integration Points
 
 - **[Agent Sharing](agent_sharing.md)** - Separate sharing mechanism for registered users (clone-based). Uses `agent_share` naming vs `guest_share` naming
-- **[Agent Sessions](../agent_sessions/agent_sessions.md)** - Guest sessions reuse the existing session infrastructure with `guest_share_id` scoping <!-- TODO: create agent_sessions docs -->
+- **[Agent Sessions](../../application/agent_sessions/agent_sessions.md)** - Guest sessions reuse the existing session infrastructure with `guest_share_id` scoping
 - **[A2A Access Tokens](../../application/a2a_integration/a2a_access_tokens/a2a_access_tokens.md)** - Similar token-based access pattern for machine clients
-- **[Authentication](../../application/authentication.md)** - Guest JWT extends the existing JWT infrastructure with a `chat-guest` role
+- **[Authentication](../../application/auth/auth.md)** - Guest JWT extends the existing JWT infrastructure with a `chat-guest` role
 
 ## Error States
 

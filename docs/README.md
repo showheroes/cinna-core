@@ -4,6 +4,22 @@ A conversational AI agent platform where users create custom AI agents, run them
 
 **Stack:** FastAPI + PostgreSQL | React + TypeScript + TanStack | Docker isolation | SQLModel ORM
 
+## Core Idea
+
+The platform separates three distinct layers:
+
+- **Agent** (logical definition) — what the agent does: custom prompts, credentials, SDK configuration
+- **Environment** (runtime instance) — where it runs: a Docker container with the agent's workspace, tools, and files
+- **Session** (conversation) — how users interact: a persistent chat thread with independent message history
+
+One agent can have multiple environments (for testing, production, or rollback via blue-green deployment). One environment can host multiple sessions that share the same file workspace but maintain separate conversation histories.
+
+Agents operate in two modes:
+- **Building mode** — development state; agent uses a larger context window, can create/modify scripts and configure integrations
+- **Conversation mode** — execution state; agent runs pre-built workflows with a lightweight prompt for faster, cheaper responses
+
+Sessions can be started manually, by automated triggers (CRON, email, webhook), or by other agents via handover. External systems can connect through A2A (Agent-to-Agent protocol) or MCP (Model Context Protocol).
+
 ---
 
 ## Glossary
@@ -38,10 +54,10 @@ A conversational AI agent platform where users create custom AI agents, run them
 
 | Domain | Description | Features |
 |--------|-------------|----------|
-| [agents](#agents) | Core agent lifecycle - creation, configuration, environments, sessions, chat, file management | 14 features |
+| [agents](#agents) | Core agent lifecycle - creation, configuration, environments, sessions, chat, file management | 10 features |
 | [tasks](#tasks) | Task submission, refinement, triggers, and scheduling | 3 features |
 | [credentials](#credentials) | Credential management, encryption, AI provider keys | 1 feature |
-| [application](#application) | User-facing platform features - authentication, integrations, real-time events, workspaces | 11 features |
+| [application](#application) | User-facing platform features - authentication, integrations, real-time events, workspaces | 15 features |
 | [knowledge](#knowledge) | Git-based knowledge sources, vector search, RAG | 1 feature |
 | [sharing](#sharing) | Agent sharing, guest access, workspace collaboration | 3 features |
 | [development](#development) | Backend/frontend patterns, AI functions, debugging | 4 features |
@@ -54,17 +70,13 @@ A conversational AI agent platform where users create custom AI agents, run them
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| agent_sessions | Core agent-session-environment lifecycle, business rules, modes | [business logic](agents/agent_sessions/agent_sessions.md) |
-| agent_environments | Docker container architecture, build layers, workspace isolation | [business logic](agents/agent_environments/agent_environments.md) \| [tech](agents/agent_environments/agent_environments_tech.md) |
+| agent_environments | Docker container architecture, build layers, workspace isolation | [business logic](agents/agent_environments/agent_environments.md) \| [tech](agents/agent_environments/agent_environments_tech.md) \| [credential rebuild](agents/agent_environments/affected_environments_rebuild.md) |
 | agent_prompts | System prompt construction for building and conversation modes | [business logic](agents/agent_prompts/agent_prompts.md) \| [tech](agents/agent_prompts/agent_prompts_tech.md) |
-| agent_commands | Slash commands executed within agent sessions (`/files`, etc.) | [business logic](agents/agent_commands/agent_commands.md) |
-| session_recovery | Recovery from lost SDK connections after container rebuilds | [business logic](agents/session_recovery/session_recovery.md) |
-| agent_activities | Activity feed, event logging, session summaries | [business logic](agents/agent_activities/agent_activities.md) \| [tech](agents/agent_activities/agent_activities_tech.md) |
-| agent_plugins | Plugin marketplace integration, capability loading | [business logic](agents/agent_plugins/agent_plugins.md) |
+| agent_commands | Slash commands in agent sessions — `/files`, `/session-recover`, `/session-reset` | [business logic](agents/agent_commands/agent_commands.md) \| [tech](agents/agent_commands/agent_commands_tech.md) \| [files](agents/agent_commands/files_command.md) \| [recovery](agents/agent_commands/session_recovery_command.md) \| [reset](agents/agent_commands/session_reset_command.md) |
+| agent_plugins | Plugin marketplace integration, capability loading | [business logic](agents/agent_plugins/agent_plugins.md) \| [tech](agents/agent_plugins/agent_plugins_tech.md) |
 | agent_schedulers | Multi-schedule CRON execution with natural language input and per-schedule prompts | [business logic](agents/agent_schedulers/agent_schedulers.md) \| [tech](agents/agent_schedulers/agent_schedulers_tech.md) |
-| agent_handover | Agent-to-agent task delegation and inbox creation | [business logic](agents/agent_handover/agent_handover.md) |
-| multi_sdk | Multiple AI provider support (Claude, OpenAI, MiniMax) | [business logic](agents/multi_sdk/multi_sdk.md) |
-| agent_environment_core | Server-side core running inside Docker containers: HTTP API, SDK adapters, prompt generation | [business logic](agents/agent_environment_core/agent_environment_core.md) \| [tech](agents/agent_environment_core/agent_environment_core_tech.md) \| [knowledge tool](agents/agent_environment_core/knowledge_tool.md) |
+| agent_handover | Agent-to-agent task delegation and inbox creation | [business logic](agents/agent_handover/agent_handover.md) \| [tech](agents/agent_handover/agent_handover_tech.md) |
+| agent_environment_core | Server-side core running inside Docker containers: HTTP API, SDK adapters, prompt generation | [business logic](agents/agent_environment_core/agent_environment_core.md) \| [tech](agents/agent_environment_core/agent_environment_core_tech.md) \| [multi-sdk](agents/agent_environment_core/multi_sdk.md) \| [multi-sdk tech](agents/agent_environment_core/multi_sdk_tech.md) \| [knowledge tool](agents/agent_environment_core/knowledge_tool.md) \| [create agent task tool](agents/agent_environment_core/create_agent_task_tool.md) \| [tools approval](agents/agent_environment_core/tools_approval_management.md) \| [tools approval tech](agents/agent_environment_core/tools_approval_management_tech.md) |
 | agent_environment_data_management | Environment data flow, cloning, syncing operations | [business logic](agents/agent_environment_data_management/agent_environment_data_management.md) \| [tech](agents/agent_environment_data_management/agent_environment_data_management_tech.md) |
 | agent_credentials | Credential syncing to agent environments, whitelisting, redaction, OAuth refresh | [business logic](agents/agent_credentials/agent_credentials.md) \| [tech](agents/agent_credentials/agent_credentials_tech.md) \| [oauth](agents/agent_credentials/oauth_credentials.md) \| [whitelist](agents/agent_credentials/credentials_whitelist.md) \| [google SA](agents/agent_credentials/google_service_account.md) \| [sharing](agents/agent_credentials/credential_sharing.md) |
 | agent_file_management | File upload/download, workspace file viewing, storage quota, garbage collection | [business logic](agents/agent_file_management/agent_file_management.md) \| [tech](agents/agent_file_management/agent_file_management_tech.md) \| [remote db viewer](agents/agent_file_management/remote_database_viewer.md) |
@@ -73,9 +85,9 @@ A conversational AI agent platform where users create custom AI agents, run them
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| input_tasks | Task submission, vague request refinement, execution workflow | [business logic](tasks/input_tasks/input_tasks.md) |
-| task_triggers | Automated triggers - CRON schedules, webhooks, date-based | [business logic](tasks/task_triggers/task_triggers.md) |
-| tools_approval | Agent tool execution approval management | [business logic](tasks/tools_approval/tools_approval.md) |
+| input_tasks | Task submission, vague request refinement, execution workflow, bi-directional agent feedback | [business logic](application/input_tasks/input_tasks.md) \| [tech](application/input_tasks/input_tasks_tech.md) |
+| task_triggers | Automated triggers - CRON schedules, webhooks, date-based | [business logic](application/input_tasks/task_triggers.md) \| [tech](application/input_tasks/task_triggers_tech.md) |
+| tools_approval | Agent tool execution approval management | [business logic](agents/agent_environment_core/tools_approval_management.md) \| [tech](agents/agent_environment_core/tools_approval_management_tech.md) |
 
 ### credentials
 
@@ -87,6 +99,8 @@ A conversational AI agent platform where users create custom AI agents, run them
 
 | Feature | Description | Docs |
 |---------|-------------|------|
+| agent_management | Agent definition lifecycle — identity, prompts, SDK, credentials, integrations, sharing — the config entry point for all platform features | [business logic](application/agent_management/agent_management.md) \| [creation wizard](application/agent_management/new_agent_wizard.md) |
+| agent_sessions | Persistent chat sessions between users/external systems and agent environments — lifecycle, modes, streaming, integration types, UI | [business logic](application/agent_sessions/agent_sessions.md) \| [tech](application/agent_sessions/agent_sessions_tech.md) \| [env panel widget](application/agent_sessions/app_env_panel_widget.md) \| [ask user question widget](application/agent_sessions/tool_answer_questions_widget.md) |
 | auth | User authentication - JWT tokens, password login, Google OAuth, domain whitelist, password recovery | [business logic](application/auth/auth.md) \| [tech](application/auth/auth_tech.md) \| [google oauth](application/auth/google_oauth.md) |
 | ssh_keys | User SSH key management for private Git repository access | [business logic](application/ssh_keys/ssh_keys.md) \| [tech](application/ssh_keys/ssh_keys_tech.md) |
 | knowledge_sources | Git-based knowledge sources with article indexing, embeddings, and semantic search | [business logic](application/knowledge_sources/knowledge_sources.md) \| [tech](application/knowledge_sources/knowledge_sources_tech.md) |
@@ -98,28 +112,31 @@ A conversational AI agent platform where users create custom AI agents, run them
 | a2a_access_tokens | Scoped JWT tokens for external A2A client authentication | [business logic](application/a2a_integration/a2a_access_tokens/a2a_access_tokens.md) \| [tech](application/a2a_integration/a2a_access_tokens/a2a_access_tokens_tech.md) |
 | mcp_integration | Agent exposure as MCP server, OAuth 2.1, connector setup | [architecture](application/mcp_integration/agent_mcp_architecture.md) \| [implementation](application/mcp_integration/agent_mcp_connector.md) \| [setup](application/mcp_integration/mcp_connector_setup.md) |
 | realtime_events | WebSocket event bus system, frontend-backend-agentenv streaming | [event bus](application/realtime_events/event_bus_system.md) \| [streaming](application/realtime_events/frontend_backend_agentenv_streaming.md) |
+| plugin_marketplaces | Admin-managed Git-based plugin catalogs, sync, visibility control | [business logic](application/plugin_marketplaces/plugin_marketplaces.md) \| [tech](application/plugin_marketplaces/plugin_marketplaces_tech.md) |
+| agent_activities | Activity feed, event logging, session summaries, sidebar bell indicator | [business logic](application/agent_activities/agent_activities.md) \| [tech](application/agent_activities/agent_activities_tech.md) |
+| getting_started | New user and new instance onboarding — API key gate, Getting Started Modal, Rotating Hints | [business logic](application/getting_started/getting_started.md) \| [tech](application/getting_started/getting_started_tech.md) |
 
 ### knowledge
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| knowledge_management | Git-based knowledge sources, article indexing, vector search | [business logic](knowledge/knowledge_management/knowledge_management.md) |
+| knowledge_management | Git-based knowledge sources, article indexing, vector search | [business logic](application/knowledge_sources/knowledge_sources.md) |
 
 ### sharing
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| agent_sharing | Clone-based agent sharing, credential requirements, push updates, guest access | [business logic](agents/agent_sharing/agent_sharing.md) \| [tech](agents/agent_sharing/agent_sharing_tech.md) \| [guest sharing](agents/agent_sharing/guest_sharing.md) \| [guest tech](agents/agent_sharing/guest_sharing_tech.md) |
+| agent_sharing | Clone-based agent sharing, credential requirements, push updates, guest access | [business logic](agents/agent_sharing/agent_sharing.md) \| [tech](agents/agent_sharing/agent_sharing_tech.md) \| [accept wizard](agents/agent_sharing/accept_share_wizard_widget.md) \| [guest sharing](agents/agent_sharing/guest_sharing.md) \| [guest tech](agents/agent_sharing/guest_sharing_tech.md) |
 | workspaces | Workspace isolation, entity separation, multi-workspace support | [business logic](application/user_workspaces/user_workspaces.md) |
 
 ### development
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| backend_patterns | SQLModel patterns, routes, services, CRUD, migrations | [reference](development/backend_patterns/backend_patterns.md) |
-| frontend_patterns | Component patterns, hooks, TanStack conventions | [reference](development/frontend_patterns/frontend_patterns.md) |
-| ai_functions | LLM utility development, multi-provider cascade fallback | [reference](development/ai_functions/ai_functions.md) |
-| security | Credentials whitelist, encryption at rest, access control | [reference](development/security/security.md) |
+| backend_patterns | SQLModel patterns, routes, services, CRUD, migrations | [reference](development/backend/backend_development_llm.md) |
+| frontend_patterns | Component patterns, hooks, TanStack conventions | [reference](development/frontend/frontend_development_llm.md) |
+| ai_functions | LLM utility development, multi-provider cascade fallback | [reference](development/backend/ai_functions_development.md) |
+| security | Credentials whitelist, encryption at rest, access control | [reference](development/security/security.md) <!-- nocheck --> |
 
 ---
 

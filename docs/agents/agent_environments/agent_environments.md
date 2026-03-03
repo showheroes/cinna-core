@@ -184,14 +184,15 @@ User → Frontend → Backend API → Environment Lifecycle Manager → Docker A
 
 ## Integration Points
 
-- **[Agent Sessions](../agent_sessions/agent_sessions.md)** - Sessions connect users to environments; environment must be running for message streaming; `ENVIRONMENT_ACTIVATED` event triggers processing of pending sessions
+- **[Agent Sessions](../../application/agent_sessions/agent_sessions.md)** - Sessions connect users to environments; environment must be running for message streaming; `ENVIRONMENT_ACTIVATED` event triggers processing of pending sessions
 - **[Agent Prompts](../agent_prompts/agent_prompts.md)** - Prompts synced to `workspace/docs/` on every start; building mode reads comprehensive prompt set, conversation mode reads workflow prompt
-- **[Session Recovery](../session_recovery/session_recovery.md)** - SDK session IDs stored for resumption after container restarts; recovery handles lost connections after rebuilds
-- **[Multi SDK](../multi_sdk/multi_sdk.md)** - Environment adapter configuration determines which SDK (Claude, OpenAI, etc.) is used per mode
+- **[Session Recovery](../agent_commands/session_recovery_command.md)** - SDK session IDs stored for resumption after container restarts; recovery handles lost connections after rebuilds
+- **[Multi SDK](../agent_environment_core/multi_sdk.md)** - Environment adapter configuration determines which SDK (Claude, OpenAI, etc.) is used per mode
 - **[Agent Environment Data Management](../agent_environment_data_management/agent_environment_data_management.md)** - Workspace data cloning, syncing, and file transfer operations between environments
-- **[Credential Management](../../credentials/credential_management/credential_management.md)** - Credentials synced to `workspace/credentials/` on environment start
-- **[AI Credentials](../../credentials/ai_credentials/ai_credentials.md)** - AI provider keys resolved and injected as environment variables
-- **[File Upload](../../file_management/file_upload/file_upload.md)** - Files uploaded to backend transferred into workspace via Docker adapter
+- **[Credential Management](../agent_credentials/agent_credentials.md)** - Credentials synced to `workspace/credentials/` on environment start
+- **[AI Credentials](../../application/ai_credentials/ai_credentials.md)** - AI provider keys resolved and injected as environment variables
+- **[Affected Environments Rebuild](./affected_environments_rebuild.md)** - Credential-triggered rebuild flow: how environments are detected and rebuilt after AI credential changes
+- **[File Upload](../agent_file_management/agent_file_management.md)** - Files uploaded to backend transferred into workspace via Docker adapter
 - **[Event Bus](../../application/realtime_events/event_bus_system.md)** - WebSocket events for environment status changes (activating, activated, suspended, error)
-- **[Knowledge Management](../../knowledge/knowledge_management/knowledge_management.md)** - Knowledge base files in `workspace/knowledge/` synced from template during rebuild
+- **[Knowledge Management](../../application/knowledge_sources/knowledge_sources.md)** - Knowledge base files in `workspace/knowledge/` synced from template during rebuild
 

@@ -160,6 +160,10 @@ Not every feature needs the full 3-layer treatment. For simple features or stand
    - References to files that were renamed or moved
    - Links to other feature docs that don't exist yet (use placeholder comment: `<!-- TODO: create {feature} docs -->` next to the link)
 
+   **Direction/pattern references** — some references intentionally point to non-existent files used as naming conventions or architectural directions (e.g. "store your service in `backend/app/services/my_service.py`"). Handle these two ways:
+   - **Automatic**: path segments starting with `your_`, `$`, or `entit` (entity/entities/EntityCard etc.) are skipped automatically — no annotation needed.
+   - **Manual**: for other direction references (e.g. `backend/app/crud.py` as a deprecated convention), append `<!-- nocheck -->` to that line so the checker ignores it.
+
 ## Output
 
 Write documentation to `docs/{domain}/{feature}/` following the structure above.

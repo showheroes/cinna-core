@@ -110,7 +110,7 @@ Clone created → Uses owner's shared or recipient's own credentials
 ## Integration Points
 
 - **Agent Environments** - Credentials resolved during environment creation; injected into Docker `.env` files. See [Agent Environments](../../agents/agent_environments/agent_environments.md)
-- **Agent Sharing** - Owner can provide credentials with shares; recipients select credentials in accept wizard. See [Shared Agents Management](../shared_agents_management.md)
+- **Agent Sharing** - Owner can provide credentials with shares; recipients select credentials in accept wizard. See [Agent Sharing](../../agents/agent_sharing/agent_sharing.md)
 - **Agent Cloning** - Clone setup links credentials based on share configuration or recipient selection
 - **User Profile** - Default credentials auto-sync to `ai_credentials_encrypted` for backward compatibility
 - **Anthropic Dual Types** - Special handling for API Keys vs OAuth Tokens. See [Anthropic Credential Types](anthropic_credential_types.md)

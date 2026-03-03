@@ -575,7 +575,6 @@ All three share the same underlying services: SessionService, MessageService, ag
 
 ## Related Documentation
 
-- `docs/agent_mcp_connector_concept.md` — Original concept document (detailed SDK analysis, resolved design questions)
 - `docs/application/mcp_integration/agent_mcp_connector.md` — Code-level implementation reference
 - `docs/application/a2a_integration/a2a_protocol/a2a_protocol.md` — A2A integration (comparable feature)
 

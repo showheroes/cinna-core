@@ -36,8 +36,8 @@
 |------|---------|
 | `knowledge_query.py` | RAG-based knowledge source query tool |
 | `create_agent_task.py` | Agent-to-agent task creation (handover) tool |
-| `respond_to_task.py` | Task response tool for incoming delegations |
-| `update_session_state.py` | Session state modification tool |
+| `respond_to_task.py` | Task response tool for incoming delegations — see [Session State Tools](session_state_tools.md) |
+| `update_session_state.py` | Session state modification tool — see [Session State Tools](session_state_tools.md) |
 
 ### Scripts
 
@@ -220,6 +220,3 @@ No dedicated frontend components - the environment core is a backend/container-s
 - LLM instructed to trust system prompt values over message content
 - Scripts query `GET /session/context` directly, bypassing LLM entirely
 
----
-
-*Refactored from: `docs/agent-sessions/agent_env_core.md`*

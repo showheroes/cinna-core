@@ -143,13 +143,15 @@ Backend ──HTTP POST──→ Environment Container (FastAPI)
 ## Integration Points
 
 - **Agent Environments** - Core runs inside the Docker container defined by [Agent Environments](../agent_environments/agent_environments.md)
-- **Agent Sessions** - Backend session service creates/manages sessions that invoke environment core endpoints. See [Agent Sessions](../agent_sessions/agent_sessions.md) <!-- TODO: create agent_sessions docs -->
+- **Agent Sessions** - Backend session service creates/manages sessions that invoke environment core endpoints. See [Agent Sessions](../../application/agent_sessions/agent_sessions.md)
 - **Agent Prompts** - Prompt generator loads and constructs prompts for both modes. See [Agent Prompts](../agent_prompts/agent_prompts.md) <!-- TODO: create agent_prompts docs -->
-- **Multi SDK** - Adapter system enables multi-provider support. See [Multi SDK](../multi_sdk/multi_sdk.md) <!-- TODO: create multi_sdk docs -->
+- **Multi SDK** - Adapter system enables multi-provider support. See [Multi SDK](multi_sdk.md)
 - **Streaming** - Response events flow through the backend streaming pipeline. See [Streaming](../../application/realtime_events/frontend_backend_agentenv_streaming.md)
 - **Agent Environment Data Management** - Prompt sync and credential sync operations. See [Data Management](../agent_environment_data_management/agent_environment_data_management.md)
 - **Knowledge Query Tool** - RAG-based knowledge queries from building mode. See [Knowledge Tool](knowledge_tool.md) aspect and [Knowledge Sources](../../application/knowledge_sources/knowledge_sources.md)
-- **Agent Handover** - Create/respond task tools enable agent-to-agent delegation. See [Agent Handover](../agent_handover/agent_handover.md) <!-- TODO: create agent_handover docs -->
+- **Agent Handover** - Create/respond task tools enable agent-to-agent delegation. See [Agent Handover](../agent_handover/agent_handover.md) and [Create Agent Task Tool](create_agent_task_tool.md)
+- **Input Tasks** - Session state tools let agents report task outcomes and exchange clarifications. See [Session State Tools](session_state_tools.md) and [Input Tasks](../../application/input_tasks/input_tasks.md)
+- **Tools Approval** - Plugin-provided tools require explicit user approval before autonomous use; approval state synced to environments. See [Tools Approval Management](tools_approval_management.md)
 
 ## API Endpoints
 
@@ -227,6 +229,3 @@ Backend ──HTTP POST──→ Environment Container (FastAPI)
     └── logs/                      # Session logs (when enabled)
 ```
 
----
-
-*Refactored from: `docs/agent-sessions/agent_env_core.md`*

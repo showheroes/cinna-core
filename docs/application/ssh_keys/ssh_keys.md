@@ -75,6 +75,7 @@ Decryption only occurs when Git operations need the private key (in-memory, neve
 ## Integration Points
 
 - **Knowledge Sources** - SSH keys are referenced by knowledge sources (`ssh_key_id` FK) for private repository access. See [Knowledge Sources](../knowledge_sources/knowledge_sources.md)
+- **Plugin Marketplaces** - Admins can assign SSH keys to private marketplace Git repos, using the same mechanism as knowledge sources. See [Plugin Marketplaces](../plugin_marketplaces/plugin_marketplaces.md)
 - **Git Operations** - `SSHKeyService.get_decrypted_private_key()` provides decrypted keys to `git_operations.py` for cloning and verifying repositories
 - **Security module** - Uses `backend/app/core/security.py` shared `encrypt_field()` / `decrypt_field()` functions (Fernet/PBKDF2)
 

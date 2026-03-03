@@ -762,7 +762,6 @@ Uses direct `fetch()` calls with JWT auth headers (not auto-generated client).
 
 ## Related Documentation
 
-- `docs/agent_mcp_connector_concept.md` — Original concept document
 - `docs/application/mcp_integration/agent_mcp_architecture.md` — Architecture overview
 
 ---
