@@ -18,11 +18,17 @@ from tests.utils.fixtures import (
     BACKGROUND_TASK_TARGETS_BASE,
 )
 
+# Additional create_session patch target for the environment status scheduler,
+# which opens its own session independently of the service layer.
+_EXTRA_SESSION_TARGETS = [
+    "app.services.environment_status_scheduler.create_session",
+]
+
 
 @pytest.fixture(autouse=True)
 def patch_create_session(db):
-    """Patch create_session at all service import sites."""
-    with patched_create_sessions(db, CREATE_SESSION_TARGETS_BASE):
+    """Patch create_session at all service import sites, including the scheduler."""
+    with patched_create_sessions(db, CREATE_SESSION_TARGETS_BASE + _EXTRA_SESSION_TARGETS):
         yield
 
 

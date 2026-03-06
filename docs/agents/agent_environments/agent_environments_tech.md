@@ -52,7 +52,8 @@ Both templates share identical structure:
 
 - `backend/app/services/environment_lifecycle.py` - `EnvironmentLifecycleManager` - core lifecycle operations
 - `backend/app/services/environment_service.py` - `EnvironmentService` - route-level orchestration
-- `backend/app/services/environment_suspension_scheduler.py` - APScheduler background job
+- `backend/app/services/environment_suspension_scheduler.py` - APScheduler background job (inactivity suspension)
+- `backend/app/services/environment_status_scheduler.py` - APScheduler background job (health monitoring)
 - `backend/app/services/adapters/base.py` - `EnvironmentAdapter` abstract interface
 - `backend/app/services/adapters/docker_adapter.py` - `DockerEnvironmentAdapter` - Docker-specific implementation
 - `backend/app/services/session_context_signer.py` - HMAC signing/verification for session context
@@ -153,6 +154,13 @@ Relevant field:
 - `start_scheduler()` - Initialize APScheduler background job (10-minute interval)
 - `shutdown_scheduler()` - Clean shutdown
 - `run_suspension_check()` - Check all running environments against inactivity thresholds
+
+### EnvironmentStatusScheduler (`backend/app/services/environment_status_scheduler.py`)
+
+- `start_scheduler()` - Initialize APScheduler background job (10-minute interval)
+- `shutdown_scheduler()` - Clean shutdown
+- `run_status_check()` - Check all running environments via health check; mark crashed ones as `error`
+- `_check_environment_statuses()` - Async implementation: queries running envs, calls `health_check()` + `get_status()`, updates `last_health_check`, emits `ENVIRONMENT_STATUS_CHANGED` event on failure
 
 ### EventService (`backend/app/services/event_service.py`)
 
@@ -301,6 +309,7 @@ Infrastructure files overwritten from template during rebuild (defined in `REBUI
 | `ENVIRONMENT_ACTIVATED` | Backend → Frontend | Activation successful, ready for use |
 | `ENVIRONMENT_ACTIVATION_FAILED` | Backend → Frontend | Activation failed |
 | `ENVIRONMENT_SUSPENDED` | Backend → Frontend | Environment suspended |
+| `ENVIRONMENT_STATUS_CHANGED` | Backend → Frontend | Environment status changed (e.g., health check detected crash → error) |
 | `agent_usage_intent` | Frontend → Backend | User opened session, triggers activity tracking and potential activation |
 
 Event types defined in `backend/app/models/event.py`

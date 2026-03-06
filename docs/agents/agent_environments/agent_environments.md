@@ -94,6 +94,17 @@ The platform supports multiple Docker base images for different agent use cases.
 2. Confirmation dialog shown
 3. Same process as automatic suspension
 
+### 7. Environment Health Monitoring (Automatic)
+
+1. Scheduler runs every 10 minutes, checks all environments with `status == "running"`
+2. For each environment, calls health check endpoint on the Docker container
+3. If health check returns unhealthy, performs a second check on container status to guard against transient issues
+4. If container is confirmed down (not just slow):
+   - Status set to `error`
+   - `status_message` set to describe the failure
+   - `ENVIRONMENT_STATUS_CHANGED` WebSocket event sent to owner
+5. `last_health_check` timestamp updated for every checked environment regardless of outcome
+
 ## Business Rules
 
 ### Environment Status Lifecycle
@@ -185,7 +196,8 @@ User → Frontend → Backend API → Environment Lifecycle Manager → Docker A
                                         │                                            │
                                         ├── Configuration Generator                  ├── /app/core/ (system code, read-only)
                                         ├── Credential Resolver                      ├── /app/workspace/ (user data, read-write)
-                                        └── Suspension Scheduler                     └── FastAPI Server → SDK Adapters → AI Provider
+                                        ├── Suspension Scheduler                     └── FastAPI Server → SDK Adapters → AI Provider
+                                        └── Status Scheduler (health checks)
 ```
 
 ## Integration Points

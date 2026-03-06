@@ -58,6 +58,10 @@ from app.services.email.sending_scheduler import (
     start_scheduler as start_email_sending_scheduler,
     shutdown_scheduler as shutdown_email_sending_scheduler
 )
+from app.services.environment_status_scheduler import (
+    start_scheduler as start_env_status_scheduler,
+    shutdown_scheduler as shutdown_env_status_scheduler
+)
 
 
 @asynccontextmanager
@@ -70,6 +74,7 @@ async def lifespan(app: FastAPI):
     start_agent_schedule_scheduler()
     start_email_polling_scheduler()
     start_email_sending_scheduler()
+    start_env_status_scheduler()
 
     # Register backend event handlers
     from app.models.event import EventType
@@ -189,6 +194,7 @@ async def lifespan(app: FastAPI):
     shutdown_agent_schedule_scheduler()
     shutdown_email_polling_scheduler()
     shutdown_email_sending_scheduler()
+    shutdown_env_status_scheduler()
     event_service.shutdown()
     logger.info("Application shutdown complete")
 
