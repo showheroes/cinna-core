@@ -156,5 +156,5 @@ External Sender → Email → IMAP Server → Backend Polling (parent agent)
 - [Agent Environment Core](../../agents/agent_environment_core/agent_environment_core.md) — Session context injection for email awareness
 - [Mail Servers](mail_servers.md) — IMAP/SMTP server configuration and credential management
 - [Email Sessions](email_sessions.md) — Session modes, processing, threading, and sending
-- [Input Tasks](../../application/input_task_management.md) — Task creation from emails, "Send Answer" flow
+- [Input Tasks](../input_tasks/input_tasks.md) — Task creation from emails, "Send Answer" flow
 - [AI Functions](../../development/backend/ai_functions_development.md) — Email reply generation via LLM cascade

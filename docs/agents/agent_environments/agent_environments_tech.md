@@ -8,7 +8,7 @@
 - `backend/app/env-templates/general-env/` - General purpose template (full Debian, `python:3.11-bookworm`)
 
 Both templates share identical structure:
-- `backend/app/env-templates/<template-name>/` - Template root
+- `backend/app/env-templates/<template-name>/` - Template root <!-- nocheck -->
   - `app/core/` - System code baked into Docker image
     - `server/main.py` - FastAPI entry point
     - `server/routes.py` - HTTP endpoints, `_store_session_context()` helper
@@ -234,7 +234,7 @@ Relevant field:
 
 Each template has its own Dockerfile and docker-compose template. Both share the same build structure:
 
-**Dockerfile** (`backend/app/env-templates/<template>/Dockerfile`):
+**Dockerfile** (`backend/app/env-templates/<template>/Dockerfile`): <!-- nocheck -->
 - Base image: `python:3.11-slim` (python-env-advanced) or `python:3.11-bookworm` (general-env)
 - Installs system deps (curl, git, Node.js for Claude Code)
 - Installs uv package manager and Claude Code CLI globally
@@ -242,7 +242,7 @@ Each template has its own Dockerfile and docker-compose template. Both share the
 - Copies `app/core` into image
 - CMD: `fastapi run core/main.py`
 
-**docker-compose.template.yml** (`backend/app/env-templates/<template>/docker-compose.template.yml`):
+**docker-compose.template.yml** (`backend/app/env-templates/<template>/docker-compose.template.yml`): <!-- nocheck -->
 - Volume mounts: `core:/app/core:ro` (read-only), `workspace:/app/workspace` (read-write)
 - Networks: `agent-bridge` (shared with backend), `agent-env-${ENV_ID}` (isolated)
 - Variables substituted: `${ENV_ID}`, `${AGENT_ID}`, `${ENV_VERSION}`, `${AGENT_PORT}`, `${AGENT_AUTH_TOKEN}`
