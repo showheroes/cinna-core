@@ -1,8 +1,19 @@
 import os
+import warnings
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, types as sa_types
+from sqlalchemy.exc import SAWarning
+import enum
+
+# Suppress circular FK warning — mutual FKs between agent/agent_environment,
+# session/input_task, and input_task/email_message are intentional.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Cannot correctly sort tables.*unresolvable cycles",
+    category=SAWarning,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -22,6 +33,15 @@ from app.models import SQLModel  # noqa
 from app.core.config import settings # noqa
 
 target_metadata = SQLModel.metadata
+
+
+def compare_type(context, inspected_column, metadata_column, inspected_type, metadata_type):
+    """Ignore VARCHAR vs str Enum comparisons — SQLModel stores str enums as VARCHAR."""
+    if isinstance(inspected_type, sa_types.VARCHAR) and isinstance(metadata_type, sa_types.Enum):
+        if issubclass(metadata_type.enum_class, str) and issubclass(metadata_type.enum_class, enum.Enum):
+            return False
+    return None
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -51,7 +71,7 @@ def run_migrations_offline():
     """
     url = get_url()
     context.configure(
-        url=url, target_metadata=target_metadata, literal_binds=True, compare_type=True
+        url=url, target_metadata=target_metadata, literal_binds=True, compare_type=compare_type
     )
 
     with context.begin_transaction():
@@ -75,7 +95,7 @@ def run_migrations_online():
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata, compare_type=True
+            connection=connection, target_metadata=target_metadata, compare_type=compare_type
         )
 
         with context.begin_transaction():

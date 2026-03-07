@@ -143,7 +143,7 @@ export function WebappShareCard({
     onSuccess: (response) => {
       showSuccessToast("Webapp share link created")
       setCreatedShareUrl(response.share_url)
-      setCreatedSecurityCode(response.security_code)
+      setCreatedSecurityCode(response.security_code ?? null)
       queryClient.invalidateQueries({ queryKey: ["webapp-shares", agentId] })
     },
     onError: (error: any) => {
