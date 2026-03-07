@@ -17,6 +17,17 @@ logger = logging.getLogger(__name__)
 class AgentEnvConnector:
     """Wraps httpx for agent-env HTTP communication. Injectable for testing."""
 
+    # Granular timeouts for SSE streaming:
+    # - connect/write/pool: short, these are quick operations
+    # - read: 30 minutes to support long-running agent sessions where the SDK
+    #   may be executing tools for extended periods without emitting SSE events
+    STREAM_TIMEOUT = httpx.Timeout(
+        connect=30.0,
+        read=1800.0,   # 30 minutes
+        write=30.0,
+        pool=30.0,
+    )
+
     async def stream_chat(
         self,
         base_url: str,
@@ -37,7 +48,7 @@ class AgentEnvConnector:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=self.STREAM_TIMEOUT) as client:
                 async with client.stream(
                     "POST",
                     f"{base_url}/chat/stream",
@@ -66,6 +77,13 @@ class AgentEnvConnector:
                 "type": "error",
                 "content": f"Environment returned error: {e.response.status_code}",
                 "error_type": "HTTPError",
+            }
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout streaming from environment: {e}")
+            yield {
+                "type": "error",
+                "content": f"Connection to environment timed out. The agent session may still be running — try sending a new message to reconnect.",
+                "error_type": "TimeoutError",
             }
         except httpx.RequestError as e:
             logger.error(f"Request error to environment: {e}")
