@@ -510,6 +510,20 @@ export type AgentUpdate = {
     update_mode?: (string | null);
 };
 
+export type AgentWebappInterfaceConfigPublic = {
+    show_header?: boolean;
+    show_chat?: boolean;
+    id: string;
+    agent_id: string;
+    created_at: string;
+    updated_at: string;
+};
+
+export type AgentWebappInterfaceConfigUpdate = {
+    show_header?: (boolean | null);
+    show_chat?: (boolean | null);
+};
+
 export type AgentWebappShareCreate = {
     label?: (string | null);
     expires_in_hours?: (number | null);
@@ -3733,6 +3747,19 @@ export type WebappServeWebappFileData = {
 };
 
 export type WebappServeWebappFileResponse = (unknown);
+
+export type WebappInterfaceConfigGetWebappInterfaceConfigData = {
+    agentId: string;
+};
+
+export type WebappInterfaceConfigGetWebappInterfaceConfigResponse = (AgentWebappInterfaceConfigPublic);
+
+export type WebappInterfaceConfigUpdateWebappInterfaceConfigData = {
+    agentId: string;
+    requestBody: AgentWebappInterfaceConfigUpdate;
+};
+
+export type WebappInterfaceConfigUpdateWebappInterfaceConfigResponse = (AgentWebappInterfaceConfigPublic);
 
 export type WebappPublicWebappStatusData = {
     token: string;

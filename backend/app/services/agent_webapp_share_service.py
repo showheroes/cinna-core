@@ -385,10 +385,14 @@ class AgentWebappShareService:
         agent = session.get(Agent, share.agent_id)
         agent_name = agent.name if agent else "Unknown Agent"
 
+        from app.services.agent_webapp_interface_config_service import AgentWebappInterfaceConfigService
+        interface_config = AgentWebappInterfaceConfigService.get_by_agent_id(session, share.agent_id)
+
         return {
             "agent_name": agent_name,
             "is_valid": True,
             "webapp_share_id": str(share.id),
             "requires_code": share.security_code_encrypted is not None,
             "is_code_blocked": share.is_code_blocked,
+            "interface_config": interface_config,
         }

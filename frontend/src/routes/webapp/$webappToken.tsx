@@ -17,12 +17,18 @@ export const Route = createFileRoute("/webapp/$webappToken")({
 
 // ── Types ────────────────────────────────────────────────────────────────
 
+interface WebappInterfaceConfig {
+  show_header: boolean
+  show_chat: boolean
+}
+
 interface WebappShareInfoResponse {
   agent_name: string | null
   is_valid: boolean
   webapp_share_id: string | null
   requires_code: boolean
   is_code_blocked: boolean
+  interface_config?: WebappInterfaceConfig
 }
 
 interface WebappShareAuthResponse {
@@ -61,6 +67,7 @@ function WebappPage() {
   >("loading")
   const [errorMessage, setErrorMessage] = useState("")
   const [agentName, setAgentName] = useState("")
+  const [showHeader, setShowHeader] = useState(true)
 
   const authAttempted = useRef(false)
 
@@ -97,6 +104,9 @@ function WebappPage() {
     }
 
     setAgentName(shareInfo.agent_name || "Agent")
+    if (shareInfo.interface_config) {
+      setShowHeader(shareInfo.interface_config.show_header)
+    }
 
     if (shareInfo.is_code_blocked) {
       authAttempted.current = true
@@ -231,6 +241,16 @@ function WebappPage() {
   const iframeSrc = `${import.meta.env.VITE_API_URL}/api/v1/webapp/${webappToken}/`
 
   if (embed) {
+    return (
+      <iframe
+        src={iframeSrc}
+        className="w-full h-screen border-0"
+        title="Agent Web App"
+      />
+    )
+  }
+
+  if (!showHeader) {
     return (
       <iframe
         src={iframeSrc}

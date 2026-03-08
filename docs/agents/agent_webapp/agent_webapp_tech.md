@@ -6,7 +6,8 @@
 
 - `backend/app/models/agent.py` - `webapp_enabled` field on `Agent` (table model), `AgentUpdate`, and `AgentPublic`
 - `backend/app/models/agent_webapp_share.py` - `AgentWebappShare` table model + schema hierarchy (Base, Create, Update, Public, Created, TokenPayload)
-- `backend/app/models/__init__.py` - re-exports all webapp share models
+- `backend/app/models/agent_webapp_interface_config.py` - `AgentWebappInterfaceConfig` table model (one-to-one with agent)
+- `backend/app/models/__init__.py` - re-exports all webapp share and interface config models
 
 ### Backend - Routes
 
@@ -20,6 +21,7 @@
 
 - `backend/app/services/webapp_service.py` - `WebappService` with agent+environment resolution, activity tracking, public status polling logic; exception hierarchy (`WebappError`, `WebappNotFoundError`, `WebappPermissionError`, `WebappNotAvailableError`)
 - `backend/app/services/agent_webapp_share_service.py` - `AgentWebappShareService` with CRUD, token validation, security code verification, JWT issuance
+- `backend/app/services/agent_webapp_interface_config_service.py` - `AgentWebappInterfaceConfigService` with get-or-create and partial update
 - `backend/app/services/adapters/docker_adapter.py` - `get_webapp_status()`, `get_webapp_file()`, `call_webapp_api()` methods
 - `backend/app/services/environment_lifecycle.py` - `webapp` added to `dirs_to_copy` in `copy_workspace_between_environments()`
 
@@ -46,8 +48,10 @@
 ### Tests
 
 - `backend/tests/api/agents/agents_webapp_test.py` - 19 scenario-based tests covering CRUD, auth, owner preview, public serving
+- `backend/tests/api/agents/agents_webapp_interface_config_test.py` - Interface config lifecycle and share info integration tests
 - `backend/tests/api/agents/agents_webapp_command_test.py` - `/webapp` command integration test
 - `backend/tests/utils/webapp_share.py` - Test utility helpers
+- `backend/tests/utils/webapp_interface_config.py` - Interface config test utility helpers
 - `backend/tests/stubs/environment_adapter_stub.py` - `get_webapp_status()`, `get_webapp_file()`, `call_webapp_api()` stubs
 
 ## Database Schema
@@ -76,6 +80,15 @@
 | `created_at` | TIMESTAMPTZ | Creation timestamp |
 | `updated_at` | TIMESTAMPTZ | Last update timestamp |
 
+### `agent_webapp_interface_config` table (new)
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | UUID PK | Config ID |
+| `agent_id` | UUID FK -> agent (unique) | CASCADE delete; unique constraint enforces one-to-one |
+| `show_header` | BOOL (default true) | Whether the header bar with agent name is shown on shared webapp |
+| `show_chat` | BOOL (default false) | Placeholder for future chat widget (not yet functional) |
+
 ## API Endpoints
 
 ### Owner Preview (`backend/app/api/routes/webapp.py`)
@@ -101,13 +114,24 @@ Prefix: `/api/v1/agents/{agent_id}/webapp-shares`
 | PATCH | `/{share_id}` | Update label, is_active, allow_data_api, security_code (resets block), remove_security_code (clears code requirement). |
 | DELETE | `/{share_id}` | Delete share permanently. |
 
+### Interface Configuration (`backend/app/api/routes/webapp_interface_config.py`)
+
+Prefix: `/api/v1/agents/{agent_id}/webapp-interface-config`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | Get interface config for agent. Returns existing config or creates one with default values (show_header=true, show_chat=false). |
+| PUT | `/` | Update interface config. Partial update — only specified fields are changed. |
+
+Requires owner auth.
+
 ### Public Auth (`backend/app/api/routes/webapp_share.py`, `public_router`)
 
 Prefix: `/api/v1/webapp-share`
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/{token}/info` | Check validity, agent name, code requirement, blocked status. |
+| GET | `/{token}/info` | Check validity, agent name, code requirement, blocked status. Also returns `interface_config` object with `show_header` and `show_chat` values. |
 | POST | `/{token}/auth` | Authenticate with optional security code. Returns JWT. |
 
 ### Public Serving (`backend/app/api/routes/webapp_public.py`)
@@ -149,6 +173,15 @@ Prefix: `/api/v1/webapp`
 - `_verify_security_code()` - Decrypts stored code, compares, increments failures, blocks after 3
 - `_create_webapp_jwt()` - Creates JWT with role "webapp-viewer", 24h max lifetime
 
+### `AgentWebappInterfaceConfigService` (`backend/app/services/agent_webapp_interface_config_service.py`)
+
+- `get_or_create()` - Returns existing config for the agent, or creates one with default values (show_header=true, show_chat=false) if none exists
+- `update()` - Partial update of config fields; only fields provided in the request body are modified
+- `get_by_agent_id()` - Returns config dict for public endpoints (no auth check); returns defaults if no record exists
+- `_verify_agent_ownership()` - Reusable agent lookup + ownership check helper
+- `_get_config_by_agent()` - Reusable config query helper
+- Exception hierarchy: `InterfaceConfigError` (base), `AgentNotFoundError`, `AgentPermissionError`
+
 ### Docker Adapter (`backend/app/services/adapters/docker_adapter.py`)
 
 - `get_webapp_status()` - `GET {base_url}/webapp/status`
@@ -157,7 +190,8 @@ Prefix: `/api/v1/webapp`
 
 ## Frontend Components
 
-- `WebappShareCard.tsx` - Full share management UI: create dialog (label, expiration, allow_data_api, require_security_code), post-create view (copy URL, security code, embed snippet), share list with status badges, edit dialog (label, allow_data_api, require_security_code toggle with optional code input), delete per share
+- `WebappShareCard.tsx` - Full share management UI: create dialog (label, expiration, allow_data_api, require_security_code), post-create view (copy URL, security code, embed snippet), share list with status badges, edit dialog (label, allow_data_api, require_security_code toggle with optional code input), delete per share; includes "Interface" button that opens the interface config modal
+- `WebappInterfaceModal.tsx` - Modal dialog for editing interface configuration (Show Header, Show Chat toggles)
 - `$webappToken.tsx` - Public page with auth state machine (loading -> code_entry -> authenticating -> ready/error), security code input, full-page iframe, `?embed=1` for chromeless mode
 - `AgentEnvironmentsTab.tsx` - `webapp_enabled` switch next to inactivity period selector
 - `EnvironmentPanel.tsx` - "Web App" tab for webapp files in workspace tree
@@ -176,4 +210,4 @@ Prefix: `/api/v1/webapp`
 
 ---
 
-*Last updated: 2026-03-07*
+*Last updated: 2026-03-08*

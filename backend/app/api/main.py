@@ -36,6 +36,7 @@ from app.api.routes import (
     utils,
     webhooks,
     webapp,
+    webapp_interface_config,
     webapp_public,
     webapp_share,
     workspace,
@@ -77,6 +78,7 @@ api_router.include_router(webhooks.router, prefix="/hooks", tags=["webhooks"])
 api_router.include_router(mail_servers.router)
 api_router.include_router(email_integration.router)
 api_router.include_router(webapp.router)
+api_router.include_router(webapp_interface_config.router)
 api_router.include_router(webapp_share.router)
 api_router.include_router(webapp_share_public_router)
 api_router.include_router(webapp_public.router)

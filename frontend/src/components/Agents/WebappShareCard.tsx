@@ -8,6 +8,7 @@ import {
   Plus,
   Globe,
   Pencil,
+  Settings2,
   ShieldAlert,
   Code2,
 } from "lucide-react"
@@ -64,6 +65,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { WebappInterfaceModal } from "./WebappInterfaceModal"
 
 interface WebappShareCardProps {
   agentId: string
@@ -119,6 +121,9 @@ export function WebappShareCard({
   const [copiedEmbedShareId, setCopiedEmbedShareId] = useState<string | null>(
     null
   )
+
+  // Interface modal state
+  const [interfaceModalOpen, setInterfaceModalOpen] = useState(false)
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -358,6 +363,15 @@ export function WebappShareCard({
           <>
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-medium">Share Links</span>
+            <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setInterfaceModalOpen(true)}
+            >
+              <Settings2 className="h-4 w-4 mr-1" />
+              Interface
+            </Button>
             <Dialog open={createDialogOpen} onOpenChange={handleDialogClose}>
             <DialogTrigger asChild>
               <Button size="sm">
@@ -556,6 +570,7 @@ export function WebappShareCard({
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </div>
           </div>
         {isLoading ? (
           <p className="text-sm text-muted-foreground">
@@ -859,6 +874,12 @@ export function WebappShareCard({
           </>
         )}
       </CardContent>
+
+      <WebappInterfaceModal
+        agentId={agentId}
+        open={interfaceModalOpen}
+        onClose={() => setInterfaceModalOpen(false)}
+      />
     </Card>
   )
 }

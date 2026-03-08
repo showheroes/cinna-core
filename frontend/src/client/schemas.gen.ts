@@ -3289,6 +3289,73 @@ export const AgentUpdateSchema = {
     title: 'AgentUpdate'
 } as const;
 
+export const AgentWebappInterfaceConfigPublicSchema = {
+    properties: {
+        show_header: {
+            type: 'boolean',
+            title: 'Show Header',
+            default: true
+        },
+        show_chat: {
+            type: 'boolean',
+            title: 'Show Chat',
+            default: false
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'agent_id', 'created_at', 'updated_at'],
+    title: 'AgentWebappInterfaceConfigPublic'
+} as const;
+
+export const AgentWebappInterfaceConfigUpdateSchema = {
+    properties: {
+        show_header: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Show Header'
+        },
+        show_chat: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Show Chat'
+        }
+    },
+    type: 'object',
+    title: 'AgentWebappInterfaceConfigUpdate'
+} as const;
+
 export const AgentWebappShareCreateSchema = {
     properties: {
         label: {

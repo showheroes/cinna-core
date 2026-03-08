@@ -99,6 +99,17 @@ Data scripts:
 2. This prevents the suspension scheduler from stopping an env with active webapp viewers
 3. The existing `inactivity_period_limit` setting applies equally to webapp traffic
 
+### Interface Configuration
+
+Per-agent configuration that controls how the webapp is displayed to viewers across all share links. Accessible via the "Interface" button on the Web App integration card in the Integrations tab.
+
+Two options are available:
+
+- **Show Header** (default: on) — shows or hides the header bar at the top of the shared webapp page. The header displays the agent name and provides visual framing for the webapp. When hidden, the webapp renders full-screen without any chrome.
+- **Show Chat** (default: off) — placeholder for a future chat widget that will allow webapp viewers to interact with the agent. Currently non-functional; the toggle is visible but reserved for future use.
+
+These settings apply globally to all share links for the agent — there is no per-share override. The configuration is created with default values on first access (no manual setup required).
+
 ## Business Rules
 
 ### Webapp Shares
@@ -198,4 +209,4 @@ When a shared webapp URL is accessed and the environment is suspended:
 
 ---
 
-*Last updated: 2026-03-07*
+*Last updated: 2026-03-08*
