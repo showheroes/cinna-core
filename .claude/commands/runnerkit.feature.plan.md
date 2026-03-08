@@ -15,9 +15,9 @@ You **MUST** consider the user input before proceeding (if not empty). This is t
 You are working with a **Full Stack FastAPI + React application** (workflow-runner-core). Feature implementation plans are comprehensive architectural documents that describe HOW to implement features.
 
 ### Document Organization
-- **Location**: `docs/agent-sessions/` (or appropriate location based on feature domain)
+- **Location**: `docs/drafts/` for implementation plans
 - **Format**: Single markdown file with complete implementation architecture
-- **Naming**: `[feature-name-kebab-case].md` or `[feature-name-kebab-case]_implementation.md`
+- **Naming**: `[feature-name-kebab-case]_plan.md`
 - **Purpose**: Blueprint for developers/LLMs to implement the feature step-by-step
 
 ## Prerequisites
@@ -32,17 +32,24 @@ Before creating the implementation plan, you MUST read the following documentati
 
 ### Always Read (Core Architecture)
 1. **`CLAUDE.md`** - Project overview, technology stack, development patterns
-2. **`docs/agent-sessions/business_logic.md`** - Core business logic and architecture patterns
+2. **`docs/README.md`** - Feature registry, domain map, glossary — use this to identify which features are relevant to the plan
 
 ### Conditionally Read (Based on Feature Requirements)
 
-Read these files ONLY if the feature touches these domains:
+After reading `docs/README.md`, identify which existing features the new feature touches and read their documentation. Follow the business-logic-first approach from CLAUDE.md:
 
-- **`docs/user_workspaces_management.md`** - If feature involves workspaces or multi-tenancy
-- **`docs/agent-sessions/agent_env_credentials_management.md`** - If feature involves sensitive data or encryption
-- **`docs/agent-sessions/agent_solutions_knowledge_tool.md`** - If feature involves agent tools or MCP servers
-- **`docs/agent-sessions/agent_solutions_knowledge_management.md`** - Example of excellent feature documentation
-- Any other relevant documentation based on the feature domain
+- Read the **business logic file** (`feature_name.md`) first to understand what each related feature does
+- Read the **tech file** (`feature_name_tech.md`) only when you need implementation details
+
+Common domains to check:
+- **`docs/application/user_workspaces/`** - If feature involves workspaces or multi-tenancy
+- **`docs/agents/agent_credentials/`** - If feature involves sensitive data or encryption
+- **`docs/agents/agent_environment_core/`** - If feature involves agent tools or MCP servers
+- **`docs/application/agent_sessions/`** - If feature involves sessions or chat
+- **`docs/application/realtime_events/`** - If feature involves WebSocket or streaming
+- **`docs/development/backend/backend_development_llm.md`** - For backend implementation patterns
+- **`docs/development/frontend/frontend_development_llm.md`** - For frontend implementation patterns
+- Any other relevant documentation identified from the feature registry
 
 **Important**: Only read conditionally required docs if they're relevant. Don't waste tokens on unrelated documentation.
 
@@ -76,13 +83,12 @@ c. **Determine scope**:
 
 a. **Always read**:
    - `CLAUDE.md` - For project structure and patterns
-   - `docs/agent-sessions/business_logic.md` - For architecture patterns
+   - `docs/README.md` - For feature registry and domain map
 
 b. **Conditionally read** based on feature requirements:
-   - Workspace-related docs if feature involves multi-tenancy
-   - Credentials/encryption docs if feature handles sensitive data
-   - Agent tool docs if feature extends agent capabilities
-   - Any other relevant documentation
+   - Identify related features from the domain map in `docs/README.md`
+   - Read business logic docs first, then tech docs only if needed
+   - Check `docs/development/` for backend/frontend implementation patterns
 
 c. **Extract patterns**:
    - Note existing approaches you should follow
@@ -95,9 +101,8 @@ c. **Extract patterns**:
 
 a. **Determine output location**:
    ```
-   OUTPUT_PATH = docs/agent-sessions/[feature-name].md
+   OUTPUT_PATH = docs/drafts/[feature-name]_plan.md
    ```
-   Or another appropriate location based on the feature domain
 
 b. **Check for existing plan**:
    - If file already exists, you're updating an existing plan
@@ -115,7 +120,8 @@ a. **Think like a software architect**:
    - Plan for error handling and edge cases
 
 b. **Look for similar existing features** (if relevant):
-   - Check `docs/agent-sessions/` for related feature documentation
+   - Check the feature registry in `docs/README.md` for related features
+   - Browse relevant domain directories (`docs/agents/`, `docs/application/`) for documentation
    - Identify patterns to follow for consistency
    - Don't automatically read other docs - ask user if they want integration analysis
 
@@ -166,7 +172,7 @@ Write a comprehensive markdown document to `OUTPUT_PATH` that includes ALL of th
    - Background task triggers (if any)
 
    **Service Layer**:
-   - Service class names and file locations (e.g., `backend/app/services/notification_service.py`)
+   - Service class names and file locations (e.g., `backend/app/services/notification_service.py`) <!-- nocheck -->
    - Key methods with signatures and descriptions
    - Business logic encapsulation
    - Integration with existing services
@@ -181,7 +187,7 @@ Write a comprehensive markdown document to `OUTPUT_PATH` that includes ALL of th
 6. **Frontend Implementation**:
 
    **UI Components**:
-   - Page locations and routes (e.g., `frontend/src/routes/_layout/notifications.tsx`)
+   - Page locations and routes (e.g., `frontend/src/routes/_layout/notifications.tsx`) <!-- nocheck -->
    - Component structure and hierarchy
    - Form fields and validation rules
    - Modal dialogs and interactions
@@ -308,7 +314,7 @@ Report completion with:
 - ✅ Design API endpoints with request/response schemas
 - ✅ Plan security architecture (encryption, access control, validation)
 - ✅ Describe UI components and user flows
-- ✅ Reference existing files and patterns (e.g., "similar to `frontend/src/routes/_layout/admin.tsx`")
+- ✅ Reference existing files and patterns (e.g., "similar to `frontend/src/routes/_layout/admin.tsx`") <!-- nocheck -->
 - ✅ Consider workspace permissions and multi-tenancy if applicable
 - ✅ Plan database migrations with indexes and foreign keys
 - ✅ Create implementation checklists for backend, frontend, and testing
@@ -369,10 +375,11 @@ This is a **technical architecture document**, NOT a business specification:
 
 ## Example Reference
 
-For an example of excellent feature architecture documentation, see:
-- `docs/agent-sessions/agent_solutions_knowledge_management.md`
+For examples of well-structured feature documentation, browse the feature directories under:
+- `docs/agents/` — agent-domain features (e.g., `agent_environments/`, `agent_credentials/`)
+- `docs/application/` — platform features (e.g., `agent_sessions/`, `email_integration/`)
 
-This example shows the level of detail, structure, and completeness expected.
+Each feature directory contains business logic and tech files that demonstrate the expected level of detail.
 
 ## Notes
 

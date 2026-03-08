@@ -2,9 +2,9 @@
 """
 Documentation reference consistency checker.
 
-Scans all markdown files in docs/, CLAUDE.md, and backend/tests/ and
-verifies that file path references to backend/, frontend/, and docs/
-actually exist in the project.
+Scans all markdown files in docs/, CLAUDE.md, backend/tests/,
+.claude/agents/, and .claude/commands/ and verifies that file path
+references to backend/, frontend/, and docs/ actually exist in the project.
 
 Usage:
     python3 .runnerkit/scripts/check_docs_references.py [--verbose]
@@ -289,6 +289,12 @@ def main():
         tests_dir = os.path.join(project_root, "backend", "tests")
         if os.path.isdir(tests_dir):
             md_files.extend(find_markdown_files(tests_dir))
+
+        # Also include all .md files under .claude/agents/ and .claude/commands/
+        for claude_subdir in ("agents", "commands"):
+            claude_dir = os.path.join(project_root, ".claude", claude_subdir)
+            if os.path.isdir(claude_dir):
+                md_files.extend(find_markdown_files(claude_dir))
 
         if not md_files:
             print("No markdown files found")

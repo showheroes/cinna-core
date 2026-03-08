@@ -128,7 +128,7 @@ Not every feature needs the full 3-layer treatment. For simple features or stand
 - Use file path references: `backend/app/services/file_service.py:upload_files_to_agent_env()`
 - Use endpoint references: `POST /api/v1/files/upload` - Upload file (creates temporary record)
 - Use component references: `frontend/src/components/Chat/FileUploadModal.tsx`
-- Link to related feature docs: `See [Agent Sessions](../agents/agent_sessions/agent_sessions.md)`
+- Link to related feature docs: `See [Agent Sessions](../agents/agent_sessions/agent_sessions.md)` <!-- nocheck -->
 - Use concise bullet points
 - Use simple text architecture diagrams
 
@@ -160,7 +160,7 @@ Not every feature needs the full 3-layer treatment. For simple features or stand
    - References to files that were renamed or moved
    - Links to other feature docs that don't exist yet (use placeholder comment: `<!-- TODO: create {feature} docs -->` next to the link)
 
-   **Direction/pattern references** — some references intentionally point to non-existent files used as naming conventions or architectural directions (e.g. "store your service in `backend/app/services/my_service.py`"). Handle these two ways:
+   **Direction/pattern references** — some references intentionally point to non-existent files used as naming conventions or architectural directions (e.g. "store your service in `backend/app/services/my_service.py`"). Handle these two ways: <!-- nocheck -->
    - **Automatic**: path segments starting with `your_`, `$`, or `entit` (entity/entities/EntityCard etc.) are skipped automatically — no annotation needed.
    - **Manual**: for other direction references (e.g. `backend/app/crud.py` as a deprecated convention), append `<!-- nocheck -->` to that line so the checker ignores it.
 
