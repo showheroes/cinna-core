@@ -33,6 +33,11 @@ class ChatRequest(BaseModel):
     mode: str = "conversation"  # "building" | "conversation"
     system_prompt: Optional[str] = None
     session_state: Optional[dict] = None  # Backend-managed state context (e.g., previous_result_state)
+    include_extra_instructions: Optional[str] = None  # Absolute path to file whose contents are
+    # inlined into a one-time <extra_instructions> block prepended to the message before the SDK
+    # call. Generic/reusable — any feature can pass a different path. None = no injection.
+    extra_instructions_prepend: Optional[str] = None  # Optional static text prepended before the
+    # file contents inside the <extra_instructions> block.
 
 
 class ChatResponse(BaseModel):

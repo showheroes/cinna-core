@@ -757,6 +757,35 @@ class MessageService:
                 # Store message IDs for marking as sent later
                 message_ids = [msg.id for msg in pending_messages]
 
+                # ── One-time webapp context injection ─────────────────────────
+                # If any pending message carries page_context, this session is webapp-connected.
+                # On the first such message per session, activate the webapp_actions_context_sent
+                # flag and include a one-time extra instructions block so the agent learns about
+                # available webapp actions without burdening the system prompt of every session.
+                include_extra_instructions: str | None = None
+                extra_instructions_prepend: str | None = None
+                has_page_context = any(
+                    (msg.message_metadata or {}).get("page_context")
+                    for msg in pending_messages
+                )
+                if has_page_context:
+                    from app.services.session_service import SessionService
+                    should_inject = SessionService.activate_webapp_context(db, session_id)
+                    if should_inject:
+                        extra_instructions_prepend = (
+                            "This session is connected to a webapp that the user is viewing.\n"
+                            "- The user's current page state is included as <page_context> or "
+                            "<context_update> blocks in their messages.\n"
+                            "- You can interact with the webapp UI by embedding <webapp_action> "
+                            "tags in your responses (see webapp actions documentation for syntax and available actions)."
+                        )
+                        if session_mode == "conversation":
+                            include_extra_instructions = "/app/workspace/webapp/WEB_APP_ACTIONS.md"
+                        logger.info(
+                            "[webapp_context] Including one-time extra instructions for session %s",
+                            session_id,
+                        )
+
             # Emit stream_started event to frontend
             await event_service.emit_stream_event(
                 session_id=session_id,
@@ -776,7 +805,9 @@ class MessageService:
                 user_message_content=concatenated_content,
                 session_mode=session_mode,
                 external_session_id=external_session_id,
-                get_fresh_db_session=get_fresh_db_session
+                get_fresh_db_session=get_fresh_db_session,
+                include_extra_instructions=include_extra_instructions,
+                extra_instructions_prepend=extra_instructions_prepend,
             ):
                 # Emit each streaming event via WebSocket to frontend
                 await event_service.emit_stream_event(
@@ -900,12 +931,22 @@ class MessageService:
         mode: str,
         external_session_id: str | None = None,
         backend_session_id: str | None = None,
-        session_state: dict | None = None
+        session_state: dict | None = None,
+        include_extra_instructions: str | None = None,
+        extra_instructions_prepend: str | None = None,
     ) -> AsyncIterator[dict]:
         """
         Send message to environment and stream response.
 
         Delegates HTTP/SSE logic to agent_env_connector (injectable for testing).
+
+        Args:
+            include_extra_instructions: Absolute path (inside agent-core container filesystem) to
+                a file whose contents should be inlined into a one-time <extra_instructions> block
+                prepended to the user message before the SDK call. Generic mechanism — any feature
+                can reuse it by passing a different path.
+            extra_instructions_prepend: Optional static text prepended before the file contents
+                inside the <extra_instructions> block.
         """
         payload = {
             "message": user_message,
@@ -915,6 +956,10 @@ class MessageService:
         }
         if session_state:
             payload["session_state"] = session_state
+        if include_extra_instructions:
+            payload["include_extra_instructions"] = include_extra_instructions
+        if extra_instructions_prepend:
+            payload["extra_instructions_prepend"] = extra_instructions_prepend
 
         async for event in agent_env_connector.stream_chat(
             base_url=base_url,
@@ -1328,7 +1373,9 @@ class MessageService:
         user_message_content: str,
         session_mode: str,
         external_session_id: str | None,
-        get_fresh_db_session: callable
+        get_fresh_db_session: callable,
+        include_extra_instructions: str | None = None,
+        extra_instructions_prepend: str | None = None,
     ) -> AsyncIterator[dict]:
         """
         Stream message to environment and handle all business logic.
@@ -1341,6 +1388,13 @@ class MessageService:
         - Updates session status
         - Syncs agent prompts (for building mode)
         - Yields SSE events for frontend
+
+        Args:
+            include_extra_instructions: When set, forwarded to agent-core as an absolute path to
+                a file whose contents are inlined into a one-time <extra_instructions> block that
+                is prepended to the user message before the SDK call.
+            extra_instructions_prepend: Optional static text prepended before the file contents
+                inside the <extra_instructions> block.
         """
         from app.models.event import EventType
 
@@ -1405,7 +1459,9 @@ class MessageService:
                 mode=session_mode,
                 external_session_id=external_session_id,
                 backend_session_id=str(session_id),
-                session_state=session_state
+                session_state=session_state,
+                include_extra_instructions=include_extra_instructions,
+                extra_instructions_prepend=extra_instructions_prepend,
             ):
                 # Handle interrupted events
                 if event.get("type") == "interrupted":

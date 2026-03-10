@@ -228,6 +228,44 @@ class SessionService:
         return db_session.get(Session, session_id)
 
     @staticmethod
+    def activate_webapp_context(db_session: DBSession, session_id: UUID) -> bool:
+        """
+        Check if webapp context instructions have been sent for this session.
+
+        If the 'webapp_actions_context_sent' flag is absent in session_metadata,
+        sets it to True (committed immediately to prevent race conditions) and
+        returns True — signalling the caller to include one-time extra instructions
+        in the next agent payload.
+
+        If the flag is already set, returns False — no action needed.
+
+        Returns False (safe default) if the session cannot be found.
+
+        This follows the same session_metadata flag pattern as 'recovery_pending'.
+        """
+        chat_session = db_session.get(Session, session_id)
+        if not chat_session:
+            logger.warning(
+                "[webapp_context] Session %s not found — skipping extra instructions", session_id
+            )
+            return False
+
+        if (chat_session.session_metadata or {}).get("webapp_actions_context_sent", False):
+            return False  # Already active — no injection needed
+
+        # First time: activate the flag and commit before payload is sent
+        if not chat_session.session_metadata:
+            chat_session.session_metadata = {}
+        chat_session.session_metadata["webapp_actions_context_sent"] = True
+        flag_modified(chat_session, "session_metadata")
+        db_session.add(chat_session)
+        db_session.commit()
+        logger.info(
+            "[webapp_context] Activated webapp_actions_context_sent flag for session %s", session_id
+        )
+        return True  # Just activated — caller should include extra instructions
+
+    @staticmethod
     def update_session(
         db_session: DBSession, session_id: UUID, data: SessionUpdate
     ) -> Session | None:

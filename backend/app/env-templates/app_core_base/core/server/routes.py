@@ -173,6 +173,58 @@ async def _store_session_context(request: ChatRequest) -> None:
         )
 
 
+def _build_extra_instructions_block(
+    include_extra_instructions: str | None,
+    extra_instructions_prepend: str | None,
+) -> str | None:
+    """
+    Assemble a one-time <extra_instructions> block from a file path and optional prepend text.
+
+    Reads the file at the absolute path given by ``include_extra_instructions`` and wraps it
+    (together with any ``extra_instructions_prepend`` text) in an XML block that is meant to
+    be prepended to the user message before the SDK call.
+
+    This function is fully generic — it only knows about an absolute path and optional prepend
+    text; no webapp-specific logic lives here. Any feature can reuse it by passing a different
+    path and prepend string.
+
+    Returns:
+        The assembled block string, or None if both arguments are absent.
+        If the file is missing/unreadable, the block is assembled without file contents and a
+        warning is logged — the prepend text is still included so the agent retains orientation.
+    """
+    if not include_extra_instructions and not extra_instructions_prepend:
+        return None
+
+    parts: list[str] = []
+
+    if extra_instructions_prepend:
+        parts.append(extra_instructions_prepend)
+
+    if include_extra_instructions:
+        file_path = Path(include_extra_instructions)
+        try:
+            file_contents = file_path.read_text(encoding="utf-8")
+            parts.append(file_contents)
+        except FileNotFoundError:
+            logger.warning(
+                "include_extra_instructions file not found: %s — skipping file contents",
+                include_extra_instructions,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to read include_extra_instructions file %s: %s — skipping file contents",
+                include_extra_instructions,
+                exc,
+            )
+
+    if not parts:
+        return None
+
+    body = "\n\n".join(parts)
+    return f"<extra_instructions>\n{body}\n</extra_instructions>"
+
+
 async def verify_auth_token(authorization: Annotated[str | None, Header()] = None) -> None:
     """
     Verify the Authorization header contains the correct bearer token.
@@ -294,12 +346,21 @@ async def chat(request: ChatRequest) -> ChatResponse:
     """
     await _store_session_context(request)
 
+    # Assemble one-time extra instructions block (if requested by backend)
+    extra_block = _build_extra_instructions_block(
+        request.include_extra_instructions,
+        request.extra_instructions_prepend,
+    )
+    effective_message = (
+        f"{extra_block}\n\n{request.message}" if extra_block else request.message
+    )
+
     response_content = []
     new_session_id = request.session_id
 
     try:
         async for chunk in sdk_manager.send_message_stream(
-            message=request.message,
+            message=effective_message,
             session_id=request.session_id,
             backend_session_id=request.backend_session_id,
             system_prompt=request.system_prompt,  # Only use explicit override if provided
@@ -344,6 +405,21 @@ async def chat_stream(request: ChatRequest):
 
     await _store_session_context(request)
 
+    # Assemble one-time extra instructions block (if requested by backend)
+    extra_block = _build_extra_instructions_block(
+        request.include_extra_instructions,
+        request.extra_instructions_prepend,
+    )
+    effective_message = (
+        f"{extra_block}\n\n{request.message}" if extra_block else request.message
+    )
+    if extra_block:
+        logger.info(
+            "Prepending extra_instructions block (%d chars) to message for backend_session_id=%s",
+            len(extra_block),
+            request.backend_session_id,
+        )
+
     async def event_stream():
         """Generate SSE events from SDK stream"""
         event_count = 0
@@ -351,7 +427,7 @@ async def chat_stream(request: ChatRequest):
         try:
             logger.info("Calling sdk_manager.send_message_stream()...")
             async for chunk in sdk_manager.send_message_stream(
-                message=request.message,
+                message=effective_message,
                 session_id=request.session_id,
                 backend_session_id=request.backend_session_id,
                 system_prompt=request.system_prompt,  # Only use explicit override if provided

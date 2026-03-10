@@ -40,6 +40,7 @@ Define how data flows between agents, environments, and clones, ensuring consist
 | `knowledge/` folder | environment | On-Demand | Integration docs, API guides |
 | `files/` folder | environment | On-Demand | Reports, CSV files, SQLite DBs, caches |
 | `uploads/` folder | environment | On-Demand | User-uploaded files |
+| `webapp/` folder | environment | On-Demand | Web app static files, data endpoints, actions registry |
 | `workspace_requirements.txt` | environment | On-Demand | Agent-installed Python packages |
 | Plugins (LLM tools) | agent_config | Dynamic | Synced via plugin sync operation |
 
@@ -81,7 +82,7 @@ Define how data flows between agents, environments, and clones, ensuring consist
 4. Old environments stopped, target started
 5. Dynamic data synced to target
 
-**Copied during switch**: `scripts/`, `docs/`, `knowledge/`, `files/`, `uploads/`, `credentials/`, `plugins/`, `workspace_requirements.txt`
+**Copied during switch**: `scripts/`, `docs/`, `knowledge/`, `files/`, `uploads/`, `credentials/`, `plugins/`, `webapp/`, `workspace_requirements.txt`
 
 **NOT copied**: `logs/`, `databases/` (runtime data)
 
@@ -92,7 +93,7 @@ Define how data flows between agents, environments, and clones, ensuring consist
 3. Workspace files copied from original agent's environment
 4. Credentials linked: shared credentials linked directly, others created as placeholders
 
-**Copied to clone**: `scripts/`, `docs/`, `knowledge/`, `files/`, `uploads/`, `workspace_requirements.txt`
+**Copied to clone**: `scripts/`, `docs/`, `knowledge/`, `files/`, `uploads/`, `webapp/`, `workspace_requirements.txt`
 
 **NOT copied**: `logs/`, `databases/` (runtime), `credentials/` (handled separately via dynamic sync)
 
@@ -102,7 +103,7 @@ Define how data flows between agents, environments, and clones, ensuring consist
 2. For each clone: workspace files synced from parent
 3. Dynamic data sync runs on next start
 
-**Applied during update**: `scripts/`, `docs/`, `knowledge/`, `files/`, `uploads/`, `workspace_requirements.txt`
+**Applied during update**: `scripts/`, `docs/`, `knowledge/`, `files/`, `uploads/`, `webapp/`, `workspace_requirements.txt`
 
 **Not applied**: Integration credentials, runtime data
 
@@ -112,7 +113,7 @@ Define how data flows between agents, environments, and clones, ensuring consist
 2. Core server code replaced from template
 3. Knowledge base files synced from template (add/update only, no deletions)
 
-**Preserved**: All workspace data (scripts, files, docs, credentials, databases, logs)
+**Preserved**: All workspace data (scripts, files, docs, credentials, webapp, databases, logs)
 
 ## Business Rules
 
@@ -166,6 +167,10 @@ Agent Model (DB) → Environment Lifecycle Manager → Docker Adapter → Docker
 ├── uploads/                     # User-uploaded files (Original Agent)
 ├── credentials/                 # Integration credentials (Clone/Instance)
 ├── plugins/                     # LLM plugins (Original Agent)
+├── webapp/                      # Web app files, data endpoints, actions registry (Original Agent)
+│   ├── index.html
+│   ├── api/                     # Python data endpoint scripts
+│   └── WEB_APP_ACTIONS.md       # Actions registry for chat integration
 ├── logs/                        # Session logs (Runtime - never synced)
 ├── databases/                   # Runtime databases (Runtime - never synced)
 └── workspace_requirements.txt   # Python packages (Original Agent)
@@ -179,4 +184,5 @@ Agent Model (DB) → Environment Lifecycle Manager → Docker Adapter → Docker
 - **[AI Credentials](../../application/ai_credentials/ai_credentials.md)** - AI provider keys resolved and injected as environment variables during start
 - **[Agent Plugins](../agent_plugins/agent_plugins.md)** - Plugins synced dynamically to `workspace/plugins/` on every start
 - **[Knowledge Management](../../application/knowledge_sources/knowledge_sources.md)** - Knowledge files synced on-demand during clone/switch, template knowledge updated during rebuild
+- **[Agent Webapp](../agent_webapp/agent_webapp.md)** - Webapp folder (`webapp/`) synced on-demand during clone/switch; contains static files, data endpoints, and the actions registry (`WEB_APP_ACTIONS.md`)
 

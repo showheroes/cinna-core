@@ -111,11 +111,12 @@ export function WebappInterfaceModal({
                 disabled={updateMutation.isPending}
               >
                 <div
-                  className={`flex items-start space-x-3 p-3 border rounded-lg transition-colors ${
+                  className={`flex items-start space-x-3 p-3 border rounded-lg transition-colors cursor-pointer ${
                     currentChatMode === null
                       ? "border-muted-foreground/30 bg-muted/30"
                       : "border-border hover:bg-muted/50"
                   }`}
+                  onClick={() => !updateMutation.isPending && handleChatModeChange("disabled")}
                 >
                   <RadioGroupItem value="disabled" id="chat-disabled" className="mt-0.5" />
                   <div className="flex items-center gap-2">
@@ -127,11 +128,12 @@ export function WebappInterfaceModal({
                 </div>
 
                 <div
-                  className={`flex items-start space-x-3 p-3 border rounded-lg transition-colors ${
+                  className={`flex items-start space-x-3 p-3 border rounded-lg transition-colors cursor-pointer ${
                     currentChatMode === "conversation"
                       ? "border-blue-500 bg-blue-500/5 dark:bg-blue-950/20"
                       : "border-border hover:bg-muted/50"
                   }`}
+                  onClick={() => !updateMutation.isPending && handleChatModeChange("conversation")}
                 >
                   <RadioGroupItem value="conversation" id="chat-conversation" className="mt-0.5" />
                   <div>
@@ -148,11 +150,12 @@ export function WebappInterfaceModal({
                 </div>
 
                 <div
-                  className={`flex items-start space-x-3 p-3 border rounded-lg transition-colors ${
+                  className={`flex items-start space-x-3 p-3 border rounded-lg transition-colors cursor-pointer ${
                     currentChatMode === "building"
                       ? "border-orange-500 bg-orange-500/5 dark:bg-orange-950/20"
                       : "border-border hover:bg-muted/50"
                   }`}
+                  onClick={() => !updateMutation.isPending && handleChatModeChange("building")}
                 >
                   <RadioGroupItem value="building" id="chat-building" className="mt-0.5" />
                   <div>

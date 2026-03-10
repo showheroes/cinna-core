@@ -127,11 +127,15 @@ function WebappPage() {
       return
     }
 
-    // Check for existing valid webapp JWT
+    // Check for existing valid webapp JWT (must match current share)
     const existingToken = localStorage.getItem(WEBAPP_TOKEN_KEY)
     if (existingToken) {
       const claims = parseWebappJwt(existingToken)
-      if (claims && claims.exp * 1000 > Date.now()) {
+      if (
+        claims &&
+        claims.exp * 1000 > Date.now() &&
+        claims.sub === shareInfo.webapp_share_id
+      ) {
         authAttempted.current = true
         setAuthState("ready")
         return

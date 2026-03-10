@@ -120,11 +120,34 @@ Tags are automatically stripped from the visible chat message — the user only 
 |---|---|
 | `refresh_page` | After code changes in building mode |
 | `reload_data` | After updating backend data in conversation mode |
-| `update_form` | To apply filter changes the user asked for in natural language |
+| `update_form` | To fill form fields or apply filter values the user asked for |
 | `show_notification` | To confirm completed actions or report errors |
 | `navigate` | To take the user to a relevant section in an SPA |
 
 For full documentation — data field specs, custom event listeners, and examples — read `/app/core/webapp-framework/ACTIONS_REFERENCE.md`.
+
+### Making the Webapp Action-Ready
+
+The `update_form` action works by finding a `<form>` element by its `id` attribute, then setting values on its child input/select/textarea elements by their `name` attributes. **This means:**
+
+1. **Every `<form>` MUST have an `id` attribute** — without it, `update_form` cannot target the form. Example: `<form id="task-form" ...>`.
+2. **Every form field MUST have a `name` attribute** — this is how `update_form` maps `values` keys to fields. Example: `<input name="title" ...>`, `<select name="status" ...>`.
+3. **`update_form` only works on standard HTML form elements** (`<input>`, `<select>`, `<textarea>`). It does NOT work on:
+   - JavaScript framework state (Alpine.js `x-data`, React state, Vue refs, etc.)
+   - Custom button groups, toggles, or filter chips that are driven by JS variables
+   - Elements that only look like inputs but are actually `<div>` or `<button>` elements
+
+**When the webapp uses JS framework state for interactive elements** (e.g., Alpine.js `x-data` for filters, tabs, or toggles), you MUST create custom actions with `webapp_action_*` event listeners so the conversation agent can control them. Do not assume `update_form` will work on framework-managed state.
+
+**Rule of thumb:** For every interactive element in the webapp (forms, filters, tabs, sorting controls), ask yourself: "Can the conversation agent control this via existing built-in actions?" If not, implement a custom action event listener and document it in `WEB_APP_ACTIONS.md`.
+
+## Maintaining the Actions Registry
+
+The file `/app/workspace/webapp/WEB_APP_ACTIONS.md` is the actions registry for this agent.
+It pre-documents the built-in action types. When you implement custom event handlers in your
+webapp JavaScript (e.g., `window.addEventListener('webapp_action_my_action', ...)`), you MUST
+add an entry to `WEB_APP_ACTIONS.md` describing the action type and what data it expects. This
+keeps conversation mode informed about what custom actions are available to use.
 
 ## Best Practices
 - Start with a single `index.html` for simple dashboards

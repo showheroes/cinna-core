@@ -269,6 +269,7 @@ class AgentCloneService:
             ("app/workspace/scripts", "app/workspace/scripts"),
             ("app/workspace/docs", "app/workspace/docs"),
             ("app/workspace/knowledge", "app/workspace/knowledge"),
+            ("app/workspace/webapp", "app/workspace/webapp"),
         ]
 
         # Optional directories (files folder)
