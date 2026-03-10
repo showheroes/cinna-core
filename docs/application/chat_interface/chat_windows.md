@@ -104,10 +104,8 @@ One-click approval of agent tool usage directly from chat. Adds tools to agent's
 - Shows appropriate recovery action and toast feedback
 
 ### File Attachments
-- File upload via MessageInput with drag-drop support (FileUploadModal)
-- 100MB file size limit
-- Attached files displayed as FileBadge components with download capability
-- Files shown in message footer below content
+
+File upload via drag-drop or modal, with visual badges and authenticated download. Files are transferred into the agent's Docker environment and referenced in the message. See **[File Sending & UI](file_sending_and_ui.md)** for the full lifecycle, display logic, and agent content augmentation.
 
 ## Auto-Scroll & Streaming Display
 
