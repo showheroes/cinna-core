@@ -59,7 +59,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | [agents](#agents) | Core agent lifecycle - creation, configuration, environments, sessions, chat, file management | 11 features |
 | [tasks](#tasks) | Task submission, refinement, triggers, and scheduling | 3 features |
 | [credentials](#credentials) | Credential management, encryption, AI provider keys | 1 feature |
-| [application](#application) | User-facing platform features - authentication, integrations, real-time events, workspaces | 15 features |
+| [application](#application) | User-facing platform features - authentication, integrations, real-time events, workspaces | 16 features |
 | [knowledge](#knowledge) | Git-based knowledge sources, vector search, RAG | 1 feature |
 | [sharing](#sharing) | Agent sharing, guest access, workspace collaboration | 3 features |
 | [development](#development) | Backend/frontend patterns, AI functions, debugging | 4 features |
@@ -119,6 +119,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | agent_activities | Activity feed, event logging, session summaries, sidebar bell indicator | [business logic](application/agent_activities/agent_activities.md) \| [tech](application/agent_activities/agent_activities_tech.md) |
 | getting_started | New user and new instance onboarding — API key gate, Getting Started Modal, Rotating Hints | [business logic](application/getting_started/getting_started.md) \| [tech](application/getting_started/getting_started_tech.md) |
 | chat_windows | Chat window rendering across session pages, guest shares, and webapp widgets — markdown, tool blocks, streaming display, auto-scroll | [business logic](application/chat_interface/chat_windows.md) \| [tech](application/chat_interface/chat_windows_tech.md) \| [tool rendering](application/chat_interface/tool_rendering.md) \| [tool tech](application/chat_interface/tool_rendering_tech.md) \| [markdown](application/chat_interface/markdown_rendering.md) \| [auto-scroll](application/chat_interface/auto_scroll_and_streaming_display.md) \| [ask user question](application/chat_interface/tool_answer_questions_widget.md) \| [tool approval](application/chat_interface/tool_approval_widget.md) \| [webapp widget](application/chat_interface/webapp_chat_widget.md) \| [file sending](application/chat_interface/file_sending_and_ui.md) |
+| user_dashboards | Customizable grid-based monitoring dashboards — per-user, workspace-independent, agent blocks with webapp/session/tasks views | [business logic](application/user_dashboards/user_dashboards.md) \| [tech](application/user_dashboards/user_dashboards_tech.md) |
 
 ### knowledge
 

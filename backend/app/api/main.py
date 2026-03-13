@@ -33,6 +33,7 @@ from app.api.routes import (
     ssh_keys,
     task_triggers,
     users,
+    user_dashboards,
     user_workspaces,
     utils,
     webhooks,
@@ -67,6 +68,7 @@ api_router.include_router(environments.router)
 api_router.include_router(sessions.router)
 api_router.include_router(messages.router)
 api_router.include_router(workspace.router)
+api_router.include_router(user_dashboards.router)
 api_router.include_router(user_workspaces.router)
 api_router.include_router(activities.router)
 api_router.include_router(security_events.router)

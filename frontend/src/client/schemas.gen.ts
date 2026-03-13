@@ -3783,6 +3783,39 @@ export const ArticleListItemSchema = {
     description: 'Article metadata for discovery step.'
 } as const;
 
+export const BlockLayoutUpdateSchema = {
+    properties: {
+        block_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Block Id'
+        },
+        grid_x: {
+            type: 'integer',
+            minimum: 0,
+            title: 'Grid X'
+        },
+        grid_y: {
+            type: 'integer',
+            minimum: 0,
+            title: 'Grid Y'
+        },
+        grid_w: {
+            type: 'integer',
+            minimum: 1,
+            title: 'Grid W'
+        },
+        grid_h: {
+            type: 'integer',
+            minimum: 1,
+            title: 'Grid H'
+        }
+    },
+    type: 'object',
+    required: ['block_id', 'grid_x', 'grid_y', 'grid_w', 'grid_h'],
+    title: 'BlockLayoutUpdate'
+} as const;
+
 export const Body_credentials_update_credential_sharingSchema = {
     properties: {
         allow_sharing: {
@@ -8361,8 +8394,7 @@ export const SecurityEventCreateSchema = {
         details: {
             additionalProperties: true,
             type: 'object',
-            title: 'Details',
-            default: {}
+            title: 'Details'
         }
     },
     type: 'object',
@@ -10302,6 +10334,379 @@ export const UserCreateSchema = {
     type: 'object',
     required: ['email', 'password'],
     title: 'UserCreate'
+} as const;
+
+export const UserDashboardBlockCreateSchema = {
+    properties: {
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        view_type: {
+            type: 'string',
+            enum: ['webapp', 'latest_session', 'latest_tasks'],
+            title: 'View Type',
+            default: 'latest_session'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        show_border: {
+            type: 'boolean',
+            title: 'Show Border',
+            default: true
+        },
+        show_header: {
+            type: 'boolean',
+            title: 'Show Header',
+            default: false
+        },
+        grid_x: {
+            type: 'integer',
+            minimum: 0,
+            title: 'Grid X',
+            default: 0
+        },
+        grid_y: {
+            type: 'integer',
+            minimum: 0,
+            title: 'Grid Y',
+            default: 0
+        },
+        grid_w: {
+            type: 'integer',
+            minimum: 1,
+            title: 'Grid W',
+            default: 2
+        },
+        grid_h: {
+            type: 'integer',
+            minimum: 1,
+            title: 'Grid H',
+            default: 2
+        }
+    },
+    type: 'object',
+    required: ['agent_id'],
+    title: 'UserDashboardBlockCreate'
+} as const;
+
+export const UserDashboardBlockPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        view_type: {
+            type: 'string',
+            title: 'View Type'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        show_border: {
+            type: 'boolean',
+            title: 'Show Border'
+        },
+        show_header: {
+            type: 'boolean',
+            title: 'Show Header'
+        },
+        grid_x: {
+            type: 'integer',
+            title: 'Grid X'
+        },
+        grid_y: {
+            type: 'integer',
+            title: 'Grid Y'
+        },
+        grid_w: {
+            type: 'integer',
+            title: 'Grid W'
+        },
+        grid_h: {
+            type: 'integer',
+            title: 'Grid H'
+        },
+        config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Config'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'agent_id', 'view_type', 'title', 'show_border', 'show_header', 'grid_x', 'grid_y', 'grid_w', 'grid_h', 'config', 'created_at', 'updated_at'],
+    title: 'UserDashboardBlockPublic'
+} as const;
+
+export const UserDashboardBlockUpdateSchema = {
+    properties: {
+        view_type: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['webapp', 'latest_session', 'latest_tasks']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'View Type'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        show_border: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Show Border'
+        },
+        show_header: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Show Header'
+        },
+        grid_x: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Grid X'
+        },
+        grid_y: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Grid Y'
+        },
+        grid_w: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Grid W'
+        },
+        grid_h: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Grid H'
+        },
+        config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Config'
+        }
+    },
+    type: 'object',
+    title: 'UserDashboardBlockUpdate'
+} as const;
+
+export const UserDashboardCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'UserDashboardCreate'
+} as const;
+
+export const UserDashboardPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        blocks: {
+            items: {
+                '$ref': '#/components/schemas/UserDashboardBlockPublic'
+            },
+            type: 'array',
+            title: 'Blocks',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['id', 'name', 'description', 'sort_order', 'created_at', 'updated_at'],
+    title: 'UserDashboardPublic'
+} as const;
+
+export const UserDashboardUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        sort_order: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sort Order'
+        }
+    },
+    type: 'object',
+    title: 'UserDashboardUpdate'
 } as const;
 
 export const UserPublicSchema = {

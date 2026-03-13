@@ -6,11 +6,19 @@ Owner preview routes for serving webapp content from agent environments.
 import uuid
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
+import jwt as pyjwt
+from jwt.exceptions import InvalidTokenError
+from pydantic import ValidationError
+
 from app.api.deps import CurrentUser, SessionDep
+from app.core import security
+from app.core.config import settings
+from app.models import TokenPayload, User
 from app.services.environment_service import EnvironmentService
 from app.services.webapp_service import (
     WebappService,
@@ -21,6 +29,30 @@ from app.services.webapp_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agents/{agent_id}/webapp", tags=["webapp"])
+
+_optional_oauth2 = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/login/access-token", auto_error=False
+)
+
+
+def _resolve_user_from_token(session, raw_token: str) -> User:
+    """Validate a JWT string and return the User, or raise 403."""
+    try:
+        payload = pyjwt.decode(
+            raw_token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
+        )
+        token_data = TokenPayload(**payload)
+    except (InvalidTokenError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+    user = session.get(User, token_data.sub)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return user
 
 
 def _handle_webapp_error(e: WebappError) -> None:
@@ -67,10 +99,20 @@ async def webapp_data_api(
     agent_id: uuid.UUID,
     endpoint: str,
     session: SessionDep,
-    current_user: CurrentUser,
+    request: Request,
+    bearer_token: str | None = Depends(_optional_oauth2),
     body: WebappDataApiRequest | None = None,
 ):
     """Execute a data script endpoint in the webapp."""
+    # Resolve user from bearer token or cookie (for iframe embedding)
+    raw_token = bearer_token or request.cookies.get("webapp_owner_token")
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    current_user = _resolve_user_from_token(session, raw_token)
+
     # Strip .py extension if caller included it in the URL
     if endpoint.endswith(".py"):
         endpoint = endpoint[:-3]
@@ -106,10 +148,21 @@ async def serve_webapp_file(
     agent_id: uuid.UUID,
     path: str,
     session: SessionDep,
-    current_user: CurrentUser,
     request: Request,
+    bearer_token: str | None = Depends(_optional_oauth2),
+    token: str | None = Query(None),
 ):
     """Serve a static file from the agent's webapp directory."""
+    # Resolve user from bearer token, query param, or cookie (for iframe embedding).
+    # Priority: Authorization header > ?token= query param > webapp_owner_token cookie.
+    raw_token = bearer_token or token or request.cookies.get("webapp_owner_token")
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    current_user = _resolve_user_from_token(session, raw_token)
+
     try:
         agent, environment = WebappService.resolve_agent_environment(
             session, agent_id, current_user.id,
@@ -150,15 +203,30 @@ async def serve_webapp_file(
         if val:
             req_headers[h] = val
 
+    # Set a cookie so sub-resource requests (JS, CSS, images) from the iframe
+    # are authenticated without needing the ?token= query param on every URL.
+    set_cookie = token and not request.cookies.get("webapp_owner_token")
+
     try:
         status_code, resp_headers, body = await adapter.get_webapp_file(path, req_headers)
         if status_code == 404:
             raise HTTPException(status_code=404, detail=f"File not found: {path}")
-        return Response(
+        response = Response(
             content=body,
             status_code=status_code,
             headers=resp_headers,
         )
+        if set_cookie:
+            response.set_cookie(
+                key="webapp_owner_token",
+                value=raw_token,
+                httponly=True,
+                samesite="strict",
+                secure=request.url.scheme == "https",
+                path=f"/api/v1/agents/{agent_id}/webapp",
+                max_age=8 * 24 * 3600,  # Match JWT expiry
+            )
+        return response
     except HTTPException:
         raise
     except Exception as e:

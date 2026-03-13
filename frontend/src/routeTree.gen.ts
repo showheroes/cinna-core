@@ -19,6 +19,7 @@ import { Route as WebappWebappTokenRouteImport } from './routes/webapp/$webappTo
 import { Route as OauthMcpConsentRouteImport } from './routes/oauth/mcp-consent'
 import { Route as GuestFileViewerRouteImport } from './routes/guest/file-viewer'
 import { Route as GuestGuestShareTokenRouteImport } from './routes/guest/$guestShareToken'
+import { Route as DashboardFullscreenDashboardIdRouteImport } from './routes/dashboard-fullscreen/$dashboardId'
 import { Route as LayoutTasksRouteImport } from './routes/_layout/tasks'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutSessionsRouteImport } from './routes/_layout/sessions'
@@ -28,10 +29,12 @@ import { Route as LayoutCredentialsRouteImport } from './routes/_layout/credenti
 import { Route as LayoutAgentsRouteImport } from './routes/_layout/agents'
 import { Route as LayoutActivitiesRouteImport } from './routes/_layout/activities'
 import { Route as LayoutSessionsIndexRouteImport } from './routes/_layout/sessions.index'
+import { Route as LayoutDashboardsIndexRouteImport } from './routes/_layout/dashboards.index'
 import { Route as CredentialsOauthCallbackRouteImport } from './routes/credentials/oauth/callback'
 import { Route as LayoutTaskTaskIdRouteImport } from './routes/_layout/task/$taskId'
 import { Route as LayoutSessionSessionIdRouteImport } from './routes/_layout/session/$sessionId'
 import { Route as LayoutKnowledgeSourceSourceIdRouteImport } from './routes/_layout/knowledge-source/$sourceId'
+import { Route as LayoutDashboardsDashboardIdRouteImport } from './routes/_layout/dashboards.$dashboardId'
 import { Route as LayoutCredentialCredentialIdRouteImport } from './routes/_layout/credential/$credentialId'
 import { Route as LayoutAgentCreatingRouteImport } from './routes/_layout/agent/creating'
 import { Route as LayoutAgentAgentIdRouteImport } from './routes/_layout/agent/$agentId'
@@ -93,6 +96,12 @@ const GuestGuestShareTokenRoute = GuestGuestShareTokenRouteImport.update({
   path: '/guest/$guestShareToken',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardFullscreenDashboardIdRoute =
+  DashboardFullscreenDashboardIdRouteImport.update({
+    id: '/dashboard-fullscreen/$dashboardId',
+    path: '/dashboard-fullscreen/$dashboardId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const LayoutTasksRoute = LayoutTasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
@@ -138,6 +147,11 @@ const LayoutSessionsIndexRoute = LayoutSessionsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => LayoutSessionsRoute,
 } as any)
+const LayoutDashboardsIndexRoute = LayoutDashboardsIndexRouteImport.update({
+  id: '/dashboards/',
+  path: '/dashboards/',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const CredentialsOauthCallbackRoute =
   CredentialsOauthCallbackRouteImport.update({
     id: '/credentials/oauth/callback',
@@ -158,6 +172,12 @@ const LayoutKnowledgeSourceSourceIdRoute =
   LayoutKnowledgeSourceSourceIdRouteImport.update({
     id: '/knowledge-source/$sourceId',
     path: '/knowledge-source/$sourceId',
+    getParentRoute: () => LayoutRoute,
+  } as any)
+const LayoutDashboardsDashboardIdRoute =
+  LayoutDashboardsDashboardIdRouteImport.update({
+    id: '/dashboards/$dashboardId',
+    path: '/dashboards/$dashboardId',
     getParentRoute: () => LayoutRoute,
   } as any)
 const LayoutCredentialCredentialIdRoute =
@@ -236,6 +256,7 @@ export interface FileRoutesByFullPath {
   '/sessions': typeof LayoutSessionsRouteWithChildren
   '/settings': typeof LayoutSettingsRoute
   '/tasks': typeof LayoutTasksRoute
+  '/dashboard-fullscreen/$dashboardId': typeof DashboardFullscreenDashboardIdRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
   '/oauth/mcp-consent': typeof OauthMcpConsentRoute
@@ -246,10 +267,12 @@ export interface FileRoutesByFullPath {
   '/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/agent/creating': typeof LayoutAgentCreatingRoute
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
+  '/dashboards/$dashboardId': typeof LayoutDashboardsDashboardIdRoute
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
+  '/dashboards': typeof LayoutDashboardsIndexRoute
   '/sessions/': typeof LayoutSessionsIndexRoute
   '/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
   '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
@@ -270,6 +293,7 @@ export interface FileRoutesByTo {
   '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/settings': typeof LayoutSettingsRoute
   '/tasks': typeof LayoutTasksRoute
+  '/dashboard-fullscreen/$dashboardId': typeof DashboardFullscreenDashboardIdRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
   '/oauth/mcp-consent': typeof OauthMcpConsentRoute
@@ -280,10 +304,12 @@ export interface FileRoutesByTo {
   '/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/agent/creating': typeof LayoutAgentCreatingRoute
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
+  '/dashboards/$dashboardId': typeof LayoutDashboardsDashboardIdRoute
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
+  '/dashboards': typeof LayoutDashboardsIndexRoute
   '/sessions': typeof LayoutSessionsIndexRoute
   '/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
   '/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
@@ -307,6 +333,7 @@ export interface FileRoutesById {
   '/_layout/sessions': typeof LayoutSessionsRouteWithChildren
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/tasks': typeof LayoutTasksRoute
+  '/dashboard-fullscreen/$dashboardId': typeof DashboardFullscreenDashboardIdRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
   '/oauth/mcp-consent': typeof OauthMcpConsentRoute
@@ -317,10 +344,12 @@ export interface FileRoutesById {
   '/_layout/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/_layout/agent/creating': typeof LayoutAgentCreatingRoute
   '/_layout/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
+  '/_layout/dashboards/$dashboardId': typeof LayoutDashboardsDashboardIdRoute
   '/_layout/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/_layout/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/_layout/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
+  '/_layout/dashboards/': typeof LayoutDashboardsIndexRoute
   '/_layout/sessions/': typeof LayoutSessionsIndexRoute
   '/_layout/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
   '/_layout/agent/$agentId/conversations': typeof LayoutAgentAgentIdConversationsRoute
@@ -344,6 +373,7 @@ export interface FileRouteTypes {
     | '/sessions'
     | '/settings'
     | '/tasks'
+    | '/dashboard-fullscreen/$dashboardId'
     | '/guest/$guestShareToken'
     | '/guest/file-viewer'
     | '/oauth/mcp-consent'
@@ -354,10 +384,12 @@ export interface FileRouteTypes {
     | '/agent/$agentId'
     | '/agent/creating'
     | '/credential/$credentialId'
+    | '/dashboards/$dashboardId'
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
     | '/task/$taskId'
     | '/credentials/oauth/callback'
+    | '/dashboards'
     | '/sessions/'
     | '/admin/marketplace/$marketplaceId'
     | '/agent/$agentId/conversations'
@@ -378,6 +410,7 @@ export interface FileRouteTypes {
     | '/knowledge-sources'
     | '/settings'
     | '/tasks'
+    | '/dashboard-fullscreen/$dashboardId'
     | '/guest/$guestShareToken'
     | '/guest/file-viewer'
     | '/oauth/mcp-consent'
@@ -388,10 +421,12 @@ export interface FileRouteTypes {
     | '/agent/$agentId'
     | '/agent/creating'
     | '/credential/$credentialId'
+    | '/dashboards/$dashboardId'
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
     | '/task/$taskId'
     | '/credentials/oauth/callback'
+    | '/dashboards'
     | '/sessions'
     | '/admin/marketplace/$marketplaceId'
     | '/agent/$agentId/conversations'
@@ -414,6 +449,7 @@ export interface FileRouteTypes {
     | '/_layout/sessions'
     | '/_layout/settings'
     | '/_layout/tasks'
+    | '/dashboard-fullscreen/$dashboardId'
     | '/guest/$guestShareToken'
     | '/guest/file-viewer'
     | '/oauth/mcp-consent'
@@ -424,10 +460,12 @@ export interface FileRouteTypes {
     | '/_layout/agent/$agentId'
     | '/_layout/agent/creating'
     | '/_layout/credential/$credentialId'
+    | '/_layout/dashboards/$dashboardId'
     | '/_layout/knowledge-source/$sourceId'
     | '/_layout/session/$sessionId'
     | '/_layout/task/$taskId'
     | '/credentials/oauth/callback'
+    | '/_layout/dashboards/'
     | '/_layout/sessions/'
     | '/_layout/admin/marketplace/$marketplaceId'
     | '/_layout/agent/$agentId/conversations'
@@ -443,6 +481,7 @@ export interface RootRouteChildren {
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
+  DashboardFullscreenDashboardIdRoute: typeof DashboardFullscreenDashboardIdRoute
   GuestGuestShareTokenRoute: typeof GuestGuestShareTokenRoute
   GuestFileViewerRoute: typeof GuestFileViewerRoute
   OauthMcpConsentRoute: typeof OauthMcpConsentRoute
@@ -522,6 +561,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GuestGuestShareTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard-fullscreen/$dashboardId': {
+      id: '/dashboard-fullscreen/$dashboardId'
+      path: '/dashboard-fullscreen/$dashboardId'
+      fullPath: '/dashboard-fullscreen/$dashboardId'
+      preLoaderRoute: typeof DashboardFullscreenDashboardIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_layout/tasks': {
       id: '/_layout/tasks'
       path: '/tasks'
@@ -585,6 +631,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutSessionsIndexRouteImport
       parentRoute: typeof LayoutSessionsRoute
     }
+    '/_layout/dashboards/': {
+      id: '/_layout/dashboards/'
+      path: '/dashboards'
+      fullPath: '/dashboards'
+      preLoaderRoute: typeof LayoutDashboardsIndexRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/credentials/oauth/callback': {
       id: '/credentials/oauth/callback'
       path: '/credentials/oauth/callback'
@@ -611,6 +664,13 @@ declare module '@tanstack/react-router' {
       path: '/knowledge-source/$sourceId'
       fullPath: '/knowledge-source/$sourceId'
       preLoaderRoute: typeof LayoutKnowledgeSourceSourceIdRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/dashboards/$dashboardId': {
+      id: '/_layout/dashboards/$dashboardId'
+      path: '/dashboards/$dashboardId'
+      fullPath: '/dashboards/$dashboardId'
+      preLoaderRoute: typeof LayoutDashboardsDashboardIdRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/credential/$credentialId': {
@@ -733,9 +793,11 @@ interface LayoutRouteChildren {
   LayoutAgentAgentIdRoute: typeof LayoutAgentAgentIdRouteWithChildren
   LayoutAgentCreatingRoute: typeof LayoutAgentCreatingRoute
   LayoutCredentialCredentialIdRoute: typeof LayoutCredentialCredentialIdRoute
+  LayoutDashboardsDashboardIdRoute: typeof LayoutDashboardsDashboardIdRoute
   LayoutKnowledgeSourceSourceIdRoute: typeof LayoutKnowledgeSourceSourceIdRoute
   LayoutSessionSessionIdRoute: typeof LayoutSessionSessionIdRoute
   LayoutTaskTaskIdRoute: typeof LayoutTaskTaskIdRoute
+  LayoutDashboardsIndexRoute: typeof LayoutDashboardsIndexRoute
   LayoutAdminMarketplaceMarketplaceIdRoute: typeof LayoutAdminMarketplaceMarketplaceIdRoute
   LayoutEnvironmentEnvIdDatabaseRoute: typeof LayoutEnvironmentEnvIdDatabaseRoute
   LayoutEnvironmentEnvIdFileRoute: typeof LayoutEnvironmentEnvIdFileRoute
@@ -757,9 +819,11 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAgentAgentIdRoute: LayoutAgentAgentIdRouteWithChildren,
   LayoutAgentCreatingRoute: LayoutAgentCreatingRoute,
   LayoutCredentialCredentialIdRoute: LayoutCredentialCredentialIdRoute,
+  LayoutDashboardsDashboardIdRoute: LayoutDashboardsDashboardIdRoute,
   LayoutKnowledgeSourceSourceIdRoute: LayoutKnowledgeSourceSourceIdRoute,
   LayoutSessionSessionIdRoute: LayoutSessionSessionIdRoute,
   LayoutTaskTaskIdRoute: LayoutTaskTaskIdRoute,
+  LayoutDashboardsIndexRoute: LayoutDashboardsIndexRoute,
   LayoutAdminMarketplaceMarketplaceIdRoute:
     LayoutAdminMarketplaceMarketplaceIdRoute,
   LayoutEnvironmentEnvIdDatabaseRoute: LayoutEnvironmentEnvIdDatabaseRoute,
@@ -777,6 +841,7 @@ const rootRouteChildren: RootRouteChildren = {
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
+  DashboardFullscreenDashboardIdRoute: DashboardFullscreenDashboardIdRoute,
   GuestGuestShareTokenRoute: GuestGuestShareTokenRoute,
   GuestFileViewerRoute: GuestFileViewerRoute,
   OauthMcpConsentRoute: OauthMcpConsentRoute,

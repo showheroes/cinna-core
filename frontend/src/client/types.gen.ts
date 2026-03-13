@@ -755,6 +755,14 @@ export type ArticleListItem = {
     git_repo_id: string;
 };
 
+export type BlockLayoutUpdate = {
+    block_id: string;
+    grid_x: number;
+    grid_y: number;
+    grid_w: number;
+    grid_h: number;
+};
+
 export type Body_credentials_update_credential_sharing = {
     allow_sharing: boolean;
 };
@@ -2167,6 +2175,73 @@ export type UserCreate = {
     password: string;
 };
 
+export type UserDashboardBlockCreate = {
+    agent_id: string;
+    view_type?: 'webapp' | 'latest_session' | 'latest_tasks';
+    title?: (string | null);
+    show_border?: boolean;
+    show_header?: boolean;
+    grid_x?: number;
+    grid_y?: number;
+    grid_w?: number;
+    grid_h?: number;
+};
+
+export type view_type = 'webapp' | 'latest_session' | 'latest_tasks';
+
+export type UserDashboardBlockPublic = {
+    id: string;
+    agent_id: string;
+    view_type: string;
+    title: (string | null);
+    show_border: boolean;
+    show_header: boolean;
+    grid_x: number;
+    grid_y: number;
+    grid_w: number;
+    grid_h: number;
+    config: ({
+    [key: string]: unknown;
+} | null);
+    created_at: string;
+    updated_at: string;
+};
+
+export type UserDashboardBlockUpdate = {
+    view_type?: ('webapp' | 'latest_session' | 'latest_tasks' | null);
+    title?: (string | null);
+    show_border?: (boolean | null);
+    show_header?: (boolean | null);
+    grid_x?: (number | null);
+    grid_y?: (number | null);
+    grid_w?: (number | null);
+    grid_h?: (number | null);
+    config?: ({
+    [key: string]: unknown;
+} | null);
+};
+
+export type UserDashboardCreate = {
+    name: string;
+    description?: (string | null);
+};
+
+export type UserDashboardPublic = {
+    id: string;
+    name: string;
+    description: (string | null);
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+    blocks?: Array<UserDashboardBlockPublic>;
+};
+
+export type UserDashboardUpdate = {
+    name?: (string | null);
+    description?: (string | null);
+    sort_order?: (number | null);
+};
+
 export type UserPublic = {
     email: string;
     is_active?: boolean;
@@ -2792,6 +2867,62 @@ export type CredentialsRefreshOauthTokenData = {
 };
 
 export type CredentialsRefreshOauthTokenResponse = (OAuthRefreshResponse);
+
+export type DashboardsListDashboardsResponse = (Array<UserDashboardPublic>);
+
+export type DashboardsCreateDashboardData = {
+    requestBody: UserDashboardCreate;
+};
+
+export type DashboardsCreateDashboardResponse = (UserDashboardPublic);
+
+export type DashboardsGetDashboardData = {
+    dashboardId: string;
+};
+
+export type DashboardsGetDashboardResponse = (UserDashboardPublic);
+
+export type DashboardsUpdateDashboardData = {
+    dashboardId: string;
+    requestBody: UserDashboardUpdate;
+};
+
+export type DashboardsUpdateDashboardResponse = (UserDashboardPublic);
+
+export type DashboardsDeleteDashboardData = {
+    dashboardId: string;
+};
+
+export type DashboardsDeleteDashboardResponse = (Message);
+
+export type DashboardsAddBlockData = {
+    dashboardId: string;
+    requestBody: UserDashboardBlockCreate;
+};
+
+export type DashboardsAddBlockResponse = (UserDashboardBlockPublic);
+
+export type DashboardsUpdateBlockLayoutData = {
+    dashboardId: string;
+    requestBody: Array<BlockLayoutUpdate>;
+};
+
+export type DashboardsUpdateBlockLayoutResponse = (Array<UserDashboardBlockPublic>);
+
+export type DashboardsUpdateBlockData = {
+    blockId: string;
+    dashboardId: string;
+    requestBody: UserDashboardBlockUpdate;
+};
+
+export type DashboardsUpdateBlockResponse = (UserDashboardBlockPublic);
+
+export type DashboardsDeleteBlockData = {
+    blockId: string;
+    dashboardId: string;
+};
+
+export type DashboardsDeleteBlockResponse = (Message);
 
 export type EmailIntegrationGetEmailIntegrationData = {
     agentId: string;
@@ -3830,6 +3961,7 @@ export type WebappWebappDataApiResponse = (unknown);
 export type WebappServeWebappFileData = {
     agentId: string;
     path: string;
+    token?: (string | null);
 };
 
 export type WebappServeWebappFileResponse = (unknown);

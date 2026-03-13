@@ -1,0 +1,164 @@
+import { useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Globe, MessageSquare, ClipboardList, MoreVertical, Pencil, Trash2 } from "lucide-react"
+
+import type { UserDashboardBlockPublic, AgentPublic } from "@/client"
+import { DashboardsService } from "@/client"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
+import { getColorPreset } from "@/utils/colorPresets"
+import useCustomToast from "@/hooks/useCustomToast"
+
+import { WebAppView } from "./views/WebAppView"
+import { LatestSessionView } from "./views/LatestSessionView"
+import { LatestTasksView } from "./views/LatestTasksView"
+import { EditBlockDialog } from "./EditBlockDialog"
+
+interface DashboardBlockProps {
+  block: UserDashboardBlockPublic
+  agent: AgentPublic | undefined
+  dashboardId: string
+  isEditMode: boolean
+}
+
+const VIEW_TYPE_ICONS: Record<string, React.ElementType> = {
+  webapp: Globe,
+  latest_session: MessageSquare,
+  latest_tasks: ClipboardList,
+}
+
+export function DashboardBlock({ block, agent, dashboardId, isEditMode }: DashboardBlockProps) {
+  const queryClient = useQueryClient()
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  const { showErrorToast } = useCustomToast()
+  const colorPreset = getColorPreset(agent?.ui_color_preset)
+  const ViewIcon = VIEW_TYPE_ICONS[block.view_type] ?? MessageSquare
+  const title = block.title || agent?.name || "Unknown Agent"
+
+  const deleteBlockMutation = useMutation({
+    mutationFn: () =>
+      DashboardsService.deleteBlock({
+        dashboardId,
+        blockId: block.id,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["userDashboard", dashboardId] })
+    },
+    onError: () => {
+      showErrorToast("Failed to remove block. Please try again.")
+    },
+  })
+
+  const renderView = () => {
+    if (!agent) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <p className="text-sm text-muted-foreground">Agent unavailable</p>
+        </div>
+      )
+    }
+
+    switch (block.view_type) {
+      case "webapp":
+        return <WebAppView agentId={agent.id} webappEnabled={agent.webapp_enabled ?? false} />
+      case "latest_tasks":
+        return <LatestTasksView agentId={agent.id} />
+      case "latest_session":
+      default:
+        return <LatestSessionView agentId={agent.id} />
+    }
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col h-full bg-background overflow-hidden rounded-lg",
+        isEditMode && "border border-border",
+        !isEditMode && block.show_border && "border border-border"
+      )}
+    >
+      {/* Block header - visible in edit mode or when show_header is enabled */}
+      {(isEditMode || block.show_header) && (
+        <div className={cn("flex items-center gap-2 px-3 py-2 border-b shrink-0", colorPreset.badgeBg)}>
+          <span
+            className={cn("h-2 w-2 rounded-full shrink-0", colorPreset.badgeText, "bg-current")}
+          />
+          <ViewIcon className={cn("h-3.5 w-3.5 shrink-0", colorPreset.badgeText)} />
+          <span className={cn("text-xs font-medium flex-1 truncate", colorPreset.badgeText)}>
+            {title}
+          </span>
+          {isEditMode && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0">
+                  <MoreVertical className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setShowEditDialog(true)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Remove
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      )}
+
+      {/* Delete confirmation inline */}
+      {showDeleteConfirm ? (
+        <div className="flex flex-col items-center justify-center h-full p-4 gap-3 text-center">
+          <p className="text-sm font-medium">Remove this block?</p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 text-xs"
+              onClick={() => deleteBlockMutation.mutate()}
+              disabled={deleteBlockMutation.isPending}
+            >
+              Remove
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => setShowDeleteConfirm(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        /* Content area */
+        <div className="flex-1 overflow-hidden min-h-0">
+          {renderView()}
+        </div>
+      )}
+
+      {showEditDialog && (
+        <EditBlockDialog
+          block={block}
+          dashboardId={dashboardId}
+          open={showEditDialog}
+          onOpenChange={setShowEditDialog}
+        />
+      )}
+    </div>
+  )
+}

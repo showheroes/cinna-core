@@ -1,5 +1,5 @@
 import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
-import { Bot, Home, Key, MessageSquare, Bell, BookOpen, ClipboardList } from "lucide-react"
+import { Bot, Key, MessageSquare, Bell, BookOpen, ClipboardList, Home } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
@@ -22,6 +22,7 @@ import useAuth from "@/hooks/useAuth"
 import { type Item, Main } from "./Main"
 import { User } from "./User"
 import { AdminMenu } from "./AdminMenu"
+import { SidebarDashboardSwitcher } from "./SidebarDashboardMenu"
 import { ActivitiesService } from "@/client"
 import { cn } from "@/lib/utils"
 import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
@@ -134,6 +135,7 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter>
         <WebSocketStatus />
+        <SidebarDashboardSwitcher />
         <SidebarWorkspaceSwitcher />
         <KnowledgeSourcesMenu />
         <SidebarAppearance />

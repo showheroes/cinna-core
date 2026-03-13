@@ -349,6 +349,17 @@ from .security_event import (
     OUTPUT_REDACTED,
     CREDENTIAL_WRITE_ATTEMPT,
 )
+from .user_dashboard import (
+    UserDashboard,
+    UserDashboardCreate,
+    UserDashboardUpdate,
+    UserDashboardPublic,
+    UserDashboardBlock,
+    UserDashboardBlockCreate,
+    UserDashboardBlockUpdate,
+    UserDashboardBlockPublic,
+    BlockLayoutUpdate,
+)
 
 __all__ = [
     # Core
@@ -667,4 +678,14 @@ __all__ = [
     "CREDENTIAL_BASH_ACCESS",
     "OUTPUT_REDACTED",
     "CREDENTIAL_WRITE_ATTEMPT",
+    # User Dashboards
+    "UserDashboard",
+    "UserDashboardCreate",
+    "UserDashboardUpdate",
+    "UserDashboardPublic",
+    "UserDashboardBlock",
+    "UserDashboardBlockCreate",
+    "UserDashboardBlockUpdate",
+    "UserDashboardBlockPublic",
+    "BlockLayoutUpdate",
 ]
