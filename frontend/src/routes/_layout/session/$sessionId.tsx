@@ -31,13 +31,18 @@ export const Route = createFileRoute("/_layout/session/$sessionId")({
       fileIds: (search.fileIds as string) || undefined,
       // Full file objects for optimistic display (JSON string)
       fileObjects: (search.fileObjects as string) || undefined,
+      // Page context collected from a webapp iframe before navigating here
+      // (e.g. from a dashboard block prompt action). Forwarded with the first
+      // message so the backend stores it in message_metadata and injects it
+      // into the agent's context via the context diff mechanism.
+      pageContext: (search.pageContext as string) || undefined,
     }
   },
 })
 
 function ChatInterface() {
   const { sessionId } = Route.useParams()
-  const { initialMessage, fileIds, fileObjects } = Route.useSearch()
+  const { initialMessage, fileIds, fileObjects, pageContext } = Route.useSearch()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -161,9 +166,10 @@ function ChatInterface() {
     async (
       content: string,
       fileIds?: string[],
-      fileObjs?: Array<{ id: string; filename: string; file_size: number; mime_type: string }>
+      fileObjs?: Array<{ id: string; filename: string; file_size: number; mime_type: string }>,
+      msgPageContext?: string
     ) => {
-      await sendMessage(content, undefined, fileIds, fileObjs)
+      await sendMessage(content, undefined, fileIds, fileObjs, msgPageContext)
     },
     [sendMessage]
   )
@@ -206,13 +212,14 @@ function ChatInterface() {
           console.error("Failed to parse fileObjects:", e)
         }
       }
-      // Use the same handleSendMessage that the UI uses, with file objects for optimistic display
-      handleSendMessage(initialMessage, fileIdsArray, parsedFileObjects)
-      // Clear the search param after sending
+      // Forward pageContext (from dashboard block prompt actions) with the first message.
+      // The backend stores it in message_metadata and uses it for context diff injection.
+      handleSendMessage(initialMessage, fileIdsArray, parsedFileObjects, pageContext)
+      // Clear the search params after sending
       navigate({
         to: "/session/$sessionId",
         params: { sessionId },
-        search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
+        search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined },
         replace: true,
       })
     }
@@ -220,6 +227,7 @@ function ChatInterface() {
     initialMessage,
     fileIds,
     fileObjects,
+    pageContext,
     isStreaming,
     session,
     messagesData,

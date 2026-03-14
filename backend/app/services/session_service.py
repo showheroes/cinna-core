@@ -29,6 +29,7 @@ class SessionService:
         sender_email: str | None = None,
         guest_share_id: UUID | None = None,
         webapp_share_id: UUID | None = None,
+        dashboard_block_id: UUID | None = None,
     ) -> Session | None:
         """
         Create session using agent's active environment.
@@ -44,6 +45,7 @@ class SessionService:
             sender_email: Optional sender email address (owner mode: track original sender)
             guest_share_id: Optional guest share ID (for guest share sessions)
             webapp_share_id: Optional webapp share ID (for webapp chat sessions)
+            dashboard_block_id: Optional dashboard block ID (for prompt action session reuse)
         """
         # Get agent to find active environment
         agent = db_session.get(Agent, data.agent_id)
@@ -53,6 +55,7 @@ class SessionService:
         # Use guest_share_id from parameter or from data
         effective_guest_share_id = guest_share_id or data.guest_share_id
         effective_webapp_share_id = webapp_share_id or data.webapp_share_id
+        effective_dashboard_block_id = dashboard_block_id or data.dashboard_block_id
 
         session = Session(
             environment_id=agent.active_environment_id,
@@ -62,6 +65,7 @@ class SessionService:
             source_task_id=source_task_id,
             guest_share_id=effective_guest_share_id,
             webapp_share_id=effective_webapp_share_id,
+            dashboard_block_id=effective_dashboard_block_id,
             title=data.title,
             mode=data.mode,
             email_thread_id=email_thread_id,
@@ -72,6 +76,31 @@ class SessionService:
         db_session.commit()
         db_session.refresh(session)
         return session
+
+    @staticmethod
+    def get_recent_block_session(
+        db_session: DBSession,
+        block_id: UUID,
+        user_id: UUID,
+        max_age_hours: int = 12,
+    ) -> Session | None:
+        """
+        Find the most recent session tagged with a given dashboard block, where
+        last_message_at is within the last max_age_hours hours.
+
+        Returns None if no such session exists.
+        """
+        from datetime import timedelta
+        cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
+        statement = (
+            select(Session)
+            .where(Session.dashboard_block_id == block_id)
+            .where(Session.user_id == user_id)
+            .where(Session.last_message_at >= cutoff)
+            .order_by(Session.last_message_at.desc())
+            .limit(1)
+        )
+        return db_session.exec(statement).first()
 
     @staticmethod
     def get_session_by_email_thread(

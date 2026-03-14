@@ -1,31 +1,59 @@
-import { useState } from "react"
+import { useState, type RefObject } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { Loader2 } from "lucide-react"
 
 import type { UserDashboardBlockPromptActionPublic } from "@/client"
-import { SessionsService, MessagesService } from "@/client"
+import { DashboardsService, SessionsService } from "@/client"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import useCustomToast from "@/hooks/useCustomToast"
+import { buildPageContext } from "@/utils/webappContext"
 
 interface PromptActionsOverlayProps {
   actions: UserDashboardBlockPromptActionPublic[]
   agentId: string
+  blockId: string
+  dashboardId: string
   isVisible: boolean
+  /**
+   * Ref to the webapp iframe in this block, if the block view type is "webapp".
+   * When provided, page context (schema.org microdata + selected text) is
+   * collected from the iframe before navigating, and forwarded to the session
+   * page via the `pageContext` search param so it is attached to the first
+   * message. This mirrors the same context collection used by WebappChatWidget.
+   */
+  iframeRef?: RefObject<HTMLIFrameElement | null>
 }
 
 /**
  * Displays prompt action buttons over a dashboard block on hover (view mode only).
- * Clicking a button creates a new agent session and sends the prompt as the first message.
- * The button becomes a clickable spinner that navigates to the session page.
+ *
+ * Clicking a button:
+ * 1. Checks whether a recent session exists for this block (last message within 12h).
+ *    - If yes: reuses that session, navigating to it with `initialMessage` so the
+ *      prompt is sent as a new message in the existing conversation.
+ *    - If no: creates a new session tagged with `dashboard_block_id`, then navigates
+ *      to it the same way.
+ * 2. Collects page context from the webapp iframe (if the block is a webapp view)
+ *    using the same postMessage mechanism as WebappChatWidget — schema.org microdata
+ *    plus any selected text. Context collection has a 500ms timeout and fails silently.
+ * 3. Navigates to the session page with `initialMessage` (the prompt text) and
+ *    `pageContext` (the collected context JSON string, if any). The session page
+ *    forwards pageContext alongside the first message send so the backend can
+ *    store it in message_metadata and inject it into the agent's context.
  */
-export function PromptActionsOverlay({ actions, agentId, isVisible }: PromptActionsOverlayProps) {
+export function PromptActionsOverlay({
+  actions,
+  agentId,
+  blockId,
+  dashboardId,
+  isVisible,
+  iframeRef,
+}: PromptActionsOverlayProps) {
   const navigate = useNavigate()
   const { showErrorToast } = useCustomToast()
 
-  // Maps actionId -> sessionId for in-flight or completed sessions
-  const [activeSessions, setActiveSessions] = useState<Record<string, string>>({})
-  // Maps actionId -> true while the session creation request is in flight
+  // Maps actionId -> true while session lookup/creation is in flight
   const [pendingActions, setPendingActions] = useState<Record<string, boolean>>({})
 
   if (!actions.length) return null
@@ -37,42 +65,36 @@ export function PromptActionsOverlay({ actions, agentId, isVisible }: PromptActi
   }
 
   const handleActionClick = async (action: UserDashboardBlockPromptActionPublic) => {
-    if (pendingActions[action.id] || activeSessions[action.id]) return
+    if (pendingActions[action.id]) return
 
     setPendingActions((prev) => ({ ...prev, [action.id]: true }))
     try {
-      // 1. Create a new session in conversation mode
-      const session = await SessionsService.createSession({
-        requestBody: { agent_id: agentId, mode: "conversation" },
-      })
+      // Resolve the session and collect page context concurrently.
+      // Context collection has a short timeout and fails silently — the session
+      // is always navigated to even if context collection fails.
+      const [resolvedSession, pageContext] = await Promise.all([
+        resolveSession(agentId, blockId, dashboardId),
+        buildPageContext(iframeRef),
+      ])
 
-      // 2. Send the prompt as the first message (fire-and-forget stream)
-      MessagesService.sendMessageStream({
-        sessionId: session.id,
-        requestBody: { content: action.prompt_text },
-      }).catch(() => {
-        // Stream errors are non-fatal here; the session is already created
+      navigate({
+        to: "/session/$sessionId",
+        params: { sessionId: resolvedSession.id },
+        search: {
+          initialMessage: action.prompt_text,
+          fileIds: undefined,
+          fileObjects: undefined,
+          pageContext,
+        },
       })
-
-      // 3. Mark this action as having an active session
-      setActiveSessions((prev) => ({ ...prev, [action.id]: session.id }))
     } catch {
       showErrorToast("Failed to start session. Please try again.")
-    } finally {
       setPendingActions((prev) => {
         const next = { ...prev }
         delete next[action.id]
         return next
       })
     }
-  }
-
-  const handleSpinnerClick = (sessionId: string) => {
-    navigate({
-      to: "/session/$sessionId",
-      params: { sessionId },
-      search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
-    })
   }
 
   return (
@@ -85,28 +107,7 @@ export function PromptActionsOverlay({ actions, agentId, isVisible }: PromptActi
       )}
     >
       {actions.map((action) => {
-        const sessionId = activeSessions[action.id]
         const isPending = pendingActions[action.id]
-
-        if (sessionId) {
-          // Show spinner that navigates to session page
-          return (
-            <button
-              key={action.id}
-              type="button"
-              title="Click to open session"
-              aria-label={`Open session for: ${action.prompt_text}`}
-              onClick={() => handleSpinnerClick(sessionId)}
-              className={cn(
-                "flex items-center justify-center h-6 w-6 rounded-full",
-                "bg-primary/10 hover:bg-primary/20 text-primary",
-                "transition-colors cursor-pointer",
-              )}
-            >
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            </button>
-          )
-        }
 
         return (
           <Button
@@ -130,4 +131,36 @@ export function PromptActionsOverlay({ actions, agentId, isVisible }: PromptActi
       })}
     </div>
   )
+}
+
+/**
+ * Resolve the session to use for a prompt action click.
+ *
+ * Checks for a recent session on this block (last message within 12h).
+ * If one exists, reuses it. Otherwise creates a new session tagged with
+ * the block ID so future prompt action clicks can find and reuse it.
+ */
+async function resolveSession(
+  agentId: string,
+  blockId: string,
+  dashboardId: string,
+): Promise<{ id: string }> {
+  try {
+    const recent = await DashboardsService.getBlockLatestSession({
+      dashboardId,
+      blockId,
+    })
+    // A recent session with activity in the last 12h exists — reuse it
+    return { id: recent.id }
+  } catch {
+    // 404 (or any network error) means no recent session — create a fresh one
+    const session = await SessionsService.createSession({
+      requestBody: {
+        agent_id: agentId,
+        mode: "conversation",
+        dashboard_block_id: blockId,
+      },
+    })
+    return { id: session.id }
+  }
 }

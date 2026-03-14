@@ -52,6 +52,10 @@ class Session(SQLModel, table=True):
         default=None, foreign_key="mcp_connector.id", ondelete="SET NULL"
     )
     mcp_session_id: str | None = Field(default=None)
+    # Track which dashboard block triggered this session (for prompt action session reuse)
+    dashboard_block_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user_dashboard_block.id", ondelete="SET NULL"
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_message_at: datetime | None = None
@@ -85,6 +89,7 @@ class SessionCreate(SQLModel):
     mode: str = "conversation"  # "building" | "conversation"
     guest_share_id: uuid.UUID | None = None  # Optional guest share link
     webapp_share_id: uuid.UUID | None = None  # Optional webapp share link
+    dashboard_block_id: uuid.UUID | None = None  # Optional dashboard block that triggered this session
 
 
 class SessionUpdate(SQLModel):
@@ -117,6 +122,7 @@ class SessionPublic(SQLModel):
     streaming_started_at: datetime | None = None
     mcp_connector_id: uuid.UUID | None = None
     mcp_session_id: str | None = None
+    dashboard_block_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
     last_message_at: datetime | None

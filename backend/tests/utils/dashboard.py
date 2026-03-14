@@ -214,3 +214,23 @@ def delete_prompt_action(
         headers=token_headers,
     )
     assert r.status_code == 200, f"Delete prompt action failed: {r.text}"
+
+
+# ── Block latest-session helper ───────────────────────────────────────────────
+
+def get_block_latest_session(
+    client: TestClient,
+    token_headers: dict[str, str],
+    dashboard_id: str,
+    block_id: str,
+) -> tuple[int, dict | None]:
+    """
+    Call GET /dashboards/{id}/blocks/{block_id}/latest-session.
+    Returns (status_code, response_json) — does NOT assert status code.
+    """
+    r = client.get(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/latest-session",
+        headers=token_headers,
+    )
+    body = r.json() if r.status_code == 200 else None
+    return r.status_code, body

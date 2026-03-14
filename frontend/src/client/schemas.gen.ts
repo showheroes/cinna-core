@@ -8734,6 +8734,18 @@ export const SessionCreateSchema = {
                 }
             ],
             title: 'Webapp Share Id'
+        },
+        dashboard_block_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Dashboard Block Id'
         }
     },
     type: 'object',
@@ -8946,6 +8958,18 @@ export const SessionPublicSchema = {
                 }
             ],
             title: 'Mcp Session Id'
+        },
+        dashboard_block_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Dashboard Block Id'
         },
         created_at: {
             type: 'string',
@@ -9180,6 +9204,18 @@ export const SessionPublicExtendedSchema = {
                 }
             ],
             title: 'Mcp Session Id'
+        },
+        dashboard_block_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Dashboard Block Id'
         },
         created_at: {
             type: 'string',

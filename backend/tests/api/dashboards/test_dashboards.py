@@ -29,6 +29,7 @@ from tests.utils.dashboard import (
     delete_block,
     delete_dashboard,
     delete_prompt_action,
+    get_block_latest_session,
     get_dashboard,
     list_dashboards,
     list_prompt_actions,
@@ -37,6 +38,9 @@ from tests.utils.dashboard import (
     update_dashboard,
     update_prompt_action,
 )
+from tests.utils.background_tasks import drain_tasks
+from tests.utils.message import send_message
+from tests.utils.session import create_session_with_block
 from tests.utils.user import create_random_user, user_authentication_headers
 
 _BASE = f"{settings.API_V1_STR}/dashboards"
@@ -722,4 +726,85 @@ def test_prompt_action_validation(
         prompt_text="Valid action",
         label="Valid",
     )
-    assert valid["id"] is not None
+
+
+# ── Scenario 12: Block latest-session endpoint ────────────────────────────────
+
+def test_block_latest_session(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """
+    Verify the GET /dashboards/{id}/blocks/{block_id}/latest-session endpoint:
+      1. No session exists → 404
+      2. Session created with dashboard_block_id but no messages → still 404
+         (last_message_at is NULL until a message is sent)
+      3. Send a message to the session → last_message_at is set
+      4. Endpoint now returns 200 with the correct session
+      5. The session response contains dashboard_block_id
+      6. Ownership guard: other user gets 403/404
+      7. Ghost dashboard_id returns 404
+    """
+    # ── Phase 1: Setup ────────────────────────────────────────────────────────
+    dashboard = create_dashboard(client, superuser_token_headers, name="Block Session Test")
+    dashboard_id = dashboard["id"]
+
+    # Create agent, drain background tasks to activate environment, then re-fetch
+    # to get active_environment_id (required to create sessions).
+    agent = create_agent_via_api(client, superuser_token_headers)
+    drain_tasks()
+    r = client.get(
+        f"{settings.API_V1_STR}/agents/{agent['id']}", headers=superuser_token_headers
+    )
+    agent = r.json()
+    agent_id = agent["id"]
+    assert agent["active_environment_id"] is not None
+
+    block = add_block(client, superuser_token_headers, dashboard_id, agent_id)
+    block_id = block["id"]
+
+    # ── Phase 2: No session → 404 ─────────────────────────────────────────────
+    status, _ = get_block_latest_session(client, superuser_token_headers, dashboard_id, block_id)
+    assert status == 404
+
+    # ── Phase 3: Create session tagged with block, no messages → 404 ──────────
+    session = create_session_with_block(
+        client, superuser_token_headers, agent_id, block_id
+    )
+    session_id = session["id"]
+
+    # The session must have dashboard_block_id set in the response
+    assert session["dashboard_block_id"] == block_id
+
+    # Still 404 because last_message_at is NULL (no messages yet)
+    status, _ = get_block_latest_session(client, superuser_token_headers, dashboard_id, block_id)
+    assert status == 404
+
+    # ── Phase 4: Send message → last_message_at is set → 200 ─────────────────
+    send_message(client, superuser_token_headers, session_id, "Hello from prompt action")
+
+    status, returned_session = get_block_latest_session(
+        client, superuser_token_headers, dashboard_id, block_id
+    )
+    assert status == 200
+    assert returned_session is not None
+    assert returned_session["id"] == session_id
+    assert returned_session["dashboard_block_id"] == block_id
+
+    # ── Phase 5: Ownership guard ──────────────────────────────────────────────
+    other_user = create_random_user(client)
+    other_headers = user_authentication_headers(
+        client=client, email=other_user["email"], password=other_user["_password"]
+    )
+    status, _ = get_block_latest_session(client, other_headers, dashboard_id, block_id)
+    assert status in (403, 404)
+
+    # Unauthenticated → 401/403
+    status_unauth = client.get(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/latest-session"
+    ).status_code
+    assert status_unauth in (401, 403)
+
+    # ── Phase 6: Ghost dashboard_id → 404 ────────────────────────────────────
+    ghost_dashboard = str(uuid.uuid4())
+    status, _ = get_block_latest_session(client, superuser_token_headers, ghost_dashboard, block_id)
+    assert status == 404

@@ -233,7 +233,7 @@ function AgentCreating() {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId },
-        search: { initialMessage: description, fileIds, fileObjects },
+        search: { initialMessage: description, fileIds, fileObjects, pageContext: undefined },
       })
     } catch (err: any) {
       console.error("Error during session start:", err)
@@ -241,7 +241,7 @@ function AgentCreating() {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId },
-        search: { initialMessage: description, fileIds, fileObjects },
+        search: { initialMessage: description, fileIds, fileObjects, pageContext: undefined },
       })
     }
   }, [sessionId, agentId, selectedCredentialIds, navigate, description, fileIds, fileObjects])

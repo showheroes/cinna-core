@@ -41,7 +41,7 @@ export function LatestSessions({ limit = 8 }: LatestSessionsProps) {
     navigate({
       to: "/session/$sessionId",
       params: { sessionId },
-      search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
+      search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined },
     })
   }
 

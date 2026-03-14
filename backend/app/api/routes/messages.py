@@ -147,6 +147,13 @@ async def send_message_stream(
     else:
         user_id = caller.id
 
+    # Truncate page_context to protect against oversized payloads.
+    # Mirrors the same limit applied in webapp_chat.py.
+    _PAGE_CONTEXT_MAX_CHARS = 10_000
+    safe_page_context: str | None = None
+    if message_in.page_context:
+        safe_page_context = message_in.page_context[:_PAGE_CONTEXT_MAX_CHARS]
+
     # Send message using centralized service method
     result = await SessionService.send_session_message(
         session_id=session_id,
@@ -154,6 +161,7 @@ async def send_message_stream(
         content=message_in.content,
         file_ids=message_in.file_ids,
         answers_to_message_id=message_in.answers_to_message_id,
+        page_context=safe_page_context,
     )
 
     # Handle error results

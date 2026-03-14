@@ -148,7 +148,7 @@ function TaskDetail() {
         navigate({
           to: "/session/$sessionId",
           params: { sessionId: result.session_id },
-          search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
+          search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined },
         })
       } else {
         showErrorToast(result.error || "Failed to execute task")
@@ -743,7 +743,7 @@ function TaskDetail() {
                   navigate({
                     to: "/session/$sessionId",
                     params: { sessionId: sessions[0].id },
-                    search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
+                    search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined },
                   })
                 }}
                 className="h-full w-[80px] flex-col gap-1"

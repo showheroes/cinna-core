@@ -1,12 +1,14 @@
+import type { RefObject } from "react"
 import { Globe } from "lucide-react"
 import { OpenAPI } from "@/client"
 
 interface WebAppViewProps {
   agentId: string
   webappEnabled: boolean
+  iframeRef?: RefObject<HTMLIFrameElement | null>
 }
 
-export function WebAppView({ agentId, webappEnabled }: WebAppViewProps) {
+export function WebAppView({ agentId, webappEnabled, iframeRef }: WebAppViewProps) {
   if (!webappEnabled) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-4 text-center">
@@ -27,6 +29,7 @@ export function WebAppView({ agentId, webappEnabled }: WebAppViewProps) {
 
   return (
     <iframe
+      ref={iframeRef}
       src={webappUrl}
       className="w-full h-full border-0"
       sandbox="allow-scripts allow-same-origin allow-forms"

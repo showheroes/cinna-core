@@ -144,6 +144,7 @@ def create_session(
     new_session = SessionService.create_session(
         db_session=session, user_id=user_id, data=session_in,
         guest_share_id=guest_share_id,
+        dashboard_block_id=session_in.dashboard_block_id,
     )
     if not new_session:
         raise HTTPException(status_code=500, detail="Failed to create session")

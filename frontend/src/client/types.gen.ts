@@ -1871,6 +1871,7 @@ export type SessionCreate = {
     mode?: string;
     guest_share_id?: (string | null);
     webapp_share_id?: (string | null);
+    dashboard_block_id?: (string | null);
 };
 
 export type SessionPublic = {
@@ -1896,6 +1897,7 @@ export type SessionPublic = {
     streaming_started_at?: (string | null);
     mcp_connector_id?: (string | null);
     mcp_session_id?: (string | null);
+    dashboard_block_id?: (string | null);
     created_at: string;
     updated_at: string;
     last_message_at: (string | null);
@@ -1927,6 +1929,7 @@ export type SessionPublicExtended = {
     streaming_started_at?: (string | null);
     mcp_connector_id?: (string | null);
     mcp_session_id?: (string | null);
+    dashboard_block_id?: (string | null);
     created_at: string;
     updated_at: string;
     last_message_at: (string | null);
@@ -2978,6 +2981,13 @@ export type DashboardsDeletePromptActionData = {
 };
 
 export type DashboardsDeletePromptActionResponse = (Message);
+
+export type DashboardsGetBlockLatestSessionData = {
+    blockId: string;
+    dashboardId: string;
+};
+
+export type DashboardsGetBlockLatestSessionResponse = (SessionPublic);
 
 export type EmailIntegrationGetEmailIntegrationData = {
     agentId: string;

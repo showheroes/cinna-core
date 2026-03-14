@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Globe, MessageSquare, ClipboardList, MoreVertical, Pencil, Trash2 } from "lucide-react"
 
@@ -40,6 +40,11 @@ export function DashboardBlock({ block, agent, dashboardId, isEditMode }: Dashbo
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
 
+  // Ref to the webapp iframe — only used when view_type === "webapp".
+  // Passed to WebAppView (to attach to the <iframe>) and to PromptActionsOverlay
+  // (to collect page context via postMessage before creating a new session).
+  const webappIframeRef = useRef<HTMLIFrameElement | null>(null)
+
   const { showErrorToast } = useCustomToast()
   const colorPreset = getColorPreset(agent?.ui_color_preset)
   const ViewIcon = VIEW_TYPE_ICONS[block.view_type] ?? MessageSquare
@@ -70,7 +75,13 @@ export function DashboardBlock({ block, agent, dashboardId, isEditMode }: Dashbo
 
     switch (block.view_type) {
       case "webapp":
-        return <WebAppView agentId={agent.id} webappEnabled={agent.webapp_enabled ?? false} />
+        return (
+          <WebAppView
+            agentId={agent.id}
+            webappEnabled={agent.webapp_enabled ?? false}
+            iframeRef={webappIframeRef}
+          />
+        )
       case "latest_tasks":
         return <LatestTasksView agentId={agent.id} />
       case "latest_session":
@@ -158,7 +169,10 @@ export function DashboardBlock({ block, agent, dashboardId, isEditMode }: Dashbo
             <PromptActionsOverlay
               actions={block.prompt_actions}
               agentId={agent.id}
+              blockId={block.id}
+              dashboardId={dashboardId}
               isVisible={isHovered}
+              iframeRef={block.view_type === "webapp" ? webappIframeRef : undefined}
             />
           )}
         </div>

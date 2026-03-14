@@ -95,7 +95,7 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
                 <Link
                   to="/session/$sessionId"
                   params={{ sessionId: feedbackTaskId }}
-                  search={{ initialMessage: undefined, fileIds: undefined, fileObjects: undefined }}
+                  search={{ initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined }}
                   className="ml-2 inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2 text-xs"
                 >
                   <span>View session</span>
@@ -139,7 +139,7 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
                   <Link
                     to="/session/$sessionId"
                     params={{ sessionId: taskSessionId }}
-                    search={{ initialMessage: undefined, fileIds: undefined, fileObjects: undefined }}
+                    search={{ initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined }}
                     className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-2"
                   >
                     <span>View session</span>

@@ -203,7 +203,8 @@ export function useSessionStreaming({
         filename: string
         file_size: number
         mime_type: string
-      }>
+      }>,
+      pageContext?: string
     ) => {
       setIsPending(true)
       setStreamingEvents([])
@@ -272,6 +273,12 @@ export function useSessionStreaming({
         const requestBody: any = { content, file_ids: fileIds || [] }
         if (answersToMessageId) {
           requestBody.answers_to_message_id = answersToMessageId
+        }
+        // Include page_context when provided (e.g. from dashboard block prompt actions).
+        // The backend stores it in message_metadata and injects it into the agent's
+        // context using the same diff mechanism as the webapp chat widget.
+        if (pageContext) {
+          requestBody.page_context = pageContext
         }
 
         const response = await fetch(

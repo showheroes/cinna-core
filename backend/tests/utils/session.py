@@ -51,3 +51,25 @@ def get_agent_session(
         f"Expected 1 session for agent {agent_id}, got {len(agent_sessions)}"
     )
     return agent_sessions[0]
+
+
+def create_session_with_block(
+    client: TestClient,
+    token_headers: dict[str, str],
+    agent_id: str,
+    dashboard_block_id: str,
+    mode: str = "conversation",
+) -> dict:
+    """Create a session tagged with a dashboard block via POST /api/v1/sessions/."""
+    payload: dict = {
+        "agent_id": agent_id,
+        "mode": mode,
+        "dashboard_block_id": dashboard_block_id,
+    }
+    r = client.post(
+        f"{settings.API_V1_STR}/sessions/",
+        headers=token_headers,
+        json=payload,
+    )
+    assert r.status_code == 200, f"Create session with block failed: {r.text}"
+    return r.json()

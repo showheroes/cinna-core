@@ -1,11 +1,12 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
     Message,
+    SessionPublic,
     UserDashboardCreate,
     UserDashboardUpdate,
     UserDashboardPublic,
@@ -17,6 +18,7 @@ from app.models import (
     UserDashboardBlockPromptActionUpdate,
     UserDashboardBlockPromptActionPublic,
 )
+from app.services.session_service import SessionService
 from app.services.user_dashboard_service import UserDashboardService
 
 router = APIRouter(prefix="/dashboards", tags=["Dashboards"])
@@ -302,3 +304,40 @@ def delete_prompt_action(
         owner_id=current_user.id,
     )
     return Message(message="Prompt action deleted")
+
+
+# ── Session reuse endpoint ────────────────────────────────────────────────────
+# NOTE: This path contains the literal segment /latest-session which does not
+# conflict with any /{action_id} route above.
+
+
+@router.get(
+    "/{dashboard_id}/blocks/{block_id}/latest-session",
+    response_model=SessionPublic,
+)
+def get_block_latest_session(
+    *,
+    dashboard_id: uuid.UUID,
+    block_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """
+    Return the most recent session tagged to this block that has a message
+    within the last 12 hours, or 404 if none exists.
+
+    Ownership is enforced by verifying the dashboard belongs to the current user.
+    Used by the frontend PromptActionsOverlay to decide whether to reuse an
+    existing session or create a new one.
+    """
+    # Verify the dashboard is owned by the current user (raises 404/403 if not)
+    UserDashboardService.get_dashboard(session, dashboard_id, current_user.id)
+
+    recent = SessionService.get_recent_block_session(
+        db_session=session,
+        block_id=block_id,
+        user_id=current_user.id,
+    )
+    if not recent:
+        raise HTTPException(status_code=404, detail="No recent session found for this block")
+    return recent

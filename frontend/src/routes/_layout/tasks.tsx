@@ -76,7 +76,7 @@ function TasksList() {
         navigate({
           to: "/session/$sessionId",
           params: { sessionId: data.session_id },
-          search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
+          search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined },
         })
       }
     },
@@ -229,7 +229,7 @@ function TasksList() {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId: task.latest_session_id },
-        search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
+        search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined },
       })
     } else {
       navigate({

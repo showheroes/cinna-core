@@ -120,7 +120,7 @@ export function SubTasksPanel({ sessionId, onClose }: SubTasksPanelProps) {
         navigate({
           to: "/session/$sessionId",
           params: { sessionId: data.session_id },
-          search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
+          search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined },
         })
       }
     },
@@ -134,7 +134,7 @@ export function SubTasksPanel({ sessionId, onClose }: SubTasksPanelProps) {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId: task.session_id },
-        search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined },
+        search: { initialMessage: undefined, fileIds: undefined, fileObjects: undefined, pageContext: undefined },
       })
     }
   }
