@@ -59,6 +59,7 @@ interface PromptActionsOverlayProps {
   isVisible: boolean        // hover state from parent
   isWebApp: boolean         // controls session indicator icon + page context collection
   iframeRef?: RefObject<HTMLIFrameElement | null>  // only passed for webapp blocks
+  onStreamComplete?: () => void  // called when streaming ends; parent uses it to refresh block content
 }
 ```
 
@@ -146,7 +147,8 @@ Dependency: `[sessionId]`
 - Subscribes when `sessionId` is set.
 - On event: checks `event.model_id !== sessionId && event.meta?.session_id !== sessionId` to filter to this session.
 - Sets `isStreaming = true` on `"running"` or `"pending_stream"` status.
-- Sets `isStreaming = false` and clears `streamingEvents` + `lastKnownSeqRef` on empty/undefined status.
+- Sets `isStreaming = false` and clears `streamingEvents` + `lastKnownSeqRef` on empty/undefined status; calls `onStreamComplete()`.
+- Uses nullish coalescing (`??`) to extract `interaction_status` from meta — critical because `""` (stream ended) is falsy and would be skipped by `||`.
 
 ### Effect 2: `stream_event`
 
@@ -154,7 +156,7 @@ Dependency: `[sessionId, isStreaming]`
 
 - Active only when both `sessionId` is set and `isStreaming` is true.
 - Subscribes to room `session_{sessionId}_stream` via `eventService.subscribeToRoom()`.
-- On `stream_completed` event: stops streaming, clears events.
+- On `stream_completed` event: stops streaming, clears events, calls `onStreamComplete()`.
 - On `webapp_action` event: forwards to iframe via `postMessage` (if `iframeRef` is present); does NOT append to `streamingEvents`.
 - On other events: deduplicates by `event_seq` (skips if `seq <= lastKnownSeqRef.current`), appends typed `StreamEvent` to state.
 - Cleanup: unsubscribes from event + room.
@@ -358,11 +360,16 @@ The `?token=` parameter on the initial request causes the backend to set the `we
 
 ## React Query Keys Relevant to Prompt Actions
 
-| Key | Used by | Notes |
-|-----|---------|-------|
-| `["userDashboard", dashboardId]` | `DashboardGrid`, `DashboardBlock` | Contains `block.prompt_actions` in the response; invalidated on block update |
+| Key | Used by | Invalidated on stream complete |
+|-----|---------|-------------------------------|
+| `["userDashboard", dashboardId]` | `DashboardGrid`, `DashboardBlock` | No (contains `block.prompt_actions`; invalidated on block update) |
+| `["dashboardBlockSessions", agentId]` | `LatestSessionView` | Yes — new sessions/messages appear after agent responds |
+| `["dashboardBlockTasks", agentId]` | `LatestTasksView` | Yes — agent may create tasks during prompt action |
+| `["dashboardBlockEnvFile", dashboardId, blockId, filePath]` | `AgentEnvFileView` | Yes — agent may modify workspace files |
 
 The prompt actions themselves are fetched as part of the dashboard/block response (via `selectinload` in the service layer). There is no separate query key for prompt actions — they are embedded in the block payload.
+
+`DashboardBlock.handleStreamComplete()` selects the correct query key to invalidate based on `block.view_type`. Webapp blocks are excluded — the iframe manages its own state.
 
 ---
 

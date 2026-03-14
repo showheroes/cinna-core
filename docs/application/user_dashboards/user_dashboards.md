@@ -68,6 +68,7 @@ Alternatively, dashboards can also be deleted from the Manage Dashboards page (`
 1. Click the ⋮ dropdown menu in the page header → "Open Fullscreen".
 2. A new browser tab opens at `/dashboard-fullscreen/{id}` showing only the dashboard grid — no sidebar, no header.
 3. Fullscreen view is read-only (no edit mode).
+4. The fullscreen route initializes its own WebSocket connection (`useEventBusConnection`) so prompt actions, streaming status sync, and block content refresh all work identically to the main layout.
 
 ---
 
@@ -148,8 +149,7 @@ Dashboard blocks can have **prompt actions** — one-click buttons that appear w
    - For webapp blocks, page context (schema.org microdata + selected text from the iframe) is collected and attached to the message as `page_context`.
    - The button shows a `Loader2` spinner while the request is in flight.
 6. While the agent is streaming a response, a compact `StreamingMessage` appears inside the overlay above the action buttons. If no streaming events have arrived yet, a "Processing..." indicator with a spinner is shown.
-7. When the stream completes, the streaming display clears and the action buttons return to their normal state. The session indicator stays active (primary color).
-8. The block auto-refreshes every 30 seconds, so completed sessions will appear in the Latest Session view.
+7. When the stream completes, the streaming display clears, the action buttons return to their normal state, and the block's content view automatically refreshes (sessions, tasks, or file content). The session indicator stays active (primary color).
 
 ### Session Persistence and Reuse
 

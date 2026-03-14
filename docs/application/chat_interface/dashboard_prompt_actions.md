@@ -46,7 +46,7 @@ For the dashboard feature itself (blocks, layout, view types), see **[User Dashb
    - A compact `StreamingMessage` appears above the action bar, showing live streaming content.
    - If no streaming events have arrived yet, a "Processing..." indicator with a spinner is shown.
    - All action buttons are disabled during streaming.
-6. When the stream completes, the streaming display clears and buttons return to normal state.
+6. When the stream completes, the streaming display clears, buttons return to normal state, and the block's content view automatically refreshes (sessions list, tasks list, or env file content reloads to reflect changes the agent may have made).
 
 ### Navigating to the Full Session
 
@@ -125,6 +125,27 @@ Non-webapp blocks do not collect page context.
 | File upload | Supported | Not supported | Not supported |
 | CompactMode | User preference | Auto (conversation→compact) | Fixed: `"compact"` |
 | Navigate to full session | n/a | Not available | Session indicator icon |
+
+---
+
+## Block Content Refresh on Completion
+
+When a prompt action stream completes, the overlay notifies the parent `DashboardBlock` via an `onStreamComplete` callback. The block then invalidates the React Query cache for its view, causing the content to refetch:
+
+- **Latest Session** blocks refetch the sessions list (the new conversation appears immediately).
+- **Latest Tasks** blocks refetch the tasks list (any tasks created by the agent appear).
+- **Agent Env File** blocks refetch the file content (file changes made by the agent are visible).
+- **Webapp** blocks do not need cache invalidation — the iframe handles its own state, and webapp actions are already forwarded via `postMessage`.
+
+---
+
+## Multi-Window Sync
+
+Prompt action streaming state syncs across multiple browser windows (including fullscreen dashboards) via the `session_interaction_status_changed` WebSocket event:
+
+- When a prompt action is triggered in one window, all other windows showing the same block detect the `"running"` status and display the "Processing..." indicator.
+- When the stream completes, the status change event with empty `interaction_status` clears the streaming state in all windows and triggers the block content refresh.
+- The fullscreen dashboard route (`/dashboard-fullscreen/{id}`) initializes its own WebSocket connection via `useEventBusConnection()` since it is outside the main `_layout` route tree.
 
 ---
 
