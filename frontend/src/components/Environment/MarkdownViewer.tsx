@@ -3,12 +3,13 @@ import remarkGfm from "remark-gfm"
 
 interface MarkdownViewerProps {
   content: string
+  className?: string
 }
 
-export function MarkdownViewer({ content }: MarkdownViewerProps) {
+export function MarkdownViewer({ content, className }: MarkdownViewerProps) {
   return (
     <div className="h-full overflow-auto p-6">
-      <article className="prose prose-slate dark:prose-invert max-w-none">
+      <article className={`prose prose-slate dark:prose-invert max-w-none ${className ?? ""}`}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{

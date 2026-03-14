@@ -78,7 +78,7 @@ export function AgentEnvFileView({
   }
 
   if (fileExtension === "md") {
-    return <MarkdownViewer content={fileContent} />
+    return <MarkdownViewer content={fileContent} className="[&>h1:first-child]:!mt-0 [&>h2:first-child]:!mt-0 [&>h3:first-child]:!mt-0 [&>h4:first-child]:!mt-0" />
   }
 
   if (fileExtension === "json") {
