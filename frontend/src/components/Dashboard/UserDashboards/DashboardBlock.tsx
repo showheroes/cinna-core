@@ -1,6 +1,6 @@
 import { useState, useRef } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Globe, MessageSquare, ClipboardList, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { Globe, MessageSquare, ClipboardList, MoreVertical, Pencil, Trash2, Zap } from "lucide-react"
 
 import type { UserDashboardBlockPublic, AgentPublic } from "@/client"
 import { DashboardsService } from "@/client"
@@ -8,6 +8,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -19,6 +20,7 @@ import { WebAppView } from "./views/WebAppView"
 import { LatestSessionView } from "./views/LatestSessionView"
 import { LatestTasksView } from "./views/LatestTasksView"
 import { EditBlockDialog } from "./EditBlockDialog"
+import { EditPromptActionsDialog } from "./EditPromptActionsDialog"
 import { PromptActionsOverlay } from "./PromptActionsOverlay"
 
 interface DashboardBlockProps {
@@ -37,6 +39,7 @@ const VIEW_TYPE_ICONS: Record<string, React.ElementType> = {
 export function DashboardBlock({ block, agent, dashboardId, isEditMode }: DashboardBlockProps) {
   const queryClient = useQueryClient()
   const [showEditDialog, setShowEditDialog] = useState(false)
+  const [showPromptActionsDialog, setShowPromptActionsDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
 
@@ -118,14 +121,19 @@ export function DashboardBlock({ block, agent, dashboardId, isEditMode }: Dashbo
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => setShowEditDialog(true)}>
                   <Pencil className="mr-2 h-4 w-4" />
-                  Edit
+                  Edit Block
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowPromptActionsDialog(true)}>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Edit Prompt Actions
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => setShowDeleteConfirm(true)}
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
-                  Remove
+                  Remove Block
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -185,6 +193,15 @@ export function DashboardBlock({ block, agent, dashboardId, isEditMode }: Dashbo
           dashboardId={dashboardId}
           open={showEditDialog}
           onOpenChange={setShowEditDialog}
+        />
+      )}
+
+      {showPromptActionsDialog && (
+        <EditPromptActionsDialog
+          block={block}
+          dashboardId={dashboardId}
+          open={showPromptActionsDialog}
+          onOpenChange={setShowPromptActionsDialog}
         />
       )}
     </div>

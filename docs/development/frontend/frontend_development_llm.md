@@ -71,6 +71,72 @@ export const Route = createFileRoute("/_layout/path")({
 - Always invalidate queries after mutations
 - Use `queryClient.invalidateQueries()` for cache updates
 
+## In-Card Editable List Pattern
+
+A recurring UI pattern for managing a list of items within a Card or Dialog. Items are displayed as compact rows with inline action buttons; creating/editing opens either an inline form or a separate Dialog.
+
+### Structure
+
+**Container**: Card (standalone) or Dialog (when opened from a menu)
+- `CardHeader` / `DialogHeader` with title + "New" / "Add" button
+- List of item rows in `CardContent` / dialog body
+- Empty state text when no items exist
+- Edit Dialog rendered at bottom (outside the list)
+
+### Item Row Layout
+
+Each item is a horizontal row: `flex items-center justify-between px-3 py-2 border rounded-lg`
+
+**Left side** (`min-w-0 flex-1`):
+- Primary text: `font-medium text-sm truncate`
+- Optional badges: `Badge` with status/type
+- Optional metadata: `text-xs text-muted-foreground`
+
+**Right side** (`flex items-center gap-0.5 shrink-0`):
+- Action icon buttons: `variant="ghost" size="icon" className="h-6 w-6"` with `h-3.5 w-3.5` icons
+- Wrap each in `TooltipProvider > Tooltip > TooltipTrigger/Content` for labels
+- Optional separator between button groups: `<div className="h-4 w-px bg-border mx-1" />` or `border-l pl-2`
+- Delete button always last: `text-destructive hover:text-destructive`, wrapped in `AlertDialog` for confirmation
+
+**Inactive/disabled rows**: Add `opacity-50 bg-muted` to the row container.
+
+### Actions
+
+| Action | UI | Pattern |
+|--------|-----|---------|
+| Create | "New"/"Add" `Button size="sm"` with `Plus` icon | Opens Dialog or inline form |
+| Edit | `Pencil` icon button in row | Opens Edit Dialog or expands inline edit form |
+| Delete | `Trash2` icon button in row | `AlertDialog` confirmation, then mutation |
+| Copy | `Copy`/`Check` icon toggle | `navigator.clipboard.writeText()`, `setCopiedId` state with `setTimeout` reset |
+| Toggle | Status icon or `Switch` | Direct mutation, no confirmation |
+
+### Edit Dialog Pattern
+
+Separate `Dialog` for editing, controlled by `editDialogOpen` + `editingConnector/editingShare` state:
+- `handleEditOpen(item)`: sets editing state + populates form fields from item
+- `handleEditSave()`: compares edited values to original, sends only changed fields
+- On success: close dialog, invalidate queries
+
+### Inline Edit Pattern (Alternative)
+
+For simpler items (e.g., prompt actions in `EditPromptActionsDialog.tsx`):
+- `editingActionId` state tracks which row is in edit mode
+- Row expands to show `Input`/`Textarea` fields with `Check`/`X` icon buttons
+- No separate Dialog needed — edit form replaces the row content
+
+### State Management
+
+- `useState` for dialog open/close, form fields, editing item reference
+- `useMutation` for create/update/delete with `onSuccess` → `queryClient.invalidateQueries`
+- Copy feedback: `copiedId` state + `setTimeout(() => setCopiedId(null), 2000)`
+- For new item form: toggle `showNewForm` boolean, reset form state on discard
+
+### Reference Implementations
+
+- `frontend/src/components/Agents/WebappShareCard.tsx` — share links with Copy/Embed/Edit/Delete
+- `frontend/src/components/Agents/McpConnectorsCard.tsx` — connectors with Copy URL/Edit/Toggle/Delete
+- `frontend/src/components/Dashboard/UserDashboards/EditPromptActionsDialog.tsx` — prompt actions with inline edit + Add form
+
 ## Environment Variables
 - Accessed via `import.meta.env.VITE_*`
 - API URL: `import.meta.env.VITE_API_URL`
