@@ -4023,6 +4023,13 @@ export type WebappWebappDataApiData = {
 
 export type WebappWebappDataApiResponse = (unknown);
 
+export type WebappGetWebappOwnerStatusData = {
+    agentId: string;
+    token?: (string | null);
+};
+
+export type WebappGetWebappOwnerStatusResponse = (unknown);
+
 export type WebappServeWebappFileData = {
     agentId: string;
     path: string;

@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from app.api.deps import CurrentUser, SessionDep
 from app.core import security
 from app.core.config import settings
-from app.models import TokenPayload, User
+from app.models import Agent, AgentEnvironment, TokenPayload, User
 from app.services.environment_service import EnvironmentService
 from app.services.webapp_service import (
     WebappService,
@@ -141,6 +141,38 @@ async def webapp_data_api(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/owner-status")
+async def get_webapp_owner_status(
+    agent_id: uuid.UUID,
+    session: SessionDep,
+    request: Request,
+    bearer_token: str | None = Depends(_optional_oauth2),
+    token: str | None = Query(None),
+):
+    """Environment status for the owner's dashboard iframe — triggers auto-activation if suspended."""
+    # Resolve user from bearer token, query param, or cookie (same pattern as serve_webapp_file).
+    raw_token = bearer_token or token or request.cookies.get("webapp_owner_token")
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    current_user = _resolve_user_from_token(session, raw_token)
+
+    # Resolve agent without requiring the environment to be running.
+    agent = session.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.owner_id != current_user.id and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    environment: AgentEnvironment | None = None
+    if agent.active_environment_id:
+        environment = session.get(AgentEnvironment, agent.active_environment_id)
+
+    return await WebappService.get_public_status(session, agent, environment)
 
 
 @router.get("/{path:path}")
