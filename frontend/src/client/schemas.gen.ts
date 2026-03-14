@@ -10401,6 +10401,126 @@ export const UserDashboardBlockCreateSchema = {
     title: 'UserDashboardBlockCreate'
 } as const;
 
+export const UserDashboardBlockPromptActionCreateSchema = {
+    properties: {
+        prompt_text: {
+            type: 'string',
+            maxLength: 2000,
+            minLength: 1,
+            title: 'Prompt Text'
+        },
+        label: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 100
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Label'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order',
+            default: 0
+        }
+    },
+    type: 'object',
+    required: ['prompt_text'],
+    title: 'UserDashboardBlockPromptActionCreate'
+} as const;
+
+export const UserDashboardBlockPromptActionPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        block_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Block Id'
+        },
+        prompt_text: {
+            type: 'string',
+            title: 'Prompt Text'
+        },
+        label: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Label'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'block_id', 'prompt_text', 'label', 'sort_order', 'created_at', 'updated_at'],
+    title: 'UserDashboardBlockPromptActionPublic'
+} as const;
+
+export const UserDashboardBlockPromptActionUpdateSchema = {
+    properties: {
+        prompt_text: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 2000,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Text'
+        },
+        label: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Label'
+        },
+        sort_order: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sort Order'
+        }
+    },
+    type: 'object',
+    title: 'UserDashboardBlockPromptActionUpdate'
+} as const;
+
 export const UserDashboardBlockPublicSchema = {
     properties: {
         id: {
@@ -10434,7 +10554,8 @@ export const UserDashboardBlockPublicSchema = {
         },
         show_header: {
             type: 'boolean',
-            title: 'Show Header'
+            title: 'Show Header',
+            default: false
         },
         grid_x: {
             type: 'integer',
@@ -10464,6 +10585,14 @@ export const UserDashboardBlockPublicSchema = {
             ],
             title: 'Config'
         },
+        prompt_actions: {
+            items: {
+                '$ref': '#/components/schemas/UserDashboardBlockPromptActionPublic'
+            },
+            type: 'array',
+            title: 'Prompt Actions',
+            default: []
+        },
         created_at: {
             type: 'string',
             format: 'date-time',
@@ -10476,7 +10605,7 @@ export const UserDashboardBlockPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'agent_id', 'view_type', 'title', 'show_border', 'show_header', 'grid_x', 'grid_y', 'grid_w', 'grid_h', 'config', 'created_at', 'updated_at'],
+    required: ['id', 'agent_id', 'view_type', 'title', 'show_border', 'grid_x', 'grid_y', 'grid_w', 'grid_h', 'config', 'created_at', 'updated_at'],
     title: 'UserDashboardBlockPublic'
 } as const;
 

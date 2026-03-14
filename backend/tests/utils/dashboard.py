@@ -139,3 +139,78 @@ def update_block_layout(
     )
     assert r.status_code == 200, f"Update block layout failed: {r.text}"
     return r.json()
+
+
+# ── Prompt action helpers ─────────────────────────────────────────────────────
+
+def create_prompt_action(
+    client: TestClient,
+    token_headers: dict[str, str],
+    dashboard_id: str,
+    block_id: str,
+    prompt_text: str | None = None,
+    label: str | None = None,
+    sort_order: int = 0,
+) -> dict:
+    """Create a prompt action via POST /dashboards/{id}/blocks/{block_id}/prompt-actions."""
+    payload: dict = {
+        "prompt_text": prompt_text or "Run a quick check and report back",
+        "sort_order": sort_order,
+    }
+    if label is not None:
+        payload["label"] = label
+    r = client.post(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions",
+        headers=token_headers,
+        json=payload,
+    )
+    assert r.status_code == 200, f"Create prompt action failed: {r.text}"
+    return r.json()
+
+
+def list_prompt_actions(
+    client: TestClient,
+    token_headers: dict[str, str],
+    dashboard_id: str,
+    block_id: str,
+) -> list[dict]:
+    """List prompt actions via GET /dashboards/{id}/blocks/{block_id}/prompt-actions."""
+    r = client.get(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions",
+        headers=token_headers,
+    )
+    assert r.status_code == 200, f"List prompt actions failed: {r.text}"
+    return r.json()
+
+
+def update_prompt_action(
+    client: TestClient,
+    token_headers: dict[str, str],
+    dashboard_id: str,
+    block_id: str,
+    action_id: str,
+    **fields,
+) -> dict:
+    """Update a prompt action via PUT /dashboards/{id}/blocks/{block_id}/prompt-actions/{action_id}."""
+    r = client.put(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions/{action_id}",
+        headers=token_headers,
+        json=fields,
+    )
+    assert r.status_code == 200, f"Update prompt action failed: {r.text}"
+    return r.json()
+
+
+def delete_prompt_action(
+    client: TestClient,
+    token_headers: dict[str, str],
+    dashboard_id: str,
+    block_id: str,
+    action_id: str,
+) -> None:
+    """Delete a prompt action via DELETE /dashboards/{id}/blocks/{block_id}/prompt-actions/{action_id}."""
+    r = client.delete(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions/{action_id}",
+        headers=token_headers,
+    )
+    assert r.status_code == 200, f"Delete prompt action failed: {r.text}"

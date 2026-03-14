@@ -36,7 +36,8 @@ Dashboards are intentionally **workspace-independent** — any agent a user owns
 1. Enter edit mode ("Edit Layout"). Block headers with the kebab (⋮) menu are only visible in edit mode.
 2. Click the kebab menu on a block header → "Edit".
 3. Modify the view type, custom title, show/hide border, or show/hide header.
-4. Click "Save Changes".
+4. Optionally add, edit, or remove prompt actions in the "Prompt Actions" section of the dialog.
+5. Click "Save Changes" to save the block settings. Prompt actions are saved immediately per-item (not on "Save Changes").
 
 ### Deleting a Block
 
@@ -114,6 +115,39 @@ Blocks have two visual modes:
 | `webapp` | Embeds the agent's web application in an iframe using the authenticated owner preview route. Only available when the agent has `webapp_enabled = true`. |
 
 Block content auto-refreshes every 30 seconds.
+
+---
+
+## Prompt Actions
+
+Dashboard blocks can have **prompt actions** — one-click buttons that appear when hovering over a block in view mode. Clicking a button creates a new agent session and sends the configured prompt text as the first user message.
+
+### Configuration
+
+1. Enter edit mode and open the block's kebab menu → "Edit".
+2. In the "Prompt Actions" section at the bottom of the dialog, click "+ Add".
+3. Fill in the **Prompt Text** (required) — the message to send to the agent.
+4. Optionally add a **Button Label** — a short display name for the button. If left blank, a truncated version of the prompt text is shown.
+5. Click "Save" on the action row to persist it immediately.
+6. Repeat for additional actions. Click the trash icon to delete a saved action immediately.
+
+### UX Flow (view mode)
+
+1. User hovers over a block that has prompt actions configured.
+2. Small pill buttons appear at the bottom of the block (semi-transparent overlay).
+3. User clicks a button → a new session is created for that block's agent (conversation mode) and the prompt text is sent as the first message.
+4. The button becomes a spinning icon to indicate the session is in progress.
+5. Clicking the spinner opens the session chat page (`/session/{id}`).
+6. The block auto-refreshes every 30 seconds, so the new session will appear in the Latest Session view shortly.
+
+### Business Rules
+
+- A block can have any number of prompt actions (no enforced cap beyond practical UI constraints).
+- Prompt actions are only visible in view mode (never in edit mode).
+- Each action stores: `prompt_text` (1–2000 characters), optional `label` (max 100 characters), and `sort_order`.
+- The in-progress (spinner) state is tracked per browser session only — it resets on page reload.
+- Prompt actions are cascade-deleted when their parent block is deleted.
+- The new session is always created in `conversation` mode.
 
 ---
 

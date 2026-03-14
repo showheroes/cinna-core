@@ -19,6 +19,7 @@ import { WebAppView } from "./views/WebAppView"
 import { LatestSessionView } from "./views/LatestSessionView"
 import { LatestTasksView } from "./views/LatestTasksView"
 import { EditBlockDialog } from "./EditBlockDialog"
+import { PromptActionsOverlay } from "./PromptActionsOverlay"
 
 interface DashboardBlockProps {
   block: UserDashboardBlockPublic
@@ -37,6 +38,7 @@ export function DashboardBlock({ block, agent, dashboardId, isEditMode }: Dashbo
   const queryClient = useQueryClient()
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
 
   const { showErrorToast } = useCustomToast()
   const colorPreset = getColorPreset(agent?.ui_color_preset)
@@ -145,9 +147,20 @@ export function DashboardBlock({ block, agent, dashboardId, isEditMode }: Dashbo
           </div>
         </div>
       ) : (
-        /* Content area */
-        <div className="flex-1 overflow-hidden min-h-0">
+        /* Content area with prompt actions overlay */
+        <div
+          className="flex-1 overflow-hidden min-h-0 relative"
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
           {renderView()}
+          {!isEditMode && agent && block.prompt_actions && block.prompt_actions.length > 0 && (
+            <PromptActionsOverlay
+              actions={block.prompt_actions}
+              agentId={agent.id}
+              isVisible={isHovered}
+            />
+          )}
         </div>
       )}
 

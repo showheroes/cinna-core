@@ -10,6 +10,10 @@ Test scenarios:
   6. Agent access validation — agent must be owned by user
   7. Webapp view_type validation — agent must have webapp_enabled
   8. Invalid view_type rejection
+  9. Prompt action CRUD lifecycle — create, list, update, delete on a block
+  10. Prompt actions returned in block/dashboard responses
+  11. Prompt action ownership guards — other user cannot manage actions
+  12. Prompt action validation — empty prompt_text rejected
 """
 import uuid
 
@@ -21,13 +25,17 @@ from tests.utils.ai_credential import create_random_ai_credential
 from tests.utils.dashboard import (
     add_block,
     create_dashboard,
+    create_prompt_action,
     delete_block,
     delete_dashboard,
+    delete_prompt_action,
     get_dashboard,
     list_dashboards,
+    list_prompt_actions,
     update_block,
     update_block_layout,
     update_dashboard,
+    update_prompt_action,
 )
 from tests.utils.user import create_random_user, user_authentication_headers
 
@@ -442,3 +450,276 @@ def test_invalid_view_type_rejected(
         },
     )
     assert r.status_code == 422
+
+
+# ── Scenario 9: Prompt action CRUD lifecycle ─────────────────────────────────
+
+def test_prompt_action_full_lifecycle(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """
+    Full prompt action CRUD lifecycle:
+      1. Create a dashboard and block
+      2. Create two prompt actions with label and without
+      3. List prompt actions — verify both appear, correct fields, sort_order respected
+      4. Verify prompt_actions returned in block GET response
+      5. Verify prompt_actions returned in dashboard GET response
+      6. Update first prompt action (change label and prompt_text)
+      7. Verify update persisted
+      8. Delete one prompt action
+      9. Verify deletion — list returns only 1 action
+      10. Delete block — verify actions cascade-delete (block gone)
+    """
+    # ── Phase 1: Setup dashboard + block ─────────────────────────────────────
+    dashboard = create_dashboard(client, superuser_token_headers, name="Prompt Action Test")
+    dashboard_id = dashboard["id"]
+    agent = create_agent_via_api(client, superuser_token_headers)
+    agent_id = agent["id"]
+    block = add_block(client, superuser_token_headers, dashboard_id, agent_id)
+    block_id = block["id"]
+
+    # Block starts with no prompt_actions
+    assert block["prompt_actions"] == []
+
+    # ── Phase 2: Create two prompt actions ───────────────────────────────────
+    action1 = create_prompt_action(
+        client, superuser_token_headers, dashboard_id, block_id,
+        prompt_text="Check my emails and summarize",
+        label="Check emails",
+        sort_order=0,
+    )
+    assert action1["prompt_text"] == "Check my emails and summarize"
+    assert action1["label"] == "Check emails"
+    assert action1["sort_order"] == 0
+    assert action1["block_id"] == block_id
+    assert "id" in action1
+    assert "created_at" in action1
+    action1_id = action1["id"]
+
+    action2 = create_prompt_action(
+        client, superuser_token_headers, dashboard_id, block_id,
+        prompt_text="Run a full status report",
+        sort_order=1,
+    )
+    assert action2["prompt_text"] == "Run a full status report"
+    assert action2["label"] is None
+    action2_id = action2["id"]
+
+    # ── Phase 3: List prompt actions ─────────────────────────────────────────
+    actions = list_prompt_actions(client, superuser_token_headers, dashboard_id, block_id)
+    assert len(actions) == 2
+    # Verify ordering by sort_order
+    assert actions[0]["id"] == action1_id
+    assert actions[1]["id"] == action2_id
+
+    # ── Phase 4: Verify prompt_actions in block GET response ─────────────────
+    fetched_dashboard = get_dashboard(client, superuser_token_headers, dashboard_id)
+    blocks_by_id = {b["id"]: b for b in fetched_dashboard["blocks"]}
+    fetched_block = blocks_by_id[block_id]
+    assert len(fetched_block["prompt_actions"]) == 2
+    action_ids_in_block = {a["id"] for a in fetched_block["prompt_actions"]}
+    assert action1_id in action_ids_in_block
+    assert action2_id in action_ids_in_block
+
+    # ── Phase 5: Verify prompt_actions in list dashboards response ────────────
+    all_dashboards = list_dashboards(client, superuser_token_headers)
+    target = next((d for d in all_dashboards if d["id"] == dashboard_id), None)
+    assert target is not None
+    target_block = next((b for b in target["blocks"] if b["id"] == block_id), None)
+    assert target_block is not None
+    assert len(target_block["prompt_actions"]) == 2
+
+    # ── Phase 6: Update first prompt action ──────────────────────────────────
+    updated = update_prompt_action(
+        client, superuser_token_headers, dashboard_id, block_id, action1_id,
+        prompt_text="Check all inboxes and report status",
+        label="Check inboxes",
+    )
+    assert updated["prompt_text"] == "Check all inboxes and report status"
+    assert updated["label"] == "Check inboxes"
+    assert updated["id"] == action1_id
+
+    # ── Phase 7: Verify update persisted ─────────────────────────────────────
+    actions_after_update = list_prompt_actions(
+        client, superuser_token_headers, dashboard_id, block_id
+    )
+    first = next((a for a in actions_after_update if a["id"] == action1_id), None)
+    assert first is not None
+    assert first["prompt_text"] == "Check all inboxes and report status"
+
+    # ── Phase 8: Delete first prompt action ───────────────────────────────────
+    delete_prompt_action(
+        client, superuser_token_headers, dashboard_id, block_id, action1_id
+    )
+
+    # ── Phase 9: Verify deletion ──────────────────────────────────────────────
+    actions_after_delete = list_prompt_actions(
+        client, superuser_token_headers, dashboard_id, block_id
+    )
+    assert len(actions_after_delete) == 1
+    assert actions_after_delete[0]["id"] == action2_id
+
+    # ── Phase 10: Block cascade-delete removes actions ────────────────────────
+    delete_block(client, superuser_token_headers, dashboard_id, block_id)
+    # Dashboard has no blocks now; no way to list the block's actions
+    # Verify via dashboard GET that block is gone
+    fetched_after_block_delete = get_dashboard(client, superuser_token_headers, dashboard_id)
+    assert all(b["id"] != block_id for b in fetched_after_block_delete["blocks"])
+
+
+# ── Scenario 10: Prompt action ownership guards ──────────────────────────────
+
+def test_prompt_action_ownership_guards(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """
+    Prompt action ownership guards:
+      1. Create dashboard + block + prompt action as superuser
+      2. Another user cannot list, create, update, or delete prompt actions on the block
+      3. Non-existent action_id returns 404 for owner
+      4. Non-existent block_id returns 404 for list/create
+    """
+    # ── Phase 1: Setup ────────────────────────────────────────────────────────
+    dashboard = create_dashboard(client, superuser_token_headers, name="Ownership Test")
+    dashboard_id = dashboard["id"]
+    agent = create_agent_via_api(client, superuser_token_headers)
+    agent_id = agent["id"]
+    block = add_block(client, superuser_token_headers, dashboard_id, agent_id)
+    block_id = block["id"]
+    action = create_prompt_action(
+        client, superuser_token_headers, dashboard_id, block_id,
+        prompt_text="Ownership test action",
+    )
+    action_id = action["id"]
+
+    # ── Phase 2: Another user cannot access prompt actions ────────────────────
+    other_user = create_random_user(client)
+    other_headers = user_authentication_headers(
+        client=client, email=other_user["email"], password=other_user["_password"]
+    )
+
+    # List → 404 (dashboard not found for other user)
+    r = client.get(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions",
+        headers=other_headers,
+    )
+    assert r.status_code in (403, 404)
+
+    # Create → 404/403
+    r = client.post(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions",
+        headers=other_headers,
+        json={"prompt_text": "Sneaky action", "sort_order": 0},
+    )
+    assert r.status_code in (403, 404)
+
+    # Update → 404/403
+    r = client.put(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions/{action_id}",
+        headers=other_headers,
+        json={"prompt_text": "Modified"},
+    )
+    assert r.status_code in (403, 404)
+
+    # Delete → 404/403
+    r = client.delete(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions/{action_id}",
+        headers=other_headers,
+    )
+    assert r.status_code in (403, 404)
+
+    # Unauthenticated requests → 401
+    assert client.get(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions"
+    ).status_code in (401, 403)
+
+    # ── Phase 3: Non-existent action_id → 404 ────────────────────────────────
+    ghost_action_id = str(uuid.uuid4())
+    r = client.put(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions/{ghost_action_id}",
+        headers=superuser_token_headers,
+        json={"prompt_text": "Ghost update"},
+    )
+    assert r.status_code == 404
+
+    r = client.delete(
+        f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions/{ghost_action_id}",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 404
+
+    # ── Phase 4: Non-existent block_id → 404 ─────────────────────────────────
+    ghost_block_id = str(uuid.uuid4())
+    r = client.get(
+        f"{_BASE}/{dashboard_id}/blocks/{ghost_block_id}/prompt-actions",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 404
+
+    r = client.post(
+        f"{_BASE}/{dashboard_id}/blocks/{ghost_block_id}/prompt-actions",
+        headers=superuser_token_headers,
+        json={"prompt_text": "Action for ghost block", "sort_order": 0},
+    )
+    assert r.status_code == 404
+
+
+# ── Scenario 11: Prompt action validation ────────────────────────────────────
+
+def test_prompt_action_validation(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """
+    Prompt action input validation:
+      1. Empty prompt_text is rejected with 422
+      2. prompt_text exceeding max_length is rejected with 422
+      3. label exceeding max_length is rejected with 422
+    """
+    dashboard = create_dashboard(client, superuser_token_headers, name="Validation Test")
+    dashboard_id = dashboard["id"]
+    agent = create_agent_via_api(client, superuser_token_headers)
+    agent_id = agent["id"]
+    block = add_block(client, superuser_token_headers, dashboard_id, agent_id)
+    block_id = block["id"]
+
+    _actions_url = f"{_BASE}/{dashboard_id}/blocks/{block_id}/prompt-actions"
+
+    # Empty prompt_text → 422
+    r = client.post(
+        _actions_url,
+        headers=superuser_token_headers,
+        json={"prompt_text": "", "sort_order": 0},
+    )
+    assert r.status_code == 422
+
+    # Missing prompt_text → 422
+    r = client.post(
+        _actions_url,
+        headers=superuser_token_headers,
+        json={"sort_order": 0},
+    )
+    assert r.status_code == 422
+
+    # Overly long prompt_text (> 2000 chars) → 422
+    r = client.post(
+        _actions_url,
+        headers=superuser_token_headers,
+        json={"prompt_text": "x" * 2001, "sort_order": 0},
+    )
+    assert r.status_code == 422
+
+    # Overly long label (> 100 chars) → 422
+    r = client.post(
+        _actions_url,
+        headers=superuser_token_headers,
+        json={"prompt_text": "Valid prompt text", "label": "L" * 101, "sort_order": 0},
+    )
+    assert r.status_code == 422
+
+    # Valid creation succeeds
+    valid = create_prompt_action(
+        client, superuser_token_headers, dashboard_id, block_id,
+        prompt_text="Valid action",
+        label="Valid",
+    )
+    assert valid["id"] is not None

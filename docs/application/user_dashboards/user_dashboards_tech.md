@@ -4,6 +4,22 @@
 
 **File:** `backend/app/models/user_dashboard.py`
 
+### `user_dashboard_block_prompt_action` table
+
+| Column | Type | Constraints | Default |
+|--------|------|-------------|---------|
+| `id` | UUID | PK | uuid4 |
+| `block_id` | UUID | FK → user_dashboard_block.id CASCADE, NOT NULL | — |
+| `prompt_text` | TEXT (max 2000) | NOT NULL | — |
+| `label` | VARCHAR(100) | nullable | NULL |
+| `sort_order` | INTEGER | NOT NULL | 0 |
+| `created_at` | DATETIME | NOT NULL | utcnow |
+| `updated_at` | DATETIME | NOT NULL | utcnow |
+
+Indexes: `ix_user_dashboard_block_prompt_action_block_id` (block_id)
+
+Cascade: `ondelete="CASCADE"` on block_id FK — deleting a block removes all its prompt actions.
+
 ### `user_dashboard` table
 
 | Column | Type | Constraints | Default |
@@ -43,6 +59,8 @@ Note: `config` is reserved for future per-view-type settings (e.g., refresh inte
 
 Note: The `agent_id` foreign key (`foreign_key="agent.id"` with `ondelete="CASCADE"`) was added via a separate migration after initial table creation.
 
+`UserDashboardBlock` has a `prompt_actions` Relationship to `UserDashboardBlockPromptAction` (cascade: all, delete-orphan, ordered by `sort_order`).
+
 ### Schema classes
 
 The `view_type` field differs between the DB model and the Pydantic schemas:
@@ -57,12 +75,18 @@ UserDashboardUpdate         — name|None, description|None, sort_order|None
 UserDashboardPublic         — id, name, description, sort_order, created_at, updated_at, blocks
 
 UserDashboardBlockBase      — agent_id, view_type (Literal), title, show_border, show_header, grid_x/y/w/h
-UserDashboardBlock          — DB table; view_type as plain str; belongs to UserDashboard
+UserDashboardBlock          — DB table; view_type as plain str; belongs to UserDashboard; has prompt_actions
 UserDashboardBlockCreate    — inherits Base
 UserDashboardBlockUpdate    — all optional: view_type (Literal|None), title, show_border, show_header, grid_x/y/w/h, config
-UserDashboardBlockPublic    — id, agent_id, view_type (str), title, show_border, show_header, grid_x/y/w/h, config, created_at, updated_at
+UserDashboardBlockPublic    — id, agent_id, view_type (str), title, show_border, show_header, grid_x/y/w/h, config, prompt_actions, created_at, updated_at
 
 BlockLayoutUpdate           — block_id, grid_x, grid_y, grid_w, grid_h (for bulk layout endpoint)
+
+UserDashboardBlockPromptActionBase   — prompt_text (1–2000 chars), label (max 100 chars, nullable), sort_order
+UserDashboardBlockPromptAction       — DB table; belongs to UserDashboardBlock
+UserDashboardBlockPromptActionCreate — inherits Base
+UserDashboardBlockPromptActionUpdate — all optional: prompt_text, label, sort_order
+UserDashboardBlockPromptActionPublic — id, block_id, prompt_text, label, sort_order, created_at, updated_at
 ```
 
 ---
@@ -85,8 +109,12 @@ BlockLayoutUpdate           — block_id, grid_x, grid_y, grid_w, grid_h (for bu
 | PUT | `/{dashboard_id}/blocks/layout` | Bulk update grid positions | `list[UserDashboardBlockPublic]` |
 | PUT | `/{dashboard_id}/blocks/{block_id}` | Update block config | `UserDashboardBlockPublic` |
 | DELETE | `/{dashboard_id}/blocks/{block_id}` | Delete block | `Message` |
+| GET | `/{dashboard_id}/blocks/{block_id}/prompt-actions` | List prompt actions for a block | `list[UserDashboardBlockPromptActionPublic]` |
+| POST | `/{dashboard_id}/blocks/{block_id}/prompt-actions` | Create prompt action | `UserDashboardBlockPromptActionPublic` |
+| PUT | `/{dashboard_id}/blocks/{block_id}/prompt-actions/{action_id}` | Update prompt action | `UserDashboardBlockPromptActionPublic` |
+| DELETE | `/{dashboard_id}/blocks/{block_id}/prompt-actions/{action_id}` | Delete prompt action | `Message` |
 
-The `/blocks/layout` route is registered **before** `/{block_id}` to avoid FastAPI path conflict.
+The `/blocks/layout` route is registered **before** `/{block_id}` to avoid FastAPI path conflict. Prompt action routes are nested under `/{block_id}/prompt-actions` — the literal path segment prevents any conflict.
 
 ### Webapp Owner Preview Routes (iframe auth)
 
@@ -123,7 +151,7 @@ Cookie is set via `Response.set_cookie()` with `httponly=True`, `samesite="stric
 ```python
 class UserDashboardService:
     list_dashboards(session, owner_id) -> list[UserDashboard]
-        # Ordered by sort_order; eager loads blocks via selectinload
+        # Ordered by sort_order; eager loads blocks + prompt_actions via chained selectinload
 
     create_dashboard(session, owner_id, data) -> UserDashboard
         # Enforces MAX_DASHBOARDS_PER_USER = 10
@@ -131,7 +159,10 @@ class UserDashboardService:
 
     get_dashboard(session, dashboard_id, owner_id) -> UserDashboard
         # Raises 404 if not found; 403 if owner mismatch
-        # Eager loads blocks
+        # Eager loads blocks + prompt_actions (chained selectinload)
+
+    _get_block(session, dashboard_id, block_id) -> UserDashboardBlock
+        # Fetches block ensuring it belongs to dashboard; raises 404 if not found
 
     update_dashboard(session, dashboard_id, owner_id, data) -> UserDashboard
 
@@ -149,6 +180,17 @@ class UserDashboardService:
 
     update_block_layout(session, dashboard_id, owner_id, layouts) -> list[UserDashboardBlock]
         # Single transaction for all grid position updates
+
+    list_prompt_actions(session, dashboard_id, block_id, owner_id) -> list[UserDashboardBlockPromptAction]
+        # Ownership via get_dashboard(); block verified via _get_block()
+        # Returns ordered by sort_order
+
+    create_prompt_action(session, dashboard_id, block_id, owner_id, data) -> UserDashboardBlockPromptAction
+
+    update_prompt_action(session, dashboard_id, block_id, action_id, owner_id, data) -> UserDashboardBlockPromptAction
+        # Raises 404 if action not found under this block
+
+    delete_prompt_action(session, dashboard_id, block_id, action_id, owner_id) -> bool
 ```
 
 ---
@@ -208,10 +250,18 @@ src/components/Dashboard/UserDashboards/
         — Regular mode: header shown when block.show_header is true (same colored bar, no kebab menu); border only when block.show_border is true
         — Inline delete confirmation replaces block content
         — onError toast handler on delete mutation
+        — isHovered state tracks hover; renders PromptActionsOverlay in view mode when block has prompt_actions
     AddBlockDialog.tsx
         — Agent picker (all owned agents); view type radio group
     EditBlockDialog.tsx
         — Edit view_type, custom title, show_border toggle, show_header toggle
+        — "Prompt Actions" section: displays saved actions (delete per-item); "+ Add" form for new actions (save/discard per-item); immediate mutations (no batch save)
+    PromptActionsOverlay.tsx
+        — Renders at bottom of block content area as absolute overlay on hover (view mode only)
+        — Shows one pill button per action (label or truncated prompt_text, max 28 chars)
+        — On button click: calls SessionsService.createSession + MessagesService.sendMessageStream
+        — Post-click: button becomes Loader2 spinner; spinner click navigates to /session/{id}
+        — activeSessions map: Record<actionId, sessionId>; resets on page reload
     views/
         WebAppView.tsx         — <iframe> embedding /api/v1/agents/{id}/webapp/?token={jwt}
         LatestSessionView.tsx  — Fetches latest 10 sessions; scrollable list with mode icon, title, timestamp per row (matches sessions index page style)
@@ -289,6 +339,8 @@ Creates `user_dashboard` and `user_dashboard_block` tables with all columns, for
 
 **`b8c9d0e1f2g3`**: Adds `show_header` boolean column (NOT NULL, server default `false`) to `user_dashboard_block`.
 
+**`361c33705d15`**: Creates `user_dashboard_block_prompt_action` table with `id`, `block_id` (FK CASCADE), `prompt_text`, `label`, `sort_order`, `created_at`, `updated_at`. Creates index on `block_id`.
+
 ---
 
 ## Tests
@@ -296,7 +348,7 @@ Creates `user_dashboard` and `user_dashboard_block` tables with all columns, for
 **Location:** `backend/tests/api/dashboards/`
 
 - `conftest.py` — imports environment adapter stubs and AI credential fixtures from shared `tests/utils/fixtures.py`
-- `test_dashboards.py` — 8 scenario-based tests covering:
+- `test_dashboards.py` — 11 scenario-based tests covering:
   - Dashboard CRUD lifecycle + ownership guards + 404 for ghost IDs
   - Block CRUD lifecycle + block-level ownership guards
   - Bulk layout update + unknown block_id → 404
@@ -305,5 +357,8 @@ Creates `user_dashboard` and `user_dashboard_block` tables with all columns, for
   - Agent access validation (other user's agent → 400)
   - Webapp view_type validation (webapp_enabled=False → 400, True → 200)
   - Invalid view_type string → 422
+  - Prompt action full CRUD lifecycle (create, list, update, delete, cascade with block delete)
+  - Prompt action ownership guards (cross-user access, unauthenticated, ghost IDs)
+  - Prompt action input validation (empty text, oversized text/label → 422)
 
-Helper utilities: `backend/tests/utils/dashboard.py`
+Helper utilities: `backend/tests/utils/dashboard.py` — includes `create_prompt_action`, `list_prompt_actions`, `update_prompt_action`, `delete_prompt_action` helpers.

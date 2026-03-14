@@ -359,6 +359,10 @@ from .user_dashboard import (
     UserDashboardBlockUpdate,
     UserDashboardBlockPublic,
     BlockLayoutUpdate,
+    UserDashboardBlockPromptAction,
+    UserDashboardBlockPromptActionCreate,
+    UserDashboardBlockPromptActionUpdate,
+    UserDashboardBlockPromptActionPublic,
 )
 
 __all__ = [
@@ -688,4 +692,8 @@ __all__ = [
     "UserDashboardBlockUpdate",
     "UserDashboardBlockPublic",
     "BlockLayoutUpdate",
+    "UserDashboardBlockPromptAction",
+    "UserDashboardBlockPromptActionCreate",
+    "UserDashboardBlockPromptActionUpdate",
+    "UserDashboardBlockPromptActionPublic",
 ]

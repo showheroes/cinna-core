@@ -180,13 +180,13 @@ async def serve_webapp_file(
         path = "index.html"
     if path == "index.html":
         try:
-            status = await adapter.get_webapp_status()
-            if not status.get("has_index"):
+            webapp_status = await adapter.get_webapp_status()
+            if not webapp_status.get("has_index"):
                 raise HTTPException(
                     status_code=404,
                     detail="Web app not built yet. No index.html found in the webapp directory. Ask the agent to build a dashboard first."
                 )
-            if status.get("total_size_bytes", 0) > WEBAPP_SIZE_LIMIT_BYTES:
+            if webapp_status.get("total_size_bytes", 0) > WEBAPP_SIZE_LIMIT_BYTES:
                 raise HTTPException(
                     status_code=413,
                     detail=f"Webapp exceeds size limit ({WEBAPP_SIZE_LIMIT_BYTES // (1024*1024)}MB). Reduce webapp size to continue serving."

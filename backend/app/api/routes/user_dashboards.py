@@ -13,10 +13,25 @@ from app.models import (
     UserDashboardBlockUpdate,
     UserDashboardBlockPublic,
     BlockLayoutUpdate,
+    UserDashboardBlockPromptActionCreate,
+    UserDashboardBlockPromptActionUpdate,
+    UserDashboardBlockPromptActionPublic,
 )
 from app.services.user_dashboard_service import UserDashboardService
 
 router = APIRouter(prefix="/dashboards", tags=["Dashboards"])
+
+
+def _action_to_public(action: Any) -> UserDashboardBlockPromptActionPublic:
+    return UserDashboardBlockPromptActionPublic(
+        id=action.id,
+        block_id=action.block_id,
+        prompt_text=action.prompt_text,
+        label=action.label,
+        sort_order=action.sort_order,
+        created_at=action.created_at,
+        updated_at=action.updated_at,
+    )
 
 
 def _block_to_public(block: Any) -> UserDashboardBlockPublic:
@@ -32,6 +47,7 @@ def _block_to_public(block: Any) -> UserDashboardBlockPublic:
         grid_w=block.grid_w,
         grid_h=block.grid_h,
         config=block.config,
+        prompt_actions=[_action_to_public(a) for a in (block.prompt_actions or [])],
         created_at=block.created_at,
         updated_at=block.updated_at,
     )
@@ -194,3 +210,95 @@ def delete_block(
         owner_id=current_user.id,
     )
     return Message(message="Block deleted")
+
+
+# ── Prompt action endpoints ───────────────────────────────────────────────────
+# NOTE: These are registered after the block-level routes. The path segment
+# /prompt-actions is a literal string, so it does not conflict with /{block_id}.
+
+
+@router.get(
+    "/{dashboard_id}/blocks/{block_id}/prompt-actions",
+    response_model=list[UserDashboardBlockPromptActionPublic],
+)
+def list_prompt_actions(
+    dashboard_id: uuid.UUID,
+    block_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """List all prompt actions for a block, ordered by sort_order."""
+    actions = UserDashboardService.list_prompt_actions(
+        session=session,
+        dashboard_id=dashboard_id,
+        block_id=block_id,
+        owner_id=current_user.id,
+    )
+    return [_action_to_public(a) for a in actions]
+
+
+@router.post(
+    "/{dashboard_id}/blocks/{block_id}/prompt-actions",
+    response_model=UserDashboardBlockPromptActionPublic,
+)
+def create_prompt_action(
+    *,
+    dashboard_id: uuid.UUID,
+    block_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+    action_in: UserDashboardBlockPromptActionCreate,
+) -> Any:
+    """Add a prompt action to a block."""
+    action = UserDashboardService.create_prompt_action(
+        session=session,
+        dashboard_id=dashboard_id,
+        block_id=block_id,
+        owner_id=current_user.id,
+        data=action_in,
+    )
+    return _action_to_public(action)
+
+
+@router.put(
+    "/{dashboard_id}/blocks/{block_id}/prompt-actions/{action_id}",
+    response_model=UserDashboardBlockPromptActionPublic,
+)
+def update_prompt_action(
+    *,
+    dashboard_id: uuid.UUID,
+    block_id: uuid.UUID,
+    action_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+    action_in: UserDashboardBlockPromptActionUpdate,
+) -> Any:
+    """Update a prompt action."""
+    action = UserDashboardService.update_prompt_action(
+        session=session,
+        dashboard_id=dashboard_id,
+        block_id=block_id,
+        action_id=action_id,
+        owner_id=current_user.id,
+        data=action_in,
+    )
+    return _action_to_public(action)
+
+
+@router.delete("/{dashboard_id}/blocks/{block_id}/prompt-actions/{action_id}")
+def delete_prompt_action(
+    dashboard_id: uuid.UUID,
+    block_id: uuid.UUID,
+    action_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Message:
+    """Delete a prompt action from a block."""
+    UserDashboardService.delete_prompt_action(
+        session=session,
+        dashboard_id=dashboard_id,
+        block_id=block_id,
+        action_id=action_id,
+        owner_id=current_user.id,
+    )
+    return Message(message="Prompt action deleted")

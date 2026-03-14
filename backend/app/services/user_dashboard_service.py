@@ -13,6 +13,9 @@ from app.models.user_dashboard import (
     UserDashboardBlockCreate,
     UserDashboardBlockUpdate,
     BlockLayoutUpdate,
+    UserDashboardBlockPromptAction,
+    UserDashboardBlockPromptActionCreate,
+    UserDashboardBlockPromptActionUpdate,
 )
 from app.models.agent import Agent
 
@@ -29,12 +32,14 @@ class UserDashboardService:
 
     @staticmethod
     def list_dashboards(session: Session, owner_id: UUID) -> list[UserDashboard]:
-        """List all dashboards for a user, ordered by sort_order, with blocks eagerly loaded."""
+        """List all dashboards for a user, ordered by sort_order, with blocks and prompt_actions eagerly loaded."""
         statement = (
             select(UserDashboard)
             .where(UserDashboard.owner_id == owner_id)
             .order_by(UserDashboard.sort_order)
-            .options(selectinload(UserDashboard.blocks))  # type: ignore[attr-defined]
+            .options(
+                selectinload(UserDashboard.blocks).selectinload(UserDashboardBlock.prompt_actions)  # type: ignore[attr-defined]
+            )
         )
         return list(session.exec(statement).all())
 
@@ -70,11 +75,13 @@ class UserDashboardService:
     def get_dashboard(
         session: Session, dashboard_id: UUID, owner_id: UUID
     ) -> UserDashboard:
-        """Get a dashboard by ID with blocks eagerly loaded. Raises 404/403 as appropriate."""
+        """Get a dashboard by ID with blocks and prompt_actions eagerly loaded. Raises 404/403 as appropriate."""
         statement = (
             select(UserDashboard)
             .where(UserDashboard.id == dashboard_id)
-            .options(selectinload(UserDashboard.blocks))  # type: ignore[attr-defined]
+            .options(
+                selectinload(UserDashboard.blocks).selectinload(UserDashboardBlock.prompt_actions)  # type: ignore[attr-defined]
+            )
         )
         dashboard = session.exec(statement).first()
         if not dashboard:
@@ -82,6 +89,21 @@ class UserDashboardService:
         if dashboard.owner_id != owner_id:
             raise HTTPException(status_code=403, detail="Not enough permissions")
         return dashboard
+
+    @staticmethod
+    def _get_block(
+        session: Session, dashboard_id: UUID, block_id: UUID
+    ) -> UserDashboardBlock:
+        """Fetch a block ensuring it belongs to the given dashboard. Raises 404 if not found."""
+        block = session.exec(
+            select(UserDashboardBlock).where(
+                UserDashboardBlock.id == block_id,
+                UserDashboardBlock.dashboard_id == dashboard_id,
+            )
+        ).first()
+        if not block:
+            raise HTTPException(status_code=404, detail="Block not found")
+        return block
 
     @staticmethod
     def update_dashboard(
@@ -254,3 +276,95 @@ class UserDashboardService:
         for block in updated_blocks:
             session.refresh(block)
         return updated_blocks
+
+    # ── Prompt Action methods ─────────────────────────────────────────────────
+
+    @staticmethod
+    def list_prompt_actions(
+        session: Session,
+        dashboard_id: UUID,
+        block_id: UUID,
+        owner_id: UUID,
+    ) -> list[UserDashboardBlockPromptAction]:
+        """List prompt actions for a block, ordered by sort_order."""
+        UserDashboardService.get_dashboard(session, dashboard_id, owner_id)
+        UserDashboardService._get_block(session, dashboard_id, block_id)
+        actions = session.exec(
+            select(UserDashboardBlockPromptAction)
+            .where(UserDashboardBlockPromptAction.block_id == block_id)
+            .order_by(UserDashboardBlockPromptAction.sort_order)  # type: ignore[arg-type]
+        ).all()
+        return list(actions)
+
+    @staticmethod
+    def create_prompt_action(
+        session: Session,
+        dashboard_id: UUID,
+        block_id: UUID,
+        owner_id: UUID,
+        data: UserDashboardBlockPromptActionCreate,
+    ) -> UserDashboardBlockPromptAction:
+        """Create a prompt action on a block."""
+        UserDashboardService.get_dashboard(session, dashboard_id, owner_id)
+        UserDashboardService._get_block(session, dashboard_id, block_id)
+        action = UserDashboardBlockPromptAction(
+            block_id=block_id,
+            prompt_text=data.prompt_text,
+            label=data.label,
+            sort_order=data.sort_order,
+        )
+        session.add(action)
+        session.commit()
+        session.refresh(action)
+        return action
+
+    @staticmethod
+    def update_prompt_action(
+        session: Session,
+        dashboard_id: UUID,
+        block_id: UUID,
+        action_id: UUID,
+        owner_id: UUID,
+        data: UserDashboardBlockPromptActionUpdate,
+    ) -> UserDashboardBlockPromptAction:
+        """Update a prompt action."""
+        UserDashboardService.get_dashboard(session, dashboard_id, owner_id)
+        UserDashboardService._get_block(session, dashboard_id, block_id)
+        action = session.exec(
+            select(UserDashboardBlockPromptAction).where(
+                UserDashboardBlockPromptAction.id == action_id,
+                UserDashboardBlockPromptAction.block_id == block_id,
+            )
+        ).first()
+        if not action:
+            raise HTTPException(status_code=404, detail="Prompt action not found")
+        update_dict = data.model_dump(exclude_unset=True)
+        action.sqlmodel_update(update_dict)
+        action.updated_at = _utc_now()
+        session.add(action)
+        session.commit()
+        session.refresh(action)
+        return action
+
+    @staticmethod
+    def delete_prompt_action(
+        session: Session,
+        dashboard_id: UUID,
+        block_id: UUID,
+        action_id: UUID,
+        owner_id: UUID,
+    ) -> bool:
+        """Delete a prompt action."""
+        UserDashboardService.get_dashboard(session, dashboard_id, owner_id)
+        UserDashboardService._get_block(session, dashboard_id, block_id)
+        action = session.exec(
+            select(UserDashboardBlockPromptAction).where(
+                UserDashboardBlockPromptAction.id == action_id,
+                UserDashboardBlockPromptAction.block_id == block_id,
+            )
+        ).first()
+        if not action:
+            raise HTTPException(status_code=404, detail="Prompt action not found")
+        session.delete(action)
+        session.commit()
+        return True

@@ -2189,13 +2189,35 @@ export type UserDashboardBlockCreate = {
 
 export type view_type = 'webapp' | 'latest_session' | 'latest_tasks';
 
+export type UserDashboardBlockPromptActionCreate = {
+    prompt_text: string;
+    label?: (string | null);
+    sort_order?: number;
+};
+
+export type UserDashboardBlockPromptActionPublic = {
+    id: string;
+    block_id: string;
+    prompt_text: string;
+    label: (string | null);
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+};
+
+export type UserDashboardBlockPromptActionUpdate = {
+    prompt_text?: (string | null);
+    label?: (string | null);
+    sort_order?: (number | null);
+};
+
 export type UserDashboardBlockPublic = {
     id: string;
     agent_id: string;
     view_type: string;
     title: (string | null);
     show_border: boolean;
-    show_header: boolean;
+    show_header?: boolean;
     grid_x: number;
     grid_y: number;
     grid_w: number;
@@ -2203,6 +2225,7 @@ export type UserDashboardBlockPublic = {
     config: ({
     [key: string]: unknown;
 } | null);
+    prompt_actions?: Array<UserDashboardBlockPromptActionPublic>;
     created_at: string;
     updated_at: string;
 };
@@ -2923,6 +2946,38 @@ export type DashboardsDeleteBlockData = {
 };
 
 export type DashboardsDeleteBlockResponse = (Message);
+
+export type DashboardsListPromptActionsData = {
+    blockId: string;
+    dashboardId: string;
+};
+
+export type DashboardsListPromptActionsResponse = (Array<UserDashboardBlockPromptActionPublic>);
+
+export type DashboardsCreatePromptActionData = {
+    blockId: string;
+    dashboardId: string;
+    requestBody: UserDashboardBlockPromptActionCreate;
+};
+
+export type DashboardsCreatePromptActionResponse = (UserDashboardBlockPromptActionPublic);
+
+export type DashboardsUpdatePromptActionData = {
+    actionId: string;
+    blockId: string;
+    dashboardId: string;
+    requestBody: UserDashboardBlockPromptActionUpdate;
+};
+
+export type DashboardsUpdatePromptActionResponse = (UserDashboardBlockPromptActionPublic);
+
+export type DashboardsDeletePromptActionData = {
+    actionId: string;
+    blockId: string;
+    dashboardId: string;
+};
+
+export type DashboardsDeletePromptActionResponse = (Message);
 
 export type EmailIntegrationGetEmailIntegrationData = {
     agentId: string;
