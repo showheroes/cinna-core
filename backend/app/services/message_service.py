@@ -32,7 +32,10 @@ PRE_ALLOWED_TOOLS = frozenset([
     "KillShell", "TaskOutput",
     # Additional built-in tools
     "mcp__knowledge__query_integration_knowledge", "mcp__task__create_agent_task",
-    "mcp__task__update_session_state", "mcp__task__respond_to_task"
+    "mcp__task__update_session_state", "mcp__task__respond_to_task",
+    # Collaboration tools
+    "mcp__task__create_collaboration", "mcp__task__post_finding",
+    "mcp__task__get_collaboration_status",
 ])
 
 # Metadata keys to forward from streaming events to response_metadata
@@ -257,6 +260,18 @@ def _build_session_context(
         ).first()
         if mcp_meta:
             context["mcp_user_email"] = mcp_meta.authenticated_user_email
+
+    # Enrich with collaboration context if this session belongs to a subtask
+    try:
+        from app.services.agent_collaboration_service import AgentCollaborationService
+        collab_context = AgentCollaborationService.get_collaboration_by_session(
+            session=db,
+            session_id=session_db.id,
+        )
+        if collab_context:
+            context.update(collab_context)
+    except Exception as e:
+        logger.debug(f"Collaboration context lookup failed (non-critical): {e}")
 
     return context
 

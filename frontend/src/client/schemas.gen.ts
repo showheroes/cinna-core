@@ -1402,6 +1402,84 @@ export const AgentAccessTokensPublicSchema = {
     title: 'AgentAccessTokensPublic'
 } as const;
 
+export const AgentCollaborationPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        coordinator_agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Coordinator Agent Id'
+        },
+        source_session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Session Id'
+        },
+        shared_context: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Shared Context'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        subtasks: {
+            items: {
+                '$ref': '#/components/schemas/CollaborationSubtaskPublic'
+            },
+            type: 'array',
+            title: 'Subtasks',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'description', 'status', 'coordinator_agent_id', 'source_session_id', 'shared_context', 'owner_id', 'created_at', 'updated_at'],
+    title: 'AgentCollaborationPublic',
+    description: 'Public response model for AgentCollaboration with subtask details.'
+} as const;
+
 export const AgentCreateSchema = {
     properties: {
         name: {
@@ -4137,6 +4215,98 @@ export const CloneUpdateRequestsPublicSchema = {
     description: 'List response for clone update requests'
 } as const;
 
+export const CollaborationSubtaskPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        collaboration_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Collaboration Id'
+        },
+        target_agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Target Agent Id'
+        },
+        target_agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Target Agent Name'
+        },
+        task_message: {
+            type: 'string',
+            title: 'Task Message'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        result_summary: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result Summary'
+        },
+        input_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Input Task Id'
+        },
+        session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Id'
+        },
+        order: {
+            type: 'integer',
+            title: 'Order'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'collaboration_id', 'target_agent_id', 'task_message', 'status', 'result_summary', 'input_task_id', 'session_id', 'order', 'created_at', 'updated_at'],
+    title: 'CollaborationSubtaskPublic',
+    description: 'Public representation of a collaboration subtask.'
+} as const;
+
 export const ConsentApproveResponseSchema = {
     properties: {
         redirect_url: {
@@ -4287,6 +4457,95 @@ export const CreateAgentTaskResponseSchema = {
     required: ['success'],
     title: 'CreateAgentTaskResponse',
     description: 'Response from task creation.'
+} as const;
+
+export const CreateCollaborationRequestSchema = {
+    properties: {
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        subtasks: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Subtasks'
+        },
+        source_session_id: {
+            type: 'string',
+            title: 'Source Session Id'
+        }
+    },
+    type: 'object',
+    required: ['title', 'subtasks', 'source_session_id'],
+    title: 'CreateCollaborationRequest',
+    description: `Request body for POST /agents/collaborations/create (called from agent-env).
+
+Uses environment auth token rather than user JWT.`
+} as const;
+
+export const CreateCollaborationResponseSchema = {
+    properties: {
+        success: {
+            type: 'boolean',
+            title: 'Success'
+        },
+        collaboration_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Collaboration Id'
+        },
+        subtask_count: {
+            type: 'integer',
+            title: 'Subtask Count',
+            default: 0
+        },
+        message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['success'],
+    title: 'CreateCollaborationResponse',
+    description: 'Response from collaboration creation.'
 } as const;
 
 export const CreateScheduleRequestSchema = {
@@ -7824,6 +8083,62 @@ export const PluginSyncResponseSchema = {
     required: ['success', 'message'],
     title: 'PluginSyncResponse',
     description: 'Response model for plugin sync operations.'
+} as const;
+
+export const PostFindingRequestSchema = {
+    properties: {
+        finding: {
+            type: 'string',
+            title: 'Finding'
+        },
+        source_session_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Session Id'
+        }
+    },
+    type: 'object',
+    required: ['finding'],
+    title: 'PostFindingRequest',
+    description: 'Request to post a finding to the collaboration shared context.'
+} as const;
+
+export const PostFindingResponseSchema = {
+    properties: {
+        success: {
+            type: 'boolean',
+            title: 'Success'
+        },
+        findings: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Findings',
+            default: []
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['success'],
+    title: 'PostFindingResponse',
+    description: 'Response after posting a finding.'
 } as const;
 
 export const PrivateUserCreateSchema = {

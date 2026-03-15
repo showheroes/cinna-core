@@ -1317,6 +1317,25 @@ class InputTaskService:
                 if not task:
                     return
 
+                # Hook: update collaboration subtask status if this session is a collaboration subtask
+                try:
+                    from app.services.agent_collaboration_service import AgentCollaborationService
+                    found, collab_complete = AgentCollaborationService.handle_subtask_state_update(
+                        session=db,
+                        subtask_session_id=UUID(session_id),
+                        state=state,
+                        summary=summary,
+                    )
+                    if found:
+                        logger.info(
+                            f"Collaboration subtask state updated for session {session_id}: "
+                            f"state={state}, collab_complete={collab_complete}"
+                        )
+                except Exception as collab_err:
+                    logger.warning(
+                        f"Collaboration subtask state update failed (non-critical): {collab_err}"
+                    )
+
                 # Deliver feedback if auto_feedback enabled and not already delivered
                 if task.auto_feedback and not task.feedback_delivered:
                     await InputTaskService.deliver_feedback_to_source(

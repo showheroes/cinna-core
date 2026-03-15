@@ -240,8 +240,18 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
                         from ..tools.create_agent_task import create_agent_task
                         from ..tools.update_session_state import update_session_state
                         from ..tools.respond_to_task import respond_to_task
+                        from ..tools.create_collaboration import create_collaboration
+                        from ..tools.post_finding import post_finding
+                        from ..tools.get_collaboration_status import get_collaboration_status
 
-                        task_tools = [create_agent_task, update_session_state, respond_to_task]
+                        task_tools = [
+                            create_agent_task,
+                            update_session_state,
+                            respond_to_task,
+                            create_collaboration,
+                            post_finding,
+                            get_collaboration_status,
+                        ]
 
                         task_server = create_sdk_mcp_server(
                             name="task",
@@ -255,7 +265,14 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
                         options.allowed_tools.append("mcp__task__create_agent_task")
                         options.allowed_tools.append("mcp__task__update_session_state")
                         options.allowed_tools.append("mcp__task__respond_to_task")
-                        logger.info("Added task tools (create_agent_task, update_session_state, respond_to_task) for conversation mode")
+                        options.allowed_tools.append("mcp__task__create_collaboration")
+                        options.allowed_tools.append("mcp__task__post_finding")
+                        options.allowed_tools.append("mcp__task__get_collaboration_status")
+                        logger.info(
+                            "Added task tools (create_agent_task, update_session_state, "
+                            "respond_to_task, create_collaboration, post_finding, "
+                            "get_collaboration_status) for conversation mode"
+                        )
                     except ImportError as e:
                         logger.warning(f"Could not import task tools: {e}")
                     except Exception as e:

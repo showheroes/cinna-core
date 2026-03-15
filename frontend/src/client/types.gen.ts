@@ -153,6 +153,25 @@ export type AgentAccessTokenUpdate = {
     is_revoked?: (boolean | null);
 };
 
+/**
+ * Public response model for AgentCollaboration with subtask details.
+ */
+export type AgentCollaborationPublic = {
+    id: string;
+    title: string;
+    description: (string | null);
+    status: string;
+    coordinator_agent_id: string;
+    source_session_id: (string | null);
+    shared_context: {
+        [key: string]: unknown;
+    };
+    owner_id: string;
+    created_at: string;
+    updated_at: string;
+    subtasks?: Array<CollaborationSubtaskPublic>;
+};
+
 export type AgentCreate = {
     name: string;
     workflow_prompt?: (string | null);
@@ -843,6 +862,24 @@ export type CloneUpdateRequestsPublic = {
     count: number;
 };
 
+/**
+ * Public representation of a collaboration subtask.
+ */
+export type CollaborationSubtaskPublic = {
+    id: string;
+    collaboration_id: string;
+    target_agent_id: string;
+    target_agent_name?: (string | null);
+    task_message: string;
+    status: string;
+    result_summary: (string | null);
+    input_task_id: (string | null);
+    session_id: (string | null);
+    order: number;
+    created_at: string;
+    updated_at: string;
+};
+
 export type ConsentApproveResponse = {
     redirect_url: string;
 };
@@ -879,6 +916,31 @@ export type CreateAgentTaskResponse = {
     success: boolean;
     task_id?: (string | null);
     session_id?: (string | null);
+    message?: (string | null);
+    error?: (string | null);
+};
+
+/**
+ * Request body for POST /agents/collaborations/create (called from agent-env).
+ *
+ * Uses environment auth token rather than user JWT.
+ */
+export type CreateCollaborationRequest = {
+    title: string;
+    description?: (string | null);
+    subtasks: Array<{
+        [key: string]: unknown;
+    }>;
+    source_session_id: string;
+};
+
+/**
+ * Response from collaboration creation.
+ */
+export type CreateCollaborationResponse = {
+    success: boolean;
+    collaboration_id?: (string | null);
+    subtask_count?: number;
     message?: (string | null);
     error?: (string | null);
 };
@@ -1672,6 +1734,23 @@ export type PluginSyncResponse = {
     total_environments?: number;
     successful_syncs?: number;
     failed_syncs?: number;
+};
+
+/**
+ * Request to post a finding to the collaboration shared context.
+ */
+export type PostFindingRequest = {
+    finding: string;
+    source_session_id?: (string | null);
+};
+
+/**
+ * Response after posting a finding.
+ */
+export type PostFindingResponse = {
+    success: boolean;
+    findings?: Array<(string)>;
+    error?: (string | null);
 };
 
 export type PrivateUserCreate = {
@@ -2798,6 +2877,31 @@ export type AiCredentialsGetAffectedEnvironmentsData = {
 };
 
 export type AiCredentialsGetAffectedEnvironmentsResponse = (AffectedEnvironmentsPublic);
+
+export type CollaborationsCreateCollaborationData = {
+    requestBody: CreateCollaborationRequest;
+};
+
+export type CollaborationsCreateCollaborationResponse = (CreateCollaborationResponse);
+
+export type CollaborationsPostFindingData = {
+    collaborationId: string;
+    requestBody: PostFindingRequest;
+};
+
+export type CollaborationsPostFindingResponse = (PostFindingResponse);
+
+export type CollaborationsGetCollaborationStatusData = {
+    collaborationId: string;
+};
+
+export type CollaborationsGetCollaborationStatusResponse = (AgentCollaborationPublic);
+
+export type CollaborationsGetCollaborationBySessionData = {
+    sessionId: string;
+};
+
+export type CollaborationsGetCollaborationBySessionResponse = (unknown);
 
 export type CredentialsShareCredentialData = {
     credentialId: string;

@@ -269,6 +269,58 @@ class PromptGenerator:
             return None
 
     @staticmethod
+    def build_collaboration_context_section(session_context: dict | None) -> str | None:
+        """
+        Build a system prompt section for agents participating in a collaboration.
+
+        Reads collaboration fields from session_context (injected by backend) and
+        generates a human-readable section so the agent understands its role.
+
+        Args:
+            session_context: Dict from session_state["session_context"], or None.
+
+        Returns:
+            Markdown section string, or None if not a collaboration session.
+        """
+        if not session_context:
+            return None
+
+        collaboration_id = session_context.get("collaboration_id")
+        if not collaboration_id:
+            return None
+
+        title = session_context.get("collaboration_title", "Unnamed Collaboration")
+        description = session_context.get("collaboration_description", "")
+        role = session_context.get("collaboration_role", "")
+        other_participants = session_context.get("collaboration_other_participants", [])
+
+        lines = [
+            "\n\n---\n",
+            "## Collaboration Context\n",
+            f"You are participating in a collaboration: **\"{title}\"**",
+        ]
+
+        if description:
+            lines.append(f"\n**Objective**: {description}")
+
+        if role:
+            lines.append(f"\n**Your role / task**: {role}")
+
+        if other_participants:
+            participants_str = ", ".join(other_participants)
+            lines.append(f"\n**Other participants**: {participants_str}")
+
+        lines.append(f"\n**Collaboration ID**: `{collaboration_id}`")
+        lines.append(
+            "\nWhen you complete your task, call `update_session_state` with "
+            "`state=\"completed\"` and a clear summary. "
+            "Use `post_finding` to share intermediate results with other participants. "
+            "Use `get_collaboration_status` to see overall progress and other agents' findings."
+        )
+
+        return "\n".join(lines)
+
+    @staticmethod
     def build_session_context_section(session_context: dict | None) -> str | None:
         """
         Build a system prompt section with server-verified session metadata.
@@ -552,6 +604,12 @@ class PromptGenerator:
         if session_context_section:
             conversation_prompt_parts.append(session_context_section)
             logger.info("Included session context section in conversation mode prompt")
+
+        # Append collaboration context if this session is part of a collaboration
+        collaboration_context_section = self.build_collaboration_context_section(session_context)
+        if collaboration_context_section:
+            conversation_prompt_parts.append(collaboration_context_section)
+            logger.info("Included collaboration context section in conversation mode prompt")
 
         # Append task creation prompt if it exists (includes handover and inbox task instructions)
         task_creation_prompt = self._load_task_creation_prompt()
