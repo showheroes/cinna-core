@@ -100,6 +100,7 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
     cron_string: string
     next_execution: string
   } | null>(null)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -112,6 +113,7 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
     cron_string: string
     next_execution: string
   } | null>(null)
+  const [editError, setEditError] = useState<string | null>(null)
 
   const queryKey = ["agent-schedules", agentId]
 
@@ -221,11 +223,14 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
       setCreateInput("")
       setCreatePrompt("")
       setCreateGenerated(null)
+      setCreateError(null)
     }
   }
 
   const handleCreateGenerate = async () => {
     if (!createInput.trim()) return
+    setCreateError(null)
+    setCreateGenerated(null)
     try {
       const result = await generateMutation.mutateAsync(createInput)
       if (result.success && result.cron_string && result.description) {
@@ -235,10 +240,10 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
           next_execution: result.next_execution ?? "",
         })
       } else {
-        showErrorToast(result.error || "Failed to generate schedule")
+        setCreateError(result.error || "Failed to generate schedule")
       }
     } catch (error: any) {
-      showErrorToast(error.message || "Failed to generate schedule")
+      setCreateError(error.message || "Failed to generate schedule")
     }
   }
 
@@ -261,11 +266,14 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
     setEditInput("")
     setEditPrompt(schedule.prompt ?? "")
     setEditGenerated(null)
+    setEditError(null)
     setEditDialogOpen(true)
   }
 
   const handleEditGenerate = async () => {
     if (!editInput.trim()) return
+    setEditError(null)
+    setEditGenerated(null)
     try {
       const result = await generateMutation.mutateAsync(editInput)
       if (result.success && result.cron_string && result.description) {
@@ -275,10 +283,10 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
           next_execution: result.next_execution ?? "",
         })
       } else {
-        showErrorToast(result.error || "Failed to generate schedule")
+        setEditError(result.error || "Failed to generate schedule")
       }
     } catch (error: any) {
-      showErrorToast(error.message || "Failed to generate schedule")
+      setEditError(error.message || "Failed to generate schedule")
     }
   }
 
@@ -377,6 +385,16 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
                           </span>
                         </div>
                       )}
+                    </div>
+                  )}
+                  {createError && (
+                    <div className="bg-destructive/10 border border-destructive/20 p-3 rounded-md">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                        <span className="text-sm text-destructive">
+                          {createError}
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -617,6 +635,16 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
                       </span>
                     </div>
                   )}
+                </div>
+              )}
+              {editError && (
+                <div className="bg-destructive/10 border border-destructive/20 p-3 rounded-md">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                    <span className="text-sm text-destructive">
+                      {editError}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
