@@ -124,9 +124,11 @@ class TaskTriggerService:
         """Create a schedule trigger using AI to parse natural language."""
         TaskTriggerService.verify_task_ownership(db_session, task_id, user_id)
 
-        # Generate schedule from natural language
+        # Generate schedule from natural language (with per-user provider routing)
+        from app.models.user import User
+        user = db_session.get(User, user_id)
         result = AIFunctionsService.generate_schedule(
-            data.natural_language, data.timezone
+            data.natural_language, data.timezone, user=user, db=db_session
         )
         if not result.get("success"):
             raise TriggerValidationError(
@@ -280,8 +282,10 @@ class TaskTriggerService:
         # Handle schedule updates with NL re-generation
         if trigger.type == TriggerType.SCHEDULE and data.natural_language:
             timezone = data.timezone or trigger.timezone or "UTC"
+            from app.models.user import User
+            user = db_session.get(User, user_id)
             result = AIFunctionsService.generate_schedule(
-                data.natural_language, timezone
+                data.natural_language, timezone, user=user, db=db_session
             )
             if not result.get("success"):
                 raise TriggerValidationError(

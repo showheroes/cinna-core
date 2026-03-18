@@ -243,6 +243,8 @@ class AgentSchedulerService:
     def generate_schedule_preview(
         natural_language: str,
         timezone: str,
+        user: "User | None" = None,
+        db: "Session | None" = None,
     ) -> dict:
         """
         Generate a CRON schedule from natural language and calculate next execution.
@@ -261,6 +263,8 @@ class AgentSchedulerService:
         ai_result = AIFunctionsService.generate_schedule(
             natural_language=natural_language,
             timezone=timezone,
+            user=user,
+            db=db,
         )
 
         if ai_result.get("success"):

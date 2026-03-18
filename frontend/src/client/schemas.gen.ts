@@ -96,6 +96,11 @@ export const AICredentialPublicSchema = {
             title: 'Has Api Key',
             default: true
         },
+        is_oauth_token: {
+            type: 'boolean',
+            title: 'Is Oauth Token',
+            default: false
+        },
         base_url: {
             anyOf: [
                 {
@@ -11287,10 +11292,34 @@ export const UserPublicSchema = {
             title: 'Default Sdk Building',
             default: 'claude-code/anthropic'
         },
+        default_ai_functions_sdk: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Functions Sdk',
+            default: 'system'
+        },
+        default_ai_functions_credential_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Functions Credential Id'
+        },
         general_assistant_enabled: {
             type: 'boolean',
             title: 'General Assistant Enabled',
-            default: true
+            default: false
         }
     },
     type: 'object',
@@ -11379,10 +11408,34 @@ export const UserPublicWithAICredentialsSchema = {
             title: 'Default Sdk Building',
             default: 'claude-code/anthropic'
         },
+        default_ai_functions_sdk: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Functions Sdk',
+            default: 'system'
+        },
+        default_ai_functions_credential_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Functions Credential Id'
+        },
         general_assistant_enabled: {
             type: 'boolean',
             title: 'General Assistant Enabled',
-            default: true
+            default: false
         },
         has_anthropic_api_key: {
             type: 'boolean',
@@ -11577,6 +11630,30 @@ export const UserUpdateMeSchema = {
                 }
             ],
             title: 'Default Sdk Building'
+        },
+        default_ai_functions_sdk: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Functions Sdk'
+        },
+        default_ai_functions_credential_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Functions Credential Id'
         },
         general_assistant_enabled: {
             anyOf: [

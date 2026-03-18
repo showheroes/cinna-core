@@ -230,6 +230,9 @@ class AgentHandoverService:
         if agent_id == target_agent_id:
             raise HandoverError("Cannot create handover to the same agent")
 
+        from app.models.user import User
+        user = session.get(User, user_id)
+
         return AIFunctionsService.generate_handover_prompt(
             source_agent_name=source_agent.name,
             source_entrypoint=source_agent.entrypoint_prompt,
@@ -237,4 +240,6 @@ class AgentHandoverService:
             target_agent_name=target_agent.name,
             target_entrypoint=target_agent.entrypoint_prompt,
             target_workflow=target_agent.workflow_prompt,
+            user=user,
+            db=session,
         )

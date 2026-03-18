@@ -75,6 +75,7 @@ class AICredentialPublic(AICredentialBase):
     id: uuid.UUID
     is_default: bool
     has_api_key: bool = True  # Always true for existing credentials
+    is_oauth_token: bool = False  # True if this is an OAuth token (sk-ant-oat*)
     # Safe to expose for openai_compatible
     base_url: str | None = None
     model: str | None = None

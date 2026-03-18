@@ -618,6 +618,7 @@ export type AICredentialPublic = {
     id: string;
     is_default: boolean;
     has_api_key?: boolean;
+    is_oauth_token?: boolean;
     base_url?: (string | null);
     model?: (string | null);
     created_at: string;
@@ -2362,6 +2363,8 @@ export type UserPublic = {
     has_password?: boolean;
     default_sdk_conversation?: (string | null);
     default_sdk_building?: (string | null);
+    default_ai_functions_sdk?: (string | null);
+    default_ai_functions_credential_id?: (string | null);
     general_assistant_enabled?: boolean;
 };
 
@@ -2379,6 +2382,8 @@ export type UserPublicWithAICredentials = {
     has_password?: boolean;
     default_sdk_conversation?: (string | null);
     default_sdk_building?: (string | null);
+    default_ai_functions_sdk?: (string | null);
+    default_ai_functions_credential_id?: (string | null);
     general_assistant_enabled?: boolean;
     has_anthropic_api_key?: boolean;
     has_openai_api_key?: boolean;
@@ -2413,6 +2418,8 @@ export type UserUpdateMe = {
     username?: (string | null);
     default_sdk_conversation?: (string | null);
     default_sdk_building?: (string | null);
+    default_ai_functions_sdk?: (string | null);
+    default_ai_functions_credential_id?: (string | null);
     general_assistant_enabled?: (boolean | null);
 };
 

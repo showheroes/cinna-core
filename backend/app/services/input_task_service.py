@@ -1486,13 +1486,17 @@ class InputTaskService:
         reply_subject = f"Re: {email_msg.subject}" if email_msg.subject else "Re: your email"
 
         if not custom_message:
-            # Use AI to generate reply
+            # Use AI to generate reply (with per-user provider routing)
+            from app.models.user import User
+            user = db_session.get(User, user_id)
             ai_result = AIFunctionsService.generate_email_reply(
                 original_subject=email_msg.subject or "",
                 original_body=email_msg.body or "",
                 original_sender=email_msg.sender,
                 session_result=session_result or "",
                 task_description=task.current_description,
+                user=user,
+                db=db_session,
             )
 
             if not ai_result.get("success"):

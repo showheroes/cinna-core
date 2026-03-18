@@ -30,6 +30,7 @@ def generate_handover_prompt(
     target_agent_name: str,
     target_entrypoint: str | None,
     target_workflow: str | None,
+    provider_kwargs: dict | None = None,
 ) -> dict:
     """
     Generate handover prompt from source to target agent.
@@ -83,8 +84,8 @@ def generate_handover_prompt(
 Generate the handover prompt now. Remember: 2-3 sentences maximum, include condition, context, and example.
 """
 
-        # Call LLM using provider manager (cascade fallback)
-        response = manager.generate_content(prompt)
+        # Call LLM using provider manager (cascade fallback or personal key)
+        response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
         # Clean up response
         handover_prompt = response.text

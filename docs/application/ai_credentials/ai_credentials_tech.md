@@ -50,7 +50,7 @@
 
 **Client (auto-generated):**
 - `frontend/src/client/sdk.gen.ts` - `AiCredentialsService`
-- `frontend/src/client/types.gen.ts` - `AICredentialPublic`, `AICredentialCreate`, `AICredentialUpdate`, `AICredentialsPublic`, `AICredentialType`
+- `frontend/src/client/types.gen.ts` - `AICredentialPublic` (includes `is_oauth_token: bool`), `AICredentialCreate`, `AICredentialUpdate`, `AICredentialsPublic`, `AICredentialType`
 
 ## Database Schema
 
@@ -66,6 +66,11 @@
 - `created_at`, `updated_at` (DATETIME)
 
 Indexes: `ix_ai_credential_owner_type` (owner_id, type), `ix_ai_credential_owner_default` (owner_id, is_default)
+
+### User fields for AI Functions SDK routing (on `user` table)
+
+- `default_ai_functions_sdk` (VARCHAR 50, default `'system'`) - `"system"` or `"personal:anthropic"` (validated against `VALID_AI_FUNCTIONS_SDK_OPTIONS`; any value without the `personal:` prefix causes `default_ai_functions_credential_id` to be cleared)
+- `default_ai_functions_credential_id` (UUID, nullable) - optional pin to a specific `AICredential`; `null` means use the default for type
 
 ### Table: `ai_credential_shares`
 
@@ -155,10 +160,16 @@ Indexes: `ix_ai_credential_shares_credential` (ai_credential_id), `ix_ai_credent
 
 ### `AICredentials.tsx` - Main Settings UI
 
-- Credentials list card with compact rows: name, default star icon, expiry badge, type label, edit/delete buttons
-- Set default via star icon
+- Credentials list card with compact rows: name, default star icon, expiry badge, type label, set-default/edit/delete buttons
+- Set default via star icon; triggers `AffectedEnvironmentsDialog` after success
 - Add button opens `AICredentialDialog`
-- SDK Preferences card (unchanged)
+- SDK Preferences card with three sections:
+  1. Conversation Mode SDK selector (environment-level)
+  2. Building Mode SDK selector (environment-level)
+  3. AI Functions section (below separator, app-level): provider dropdown ("System (default)" / "Personal Anthropic") + conditional credential picker when "Personal Anthropic" is selected
+- Credential picker shows all Anthropic credentials; OAuth tokens (`is_oauth_token: true`) are shown as disabled with "(OAuth - incompatible)" suffix
+- OAuth warning alert shown if the selected or default credential is an OAuth token
+- Missing key warning alert shown if selected SDKs or AI functions provider lacks a default credential
 
 ### `AICredentialDialog.tsx` - Add/Edit Dialog
 
@@ -202,4 +213,4 @@ Indexes: `ix_ai_credential_shares_credential` (ai_credential_id), `ix_ai_credent
 
 ---
 
-*Last updated: 2026-03-02*
+*Last updated: 2026-03-18*

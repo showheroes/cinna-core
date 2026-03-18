@@ -14,6 +14,7 @@ def refine_prompt(
     workflow_prompt: str | None,
     mode: str,
     is_new_agent: bool,
+    provider_kwargs: dict | None = None,
 ) -> dict:
     """
     Refine a user's prompt to make it more effective for the AI agent.
@@ -100,8 +101,8 @@ Return ONLY the refined prompt text, without any markdown formatting, quotes, or
 Do not include phrases like "Here's the refined prompt:" - just output the prompt itself."""
 
     try:
-        # Generate using provider manager (cascade fallback)
-        response = manager.generate_content(prompt)
+        # Generate using provider manager (cascade fallback or personal key)
+        response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
         refined = response.text
 

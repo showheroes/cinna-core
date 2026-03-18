@@ -503,11 +503,13 @@ async def generate_sql_query(
         adapter = lifecycle_manager.get_adapter(environment)
         schema = await adapter.get_database_schema(request.path)
 
-        # Generate SQL using AI
+        # Generate SQL using AI (pass user for personal API key routing)
         result = AIFunctionsService.generate_sql(
             user_request=request.user_request,
             database_schema=schema,
-            current_query=request.current_query
+            current_query=request.current_query,
+            user=current_user,
+            db=session,
         )
 
         return result

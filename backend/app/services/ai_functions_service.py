@@ -7,8 +7,10 @@ This service encapsulates fast, cheap LLM calls for tasks like:
 - Other text generation tasks
 
 Supports multiple providers with cascade fallback via AI_FUNCTIONS_PROVIDERS env variable.
+Also supports per-user personal Anthropic API keys via the default_ai_functions_sdk user preference.
 """
 import logging
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlmodel import Session
@@ -27,6 +29,9 @@ from app.agents.schedule_generator import generate_agent_schedule
 from app.agents.provider_manager import get_provider_manager
 from app.models.agent import Agent
 
+if TYPE_CHECKING:
+    from app.models.user import User
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +39,108 @@ class AIFunctionsService:
     """Service for simple AI-powered text generation tasks."""
 
     @staticmethod
-    def generate_agent_configuration(description: str) -> dict:
+    def _get_credential_api_key(db: Session, credential_id: UUID, user_id: UUID) -> str | None:
+        """
+        Look up a specific AICredential by ID, verify ownership, and decrypt its api_key.
+
+        Args:
+            db: Database session
+            credential_id: Credential UUID
+            user_id: User UUID (for ownership check)
+
+        Returns:
+            Decrypted API key string, or None if credential not found / not owned
+        """
+        from app.models.ai_credential import AICredential
+        from app.services.ai_credentials_service import ai_credentials_service
+
+        credential = db.get(AICredential, credential_id)
+        if not credential or credential.owner_id != user_id:
+            return None
+        data = ai_credentials_service._decrypt_credential(credential)
+        return data.api_key
+
+    @staticmethod
+    def _get_user_default_anthropic_key(db: Session, user_id: UUID) -> str | None:
+        """
+        Look up the user's default Anthropic AICredential and decrypt its api_key.
+
+        Args:
+            db: Database session
+            user_id: User UUID
+
+        Returns:
+            Decrypted API key string, or None if no default Anthropic credential exists
+        """
+        from app.models.ai_credential import AICredentialType
+        from app.services.ai_credentials_service import ai_credentials_service
+
+        credential = ai_credentials_service.get_default_for_type(
+            db, user_id, AICredentialType.ANTHROPIC
+        )
+        if not credential:
+            return None
+        data = ai_credentials_service._decrypt_credential(credential)
+        return data.api_key
+
+    @staticmethod
+    def _resolve_provider_kwargs(user: "User | None", db: Session | None) -> dict:
+        """
+        Resolve provider kwargs based on the user's AI functions SDK preference.
+
+        When user chose "anthropic":
+        - If default_ai_functions_credential_id is set, uses that specific credential
+        - Otherwise falls back to the default Anthropic credential
+
+        Returns:
+            - {"api_key": key} if user chose "anthropic"
+            - {} if user chose "system" or no user context provided
+
+        Raises:
+            ValueError: If user chose "anthropic" but no usable credential is found,
+                        or if the selected credential is an OAuth token
+        """
+        if not user or not db:
+            return {}
+
+        pref = getattr(user, "default_ai_functions_sdk", None) or "system"
+        if pref != "personal:anthropic":
+            return {}
+
+        credential_id = getattr(user, "default_ai_functions_credential_id", None)
+
+        if credential_id:
+            # Use specific credential
+            api_key = AIFunctionsService._get_credential_api_key(db, credential_id, user.id)
+            if not api_key:
+                raise ValueError(
+                    "The selected AI functions credential was not found or you no longer have access. "
+                    "Please update your AI Functions settings."
+                )
+        else:
+            # Fall back to default for type
+            api_key = AIFunctionsService._get_user_default_anthropic_key(db, user.id)
+            if not api_key:
+                raise ValueError(
+                    "You selected Personal Anthropic API for AI functions, but no default "
+                    "Anthropic credential is configured. Please add one in AI Credentials settings."
+                )
+
+        # Validate: OAuth tokens cannot be used with the Anthropic Messages API
+        if api_key.startswith("sk-ant-oat"):
+            raise ValueError(
+                "OAuth tokens cannot be used with the Anthropic API for AI functions. "
+                "Please select a credential with an API key (sk-ant-api*)."
+            )
+
+        return {"api_key": api_key}
+
+    @staticmethod
+    def generate_agent_configuration(
+        description: str,
+        user: "User | None" = None,
+        db: Session | None = None,
+    ) -> dict:
         """
         Generate agent configuration from user description.
 
@@ -45,6 +151,8 @@ class AIFunctionsService:
 
         Args:
             description: User's description of what the agent should do
+            user: Optional current user (for per-user provider routing)
+            db: Optional database session (required when user is provided)
 
         Returns:
             dict with keys:
@@ -56,7 +164,8 @@ class AIFunctionsService:
             Exception: If agent generation fails and no fallback is available
         """
         try:
-            config = generate_agent_config(description)
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
+            config = generate_agent_config(description, provider_kwargs=provider_kwargs)
             logger.info(
                 f"Generated agent config: {config.get('name', 'Unknown')} "
                 f"(entrypoint: {len(config.get('entrypoint_prompt', ''))} chars, "
@@ -75,7 +184,9 @@ class AIFunctionsService:
     @staticmethod
     def generate_description_from_workflow(
         workflow_prompt: str,
-        agent_name: str | None = None
+        agent_name: str | None = None,
+        user: "User | None" = None,
+        db: Session | None = None,
     ) -> str:
         """
         Generate a short description from a workflow prompt.
@@ -83,12 +194,17 @@ class AIFunctionsService:
         Args:
             workflow_prompt: The agent's workflow/system prompt
             agent_name: Optional agent name for context
+            user: Optional current user (for per-user provider routing)
+            db: Optional database session (required when user is provided)
 
         Returns:
             str: A concise 1-2 sentence description of what the agent does
         """
         try:
-            description = generate_agent_description(workflow_prompt, agent_name)
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
+            description = generate_agent_description(
+                workflow_prompt, agent_name, provider_kwargs=provider_kwargs
+            )
             logger.info(f"Generated agent description: {description[:50]}...")
             return description
         except Exception as e:
@@ -97,18 +213,27 @@ class AIFunctionsService:
             return "AI agent configured with custom workflow."
 
     @staticmethod
-    def generate_session_title(message_content: str) -> str:
+    def generate_session_title(
+        message_content: str,
+        user: "User | None" = None,
+        db: Session | None = None,
+    ) -> str:
         """
         Generate a concise title for a conversation session.
 
         Args:
             message_content: First message from the user
+            user: Optional current user (for per-user provider routing)
+            db: Optional database session (required when user is provided)
 
         Returns:
             str: Concise title (max 100 chars)
         """
         try:
-            title = generate_conversation_title(message_content)
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
+            title = generate_conversation_title(
+                message_content, provider_kwargs=provider_kwargs
+            )
             logger.info(f"Generated session title: {title}")
             return title
         except Exception as e:
@@ -120,13 +245,20 @@ class AIFunctionsService:
             return title
 
     @staticmethod
-    def generate_schedule(natural_language: str, timezone: str) -> dict:
+    def generate_schedule(
+        natural_language: str,
+        timezone: str,
+        user: "User | None" = None,
+        db: Session | None = None,
+    ) -> dict:
         """
         Generate CRON schedule from natural language.
 
         Args:
             natural_language: User's input (e.g., "every workday at 7 AM")
             timezone: IANA timezone (e.g., "Europe/Berlin")
+            user: Optional current user (for per-user provider routing)
+            db: Optional database session (required when user is provided)
 
         Returns:
             dict with keys:
@@ -140,7 +272,8 @@ class AIFunctionsService:
             using AgentSchedulerService.convert_local_cron_to_utc().
         """
         try:
-            result = generate_agent_schedule(natural_language, timezone)
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
+            result = generate_agent_schedule(natural_language, timezone, provider_kwargs=provider_kwargs)
             logger.info(
                 f"Generated schedule: {result.get('success')} - "
                 f"{result.get('description') or result.get('error')}"
@@ -160,7 +293,9 @@ class AIFunctionsService:
         source_workflow: str | None,
         target_agent_name: str,
         target_entrypoint: str | None,
-        target_workflow: str | None
+        target_workflow: str | None,
+        user: "User | None" = None,
+        db: Session | None = None,
     ) -> dict:
         """
         Generate handover prompt between two agents using AI.
@@ -180,6 +315,7 @@ class AIFunctionsService:
                 - error: Error message (if not success)
         """
         try:
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
             result = generate_handover_prompt_from_agents(
                 source_agent_name=source_agent_name,
                 source_entrypoint=source_entrypoint,
@@ -187,6 +323,7 @@ class AIFunctionsService:
                 target_agent_name=target_agent_name,
                 target_entrypoint=target_entrypoint,
                 target_workflow=target_workflow,
+                provider_kwargs=provider_kwargs,
             )
             logger.info(
                 f"Generated handover prompt: {result.get('success')} - "
@@ -224,7 +361,9 @@ class AIFunctionsService:
     def generate_sql(
         user_request: str,
         database_schema: dict,
-        current_query: str | None = None
+        current_query: str | None = None,
+        user: "User | None" = None,
+        db: Session | None = None,
     ) -> dict:
         """
         Generate SQL query from natural language description.
@@ -233,6 +372,8 @@ class AIFunctionsService:
             user_request: User's natural language request
             database_schema: Database schema with tables, views, and columns
             current_query: Current SQL query in the editor (optional)
+            user: Optional current user (for per-user provider routing)
+            db: Optional database session (required when user is provided)
 
         Returns:
             dict with keys:
@@ -241,10 +382,12 @@ class AIFunctionsService:
                 - error: Error message or clarifying questions (if not success)
         """
         try:
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
             result = generate_sql_query(
                 user_request=user_request,
                 database_schema=database_schema,
                 current_query=current_query,
+                provider_kwargs=provider_kwargs,
             )
             logger.info(
                 f"Generated SQL: {result.get('success')} - "
@@ -299,6 +442,11 @@ class AIFunctionsService:
                     entrypoint_prompt = agent.entrypoint_prompt
                     workflow_prompt = agent.workflow_prompt
 
+            # Resolve provider kwargs from user preference
+            from app.models.user import User as UserModel
+            user = db.get(UserModel, owner_id)
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
+
             result = refine_prompt(
                 user_input=user_input,
                 has_files_attached=has_files_attached,
@@ -307,6 +455,7 @@ class AIFunctionsService:
                 workflow_prompt=workflow_prompt,
                 mode=mode,
                 is_new_agent=is_new_agent,
+                provider_kwargs=provider_kwargs,
             )
             logger.info(
                 f"Refined prompt: {result.get('success')} - "
@@ -360,6 +509,11 @@ class AIFunctionsService:
                     agent_workflow_prompt = agent.workflow_prompt
                     agent_refiner_prompt = agent.refiner_prompt
 
+            # Resolve provider kwargs from user preference
+            from app.models.user import User as UserModel
+            user = db.get(UserModel, owner_id)
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
+
             result = refine_task_from_agents(
                 current_description=current_description,
                 agent_workflow_prompt=agent_workflow_prompt,
@@ -367,6 +521,7 @@ class AIFunctionsService:
                 user_comment=user_comment,
                 refinement_history=refinement_history,
                 user_selected_text=user_selected_text,
+                provider_kwargs=provider_kwargs,
             )
             logger.info(
                 f"Refined task: {result.get('success')} - "
@@ -387,6 +542,8 @@ class AIFunctionsService:
         original_sender: str,
         session_result: str,
         task_description: str,
+        user: "User | None" = None,
+        db: Session | None = None,
     ) -> dict:
         """
         Generate a professional email reply from agent session results.
@@ -397,6 +554,8 @@ class AIFunctionsService:
             original_sender: Email address of the original sender
             session_result: The agent's session result/output
             task_description: The task description that was executed
+            user: Optional current user (for per-user provider routing)
+            db: Optional database session (required when user is provided)
 
         Returns:
             dict with keys:
@@ -406,12 +565,14 @@ class AIFunctionsService:
                 - error: Error message (if not success)
         """
         try:
+            provider_kwargs = AIFunctionsService._resolve_provider_kwargs(user, db)
             result = generate_email_reply_from_agents(
                 original_subject=original_subject,
                 original_body=original_body,
                 original_sender=original_sender,
                 session_result=session_result,
                 task_description=task_description,
+                provider_kwargs=provider_kwargs,
             )
             logger.info(
                 f"Generated email reply: {result.get('success')} - "

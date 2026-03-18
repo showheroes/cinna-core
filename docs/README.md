@@ -98,7 +98,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| ai_credentials | LLM provider API keys, named credentials, default selection, environment linking, sharing | [business logic](application/ai_credentials/ai_credentials.md) \| [tech](application/ai_credentials/ai_credentials_tech.md) \| [anthropic types](application/ai_credentials/anthropic_credential_types.md) \| [affected envs](application/ai_credentials/affected_environments_widget.md) |
+| ai_credentials | LLM provider API keys, named credentials, default selection, environment linking, sharing | [business logic](application/ai_credentials/ai_credentials.md) \| [tech](application/ai_credentials/ai_credentials_tech.md) \| [anthropic types](application/ai_credentials/anthropic_credential_types.md) \| [affected envs](application/ai_credentials/affected_environments_widget.md) \| [ai functions routing](application/ai_credentials/ai_functions_sdk_routing.md) |
 
 ### application
 

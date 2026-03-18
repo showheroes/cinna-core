@@ -13,6 +13,7 @@ def generate_sql_query(
     user_request: str,
     database_schema: dict,
     current_query: str | None,
+    provider_kwargs: dict | None = None,
 ) -> dict:
     """
     Generate SQL query from natural language description.
@@ -70,8 +71,8 @@ If you CANNOT generate the query (unclear request, missing information, etc.):
 Respond with ONLY the JSON object, no markdown formatting or additional text.
 """
 
-    # Generate content using provider manager (cascade fallback)
-    response = manager.generate_content(prompt)
+    # Generate content using provider manager (cascade fallback or personal key)
+    response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
     # Parse response
     response_text = response.text

@@ -30,6 +30,7 @@ from app.models.user import (
     AIServiceCredentialsUpdate,
     UserPublicWithAICredentials,
     VALID_SDK_OPTIONS,
+    VALID_AI_FUNCTIONS_SDK_OPTIONS,
 )
 from app.models.ai_credential import (
     AICredentialType,
@@ -119,6 +120,34 @@ def update_user_me(
             status_code=400,
             detail=f"Invalid SDK for building mode. Must be one of: {VALID_SDK_OPTIONS}",
         )
+    if user_in.default_ai_functions_sdk and user_in.default_ai_functions_sdk not in VALID_AI_FUNCTIONS_SDK_OPTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid AI functions SDK. Must be one of: {VALID_AI_FUNCTIONS_SDK_OPTIONS}",
+        )
+    # When switching to "system", clear the credential_id
+    if user_in.default_ai_functions_sdk and not user_in.default_ai_functions_sdk.startswith("personal:"):
+        user_in.default_ai_functions_credential_id = None
+    # Validate AI functions credential_id if provided
+    if user_in.default_ai_functions_credential_id is not None:
+        from app.models.ai_credential import AICredential, AICredentialType
+        cred = session.get(AICredential, user_in.default_ai_functions_credential_id)
+        if not cred or cred.owner_id != current_user.id:
+            raise HTTPException(status_code=404, detail="AI credential not found")
+        if cred.type != AICredentialType.ANTHROPIC:
+            raise HTTPException(
+                status_code=400,
+                detail="Only Anthropic credentials can be used for AI functions",
+            )
+        # Check for OAuth token
+        from app.services.ai_credentials_service import ai_credentials_service
+        data = ai_credentials_service._decrypt_credential(cred)
+        if data.api_key and data.api_key.startswith("sk-ant-oat"):
+            raise HTTPException(
+                status_code=400,
+                detail="OAuth tokens cannot be used with the Anthropic API for AI functions. "
+                       "Please select a credential with an API key (sk-ant-api*).",
+            )
     user_data = user_in.model_dump(exclude_unset=True)
     current_user.sqlmodel_update(user_data)
     session.add(current_user)

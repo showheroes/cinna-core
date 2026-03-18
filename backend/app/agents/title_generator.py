@@ -6,12 +6,16 @@ Uses the provider manager for cascade provider selection.
 from .provider_manager import get_provider_manager
 
 
-def generate_conversation_title(message_content: str) -> str:
+def generate_conversation_title(
+    message_content: str,
+    provider_kwargs: dict | None = None,
+) -> str:
     """
     Generate a concise title for a conversation based on the first message.
 
     Args:
         message_content: First message from the user
+        provider_kwargs: Optional kwargs to pass to generate_content (e.g., api_key for personal Anthropic key)
 
     Returns:
         str: Concise title for the conversation (max 100 chars)
@@ -27,9 +31,9 @@ User's message: {message_content}
 Return ONLY the title text, without any quotes, markdown, or formatting.
 """
 
-    # Generate content using provider manager (cascade fallback)
+    # Generate content using provider manager (cascade fallback or personal key)
     manager = get_provider_manager()
-    response = manager.generate_content(prompt)
+    response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
     # Extract title
     title = response.text

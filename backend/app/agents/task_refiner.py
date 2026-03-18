@@ -29,6 +29,7 @@ def refine_task(
     refinement_history: list[dict] | None = None,
     user_selected_text: str | None = None,
     agent_refiner_prompt: str | None = None,
+    provider_kwargs: dict | None = None,
 ) -> dict:
     """
     Refine a task description based on user feedback.
@@ -119,7 +120,7 @@ IMPORTANT: Return ONLY the JSON object, no markdown code blocks or other formatt
 """
 
     try:
-        response = manager.generate_content(prompt)
+        response = manager.generate_content(prompt, **(provider_kwargs or {}))
         response_text = response.text.strip()
 
         # Clean up response if wrapped in code blocks

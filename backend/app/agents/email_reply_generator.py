@@ -28,6 +28,7 @@ def generate_email_reply(
     original_sender: str,
     session_result: str,
     task_description: str,
+    provider_kwargs: dict | None = None,
 ) -> dict:
     """
     Generate a professional email reply based on original email and session results.
@@ -47,6 +48,7 @@ def generate_email_reply(
             - error: Error message (if not success)
     """
     manager = get_provider_manager()
+    _provider_kwargs = provider_kwargs or {}
 
     # Load system prompt
     system_prompt = _load_prompt_template()
@@ -73,7 +75,7 @@ IMPORTANT: Return ONLY the JSON object, no markdown code blocks or other formatt
 """
 
     try:
-        response = manager.generate_content(prompt)
+        response = manager.generate_content(prompt, **_provider_kwargs)
         response_text = response.text.strip()
 
         # Clean up response if wrapped in code blocks

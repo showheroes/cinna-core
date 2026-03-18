@@ -28,6 +28,7 @@ def _load_prompt_template(file_path: Path) -> str:
 def generate_agent_schedule(
     natural_language: str,
     timezone: str,
+    provider_kwargs: dict | None = None,
 ) -> dict:
     """
     Convert natural language schedule to CRON string.
@@ -63,8 +64,8 @@ Current time: {current_time.isoformat()}
 Generate the schedule configuration in JSON format.
 """
 
-        # Call LLM using provider manager (cascade fallback)
-        response = manager.generate_content(prompt)
+        # Call LLM using provider manager (cascade fallback or personal key)
+        response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
         # Parse response (expected to be JSON)
         response_text = response.text

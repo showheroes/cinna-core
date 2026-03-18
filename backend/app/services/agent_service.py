@@ -19,12 +19,23 @@ from app.core.db import engine
 logger = logging.getLogger(__name__)
 
 
-def _generate_description_background(agent_id: UUID, workflow_prompt: str, agent_name: str | None):
+def _generate_description_background(
+    agent_id: UUID,
+    workflow_prompt: str,
+    agent_name: str | None,
+    user_id: UUID | None = None,
+):
     """
     Background task to generate agent description from workflow prompt.
 
     Runs in a separate thread to avoid blocking the main request.
     Creates its own database session for the update.
+
+    Args:
+        agent_id: Agent to update
+        workflow_prompt: New workflow prompt to generate description from
+        agent_name: Agent name for context
+        user_id: Optional user ID for per-user provider routing
     """
     from sqlmodel import Session as SQLSession
 
@@ -33,14 +44,17 @@ def _generate_description_background(agent_id: UUID, workflow_prompt: str, agent
             logger.debug("AI functions not available, skipping description generation")
             return
 
-        # Generate description
-        description = AIFunctionsService.generate_description_from_workflow(
-            workflow_prompt=workflow_prompt,
-            agent_name=agent_name
-        )
-
-        # Update agent in database with new session
+        # Generate description with its own db session
         with SQLSession(engine) as db_session:
+            from app.models.user import User as UserModel
+            user = db_session.get(UserModel, user_id) if user_id else None
+            description = AIFunctionsService.generate_description_from_workflow(
+                workflow_prompt=workflow_prompt,
+                agent_name=agent_name,
+                user=user,
+                db=db_session,
+            )
+
             agent = db_session.get(Agent, agent_id)
             if agent:
                 agent.description = description
@@ -214,7 +228,8 @@ class AgentService:
     def handle_workflow_prompt_change(
         agent: Agent,
         new_workflow_prompt: str,
-        trigger_description_update: bool = True
+        trigger_description_update: bool = True,
+        user_id: UUID | None = None,
     ) -> None:
         """
         Handle workflow_prompt change - regenerate A2A skills and trigger description update.
@@ -227,6 +242,7 @@ class AgentService:
             agent: The agent being updated (used to read current state, not modified)
             new_workflow_prompt: The new workflow prompt value
             trigger_description_update: If True, triggers background description generation
+            user_id: Optional user ID for per-user AI provider routing
         """
         import threading
 
@@ -271,7 +287,9 @@ class AgentService:
 
             # Generate description
             if trigger_description_update:
-                _generate_description_background(agent_id, new_workflow_prompt, agent_name)
+                _generate_description_background(
+                    agent_id, new_workflow_prompt, agent_name, user_id=user_id
+                )
 
         thread = threading.Thread(
             target=_regenerate_in_background,
@@ -281,7 +299,12 @@ class AgentService:
         logger.info(f"Triggered background regeneration for agent {agent_id} (a2a_skills={a2a_enabled}, description={trigger_description_update})")
 
     @staticmethod
-    def update_agent(session: Session, agent_id: UUID, data: AgentUpdate) -> Agent | None:
+    def update_agent(
+        session: Session,
+        agent_id: UUID,
+        data: AgentUpdate,
+        user_id: UUID | None = None,
+    ) -> Agent | None:
         """Update agent"""
         agent = session.get(Agent, agent_id)
         if not agent:
@@ -294,7 +317,8 @@ class AgentService:
             AgentService.handle_workflow_prompt_change(
                 agent=agent,
                 new_workflow_prompt=update_dict["workflow_prompt"],
-                trigger_description_update=True
+                trigger_description_update=True,
+                user_id=user_id,
             )
 
         agent.sqlmodel_update(update_dict)
@@ -416,7 +440,9 @@ class AgentService:
             # Generate agent name, entrypoint_prompt, and workflow_prompt from description using LLM
             if AIFunctionsService.is_available():
                 try:
-                    config = AIFunctionsService.generate_agent_configuration(description)
+                    config = AIFunctionsService.generate_agent_configuration(
+                        description, user=user, db=session
+                    )
                     agent_name = config.get("name", f"Agent: {description[:30]}...")
                     entrypoint_prompt = config.get("entrypoint_prompt", description)
                     workflow_prompt = config.get("workflow_prompt", f"You are an AI agent designed to: {description}")

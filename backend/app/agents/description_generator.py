@@ -16,13 +16,18 @@ logger = logging.getLogger(__name__)
 FALLBACK_DESCRIPTION = "AI agent configured with custom workflow."
 
 
-def generate_agent_description(workflow_prompt: str, agent_name: str | None = None) -> str:
+def generate_agent_description(
+    workflow_prompt: str,
+    agent_name: str | None = None,
+    provider_kwargs: dict | None = None,
+) -> str:
     """
     Generate a short description from a workflow prompt.
 
     Args:
         workflow_prompt: The agent's workflow/system prompt
         agent_name: Optional agent name for context
+        provider_kwargs: Optional kwargs to pass to generate_content (e.g., api_key for personal Anthropic key)
 
     Returns:
         str: A concise 1-2 sentence description of what the agent does
@@ -48,7 +53,7 @@ Requirements:
 
 Return ONLY the description, nothing else."""
 
-        response = manager.generate_content(prompt)
+        response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
         # Clean up response
         description = response.text.strip()

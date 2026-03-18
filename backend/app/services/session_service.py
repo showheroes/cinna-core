@@ -982,7 +982,8 @@ class SessionService:
     async def auto_generate_session_title(
         session_id: UUID,
         first_message_content: str,
-        get_fresh_db_session: callable
+        get_fresh_db_session: callable,
+        user_id: UUID | None = None,
     ) -> None:
         """
         Auto-generate session title from first message if no title exists.
@@ -992,6 +993,7 @@ class SessionService:
             session_id: Session UUID
             first_message_content: Content of the first message
             get_fresh_db_session: Callable that returns a fresh DB session (context manager)
+            user_id: Optional user ID for per-user AI provider routing
         """
         logger.info(f"[DEBUG] Starting auto_generate_session_title for session {session_id}")
         logger.info(f"[DEBUG] First message content (first 100 chars): {first_message_content[:100]}")
@@ -1004,12 +1006,21 @@ class SessionService:
             logger.info(f"[DEBUG] AIFunctionsService.is_available() = {is_available}")
 
             if is_available:
-                # Generate title using LLM
+                # Generate title using LLM (with optional per-user provider routing)
                 logger.info(f"[DEBUG] Calling AIFunctionsService.generate_session_title")
-                title = await asyncio.to_thread(
-                    AIFunctionsService.generate_session_title,
-                    first_message_content
-                )
+
+                def _generate_title_in_thread():
+                    """Run title generation in a thread with its own db session."""
+                    if user_id:
+                        with get_fresh_db_session() as db:
+                            from app.models.user import User as UserModel
+                            user = db.get(UserModel, user_id)
+                            return AIFunctionsService.generate_session_title(
+                                first_message_content, user, db
+                            )
+                    return AIFunctionsService.generate_session_title(first_message_content)
+
+                title = await asyncio.to_thread(_generate_title_in_thread)
                 logger.info(f"[DEBUG] Generated title: {title}")
 
                 # Only update if we got a valid title
@@ -1247,6 +1258,7 @@ class SessionService:
                                 session_id=session_id,
                                 first_message_content=content,
                                 get_fresh_db_session=get_fresh_db_session,
+                                user_id=user_id,
                             ),
                             task_name=f"auto_generate_title_session_{session_id}",
                         )
@@ -1334,7 +1346,8 @@ class SessionService:
                         SessionService.auto_generate_session_title(
                             session_id=session_id,
                             first_message_content=content,
-                            get_fresh_db_session=get_fresh_db_session
+                            get_fresh_db_session=get_fresh_db_session,
+                            user_id=user_id,
                         ),
                         task_name=f"auto_generate_title_session_{session_id}"
                     )
@@ -1446,7 +1459,8 @@ class SessionService:
                     SessionService.auto_generate_session_title(
                         session_id=session_id,
                         first_message_content=concatenated_content,
-                        get_fresh_db_session=get_fresh_db_session
+                        get_fresh_db_session=get_fresh_db_session,
+                        user_id=session.user_id,
                     ),
                     task_name=f"auto_generate_title_session_{session_id}"
                 )

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Trash2, AlertCircle, MessageCircle, Wrench, Plus, Pencil, Star, Key, Calendar } from "lucide-react"
+import { Trash2, AlertCircle, MessageCircle, Wrench, Plus, Pencil, Star, Key, Calendar, Sparkles } from "lucide-react"
 import { UsersService, AiCredentialsService, AICredentialPublic, AICredentialType } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -149,8 +149,12 @@ export function AICredentialsSettings() {
 
   // Update SDK preferences mutation
   const updateSdkMutation = useMutation({
-    mutationFn: (data: { default_sdk_conversation?: string; default_sdk_building?: string }) =>
-      UsersService.updateUserMe({ requestBody: data }),
+    mutationFn: (data: {
+      default_sdk_conversation?: string
+      default_sdk_building?: string
+      default_ai_functions_sdk?: string
+      default_ai_functions_credential_id?: string | null
+    }) => UsersService.updateUserMe({ requestBody: data }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["aiCredentialsStatus"] })
       queryClient.invalidateQueries({ queryKey: ["currentUser"] })
@@ -178,6 +182,7 @@ export function AICredentialsSettings() {
     const warnings: string[] = []
     const convSdk = status?.default_sdk_conversation || "claude-code/anthropic"
     const buildSdk = status?.default_sdk_building || "claude-code/anthropic"
+    const aiFunctionsSdk = status?.default_ai_functions_sdk || "system"
 
     if (!hasRequiredKey(convSdk)) {
       warnings.push(`${getSDKDisplayName(convSdk)} (Conversation mode)`)
@@ -186,6 +191,11 @@ export function AICredentialsSettings() {
       warnings.push(`${getSDKDisplayName(buildSdk)} (Building mode)`)
     } else if (!hasRequiredKey(buildSdk) && buildSdk === convSdk && !warnings.length) {
       warnings.push(`${getSDKDisplayName(buildSdk)} (Building mode)`)
+    }
+
+    // Warn if personal Anthropic key selected for AI functions but no Anthropic credential exists
+    if (aiFunctionsSdk === "personal:anthropic" && !hasDefaultForType("anthropic")) {
+      warnings.push("Anthropic (AI Functions — no default credential)")
     }
 
     if (warnings.length === 0) return null
@@ -348,7 +358,7 @@ export function AICredentialsSettings() {
           <CardHeader>
             <CardTitle>Default SDK Preferences</CardTitle>
             <CardDescription>
-              Select default AI SDKs for new environments. These can be overridden per environment.
+              Select default AI SDKs for new environments and application-level AI functions.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -428,12 +438,121 @@ export function AICredentialsSettings() {
               </Select>
             </div>
 
-            {/* Info about defaults */}
+            {/* Info about environment defaults */}
             <div className="text-xs text-muted-foreground pt-2 border-t">
               <p>
                 When you set a credential as default, it will be automatically used for new environments
                 with the matching SDK type.
               </p>
+            </div>
+
+            {/* AI Functions SDK - Application level */}
+            <div className="pt-2 border-t space-y-3">
+              <div className="flex items-center justify-between gap-4 py-2">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-purple-500/10">
+                    <Sparkles className="h-4 w-4 text-purple-500" />
+                  </div>
+                  <div>
+                    <Label htmlFor="sdk-ai-functions" className="text-sm font-medium">
+                      AI Functions
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Provider for titles, schedules, suggestions, etc.
+                    </p>
+                  </div>
+                </div>
+                <Select
+                  value={status?.default_ai_functions_sdk || "system"}
+                  onValueChange={(value) => {
+                    if (value === "system") {
+                      updateSdkMutation.mutate({
+                        default_ai_functions_sdk: value,
+                        default_ai_functions_credential_id: null,
+                      })
+                    } else {
+                      updateSdkMutation.mutate({ default_ai_functions_sdk: value })
+                    }
+                  }}
+                  disabled={updateSdkMutation.isPending}
+                >
+                  <SelectTrigger id="sdk-ai-functions" className="w-[180px]">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="system">System (default)</SelectItem>
+                    <SelectItem value="personal:anthropic">Personal Anthropic</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Credential picker - shown when personal provider is selected */}
+              {(status?.default_ai_functions_sdk || "system") === "personal:anthropic" && (() => {
+                const anthropicCreds = credentials.filter(c => c.type === "anthropic")
+                const selectedCredId = status?.default_ai_functions_credential_id || "default"
+                const selectedCred = anthropicCreds.find(c => c.id === selectedCredId)
+
+                // Check if selected credential is OAuth
+                const selectedIsOAuth = selectedCred?.is_oauth_token
+                // Check if "Use Default" would resolve to an OAuth token
+                const defaultCred = anthropicCreds.find(c => c.is_default)
+                const defaultIsOAuth = selectedCredId === "default" && defaultCred?.is_oauth_token
+
+                return (
+                  <div className="ml-11 space-y-2">
+                    <div className="flex items-center justify-between gap-4">
+                      <Label htmlFor="ai-functions-credential" className="text-xs text-muted-foreground">
+                        Credential
+                      </Label>
+                      <Select
+                        value={selectedCredId}
+                        onValueChange={(value) => {
+                          updateSdkMutation.mutate({
+                            default_ai_functions_credential_id: value === "default" ? null : value,
+                          })
+                        }}
+                        disabled={updateSdkMutation.isPending}
+                      >
+                        <SelectTrigger id="ai-functions-credential" className="w-[180px]">
+                          <SelectValue placeholder="Select credential" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="default">
+                            Use Default{defaultCred ? ` (${defaultCred.name})` : ""}
+                          </SelectItem>
+                          {anthropicCreds.map((cred) => (
+                            <SelectItem
+                              key={cred.id}
+                              value={cred.id}
+                              disabled={cred.is_oauth_token}
+                            >
+                              {cred.name}
+                              {cred.is_oauth_token && " (OAuth - incompatible)"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* OAuth warning */}
+                    {(selectedIsOAuth || defaultIsOAuth) && (
+                      <Alert variant="destructive" className="py-2">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        <AlertDescription className="text-xs">
+                          OAuth tokens cannot be used with the Anthropic API. Please select a credential with an API key (sk-ant-api*).
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {/* No credentials warning */}
+                    {anthropicCreds.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        No Anthropic credentials found. Add one in the credentials panel.
+                      </p>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           </CardContent>
         </Card>

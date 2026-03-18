@@ -237,12 +237,18 @@ class AICredentialsService:
         # Decrypt to get non-sensitive fields
         data = self._decrypt_credential(credential)
 
+        # Detect OAuth token for Anthropic credentials
+        is_oauth = False
+        if credential.type == AICredentialType.ANTHROPIC and data.api_key:
+            is_oauth = data.api_key.startswith("sk-ant-oat")
+
         return AICredentialPublic(
             id=credential.id,
             name=credential.name,
             type=credential.type,
             is_default=credential.is_default,
             has_api_key=bool(data.api_key),
+            is_oauth_token=is_oauth,
             base_url=data.base_url,
             model=data.model,
             expiry_notification_date=credential.expiry_notification_date,

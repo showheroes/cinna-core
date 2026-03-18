@@ -11,6 +11,7 @@ Supported providers:
 from .base import BaseAIProvider, ProviderResponse, ProviderError
 from .gemini import GeminiProvider
 from .openai_compatible import OpenAICompatibleProvider
+from .anthropic_provider import AnthropicProvider
 
 __all__ = [
     "BaseAIProvider",
@@ -18,4 +19,5 @@ __all__ = [
     "ProviderError",
     "GeminiProvider",
     "OpenAICompatibleProvider",
+    "AnthropicProvider",
 ]

@@ -218,7 +218,7 @@ def update_agent(
                 )
 
     updated_agent = AgentService.update_agent(
-        session=session, agent_id=id, data=agent_in
+        session=session, agent_id=id, data=agent_in, user_id=current_user.id
     )
     if not updated_agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -485,6 +485,8 @@ def generate_schedule(
     result = AgentSchedulerService.generate_schedule_preview(
         natural_language=data.natural_language,
         timezone=data.timezone,
+        user=current_user,
+        db=session,
     )
     return ScheduleResponse(**result)
 

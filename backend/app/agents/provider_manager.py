@@ -27,6 +27,7 @@ from .providers import (
     ProviderError,
     GeminiProvider,
     OpenAICompatibleProvider,
+    AnthropicProvider,
 )
 
 
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 PROVIDER_REGISTRY: dict[str, type[BaseAIProvider]] = {
     "gemini": GeminiProvider,
     "openai-compatible": OpenAICompatibleProvider,
+    "anthropic": AnthropicProvider,
 }
 
 
@@ -107,23 +109,37 @@ class ProviderManager:
         prompt: str,
         model: Optional[str] = None,
         preferred_provider: Optional[str] = None,
+        api_key: Optional[str] = None,
     ) -> ProviderResponse:
         """
         Generate content using the cascade of providers.
 
         Tries providers in order and falls back to the next one if a provider fails.
 
+        When api_key is provided, bypasses the cascade entirely and calls
+        AnthropicProvider directly with that key. No fallback occurs — if it
+        fails, the error propagates to the caller. This is used for per-user
+        personal API key routing.
+
         Args:
             prompt: The prompt to send to the LLM
             model: Optional model override (provider-specific)
             preferred_provider: Optional preferred provider to try first
+            api_key: Optional personal API key. When set, bypasses cascade and
+                     uses AnthropicProvider directly with no fallback.
 
         Returns:
             ProviderResponse with generated text
 
         Raises:
-            ProviderError: If all providers fail
+            ProviderError: If all providers fail (or if personal key call fails)
         """
+        # Personal API key path: bypass cascade, no fallback
+        if api_key:
+            logger.info("Using personal Anthropic API key for AI function call")
+            provider = AnthropicProvider(api_key=api_key)
+            return provider.generate_content(prompt, model)
+
         # Build provider order with preferred provider first
         providers_to_try = []
         if preferred_provider and preferred_provider in self._providers:

@@ -10,6 +10,9 @@ SDK_MINIMAX = "claude-code/minimax"
 SDK_OPENAI_COMPATIBLE = "google-adk-wr/openai-compatible"
 VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX, SDK_OPENAI_COMPATIBLE]
 
+# AI Functions SDK constants
+VALID_AI_FUNCTIONS_SDK_OPTIONS = ["system", "personal:anthropic"]
+
 
 # Shared properties
 class UserBase(SQLModel):
@@ -43,6 +46,8 @@ class UserUpdateMe(SQLModel):
     username: str | None = Field(default=None, max_length=50, regex=r"^[a-zA-Z0-9_]*$")
     default_sdk_conversation: str | None = Field(default=None, max_length=50)
     default_sdk_building: str | None = Field(default=None, max_length=50)
+    default_ai_functions_sdk: str | None = Field(default=None, max_length=50)
+    default_ai_functions_credential_id: uuid.UUID | None = None
     general_assistant_enabled: bool | None = None
 
 
@@ -61,6 +66,10 @@ class User(UserBase, table=True):
     # Default SDK preferences for new environments
     default_sdk_conversation: str | None = Field(default=SDK_ANTHROPIC, max_length=50)
     default_sdk_building: str | None = Field(default=SDK_ANTHROPIC, max_length=50)
+    # Default AI Functions SDK preference
+    default_ai_functions_sdk: str | None = Field(default="system", max_length=50)
+    # Specific credential ID for AI functions (None = use default for type)
+    default_ai_functions_credential_id: uuid.UUID | None = Field(default=None)
     # General Assistant feature flag
     general_assistant_enabled: bool = Field(default=False)
     items: List["app.models.item.Item"] = Relationship(back_populates="owner", cascade_delete=True)
@@ -75,6 +84,8 @@ class UserPublic(UserBase):
     has_password: bool = False
     default_sdk_conversation: str | None = SDK_ANTHROPIC
     default_sdk_building: str | None = SDK_ANTHROPIC
+    default_ai_functions_sdk: str | None = "system"
+    default_ai_functions_credential_id: uuid.UUID | None = None
     general_assistant_enabled: bool = False
 
 

@@ -28,12 +28,16 @@ def _load_prompt_template(file_path: Path) -> str:
         raise RuntimeError(f"Failed to load prompt template from {file_path}: {e}")
 
 
-def generate_agent_name(description: str) -> str:
+def generate_agent_name(
+    description: str,
+    provider_kwargs: dict | None = None,
+) -> str:
     """
     Generate a concise agent name from description.
 
     Args:
         description: User's description of what the agent should do
+        provider_kwargs: Optional kwargs to pass to generate_content (e.g., api_key for personal Anthropic key)
 
     Returns:
         str: Concise agent name (max 50 characters)
@@ -54,18 +58,22 @@ Return ONLY the name, nothing else.
 Example: "Sales Report Generator"
 """
 
-    response = manager.generate_content(prompt)
+    response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
     name = response.text.strip('"').strip("'")
     return name[:50]  # Ensure max length
 
 
-def generate_entrypoint_prompt(description: str) -> str:
+def generate_entrypoint_prompt(
+    description: str,
+    provider_kwargs: dict | None = None,
+) -> str:
     """
     Generate human-like entrypoint prompt from description.
 
     Args:
         description: User's description of what the agent should do
+        provider_kwargs: Optional kwargs to pass to generate_content (e.g., api_key for personal Anthropic key)
 
     Returns:
         str: Natural, conversational trigger message
@@ -88,7 +96,7 @@ def generate_entrypoint_prompt(description: str) -> str:
 
 Generate the entrypoint prompt now. Remember: natural, conversational, 1-2 sentences maximum."""
 
-    response = manager.generate_content(prompt)
+    response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
     # Clean up response
     entrypoint = response.text
@@ -102,12 +110,16 @@ Generate the entrypoint prompt now. Remember: natural, conversational, 1-2 sente
     return entrypoint
 
 
-def generate_workflow_prompt(description: str) -> str:
+def generate_workflow_prompt(
+    description: str,
+    provider_kwargs: dict | None = None,
+) -> str:
     """
     Generate comprehensive workflow prompt from description.
 
     Args:
         description: User's description of what the agent should do
+        provider_kwargs: Optional kwargs to pass to generate_content (e.g., api_key for personal Anthropic key)
 
     Returns:
         str: Detailed system prompt for conversation mode agent
@@ -130,7 +142,7 @@ def generate_workflow_prompt(description: str) -> str:
 
 Generate the workflow prompt now. Include role, execution steps, and data presentation guidelines."""
 
-    response = manager.generate_content(prompt)
+    response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
     # Clean up response
     workflow = response.text
@@ -148,7 +160,10 @@ Generate the workflow prompt now. Include role, execution steps, and data presen
     return workflow
 
 
-def generate_agent_config(description: str) -> dict:
+def generate_agent_config(
+    description: str,
+    provider_kwargs: dict | None = None,
+) -> dict:
     """
     Generate complete agent configuration from description.
 
@@ -159,6 +174,7 @@ def generate_agent_config(description: str) -> dict:
 
     Args:
         description: User's description of what the agent should do
+        provider_kwargs: Optional kwargs to pass to generate_content (e.g., api_key for personal Anthropic key)
 
     Returns:
         dict with keys:
@@ -168,9 +184,9 @@ def generate_agent_config(description: str) -> dict:
     """
     try:
         # Generate all components
-        name = generate_agent_name(description)
-        entrypoint = generate_entrypoint_prompt(description)
-        workflow = generate_workflow_prompt(description)
+        name = generate_agent_name(description, provider_kwargs=provider_kwargs)
+        entrypoint = generate_entrypoint_prompt(description, provider_kwargs=provider_kwargs)
+        workflow = generate_workflow_prompt(description, provider_kwargs=provider_kwargs)
 
         return {
             "name": name,
