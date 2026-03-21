@@ -16,6 +16,34 @@ from .ai_credentials_service import ai_credentials_service
 
 logger = logging.getLogger(__name__)
 
+
+class AgentEnvironmentError(Exception):
+    def __init__(self, message: str, status_code: int = 400):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
+
+
+class EnvironmentNotFoundError(AgentEnvironmentError):
+    def __init__(self, message: str = "Environment not found"):
+        super().__init__(message, status_code=404)
+
+
+class AgentNotFoundError(AgentEnvironmentError):
+    def __init__(self, message: str = "Agent not found"):
+        super().__init__(message, status_code=404)
+
+
+class EnvironmentPermissionDeniedError(AgentEnvironmentError):
+    def __init__(self, message: str = "Not enough permissions"):
+        super().__init__(message, status_code=403)
+
+
+class EnvironmentCredentialError(AgentEnvironmentError):
+    def __init__(self, message: str):
+        super().__init__(message, status_code=400)
+
+
 # SDK Provider Constants
 SDK_ANTHROPIC = "claude-code/anthropic"
 SDK_MINIMAX = "claude-code/minimax"
@@ -97,6 +125,33 @@ class EnvironmentService:
         return cls._lifecycle_manager
 
     @staticmethod
+    def _apply_credential_keys(cred_data, cred_type) -> dict:
+        keys = {}
+        if cred_type == AICredentialType.ANTHROPIC:
+            keys["anthropic_api_key"] = cred_data.api_key
+        elif cred_type == AICredentialType.MINIMAX:
+            keys["minimax_api_key"] = cred_data.api_key
+        elif cred_type == AICredentialType.OPENAI_COMPATIBLE:
+            keys["openai_compatible_api_key"] = cred_data.api_key
+            keys["openai_compatible_base_url"] = cred_data.base_url
+            keys["openai_compatible_model"] = cred_data.model
+        return keys
+
+    @staticmethod
+    def get_environment_with_access_check(
+        session: Session, env_id: UUID, user_id: UUID, is_superuser: bool = False
+    ) -> tuple["AgentEnvironment", "Agent"]:
+        environment = session.get(AgentEnvironment, env_id)
+        if not environment:
+            raise EnvironmentNotFoundError()
+        agent = session.get(Agent, environment.agent_id)
+        if not agent:
+            raise AgentNotFoundError()
+        if not is_superuser and agent.owner_id != user_id:
+            raise EnvironmentPermissionDeniedError()
+        return environment, agent
+
+    @staticmethod
     async def _create_environment_background(
         env_id: UUID,
         agent_id: UUID,
@@ -131,7 +186,7 @@ class EnvironmentService:
                 agent = session.get(Agent, agent_id)
 
                 if not environment or not agent:
-                    raise ValueError("Environment or Agent not found")
+                    raise AgentEnvironmentError("Environment or Agent not found")
 
                 # Run creation process
                 lifecycle_manager = EnvironmentService.get_lifecycle_manager()
@@ -271,7 +326,7 @@ class EnvironmentService:
                 target_env = session.get(AgentEnvironment, env_id)
 
                 if not agent or not target_env:
-                    raise ValueError("Agent or Environment not found")
+                    raise AgentEnvironmentError("Agent or Environment not found")
 
                 # Get all environments for this agent
                 all_envs = EnvironmentService.list_agent_environments(session, agent_id)
@@ -302,7 +357,7 @@ class EnvironmentService:
                             session.add(env)
                         except Exception as e:
                             # Log but continue
-                            print(f"Warning: Failed to stop environment {env.id}: {e}")
+                            logger.warning(f"Failed to stop environment {env.id}: {e}")
 
                 # Start target environment (this updates status internally)
                 await lifecycle_manager.start_environment(session, target_env, agent)
@@ -329,6 +384,7 @@ class EnvironmentService:
                         target_env.status_message = f"Failed to activate environment: {str(e)}"
                         error_session.add(target_env)
                         error_session.commit()
+
     @staticmethod
     async def create_environment(
         session: Session,
@@ -361,7 +417,7 @@ class EnvironmentService:
         # Get agent
         agent = session.get(Agent, agent_id)
         if not agent:
-            raise ValueError(f"Agent {agent_id} not found")
+            raise AgentNotFoundError(f"Agent {agent_id} not found")
 
         # Normalize SDK values (use user's defaults, then fall back to global default)
         # Conversation SDK is always required
@@ -376,9 +432,9 @@ class EnvironmentService:
 
         # Validate SDK values
         if sdk_conversation not in VALID_SDK_OPTIONS:
-            raise ValueError(f"Invalid agent_sdk_conversation: {sdk_conversation}. Valid options: {VALID_SDK_OPTIONS}")
+            raise AgentEnvironmentError(f"Invalid agent_sdk_conversation: {sdk_conversation}. Valid options: {VALID_SDK_OPTIONS}")
         if sdk_building is not None and sdk_building not in VALID_SDK_OPTIONS:
-            raise ValueError(f"Invalid agent_sdk_building: {sdk_building}. Valid options: {VALID_SDK_OPTIONS}")
+            raise AgentEnvironmentError(f"Invalid agent_sdk_building: {sdk_building}. Valid options: {VALID_SDK_OPTIONS}")
 
         # Initialize API key variables
         anthropic_api_key = None
@@ -396,15 +452,15 @@ class EnvironmentService:
             ai_credentials = ai_credentials_service.get_user_ai_credentials(user=user)
 
             # Collect required SDKs and validate user has API keys
-            required_sdks = set([sdk_conversation, sdk_building])
+            required_sdks = {sdk_conversation, sdk_building}
             for sdk in required_sdks:
                 required_key = SDK_API_KEY_MAP.get(sdk)
                 if required_key and ai_credentials:
                     key_value = getattr(ai_credentials, required_key, None)
                     if not key_value:
-                        raise ValueError(f"Missing required API key '{required_key}' for SDK '{sdk}'. Please add it in user settings.")
+                        raise EnvironmentCredentialError(f"Missing required API key '{required_key}' for SDK '{sdk}'. Please add it in user settings.")
                 elif required_key and not ai_credentials:
-                    raise ValueError(f"Missing required API key '{required_key}' for SDK '{sdk}'. Please add it in user settings.")
+                    raise EnvironmentCredentialError(f"Missing required API key '{required_key}' for SDK '{sdk}'. Please add it in user settings.")
 
             # Get API keys from user's default credentials
             anthropic_api_key = ai_credentials.anthropic_api_key if ai_credentials else None
@@ -419,33 +475,29 @@ class EnvironmentService:
                     session, data.conversation_ai_credential_id, user.id
                 )
                 if not conv_cred_data:
-                    raise ValueError("Cannot access the specified conversation AI credential")
+                    raise EnvironmentCredentialError("Cannot access the specified conversation AI credential")
                 conversation_ai_credential_id = data.conversation_ai_credential_id
                 # Map to appropriate API key based on SDK
                 cred_type = SDK_TO_CREDENTIAL_TYPE.get(sdk_conversation)
-                if cred_type == AICredentialType.ANTHROPIC:
-                    anthropic_api_key = conv_cred_data.api_key
-                elif cred_type == AICredentialType.MINIMAX:
-                    minimax_api_key = conv_cred_data.api_key
-                elif cred_type == AICredentialType.OPENAI_COMPATIBLE:
-                    openai_compatible_api_key = conv_cred_data.api_key
-                    openai_compatible_base_url = conv_cred_data.base_url
-                    openai_compatible_model = conv_cred_data.model
+                resolved = EnvironmentService._apply_credential_keys(conv_cred_data, cred_type)
+                anthropic_api_key = resolved.get("anthropic_api_key", anthropic_api_key)
+                minimax_api_key = resolved.get("minimax_api_key", minimax_api_key)
+                openai_compatible_api_key = resolved.get("openai_compatible_api_key", openai_compatible_api_key)
+                openai_compatible_base_url = resolved.get("openai_compatible_base_url", openai_compatible_base_url)
+                openai_compatible_model = resolved.get("openai_compatible_model", openai_compatible_model)
             else:
                 # Fall back to user's default for conversation SDK
                 cred_type = SDK_TO_CREDENTIAL_TYPE.get(sdk_conversation)
                 if cred_type:
                     default_cred = ai_credentials_service.get_default_for_type(session, user.id, cred_type)
                     if default_cred:
-                        conv_cred_data = ai_credentials_service._decrypt_credential(default_cred)
-                        if cred_type == AICredentialType.ANTHROPIC:
-                            anthropic_api_key = conv_cred_data.api_key
-                        elif cred_type == AICredentialType.MINIMAX:
-                            minimax_api_key = conv_cred_data.api_key
-                        elif cred_type == AICredentialType.OPENAI_COMPATIBLE:
-                            openai_compatible_api_key = conv_cred_data.api_key
-                            openai_compatible_base_url = conv_cred_data.base_url
-                            openai_compatible_model = conv_cred_data.model
+                        conv_cred_data = ai_credentials_service.decrypt_credential(default_cred)
+                        resolved = EnvironmentService._apply_credential_keys(conv_cred_data, cred_type)
+                        anthropic_api_key = resolved.get("anthropic_api_key", anthropic_api_key)
+                        minimax_api_key = resolved.get("minimax_api_key", minimax_api_key)
+                        openai_compatible_api_key = resolved.get("openai_compatible_api_key", openai_compatible_api_key)
+                        openai_compatible_base_url = resolved.get("openai_compatible_base_url", openai_compatible_base_url)
+                        openai_compatible_model = resolved.get("openai_compatible_model", openai_compatible_model)
                     else:
                         logger.info(f"DEBUG env_service - No default credential found for type {cred_type}")
 
@@ -455,18 +507,16 @@ class EnvironmentService:
                     session, data.building_ai_credential_id, user.id
                 )
                 if not build_cred_data:
-                    raise ValueError("Cannot access the specified building AI credential")
+                    raise EnvironmentCredentialError("Cannot access the specified building AI credential")
                 building_ai_credential_id = data.building_ai_credential_id
                 # Map to appropriate API key based on SDK
                 cred_type = SDK_TO_CREDENTIAL_TYPE.get(sdk_building)
-                if cred_type == AICredentialType.ANTHROPIC:
-                    anthropic_api_key = build_cred_data.api_key
-                elif cred_type == AICredentialType.MINIMAX:
-                    minimax_api_key = build_cred_data.api_key
-                elif cred_type == AICredentialType.OPENAI_COMPATIBLE:
-                    openai_compatible_api_key = build_cred_data.api_key
-                    openai_compatible_base_url = build_cred_data.base_url
-                    openai_compatible_model = build_cred_data.model
+                resolved = EnvironmentService._apply_credential_keys(build_cred_data, cred_type)
+                anthropic_api_key = resolved.get("anthropic_api_key", anthropic_api_key)
+                minimax_api_key = resolved.get("minimax_api_key", minimax_api_key)
+                openai_compatible_api_key = resolved.get("openai_compatible_api_key", openai_compatible_api_key)
+                openai_compatible_base_url = resolved.get("openai_compatible_base_url", openai_compatible_base_url)
+                openai_compatible_model = resolved.get("openai_compatible_model", openai_compatible_model)
             else:
                 # Fall back to user's default for building SDK if not same as conversation
                 if sdk_building != sdk_conversation or not data.conversation_ai_credential_id:
@@ -474,18 +524,16 @@ class EnvironmentService:
                     if cred_type:
                         default_cred = ai_credentials_service.get_default_for_type(session, user.id, cred_type)
                         if default_cred:
-                            build_cred_data = ai_credentials_service._decrypt_credential(default_cred)
-                            if cred_type == AICredentialType.ANTHROPIC:
-                                anthropic_api_key = build_cred_data.api_key
-                            elif cred_type == AICredentialType.MINIMAX:
-                                minimax_api_key = build_cred_data.api_key
-                            elif cred_type == AICredentialType.OPENAI_COMPATIBLE:
-                                openai_compatible_api_key = build_cred_data.api_key
-                                openai_compatible_base_url = build_cred_data.base_url
-                                openai_compatible_model = build_cred_data.model
+                            build_cred_data = ai_credentials_service.decrypt_credential(default_cred)
+                            resolved = EnvironmentService._apply_credential_keys(build_cred_data, cred_type)
+                            anthropic_api_key = resolved.get("anthropic_api_key", anthropic_api_key)
+                            minimax_api_key = resolved.get("minimax_api_key", minimax_api_key)
+                            openai_compatible_api_key = resolved.get("openai_compatible_api_key", openai_compatible_api_key)
+                            openai_compatible_base_url = resolved.get("openai_compatible_base_url", openai_compatible_base_url)
+                            openai_compatible_model = resolved.get("openai_compatible_model", openai_compatible_model)
 
             # Validate that we have the required API keys
-            required_sdks = set([sdk_conversation, sdk_building])
+            required_sdks = {sdk_conversation, sdk_building}
             for sdk in required_sdks:
                 required_key = SDK_API_KEY_MAP.get(sdk)
                 if required_key:
@@ -497,7 +545,7 @@ class EnvironmentService:
                     elif required_key == "openai_compatible_api_key":
                         key_value = openai_compatible_api_key
                     if not key_value:
-                        raise ValueError(f"Missing required API key for SDK '{sdk}'. Please select an AI credential or set a default.")
+                        raise EnvironmentCredentialError(f"Missing required API key for SDK '{sdk}'. Please select an AI credential or set a default.")
 
         # Generate a memorable instance name if not provided
         instance_name = data.instance_name if data.instance_name != "Instance" else generate_environment_name()
@@ -587,14 +635,14 @@ class EnvironmentService:
                 await lifecycle_manager.stop_environment(session, environment)
             except Exception as e:
                 # Log error but continue with deletion
-                print(f"Warning: Failed to stop environment: {e}")
+                logger.warning(f"Failed to stop environment: {e}")
 
         # Delete Docker instance (directory, volumes, networks, etc.)
         try:
             await lifecycle_manager.delete_environment_instance(environment)
         except Exception as e:
             # Log error but continue with DB deletion
-            print(f"Warning: Failed to delete environment instance: {e}")
+            logger.warning(f"Failed to delete environment instance: {e}")
 
         # Delete DB record
         session.delete(environment)
@@ -627,12 +675,12 @@ class EnvironmentService:
         # Get agent
         agent = session.get(Agent, agent_id)
         if not agent:
-            raise ValueError(f"Agent {agent_id} not found")
+            raise AgentNotFoundError(f"Agent {agent_id} not found")
 
         # Get target environment
         target_env = session.get(AgentEnvironment, env_id)
         if not target_env or target_env.agent_id != agent_id:
-            raise ValueError("Environment not found for this agent")
+            raise EnvironmentNotFoundError("Environment not found for this agent")
 
         # Update target environment status immediately
         target_env.status = "starting"
@@ -657,11 +705,11 @@ class EnvironmentService:
         """Start environment container"""
         environment = session.get(AgentEnvironment, env_id)
         if not environment:
-            raise ValueError(f"Environment {env_id} not found")
+            raise EnvironmentNotFoundError(f"Environment {env_id} not found")
 
         agent = session.get(Agent, environment.agent_id)
         if not agent:
-            raise ValueError(f"Agent {environment.agent_id} not found")
+            raise AgentNotFoundError(f"Agent {environment.agent_id} not found")
 
         lifecycle_manager = EnvironmentService.get_lifecycle_manager()
         await lifecycle_manager.start_environment(session, environment, agent)
@@ -674,7 +722,7 @@ class EnvironmentService:
         """Stop environment container"""
         environment = session.get(AgentEnvironment, env_id)
         if not environment:
-            raise ValueError(f"Environment {env_id} not found")
+            raise EnvironmentNotFoundError(f"Environment {env_id} not found")
 
         lifecycle_manager = EnvironmentService.get_lifecycle_manager()
         await lifecycle_manager.stop_environment(session, environment)
@@ -692,7 +740,7 @@ class EnvironmentService:
         """
         environment = session.get(AgentEnvironment, env_id)
         if not environment:
-            raise ValueError(f"Environment {env_id} not found")
+            raise EnvironmentNotFoundError(f"Environment {env_id} not found")
 
         lifecycle_manager = EnvironmentService.get_lifecycle_manager()
         await lifecycle_manager.suspend_environment(session, environment)
@@ -705,11 +753,11 @@ class EnvironmentService:
         """Restart environment container"""
         environment = session.get(AgentEnvironment, env_id)
         if not environment:
-            raise ValueError(f"Environment {env_id} not found")
+            raise EnvironmentNotFoundError(f"Environment {env_id} not found")
 
         agent = session.get(Agent, environment.agent_id)
         if not agent:
-            raise ValueError(f"Agent {environment.agent_id} not found")
+            raise AgentNotFoundError(f"Agent {environment.agent_id} not found")
 
         lifecycle_manager = EnvironmentService.get_lifecycle_manager()
         await lifecycle_manager.restart_environment(session, environment, agent)
@@ -732,11 +780,11 @@ class EnvironmentService:
         """
         environment = session.get(AgentEnvironment, env_id)
         if not environment:
-            raise ValueError(f"Environment {env_id} not found")
+            raise EnvironmentNotFoundError(f"Environment {env_id} not found")
 
         agent = session.get(Agent, environment.agent_id)
         if not agent:
-            raise ValueError(f"Agent {environment.agent_id} not found")
+            raise AgentNotFoundError(f"Agent {environment.agent_id} not found")
 
         lifecycle_manager = EnvironmentService.get_lifecycle_manager()
         await lifecycle_manager.rebuild_environment(session, environment, agent)
@@ -749,7 +797,7 @@ class EnvironmentService:
         """Get environment status"""
         environment = session.get(AgentEnvironment, env_id)
         if not environment:
-            raise ValueError(f"Environment {env_id} not found")
+            raise EnvironmentNotFoundError(f"Environment {env_id} not found")
 
         lifecycle_manager = EnvironmentService.get_lifecycle_manager()
         status = await lifecycle_manager.get_status(environment)
@@ -765,7 +813,7 @@ class EnvironmentService:
         """Check environment health"""
         environment = session.get(AgentEnvironment, env_id)
         if not environment:
-            raise ValueError(f"Environment {env_id} not found")
+            raise EnvironmentNotFoundError(f"Environment {env_id} not found")
 
         lifecycle_manager = EnvironmentService.get_lifecycle_manager()
         health = await lifecycle_manager.check_health(session, environment)
@@ -777,7 +825,7 @@ class EnvironmentService:
         """Get environment logs"""
         environment = session.get(AgentEnvironment, env_id)
         if not environment:
-            raise ValueError(f"Environment {env_id} not found")
+            raise EnvironmentNotFoundError(f"Environment {env_id} not found")
 
         lifecycle_manager = EnvironmentService.get_lifecycle_manager()
         logs = await lifecycle_manager.get_logs(environment, lines=lines)
@@ -811,8 +859,6 @@ class EnvironmentService:
             True if sync successful
         """
         from app.services.agent_service import AgentService
-        import logging
-        logger = logging.getLogger(__name__)
 
         try:
             lifecycle_manager = EnvironmentService.get_lifecycle_manager()
@@ -827,7 +873,6 @@ class EnvironmentService:
 
             # Update agent if prompts have changed
             updated = False
-            workflow_prompt_changed = False
 
             if workflow_prompt and workflow_prompt != agent.workflow_prompt:
                 # Use unified handler for workflow_prompt changes
@@ -839,7 +884,6 @@ class EnvironmentService:
                 )
                 agent.workflow_prompt = workflow_prompt
                 updated = True
-                workflow_prompt_changed = True
                 logger.info(f"Updated agent {agent.id} workflow_prompt from environment ({len(workflow_prompt)} chars)")
 
             if entrypoint_prompt and entrypoint_prompt != agent.entrypoint_prompt:
@@ -1029,7 +1073,7 @@ class EnvironmentService:
             .join(User, Agent.owner_id == User.id)
             .where(
                 Agent.owner_id == credential.owner_id,
-                AgentEnvironment.use_default_ai_credentials == True,
+                AgentEnvironment.use_default_ai_credentials.is_(True),
                 or_(*sdk_filters),
             )
         )

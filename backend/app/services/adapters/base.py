@@ -245,13 +245,14 @@ class EnvironmentAdapter(ABC):
         pass
 
     @abstractmethod
-    async def set_agent_prompts(self, workflow_prompt: str | None = None, entrypoint_prompt: str | None = None) -> bool:
+    async def set_agent_prompts(self, workflow_prompt: str | None = None, entrypoint_prompt: str | None = None, refiner_prompt: str | None = None) -> bool:
         """
         Update agent prompts in docs files.
 
         Args:
             workflow_prompt: Content for docs/WORKFLOW_PROMPT.md (None to skip)
             entrypoint_prompt: Content for docs/ENTRYPOINT_PROMPT.md (None to skip)
+            refiner_prompt: Content for docs/REFINER_PROMPT.md (None to skip)
 
         Returns:
             True if successful

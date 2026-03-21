@@ -114,7 +114,7 @@ class AICredentialsService:
         credential = self.get_credential(session, credential_id, user_id)
 
         # Get existing decrypted data
-        existing_data = self._decrypt_credential(credential)
+        existing_data = self.decrypt_credential(credential)
 
         # Apply updates
         if data.name is not None:
@@ -226,7 +226,7 @@ class AICredentialsService:
         )
         return session.exec(statement).first()
 
-    def _decrypt_credential(self, credential: AICredential) -> AICredentialData:
+    def decrypt_credential(self, credential: AICredential) -> AICredentialData:
         """Decrypt credential data"""
         decrypted_json = decrypt_field(credential.encrypted_data)
         data_dict = json.loads(decrypted_json)
@@ -235,7 +235,7 @@ class AICredentialsService:
     def _to_public(self, credential: AICredential, session: Session) -> AICredentialPublic:
         """Convert credential to public representation"""
         # Decrypt to get non-sensitive fields
-        data = self._decrypt_credential(credential)
+        data = self.decrypt_credential(credential)
 
         # Detect OAuth token for Anthropic credentials
         is_oauth = False
@@ -331,7 +331,7 @@ class AICredentialsService:
         self, session: Session, user: User, credential: AICredential
     ) -> None:
         """Sync default credential to user's AI credentials profile for backward compatibility"""
-        data = self._decrypt_credential(credential)
+        data = self.decrypt_credential(credential)
 
         # Map credential type to user profile fields
         update_data: dict = {}
@@ -475,7 +475,7 @@ class AICredentialsService:
 
         # Check if user owns the credential
         if credential.owner_id == user_id:
-            return self._decrypt_credential(credential)
+            return self.decrypt_credential(credential)
 
         # Check if user has a share
         statement = select(AICredentialShare).where(
@@ -484,7 +484,7 @@ class AICredentialsService:
         )
         share = session.exec(statement).first()
         if share:
-            return self._decrypt_credential(credential)
+            return self.decrypt_credential(credential)
 
         return None
 

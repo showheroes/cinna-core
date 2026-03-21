@@ -242,9 +242,9 @@ def test_environment_auth_and_ownership(
     Auth guards and ownership enforcement:
       1.  Create agent, get env_id
       2.  Unauthenticated GET → 401/403
-      3.  Other user GET → 400 (not enough permissions)
-      4.  Other user PATCH → 400
-      5.  Other user DELETE → 400
+      3.  Other user GET → 403 (not enough permissions)
+      4.  Other user PATCH → 403
+      5.  Other user DELETE → 403
       6.  Non-existent env GET → 404
       7.  Non-existent env PATCH → 404
       8.  Non-existent env DELETE → 404
@@ -260,7 +260,7 @@ def test_environment_auth_and_ownership(
     r = client.get(f"{_BASE}/{env_id}")
     assert r.status_code in (401, 403)
 
-    # ── Phase 3–5: Other user → 400 on GET, PATCH, DELETE ────────────────
+    # ── Phase 3–5: Other user → 403 on GET, PATCH, DELETE ────────────────
     other_user = create_random_user(client)
     other_headers = user_authentication_headers(
         client=client,
@@ -269,17 +269,17 @@ def test_environment_auth_and_ownership(
     )
 
     r = client.get(f"{_BASE}/{env_id}", headers=other_headers)
-    assert r.status_code == 400
+    assert r.status_code == 403
 
     r = client.patch(
         f"{_BASE}/{env_id}",
         headers=other_headers,
         json={"instance_name": "Hacked"},
     )
-    assert r.status_code == 400
+    assert r.status_code == 403
 
     r = client.delete(f"{_BASE}/{env_id}", headers=other_headers)
-    assert r.status_code == 400
+    assert r.status_code == 403
 
     # Owner's environment is still intact
     get_environment(client, superuser_token_headers, env_id)
@@ -343,3 +343,129 @@ def test_environment_default_values(
     # status_message may be None or a string — must not be absent
     assert "status_message" in fetched
     assert fetched["status_message"] is None or isinstance(fetched["status_message"], str)
+
+
+# ---------------------------------------------------------------------------
+# Scenario 6: Exception hierarchy and 403 permission denied
+# ---------------------------------------------------------------------------
+
+def test_environment_permission_denied_returns_403(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Permission denied on environment endpoints returns 403, not 400.
+
+    Verifies the EnvironmentPermissionDeniedError status code change across
+    all endpoints that perform ownership checks.
+    """
+    # ── Setup: Create agent and get env_id ───────────────────────────────
+    agent = create_agent_via_api(client, superuser_token_headers)
+    agent_id = agent["id"]
+
+    result = list_environments(client, superuser_token_headers, agent_id)
+    env_id = result["data"][0]["id"]
+
+    # Create a second user who does not own the agent
+    other_user = create_random_user(client)
+    other_headers = user_authentication_headers(
+        client=client,
+        email=other_user["email"],
+        password=other_user["_password"],
+    )
+
+    # ── Verify 403 on all read/write environment endpoints ────────────────
+    r = client.get(f"{_BASE}/{env_id}", headers=other_headers)
+    assert r.status_code == 403
+    assert "Not enough permissions" in r.json().get("detail", "")
+
+    r = client.patch(
+        f"{_BASE}/{env_id}",
+        headers=other_headers,
+        json={"instance_name": "Hacked"},
+    )
+    assert r.status_code == 403
+
+    r = client.delete(f"{_BASE}/{env_id}", headers=other_headers)
+    assert r.status_code == 403
+
+    r = client.post(f"{_BASE}/{env_id}/start", headers=other_headers)
+    assert r.status_code == 403
+
+    r = client.post(f"{_BASE}/{env_id}/stop", headers=other_headers)
+    assert r.status_code == 403
+
+    r = client.post(f"{_BASE}/{env_id}/suspend", headers=other_headers)
+    assert r.status_code == 403
+
+    r = client.post(f"{_BASE}/{env_id}/restart", headers=other_headers)
+    assert r.status_code == 403
+
+    r = client.post(f"{_BASE}/{env_id}/rebuild", headers=other_headers)
+    assert r.status_code == 403
+
+    r = client.get(f"{_BASE}/{env_id}/status", headers=other_headers)
+    assert r.status_code == 403
+
+    r = client.get(f"{_BASE}/{env_id}/health", headers=other_headers)
+    assert r.status_code == 403
+
+    r = client.get(f"{_BASE}/{env_id}/logs", headers=other_headers)
+    assert r.status_code == 403
+
+    # ── Verify owner (superuser) can still access the environment ─────────
+    r = client.get(f"{_BASE}/{env_id}", headers=superuser_token_headers)
+    assert r.status_code == 200
+
+
+def test_environment_exception_classes() -> None:
+    """
+    Unit test for the AgentEnvironmentError exception hierarchy.
+
+    Verifies correct status codes and message attributes on each exception class.
+    """
+    from app.services.environment_service import (
+        AgentEnvironmentError,
+        EnvironmentNotFoundError,
+        AgentNotFoundError,
+        EnvironmentPermissionDeniedError,
+        EnvironmentCredentialError,
+    )
+
+    # Base class
+    err = AgentEnvironmentError("something went wrong", status_code=400)
+    assert err.status_code == 400
+    assert err.message == "something went wrong"
+    assert str(err) == "something went wrong"
+
+    # Default status codes
+    err = AgentEnvironmentError("oops")
+    assert err.status_code == 400
+
+    # EnvironmentNotFoundError
+    err = EnvironmentNotFoundError()
+    assert err.status_code == 404
+    assert err.message == "Environment not found"
+    assert isinstance(err, AgentEnvironmentError)
+
+    err = EnvironmentNotFoundError("custom not found message")
+    assert err.status_code == 404
+    assert err.message == "custom not found message"
+
+    # AgentNotFoundError
+    err = AgentNotFoundError()
+    assert err.status_code == 404
+    assert err.message == "Agent not found"
+    assert isinstance(err, AgentEnvironmentError)
+
+    # EnvironmentPermissionDeniedError
+    err = EnvironmentPermissionDeniedError()
+    assert err.status_code == 403
+    assert err.message == "Not enough permissions"
+    assert isinstance(err, AgentEnvironmentError)
+
+    # EnvironmentCredentialError
+    err = EnvironmentCredentialError("Missing API key")
+    assert err.status_code == 400
+    assert err.message == "Missing API key"
+    assert isinstance(err, AgentEnvironmentError)

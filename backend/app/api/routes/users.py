@@ -141,7 +141,7 @@ def update_user_me(
             )
         # Check for OAuth token
         from app.services.ai_credentials_service import ai_credentials_service
-        data = ai_credentials_service._decrypt_credential(cred)
+        data = ai_credentials_service.decrypt_credential(cred)
         if data.api_key and data.api_key.startswith("sk-ant-oat"):
             raise HTTPException(
                 status_code=400,

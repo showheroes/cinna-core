@@ -57,7 +57,7 @@ class AIFunctionsService:
         credential = db.get(AICredential, credential_id)
         if not credential or credential.owner_id != user_id:
             return None
-        data = ai_credentials_service._decrypt_credential(credential)
+        data = ai_credentials_service.decrypt_credential(credential)
         return data.api_key
 
     @staticmethod
@@ -80,7 +80,7 @@ class AIFunctionsService:
         )
         if not credential:
             return None
-        data = ai_credentials_service._decrypt_credential(credential)
+        data = ai_credentials_service.decrypt_credential(credential)
         return data.api_key
 
     @staticmethod
