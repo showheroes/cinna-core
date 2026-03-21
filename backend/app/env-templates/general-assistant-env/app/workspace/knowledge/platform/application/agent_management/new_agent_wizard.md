@@ -37,7 +37,7 @@ Dashboard UI → Agent Creation Route → Backend SSE → Environment Service �
 When "+ New Agent" is selected:
 - Mode switch replaced with Settings (cog) icon
 - Cog opens dropdown with SDK configuration
-- User can select different SDKs for conversation and building modes
+- User selects SDK Engine, AI Credential (filtered by compatibility), and optional Model Override for each mode
 - Selections passed to creation wizard via URL search params
 
 **State:**
@@ -45,10 +45,14 @@ When "+ New Agent" is selected:
 - `sdkConversation`: Selected SDK for conversation mode (default: `claude-code/anthropic`)
 - `sdkBuilding`: Selected SDK for building mode (default: `claude-code/anthropic`)
 
-**SDK Options:** Defined in `SDK_OPTIONS` constant
-- `claude-code/anthropic` - Anthropic Claude
-- `claude-code/minimax` - MiniMax M2
-- `google-adk-wr/openai-compatible` - OpenAI Compatible
+**SDK Engine Options:** Three engine choices per mode
+- `claude-code` — Claude Code (Anthropic or MiniMax credentials)
+- `opencode` — OpenCode (Anthropic, OpenAI, OpenAI-compatible, Google)
+- `google-adk-wr` — Google ADK (OpenAI-compatible or Google credentials)
+
+**Credential Filtering:** Credential dropdown is filtered by `SDK_CREDENTIAL_COMPATIBILITY` — only credentials whose type is compatible with the selected engine are shown.
+
+**Model Override:** Optional text field per mode for explicit model selection (e.g., `gpt-4o-mini`, `claude-opus-4`). Left empty = adapter uses its default.
 
 **API Key Validation:** Uses `getKeyStatus()` helper with `aiCredentialsStatus` query to show warnings for unconfigured SDKs
 

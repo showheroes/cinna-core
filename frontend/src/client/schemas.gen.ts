@@ -191,7 +191,7 @@ export const AICredentialSelectionsSchema = {
 
 export const AICredentialTypeSchema = {
     type: 'string',
-    enum: ['anthropic', 'minimax', 'openai_compatible'],
+    enum: ['anthropic', 'minimax', 'openai_compatible', 'openai', 'google'],
     title: 'AICredentialType',
     description: 'Type of AI credential/SDK provider'
 } as const;
@@ -1932,6 +1932,28 @@ export const AgentEnvironmentCreateSchema = {
             ],
             title: 'Agent Sdk Building'
         },
+        model_override_conversation: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Override Conversation'
+        },
+        model_override_building: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Override Building'
+        },
         use_default_ai_credentials: {
             type: 'boolean',
             title: 'Use Default Ai Credentials',
@@ -2070,6 +2092,28 @@ export const AgentEnvironmentPublicSchema = {
             ],
             title: 'Agent Sdk Building'
         },
+        model_override_conversation: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Override Conversation'
+        },
+        model_override_building: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Override Building'
+        },
         use_default_ai_credentials: {
             type: 'boolean',
             title: 'Use Default Ai Credentials'
@@ -2100,7 +2144,7 @@ export const AgentEnvironmentPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'agent_id', 'env_name', 'env_version', 'instance_name', 'type', 'status', 'status_message', 'is_active', 'created_at', 'updated_at', 'last_health_check', 'last_activity_at', 'agent_sdk_conversation', 'agent_sdk_building', 'use_default_ai_credentials', 'conversation_ai_credential_id', 'building_ai_credential_id'],
+    required: ['id', 'agent_id', 'env_name', 'env_version', 'instance_name', 'type', 'status', 'status_message', 'is_active', 'created_at', 'updated_at', 'last_health_check', 'last_activity_at', 'agent_sdk_conversation', 'agent_sdk_building', 'model_override_conversation', 'model_override_building', 'use_default_ai_credentials', 'conversation_ai_credential_id', 'building_ai_credential_id'],
     title: 'AgentEnvironmentPublic'
 } as const;
 
@@ -11320,6 +11364,52 @@ export const UserPublicSchema = {
             type: 'boolean',
             title: 'General Assistant Enabled',
             default: false
+        },
+        default_ai_credential_conversation_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Credential Conversation Id'
+        },
+        default_ai_credential_building_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Credential Building Id'
+        },
+        default_model_override_conversation: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Model Override Conversation'
+        },
+        default_model_override_building: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Model Override Building'
         }
     },
     type: 'object',
@@ -11436,6 +11526,52 @@ export const UserPublicWithAICredentialsSchema = {
             type: 'boolean',
             title: 'General Assistant Enabled',
             default: false
+        },
+        default_ai_credential_conversation_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Credential Conversation Id'
+        },
+        default_ai_credential_building_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Credential Building Id'
+        },
+        default_model_override_conversation: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Model Override Conversation'
+        },
+        default_model_override_building: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Model Override Building'
         },
         has_anthropic_api_key: {
             type: 'boolean',
@@ -11665,6 +11801,54 @@ export const UserUpdateMeSchema = {
                 }
             ],
             title: 'General Assistant Enabled'
+        },
+        default_ai_credential_conversation_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Credential Conversation Id'
+        },
+        default_ai_credential_building_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Ai Credential Building Id'
+        },
+        default_model_override_conversation: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Model Override Conversation'
+        },
+        default_model_override_building: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Model Override Building'
         }
     },
     type: 'object',

@@ -244,6 +244,8 @@ export type AgentEnvironmentCreate = {
     };
     agent_sdk_conversation?: (string | null);
     agent_sdk_building?: (string | null);
+    model_override_conversation?: (string | null);
+    model_override_building?: (string | null);
     use_default_ai_credentials?: boolean;
     conversation_ai_credential_id?: (string | null);
     building_ai_credential_id?: (string | null);
@@ -265,6 +267,8 @@ export type AgentEnvironmentPublic = {
     last_activity_at: (string | null);
     agent_sdk_conversation: (string | null);
     agent_sdk_building: (string | null);
+    model_override_conversation: (string | null);
+    model_override_building: (string | null);
     use_default_ai_credentials: boolean;
     conversation_ai_credential_id: (string | null);
     building_ai_credential_id: (string | null);
@@ -652,7 +656,7 @@ export type AICredentialsPublic = {
 /**
  * Type of AI credential/SDK provider
  */
-export type AICredentialType = 'anthropic' | 'minimax' | 'openai_compatible';
+export type AICredentialType = 'anthropic' | 'minimax' | 'openai_compatible' | 'openai' | 'google';
 
 /**
  * Update AI credential (partial update)
@@ -2366,6 +2370,10 @@ export type UserPublic = {
     default_ai_functions_sdk?: (string | null);
     default_ai_functions_credential_id?: (string | null);
     general_assistant_enabled?: boolean;
+    default_ai_credential_conversation_id?: (string | null);
+    default_ai_credential_building_id?: (string | null);
+    default_model_override_conversation?: (string | null);
+    default_model_override_building?: (string | null);
 };
 
 /**
@@ -2385,6 +2393,10 @@ export type UserPublicWithAICredentials = {
     default_ai_functions_sdk?: (string | null);
     default_ai_functions_credential_id?: (string | null);
     general_assistant_enabled?: boolean;
+    default_ai_credential_conversation_id?: (string | null);
+    default_ai_credential_building_id?: (string | null);
+    default_model_override_conversation?: (string | null);
+    default_model_override_building?: (string | null);
     has_anthropic_api_key?: boolean;
     has_openai_api_key?: boolean;
     has_google_ai_api_key?: boolean;
@@ -2421,6 +2433,10 @@ export type UserUpdateMe = {
     default_ai_functions_sdk?: (string | null);
     default_ai_functions_credential_id?: (string | null);
     general_assistant_enabled?: (boolean | null);
+    default_ai_credential_conversation_id?: (string | null);
+    default_ai_credential_building_id?: (string | null);
+    default_model_override_conversation?: (string | null);
+    default_model_override_building?: (string | null);
 };
 
 export type UserWorkspaceCreate = {
@@ -2857,6 +2873,12 @@ export type AiCredentialsCreateAiCredentialData = {
 };
 
 export type AiCredentialsCreateAiCredentialResponse = (AICredentialPublic);
+
+export type AiCredentialsResolveDefaultCredentialData = {
+    sdkEngine: string;
+};
+
+export type AiCredentialsResolveDefaultCredentialResponse = ((AICredentialPublic | null));
 
 export type AiCredentialsGetAiCredentialData = {
     credentialId: string;

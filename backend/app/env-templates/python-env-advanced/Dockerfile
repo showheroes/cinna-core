@@ -25,6 +25,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /bin/
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install OpenCode binary (multi-provider AI agent)
+RUN curl -fsSL https://opencode.ai/install | bash
+
 # Set working directory
 WORKDIR /app
 

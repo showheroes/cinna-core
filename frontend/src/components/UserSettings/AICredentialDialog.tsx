@@ -27,11 +27,13 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import useCustomToast from "@/hooks/useCustomToast"
 
-// Type display names
+// Type display names and metadata
 const TYPE_OPTIONS: { value: AICredentialType; label: string; description: string }[] = [
-  { value: "anthropic", label: "Anthropic", description: "Claude AI models" },
+  { value: "anthropic", label: "Anthropic", description: "Claude AI models (API Key or OAuth Token)" },
   { value: "minimax", label: "MiniMax", description: "MiniMax M2 models" },
-  { value: "openai_compatible", label: "OpenAI Compatible", description: "OpenAI-compatible endpoints (Ollama, vLLM, etc.)" },
+  { value: "openai", label: "OpenAI", description: "OpenAI API (GPT-4o, o3, etc.)" },
+  { value: "openai_compatible", label: "OpenAI Compatible", description: "OpenAI-compatible endpoints (vLLM, custom)" },
+  { value: "google", label: "Google", description: "Google AI (Gemini models via AI Studio)" },
 ]
 
 interface AICredentialDialogProps {
@@ -113,8 +115,8 @@ export function AICredentialDialog({
           name,
           type,
           api_key: apiKey,
-          base_url: type === "openai_compatible" ? baseUrl : undefined,
-          model: type === "openai_compatible" ? model : undefined,
+          base_url: (type === "openai_compatible" || type === "google") ? (baseUrl || undefined) : undefined,
+          model: type === "openai_compatible" ? (model || undefined) : undefined,
           expiry_notification_date: expiryNotificationDate ? new Date(expiryNotificationDate).toISOString() : undefined,
         },
       })
@@ -149,10 +151,12 @@ export function AICredentialDialog({
         // Only update API key if provided (not empty)
         updatePayload.api_key = apiKey
       }
-      if (type === "openai_compatible") {
+      if (type === "openai_compatible" || type === "google") {
         if (baseUrl !== credential?.base_url) {
           updatePayload.base_url = baseUrl || null
         }
+      }
+      if (type === "openai_compatible") {
         if (model !== credential?.model) {
           updatePayload.model = model || null
         }
@@ -212,9 +216,13 @@ export function AICredentialDialog({
   const isPending = createMutation.isPending || updateMutation.isPending
   const error = createMutation.error || updateMutation.error
 
-  // Validation
-  const isValid = name.trim() !== "" && (isEditing || apiKey.trim() !== "") &&
-    (type !== "openai_compatible" || (baseUrl.trim() !== "" && model.trim() !== ""))
+  // Validation — different required fields per type
+  const isValid = (): boolean => {
+    if (name.trim() === "") return false
+    if (!isEditing && apiKey.trim() === "") return false
+    if (type === "openai_compatible") return baseUrl.trim() !== "" && model.trim() !== ""
+    return true
+  }
 
   return (
     <>
@@ -286,7 +294,8 @@ export function AICredentialDialog({
           {/* API Key */}
           <div className="space-y-2">
             <Label htmlFor="credential-api-key">
-              API Key {isEditing && "(leave blank to keep existing)"}
+              API Key{" "}
+              {isEditing && <span className="text-muted-foreground">(leave blank to keep existing)</span>}
             </Label>
             <Input
               id="credential-api-key"
@@ -342,10 +351,30 @@ export function AICredentialDialog({
                   onChange={(e) => setModel(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Model identifier (e.g., llama3.2:latest, gpt-4)
+                  Default model identifier (e.g., llama3.2:latest, gpt-4)
                 </p>
               </div>
             </>
+          )}
+
+          {/* Google AI specific fields */}
+          {type === "google" && (
+            <div className="space-y-2">
+              <Label htmlFor="credential-base-url-google">
+                API Endpoint{" "}
+                <span className="text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="credential-base-url-google"
+                type="text"
+                placeholder="https://generativelanguage.googleapis.com"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Custom Google AI endpoint URL. Leave blank for the default.
+              </p>
+            </div>
           )}
 
           {/* Set as default checkbox */}
@@ -375,7 +404,7 @@ export function AICredentialDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={isPending || !isValid}>
+          <Button onClick={handleSubmit} disabled={isPending || !isValid()}>
             {isPending ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

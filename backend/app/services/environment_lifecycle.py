@@ -12,11 +12,13 @@ from datetime import UTC, datetime, timedelta
 from app.models.environment import AgentEnvironment
 from app.models.agent import Agent
 from app.models import User
+from app.models.ai_credential import AICredentialType
 from app.core.config import settings
 from app.core import security
 from app.utils import detect_anthropic_credential_type
 from .adapters.base import EnvironmentAdapter, EnvInitConfig
 from .adapters.docker_adapter import DockerEnvironmentAdapter
+from .sdk_constants import SDK_TO_CREDENTIAL_TYPE, apply_credential_to_bag, make_empty_credential_bag
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +116,9 @@ class EnvironmentLifecycleManager:
         minimax_api_key: str | None = None,
         openai_compatible_api_key: str | None = None,
         openai_compatible_base_url: str | None = None,
-        openai_compatible_model: str | None = None
+        openai_compatible_model: str | None = None,
+        openai_api_key: str | None = None,
+        google_api_key: str | None = None,
     ) -> bool:
         """
         Create environment instance:
@@ -132,6 +136,8 @@ class EnvironmentLifecycleManager:
             openai_compatible_api_key: User's OpenAI Compatible API key (optional)
             openai_compatible_base_url: User's OpenAI Compatible base URL (optional)
             openai_compatible_model: User's OpenAI Compatible model (optional)
+            openai_api_key: OpenAI API key (for opencode/openai)
+            google_api_key: Google API key (for opencode/google)
 
         Returns:
             True if creation successful
@@ -180,7 +186,9 @@ class EnvironmentLifecycleManager:
             self._update_environment_config(
                 db_session, instance_dir, environment, agent,
                 anthropic_api_key, minimax_api_key,
-                openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model
+                openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model,
+                openai_api_key=openai_api_key,
+                google_api_key=google_api_key,
             )
 
             # 6. Build image
@@ -829,6 +837,7 @@ class EnvironmentLifecycleManager:
             # Fetch user credentials for SDK settings regeneration
             # If specific credentials are assigned, use ONLY those (no fallback to user profile)
             user = db_session.get(User, agent.owner_id)
+            anthropic_api_key = None
             minimax_api_key = None
             openai_compatible_api_key = None
             openai_compatible_base_url = None
@@ -842,13 +851,28 @@ class EnvironmentLifecycleManager:
 
             if user:
                 from app.services.ai_credentials_service import ai_credentials_service
-                from app.models.ai_credential import AICredentialType
 
-                SDK_TO_CREDENTIAL_TYPE = {
-                    "claude-code/anthropic": AICredentialType.ANTHROPIC,
-                    "claude-code/minimax": AICredentialType.MINIMAX,
-                    "google-adk-wr/openai-compatible": AICredentialType.OPENAI_COMPATIBLE,
-                }
+                # Initialise credential variables for all supported types
+                openai_api_key = None
+                google_api_key = None
+
+                def _apply_cred_to_vars(cred_type, cred_data):
+                    """Apply credential data to the appropriate local variable."""
+                    nonlocal anthropic_api_key, minimax_api_key
+                    nonlocal openai_compatible_api_key, openai_compatible_base_url, openai_compatible_model
+                    nonlocal openai_api_key, google_api_key
+                    if cred_type == AICredentialType.ANTHROPIC and anthropic_api_key is None:
+                        anthropic_api_key = cred_data.api_key
+                    elif cred_type == AICredentialType.MINIMAX and minimax_api_key is None:
+                        minimax_api_key = cred_data.api_key
+                    elif cred_type == AICredentialType.OPENAI_COMPATIBLE and openai_compatible_api_key is None:
+                        openai_compatible_api_key = cred_data.api_key
+                        openai_compatible_base_url = cred_data.base_url
+                        openai_compatible_model = cred_data.model
+                    elif cred_type == AICredentialType.OPENAI and openai_api_key is None:
+                        openai_api_key = cred_data.api_key
+                    elif cred_type == AICredentialType.GOOGLE and google_api_key is None:
+                        google_api_key = cred_data.api_key
 
                 # Use assigned credentials from environment (handles shared credentials)
                 if environment.conversation_ai_credential_id:
@@ -857,12 +881,8 @@ class EnvironmentLifecycleManager:
                     )
                     if conv_cred_data:
                         cred_type = SDK_TO_CREDENTIAL_TYPE.get(sdk_conversation)
-                        if cred_type == AICredentialType.MINIMAX:
-                            minimax_api_key = conv_cred_data.api_key
-                        elif cred_type == AICredentialType.OPENAI_COMPATIBLE:
-                            openai_compatible_api_key = conv_cred_data.api_key
-                            openai_compatible_base_url = conv_cred_data.base_url
-                            openai_compatible_model = conv_cred_data.model
+                        if cred_type:
+                            _apply_cred_to_vars(cred_type, conv_cred_data)
                     else:
                         logger.warning(f"Assigned conversation credential {environment.conversation_ai_credential_id} not accessible during rebuild for environment {environment.id}")
 
@@ -872,12 +892,8 @@ class EnvironmentLifecycleManager:
                     )
                     if build_cred_data:
                         cred_type = SDK_TO_CREDENTIAL_TYPE.get(sdk_building)
-                        if cred_type == AICredentialType.MINIMAX and minimax_api_key is None:
-                            minimax_api_key = build_cred_data.api_key
-                        elif cred_type == AICredentialType.OPENAI_COMPATIBLE and openai_compatible_api_key is None:
-                            openai_compatible_api_key = build_cred_data.api_key
-                            openai_compatible_base_url = build_cred_data.base_url
-                            openai_compatible_model = build_cred_data.model
+                        if cred_type:
+                            _apply_cred_to_vars(cred_type, build_cred_data)
                     else:
                         logger.warning(f"Assigned building credential {environment.building_ai_credential_id} not accessible during rebuild for environment {environment.id}")
 
@@ -885,6 +901,8 @@ class EnvironmentLifecycleManager:
                 if not has_assigned_credentials:
                     ai_credentials = ai_credentials_service.get_user_ai_credentials(user=user)
                     if ai_credentials:
+                        if anthropic_api_key is None and ai_credentials.anthropic_api_key:
+                            anthropic_api_key = ai_credentials.anthropic_api_key
                         if minimax_api_key is None and ai_credentials.minimax_api_key:
                             minimax_api_key = ai_credentials.minimax_api_key
                         if openai_compatible_api_key is None and ai_credentials.openai_compatible_api_key:
@@ -893,6 +911,20 @@ class EnvironmentLifecycleManager:
                             openai_compatible_base_url = ai_credentials.openai_compatible_base_url
                         if openai_compatible_model is None and ai_credentials.openai_compatible_model:
                             openai_compatible_model = ai_credentials.openai_compatible_model
+                    # For OpenCode-specific types (openai, google), try resolving
+                    # from the user's named default credentials
+                    if openai_api_key is None:
+                        openai_default = ai_credentials_service.get_default_for_type(
+                            db_session, user.id, AICredentialType.OPENAI
+                        )
+                        if openai_default:
+                            openai_api_key = ai_credentials_service.decrypt_credential(openai_default).api_key
+                    if google_api_key is None:
+                        google_default = ai_credentials_service.get_default_for_type(
+                            db_session, user.id, AICredentialType.GOOGLE
+                        )
+                        if google_default:
+                            google_api_key = ai_credentials_service.decrypt_credential(google_default).api_key
 
                 # Regenerate MiniMax settings if needed
                 if uses_minimax and minimax_api_key:
@@ -917,6 +949,21 @@ class EnvironmentLifecycleManager:
                         sdk_conversation
                     )
                     logger.info(f"Regenerated OpenAI Compatible settings files after rebuild for environment {environment.id}")
+
+                # Regenerate OpenCode config files if needed
+                uses_opencode = sdk_conversation.startswith("opencode") or sdk_building.startswith("opencode")
+                if uses_opencode:
+                    self._generate_opencode_config_files(
+                        instance_dir,
+                        environment,
+                        anthropic_api_key=anthropic_api_key,
+                        openai_api_key=openai_api_key,
+                        openai_compatible_api_key=openai_compatible_api_key,
+                        openai_compatible_base_url=openai_compatible_base_url,
+                        openai_compatible_model=openai_compatible_model,
+                        google_api_key=google_api_key,
+                    )
+                    logger.info(f"Regenerated OpenCode config files after rebuild for environment {environment.id}")
 
             # If container was restarted, setup new container and sync data
             if was_running:
@@ -1101,7 +1148,9 @@ class EnvironmentLifecycleManager:
         minimax_api_key: str | None = None,
         openai_compatible_api_key: str | None = None,
         openai_compatible_base_url: str | None = None,
-        openai_compatible_model: str | None = None
+        openai_compatible_model: str | None = None,
+        openai_api_key: str | None = None,
+        google_api_key: str | None = None,
     ):
         """
         Update environment configuration files.
@@ -1127,6 +1176,8 @@ class EnvironmentLifecycleManager:
             openai_compatible_api_key: User's OpenAI Compatible API key (optional)
             openai_compatible_base_url: User's OpenAI Compatible base URL (optional)
             openai_compatible_model: User's OpenAI Compatible model (optional)
+            openai_api_key: OpenAI API key (for opencode/openai)
+            google_api_key: Google API key (for opencode/google)
         """
         # 1. Generate new auth token
         auth_token = self._generate_auth_token(agent.owner_id)
@@ -1145,91 +1196,89 @@ class EnvironmentLifecycleManager:
         user = db_session.get(User, agent.owner_id)
 
         from app.services.ai_credentials_service import ai_credentials_service
-        from app.models.ai_credential import AICredentialType
-
-        # SDK to credential type mapping
-        SDK_TO_CREDENTIAL_TYPE = {
-            "claude-code/anthropic": AICredentialType.ANTHROPIC,
-            "claude-code/minimax": AICredentialType.MINIMAX,
-            "google-adk-wr/openai-compatible": AICredentialType.OPENAI_COMPATIBLE,
-        }
 
         sdk_conversation = environment.agent_sdk_conversation or "claude-code/anthropic"
         sdk_building = environment.agent_sdk_building or "claude-code/anthropic"
+
+        # Build a credential bag from the caller-supplied values
+        bag = {
+            "anthropic_api_key": anthropic_api_key,
+            "minimax_api_key": minimax_api_key,
+            "openai_compatible_api_key": openai_compatible_api_key,
+            "openai_compatible_base_url": openai_compatible_base_url,
+            "openai_compatible_model": openai_compatible_model,
+            "openai_api_key": openai_api_key,
+            "google_api_key": google_api_key,
+        }
 
         # Track if specific credentials are assigned (to prevent fallback)
         has_assigned_conversation_credential = environment.conversation_ai_credential_id is not None
         has_assigned_building_credential = environment.building_ai_credential_id is not None
 
-        # Resolve conversation credential if stored on environment
-        if environment.conversation_ai_credential_id and user:
-            conv_cred_data = ai_credentials_service.get_credential_for_use(
-                db_session, environment.conversation_ai_credential_id, user.id
+        def _resolve_assigned_credential(credential_id, sdk_id, label):
+            """Resolve an assigned credential into the bag (only fills None slots)."""
+            if not credential_id or not user:
+                return
+            cred_data = ai_credentials_service.get_credential_for_use(
+                db_session, credential_id, user.id
             )
-            if conv_cred_data:
-                cred_type = SDK_TO_CREDENTIAL_TYPE.get(sdk_conversation)
-                if cred_type == AICredentialType.ANTHROPIC and anthropic_api_key is None:
-                    anthropic_api_key = conv_cred_data.api_key
-                    logger.debug(f"Fetched ANTHROPIC_API_KEY from assigned credential for environment {environment.id}")
-                elif cred_type == AICredentialType.MINIMAX and minimax_api_key is None:
-                    minimax_api_key = conv_cred_data.api_key
-                    logger.debug(f"Fetched MINIMAX_API_KEY from assigned credential for environment {environment.id}")
-                elif cred_type == AICredentialType.OPENAI_COMPATIBLE:
-                    if openai_compatible_api_key is None:
-                        openai_compatible_api_key = conv_cred_data.api_key
-                        logger.debug(f"Fetched OPENAI_COMPATIBLE_API_KEY from assigned credential for environment {environment.id}")
-                    if openai_compatible_base_url is None:
-                        openai_compatible_base_url = conv_cred_data.base_url
-                    if openai_compatible_model is None:
-                        openai_compatible_model = conv_cred_data.model
+            if cred_data:
+                cred_type = SDK_TO_CREDENTIAL_TYPE.get(sdk_id)
+                if cred_type:
+                    # Only fill keys that are still None
+                    temp_bag = make_empty_credential_bag()
+                    apply_credential_to_bag(temp_bag, cred_type, cred_data)
+                    for key, val in temp_bag.items():
+                        if val is not None and bag[key] is None:
+                            bag[key] = val
+                    logger.debug(f"Resolved {label} credential for environment {environment.id}")
             else:
-                logger.warning(f"Assigned conversation credential {environment.conversation_ai_credential_id} not accessible for environment {environment.id}")
+                logger.warning(f"Assigned {label} credential {credential_id} not accessible for environment {environment.id}")
 
-        # Resolve building credential if stored on environment
-        if environment.building_ai_credential_id and user:
-            build_cred_data = ai_credentials_service.get_credential_for_use(
-                db_session, environment.building_ai_credential_id, user.id
-            )
-            if build_cred_data:
-                cred_type = SDK_TO_CREDENTIAL_TYPE.get(sdk_building)
-                if cred_type == AICredentialType.ANTHROPIC and anthropic_api_key is None:
-                    anthropic_api_key = build_cred_data.api_key
-                    logger.debug(f"Fetched ANTHROPIC_API_KEY from assigned building credential for environment {environment.id}")
-                elif cred_type == AICredentialType.MINIMAX and minimax_api_key is None:
-                    minimax_api_key = build_cred_data.api_key
-                    logger.debug(f"Fetched MINIMAX_API_KEY from assigned building credential for environment {environment.id}")
-                elif cred_type == AICredentialType.OPENAI_COMPATIBLE:
-                    if openai_compatible_api_key is None:
-                        openai_compatible_api_key = build_cred_data.api_key
-                        logger.debug(f"Fetched OPENAI_COMPATIBLE_API_KEY from assigned building credential for environment {environment.id}")
-                    if openai_compatible_base_url is None:
-                        openai_compatible_base_url = build_cred_data.base_url
-                    if openai_compatible_model is None:
-                        openai_compatible_model = build_cred_data.model
-            else:
-                logger.warning(f"Assigned building credential {environment.building_ai_credential_id} not accessible for environment {environment.id}")
+        # Resolve conversation and building credentials if stored on environment
+        _resolve_assigned_credential(
+            environment.conversation_ai_credential_id, sdk_conversation, "conversation"
+        )
+        _resolve_assigned_credential(
+            environment.building_ai_credential_id, sdk_building, "building"
+        )
 
         # Fall back to user's profile credentials ONLY if no specific credentials are assigned
-        # If credentials were specifically assigned but not accessible, do NOT fall back
         if user and not has_assigned_conversation_credential and not has_assigned_building_credential:
             ai_credentials = ai_credentials_service.get_user_ai_credentials(user=user)
             if ai_credentials:
-                if anthropic_api_key is None and ai_credentials.anthropic_api_key:
-                    anthropic_api_key = ai_credentials.anthropic_api_key
-                    logger.debug(f"Fetched ANTHROPIC_API_KEY from user profile for environment {environment.id}")
-                if minimax_api_key is None and ai_credentials.minimax_api_key:
-                    minimax_api_key = ai_credentials.minimax_api_key
-                    logger.debug(f"Fetched MINIMAX_API_KEY from user profile for environment {environment.id}")
-                # Fetch OpenAI Compatible credentials
-                if openai_compatible_api_key is None and ai_credentials.openai_compatible_api_key:
-                    openai_compatible_api_key = ai_credentials.openai_compatible_api_key
-                    logger.debug(f"Fetched OPENAI_COMPATIBLE_API_KEY from user profile for environment {environment.id}")
-                if openai_compatible_base_url is None and ai_credentials.openai_compatible_base_url:
-                    openai_compatible_base_url = ai_credentials.openai_compatible_base_url
-                    logger.debug(f"Fetched OPENAI_COMPATIBLE_BASE_URL from user profile for environment {environment.id}")
-                if openai_compatible_model is None and ai_credentials.openai_compatible_model:
-                    openai_compatible_model = ai_credentials.openai_compatible_model
-                    logger.debug(f"Fetched OPENAI_COMPATIBLE_MODEL from user profile for environment {environment.id}")
+                if bag["anthropic_api_key"] is None and ai_credentials.anthropic_api_key:
+                    bag["anthropic_api_key"] = ai_credentials.anthropic_api_key
+                if bag["minimax_api_key"] is None and ai_credentials.minimax_api_key:
+                    bag["minimax_api_key"] = ai_credentials.minimax_api_key
+                if bag["openai_compatible_api_key"] is None and ai_credentials.openai_compatible_api_key:
+                    bag["openai_compatible_api_key"] = ai_credentials.openai_compatible_api_key
+                if bag["openai_compatible_base_url"] is None and ai_credentials.openai_compatible_base_url:
+                    bag["openai_compatible_base_url"] = ai_credentials.openai_compatible_base_url
+                if bag["openai_compatible_model"] is None and ai_credentials.openai_compatible_model:
+                    bag["openai_compatible_model"] = ai_credentials.openai_compatible_model
+            # For OpenCode-specific types, try named default credentials
+            if bag["openai_api_key"] is None:
+                openai_default = ai_credentials_service.get_default_for_type(
+                    db_session, user.id, AICredentialType.OPENAI
+                )
+                if openai_default:
+                    bag["openai_api_key"] = ai_credentials_service.decrypt_credential(openai_default).api_key
+            if bag["google_api_key"] is None:
+                google_default = ai_credentials_service.get_default_for_type(
+                    db_session, user.id, AICredentialType.GOOGLE
+                )
+                if google_default:
+                    bag["google_api_key"] = ai_credentials_service.decrypt_credential(google_default).api_key
+
+        # Unpack bag back to local vars for downstream methods that use positional args
+        anthropic_api_key = bag["anthropic_api_key"]
+        minimax_api_key = bag["minimax_api_key"]
+        openai_compatible_api_key = bag["openai_compatible_api_key"]
+        openai_compatible_base_url = bag["openai_compatible_base_url"]
+        openai_compatible_model = bag["openai_compatible_model"]
+        openai_api_key = bag["openai_api_key"]
+        google_api_key = bag["google_api_key"]
 
         # 4. Generate docker-compose.yml
         self._generate_compose_file(instance_dir, environment, agent, port, auth_token)
@@ -1243,6 +1292,20 @@ class EnvironmentLifecycleManager:
 
         # 6. Write Claude Code PreToolUse hook settings for credential access detection
         self._write_claude_code_hook_settings(instance_dir, environment)
+
+        # 7. Generate OpenCode config files if any mode uses the opencode SDK
+        uses_opencode = sdk_conversation.startswith("opencode") or sdk_building.startswith("opencode")
+        if uses_opencode:
+            self._generate_opencode_config_files(
+                instance_dir,
+                environment,
+                anthropic_api_key=anthropic_api_key,
+                openai_api_key=openai_api_key,
+                openai_compatible_api_key=openai_compatible_api_key,
+                openai_compatible_base_url=openai_compatible_base_url,
+                openai_compatible_model=openai_compatible_model,
+                google_api_key=google_api_key,
+            )
 
         logger.info(f"Updated configuration files for environment {environment.id}")
 
@@ -1537,6 +1600,187 @@ SDK_ADAPTER_CONVERSATION={sdk_conversation}
             with open(conversation_settings_path, 'w') as f:
                 json.dump(minimax_settings, f, indent=2)
             logger.info(f"Generated MiniMax conversation settings for environment {environment.id}")
+
+    def _generate_opencode_config_files(
+        self,
+        instance_dir: Path,
+        environment: AgentEnvironment,
+        anthropic_api_key: str | None = None,
+        openai_api_key: str | None = None,
+        openai_compatible_api_key: str | None = None,
+        openai_compatible_base_url: str | None = None,
+        openai_compatible_model: str | None = None,
+        google_api_key: str | None = None,
+    ):
+        """
+        Generate OpenCode config files in the core .opencode folder.
+
+        Creates per-mode config files that are read by the OpenCodeAdapter at
+        runtime. Each file combines opencode.json settings with auth credentials
+        so the adapter can load everything from a single file.
+
+        Files are placed in /app/core/.opencode/ inside the container
+        (host path: instance_dir/app/core/.opencode/).
+
+        Note: Since core files are replaced during rebuild, this method must be
+        called AFTER the core files are copied from template.
+
+        Args:
+            instance_dir: Environment instance directory
+            environment: Environment model
+            anthropic_api_key: Anthropic API key
+            openai_api_key: OpenAI API key
+            openai_compatible_api_key: OpenAI-compatible API key
+            openai_compatible_base_url: OpenAI-compatible base URL
+            openai_compatible_model: OpenAI-compatible model name
+            google_api_key: Google API key
+        """
+        import json as _json
+
+        sdk_conversation = environment.agent_sdk_conversation or "claude-code/anthropic"
+        sdk_building = environment.agent_sdk_building or "claude-code/anthropic"
+
+        # Create .opencode directory inside the instance core folder
+        opencode_dir = instance_dir / "app" / "core" / ".opencode"
+        opencode_dir.mkdir(parents=True, exist_ok=True)
+
+        # Default models per provider per mode
+        _default_models = {
+            "anthropic": {
+                "building": "anthropic/claude-sonnet-4-5",
+                "conversation": "anthropic/claude-haiku-4-5-20251001",
+            },
+            "openai": {
+                "building": "openai/gpt-4o",
+                "conversation": "openai/gpt-4o-mini",
+            },
+            "openai_compatible": {
+                "building": openai_compatible_model or "openai/gpt-4",
+                "conversation": openai_compatible_model or "openai/gpt-4",
+            },
+            "google": {
+                "building": "google/gemini-2.5-pro",
+                "conversation": "google/gemini-2.5-flash",
+            },
+        }
+
+        def _get_provider_from_sdk(sdk_value: str) -> str:
+            """Extract the provider from an SDK value like 'opencode/anthropic'."""
+            if "/" in sdk_value:
+                return sdk_value.split("/", 1)[1]
+            return "anthropic"  # default
+
+        def _build_auth(provider: str) -> dict:
+            """Build the auth section for the given provider."""
+            auth: dict = {}
+            if provider in ("anthropic", "default") and anthropic_api_key:
+                auth["anthropic"] = anthropic_api_key
+            elif provider == "openai" and openai_api_key:
+                auth["openai"] = openai_api_key
+            elif provider == "openai_compatible" and openai_compatible_api_key:
+                auth["openai-compatible"] = openai_compatible_api_key
+            elif provider == "google" and google_api_key:
+                auth["google"] = google_api_key
+            return auth
+
+        def _build_config(mode: str, sdk_value: str) -> dict:
+            """Build a complete opencode config dict for a given mode."""
+            provider = _get_provider_from_sdk(sdk_value)
+
+            # Determine model: explicit override → provider+mode default
+            model_override = (
+                environment.model_override_building if mode == "building"
+                else environment.model_override_conversation
+            )
+            provider_defaults = _default_models.get(provider, _default_models.get("anthropic", {}))
+            model = model_override or provider_defaults.get(mode, "anthropic/claude-sonnet-4-5")
+
+            auth = _build_auth(provider)
+
+            # MCP bridge servers expose platform custom tools to OpenCode agents.
+            # All three servers are registered for both modes so the agent can
+            # use whichever is relevant based on the system prompt instructions.
+            mcp_bridge_servers = {
+                "knowledge": {
+                    "type": "local",
+                    "command": [
+                        "python3",
+                        "/app/core/server/tools/mcp_bridge/knowledge_server.py",
+                    ],
+                    "enabled": True,
+                },
+                "task": {
+                    "type": "local",
+                    "command": [
+                        "python3",
+                        "/app/core/server/tools/mcp_bridge/task_server.py",
+                    ],
+                    "enabled": True,
+                },
+                "collaboration": {
+                    "type": "local",
+                    "command": [
+                        "python3",
+                        "/app/core/server/tools/mcp_bridge/collaboration_server.py",
+                    ],
+                    "enabled": True,
+                },
+            }
+
+            config = {
+                "$schema": "https://opencode.ai/config.json",
+                "model": model,
+                "permission": {"*": "allow"},
+                "tools": {
+                    "webfetch": True,
+                    "websearch": True,
+                    "bash": True,
+                    "read": True,
+                    "write": True,
+                    "edit": True,
+                    "glob": True,
+                    "grep": True,
+                    "list": True,
+                    "patch": True,
+                },
+                "mcp": mcp_bridge_servers,
+                "server": {
+                    "port": 4096,
+                    "hostname": "127.0.0.1",
+                },
+                "auth": auth,
+            }
+
+            return config
+
+        # Generate building mode config if building uses opencode
+        if sdk_building.startswith("opencode"):
+            building_config = _build_config("building", sdk_building)
+            building_config_path = opencode_dir / "building_config.json"
+            with open(building_config_path, 'w') as f:
+                _json.dump(building_config, f, indent=2)
+            logger.info(f"Generated OpenCode building config for environment {environment.id}")
+
+        # Generate conversation mode config if conversation uses opencode
+        if sdk_conversation.startswith("opencode"):
+            conversation_config = _build_config("conversation", sdk_conversation)
+            conversation_config_path = opencode_dir / "conversation_config.json"
+            with open(conversation_config_path, 'w') as f:
+                _json.dump(conversation_config, f, indent=2)
+            logger.info(f"Generated OpenCode conversation config for environment {environment.id}")
+
+        # Write a shared auth.json using the first available opencode mode's provider
+        # This is the credentials file that opencode serve reads on startup
+        first_opencode_sdk = sdk_building if sdk_building.startswith("opencode") else sdk_conversation
+        provider = _get_provider_from_sdk(first_opencode_sdk)
+        shared_auth = _build_auth(provider)
+        if shared_auth:
+            auth_path = opencode_dir / "auth.json"
+            with open(auth_path, 'w') as f:
+                _json.dump(shared_auth, f, indent=2)
+            # Restrict file permissions so credentials are not world-readable
+            auth_path.chmod(0o600)
+            logger.info(f"Generated OpenCode auth.json for environment {environment.id}")
 
     def _write_claude_code_hook_settings(self, instance_dir: Path, environment: AgentEnvironment):
         """

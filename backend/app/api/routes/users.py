@@ -32,6 +32,7 @@ from app.models.user import (
     VALID_SDK_OPTIONS,
     VALID_AI_FUNCTIONS_SDK_OPTIONS,
 )
+from app.services.sdk_constants import is_valid_sdk
 from app.models.ai_credential import (
     AICredentialType,
     AICredentialCreate,
@@ -110,15 +111,15 @@ def update_user_me(
                 status_code=409, detail="User with this email already exists"
             )
     # Validate SDK values if provided
-    if user_in.default_sdk_conversation and user_in.default_sdk_conversation not in VALID_SDK_OPTIONS:
+    if user_in.default_sdk_conversation and not is_valid_sdk(user_in.default_sdk_conversation):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid SDK for conversation mode. Must be one of: {VALID_SDK_OPTIONS}",
+            detail="Invalid SDK for conversation mode",
         )
-    if user_in.default_sdk_building and user_in.default_sdk_building not in VALID_SDK_OPTIONS:
+    if user_in.default_sdk_building and not is_valid_sdk(user_in.default_sdk_building):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid SDK for building mode. Must be one of: {VALID_SDK_OPTIONS}",
+            detail="Invalid SDK for building mode",
         )
     if user_in.default_ai_functions_sdk and user_in.default_ai_functions_sdk not in VALID_AI_FUNCTIONS_SDK_OPTIONS:
         raise HTTPException(
@@ -352,14 +353,20 @@ def get_ai_credentials_status(
     openai_compat_default = ai_credentials_service.get_default_for_type(
         session, current_user.id, AICredentialType.OPENAI_COMPATIBLE
     )
+    openai_default = ai_credentials_service.get_default_for_type(
+        session, current_user.id, AICredentialType.OPENAI
+    )
+    google_default = ai_credentials_service.get_default_for_type(
+        session, current_user.id, AICredentialType.GOOGLE
+    )
 
     return UserPublicWithAICredentials(
         **current_user.model_dump(),
         has_google_account=bool(current_user.google_id),
         has_password=bool(current_user.hashed_password),
         has_anthropic_api_key=anthropic_default is not None,
-        has_openai_api_key=False,  # Not yet supported in AICredential model
-        has_google_ai_api_key=False,  # Not yet supported in AICredential model
+        has_openai_api_key=openai_default is not None,
+        has_google_ai_api_key=google_default is not None,
         has_minimax_api_key=minimax_default is not None,
         has_openai_compatible_api_key=openai_compat_default is not None,
     )

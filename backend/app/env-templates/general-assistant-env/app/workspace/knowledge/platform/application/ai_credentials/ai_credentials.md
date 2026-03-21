@@ -8,18 +8,23 @@ Enable users to manage multiple named AI credentials (API keys) for different LL
 
 - **Named AI Credential** - Reusable, encrypted API key with a user-defined name (e.g., "Production Anthropic", "Testing OpenAI")
 - **Default Credential** - One credential per type marked as default; auto-synced to user profile for backward compatibility
-- **Credential Type** - Provider category: `anthropic`, `minimax`, `openai_compatible`
+- **Prioritized Default Resolution** - When "Use Default" is selected for an SDK engine, the system finds the best matching default credential using priority: Anthropic > Google (Gemini) > OpenAI > any other compatible type (oldest first)
+- **Credential Type** - Provider category: `anthropic`, `minimax`, `openai`, `openai_compatible`, `google`
 - **Auto-Sync** - When a credential is set as default, its values are copied to the user's profile fields (`ai_credentials_encrypted`) so existing code continues working
 - **Environment Linking** - Environments can use default credentials or be explicitly linked to specific credentials
 - **Credential Provision** - Agent owners can attach their AI credentials when sharing, so recipients don't need their own
 
 ## Credential Types
 
-| Type | SDK ID | Required Fields |
-|------|--------|-----------------|
-| `anthropic` | `claude-code/anthropic` | `api_key` |
-| `minimax` | `claude-code/minimax` | `api_key` |
-| `openai_compatible` | `google-adk-wr/openai-compatible` | `api_key`, `base_url`, `model` |
+| Type | Required Fields | Optional Fields | Compatible SDK Engines |
+|------|-----------------|-----------------|------------------------|
+| `anthropic` | `api_key` | — | `claude-code`, `opencode` |
+| `minimax` | `api_key` | — | `claude-code` |
+| `openai` | `api_key` | — | `opencode` |
+| `openai_compatible` | `api_key`, `base_url`, `model` | — | `opencode`, `google-adk-wr` |
+| `google` | `api_key` | `base_url` | `opencode`, `google-adk-wr` |
+
+Note: `anthropic` credentials also support OAuth tokens (prefix `sk-ant-oat*`) — see [Anthropic Credential Types](anthropic_credential_types.md).
 
 ## User Stories / Flows
 
@@ -32,18 +37,30 @@ Enable users to manage multiple named AI credentials (API keys) for different LL
 5. Credential is encrypted and stored
 6. If marked as default, previous default for that type is unset, and values sync to user profile
 
+### Setting Up API Keys and Defaults
+
+1. User opens User Settings > AI Credentials
+2. The **Default SDK Preferences** panel shows compact summary rows for Conversation and Building modes, each displaying: SDK engine name, resolved credential, and model override (if set)
+3. User clicks the **Edit** (pencil) button on a mode row to open a modal dialog with the cascading three-step selection:
+   - **Step 1 — SDK Engine**: Claude Code, OpenCode, or Google ADK (simplified)
+   - **Step 2 — Credential**: Dropdown filtered to credentials compatible with the chosen engine; first option is "Use Default" with a resolved default indicator showing which credential will actually be used (via prioritized resolution)
+   - **Step 3 — Model Override** (optional): Free-text field with suggestions; leave empty to use the SDK adapter's built-in default
+4. User clicks **Save** in the modal — values for that mode are saved
+5. Saved defaults pre-populate the Add Environment dialog on future environment creation
+
 ### Using Default Credentials with Environments
 
-1. User creates an environment with `use_default_ai_credentials = true` (default)
-2. Backend resolves the user's default credentials for each SDK type
-3. Credentials injected into container `.env` file
-4. If no default exists for a required type, an error is returned
+1. User opens the Add Environment dialog
+2. Conversation and Building modes are shown as compact summary rows pre-populated from the user's saved default preferences
+3. User clicks the **Edit** (pencil) button on a mode row to open a modal with SDK engine, credential, and model override fields
+4. If left on "Default", the resolved default indicator shows which credential will be used (prioritized resolution: Anthropic > Google > OpenAI > other compatible defaults)
+5. Credentials injected into the container `.env` or SDK config files
 
 ### Using Specific Credentials with Environments
 
-1. User creates environment, toggles "Use Default AI Credentials" OFF
-2. Selects specific credentials from dropdowns (filtered by SDK type)
-3. Backend validates credentials match SDK requirements
+1. User opens Add Environment dialog and clicks Edit on a mode row
+2. Selects a specific credential from the dropdown (filtered by the chosen SDK engine)
+3. Backend validates the selected credential type matches the SDK engine compatibility rules
 4. Environment created with explicit credential links
 
 ### Sharing Agent WITH AI Credentials
@@ -76,14 +93,15 @@ Enable users to manage multiple named AI credentials (API keys) for different LL
 ## Business Rules
 
 - **One default per type** - Setting a new default automatically unsets the previous one for the same type
+- **Prioritized default resolution** - When resolving which default credential to use for an SDK engine, priority order is: Anthropic > Google (Gemini) > OpenAI > any other compatible type ordered by creation date (oldest first). Only credentials marked as default AND compatible with the SDK engine are considered
 - **Auto-sync on default** - Default credential values are always copied to user profile fields
 - **Profile cleared on delete** - If the deleted credential was the default, corresponding user profile fields are cleared
 - **Ownership validation** - All operations verify the credential belongs to the requesting user
 - **Cascade delete** - Deleting a user cascades to all their credentials
 - **Type immutable on edit** - Credential type cannot be changed after creation
 - **Name required** - Max 255 characters
-- **API key required** - For all types
-- **Base URL + Model required** - Only for `openai_compatible` type
+- **API key required** - For all credential types
+- **Base URL + Model required** - Only for `openai_compatible` type; base URL is optional for `google`
 - **Keys never exposed** - API responses show `has_api_key: true` instead of the actual key
 - **Share access control** - Shared credentials can only be used, not modified, by recipients
 
@@ -94,9 +112,17 @@ User creates AI Credential → Encrypted storage in ai_credential table
                           ↓
 User sets as default → Auto-sync to user.ai_credentials_encrypted
                           ↓
-Environment creation → Resolves credentials (default or explicit link)
+User saves Default SDK Preferences → Stored as:
+  user.default_sdk_conversation / default_sdk_building (engine+type)
+  user.default_ai_credential_conversation_id / _building_id (FK → ai_credential)
+  user.default_model_override_conversation / _building (optional string)
                           ↓
-Container startup → Credentials injected into .env file
+Environment creation → Resolves credentials:
+  explicit credential ID from request
+  → or user.default_ai_credential_*_id (named credential default)
+  → or user.ai_credentials_encrypted (legacy flat default, for backward compat)
+                          ↓
+Container startup → Credentials injected into .env file or SDK config files
 ```
 
 ```
@@ -119,4 +145,4 @@ Clone created → Uses owner's shared or recipient's own credentials
 
 ---
 
-*Last updated: 2026-03-02*
+*Last updated: 2026-03-21*

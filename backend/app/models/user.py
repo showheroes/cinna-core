@@ -49,6 +49,11 @@ class UserUpdateMe(SQLModel):
     default_ai_functions_sdk: str | None = Field(default=None, max_length=50)
     default_ai_functions_credential_id: uuid.UUID | None = None
     general_assistant_enabled: bool | None = None
+    # Default credential and model override per mode
+    default_ai_credential_conversation_id: uuid.UUID | None = None
+    default_ai_credential_building_id: uuid.UUID | None = None
+    default_model_override_conversation: str | None = Field(default=None, max_length=255)
+    default_model_override_building: str | None = Field(default=None, max_length=255)
 
 
 class UpdatePassword(SQLModel):
@@ -70,6 +75,20 @@ class User(UserBase, table=True):
     default_ai_functions_sdk: str | None = Field(default="system", max_length=50)
     # Specific credential ID for AI functions (None = use default for type)
     default_ai_functions_credential_id: uuid.UUID | None = Field(default=None)
+    # Default named credential per mode (FK to ai_credential table)
+    default_ai_credential_conversation_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="ai_credential.id",
+        ondelete="SET NULL",
+    )
+    default_ai_credential_building_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="ai_credential.id",
+        ondelete="SET NULL",
+    )
+    # Default model override per mode
+    default_model_override_conversation: str | None = Field(default=None, max_length=255)
+    default_model_override_building: str | None = Field(default=None, max_length=255)
     # General Assistant feature flag
     general_assistant_enabled: bool = Field(default=False)
     items: List["app.models.item.Item"] = Relationship(back_populates="owner", cascade_delete=True)
@@ -87,6 +106,11 @@ class UserPublic(UserBase):
     default_ai_functions_sdk: str | None = "system"
     default_ai_functions_credential_id: uuid.UUID | None = None
     general_assistant_enabled: bool = False
+    # Default credential and model override per mode
+    default_ai_credential_conversation_id: uuid.UUID | None = None
+    default_ai_credential_building_id: uuid.UUID | None = None
+    default_model_override_conversation: str | None = None
+    default_model_override_building: str | None = None
 
 
 class UsersPublic(SQLModel):

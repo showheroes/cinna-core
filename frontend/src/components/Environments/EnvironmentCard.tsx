@@ -15,12 +15,28 @@ const getTemplateDisplayName = (envName: string): string => {
   return envName
 }
 
-// Helper to get SDK display name
+// Helper to get SDK display name from full SDK ID or engine prefix
 const getSDKDisplayName = (sdk: string | null | undefined): string => {
-  if (!sdk || sdk === "claude-code/anthropic") return "Anthropic"
+  if (!sdk) return "Anthropic"
+  if (sdk === "claude-code/anthropic" || sdk === "claude-code") return "Claude Code"
   if (sdk === "claude-code/minimax") return "MiniMax"
-  if (sdk === "google-adk-wr/openai-compatible") return "OpenAI Compatible"
-  return sdk
+  if (sdk === "google-adk-wr/openai-compatible" || sdk === "google-adk-wr") return "Google ADK"
+  if (sdk === "opencode" || sdk === "opencode/anthropic") return "OpenCode"
+  // OpenCode with specific provider — show provider in parentheses
+  if (sdk === "opencode/openai") return "OpenCode (OpenAI)"
+  if (sdk === "opencode/openai_compatible") return "OpenCode (Custom)"
+  if (sdk === "opencode/google") return "OpenCode (Google)"
+  if (sdk.startsWith("opencode/")) return "OpenCode"
+  // For any other engine/provider format, capitalize the engine part
+  const engine = sdk.includes("/") ? sdk.split("/")[0] : sdk
+  return engine.charAt(0).toUpperCase() + engine.slice(1)
+}
+
+// Helper to build SDK badge label with optional model override
+const getSDKBadgeLabel = (sdk: string | null | undefined, modelOverride?: string | null): string => {
+  const name = getSDKDisplayName(sdk)
+  if (modelOverride) return `${name} · ${modelOverride}`
+  return name
 }
 
 interface EnvironmentCardProps {
@@ -139,11 +155,11 @@ export function EnvironmentCard({ environment, agentId, onActivate }: Environmen
               </Badge>
               <Badge variant="outline" className="text-xs gap-1">
                 <MessageCircle className="h-3 w-3" />
-                {getSDKDisplayName(environment.agent_sdk_conversation)}
+                {getSDKBadgeLabel(environment.agent_sdk_conversation, environment.model_override_conversation)}
               </Badge>
               <Badge variant="outline" className="text-xs gap-1">
                 <Wrench className="h-3 w-3" />
-                {getSDKDisplayName(environment.agent_sdk_building)}
+                {getSDKBadgeLabel(environment.agent_sdk_building, environment.model_override_building)}
               </Badge>
             </div>
             {environment.last_health_check && (

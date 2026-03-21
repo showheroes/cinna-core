@@ -12,9 +12,13 @@ if TYPE_CHECKING:
 
 class AICredentialType(str, Enum):
     """Type of AI credential/SDK provider"""
+    # Existing types (backward compat)
     ANTHROPIC = "anthropic"
     MINIMAX = "minimax"
     OPENAI_COMPATIBLE = "openai_compatible"
+    # New types added for OpenCode and expanded SDK support
+    OPENAI = "openai"
+    GOOGLE = "google"
 
 
 # Shared properties
@@ -29,8 +33,10 @@ class AICredentialBase(SQLModel):
 class AICredentialCreate(AICredentialBase):
     """Create AI credential with sensitive data"""
     api_key: str = Field(min_length=1)
-    # Only for openai_compatible type
+    # Optional fields — used depending on credential type
+    # openai_compatible, google: base_url (optional endpoint override)
     base_url: str | None = Field(default=None, max_length=500)
+    # openai_compatible: required default model name
     model: str | None = Field(default=None, max_length=255)
 
 
@@ -39,7 +45,7 @@ class AICredentialUpdate(SQLModel):
     """Update AI credential (partial update)"""
     name: str | None = Field(default=None, min_length=1, max_length=255)
     api_key: str | None = Field(default=None, min_length=1)
-    # Only for openai_compatible type
+    # Optional fields for various types
     base_url: str | None = Field(default=None, max_length=500)
     model: str | None = Field(default=None, max_length=255)
     expiry_notification_date: datetime | None = Field(default=None)
@@ -66,7 +72,9 @@ class AICredential(AICredentialBase, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
-    owner: "User" = Relationship()
+    owner: "User" = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[AICredential.owner_id]"}
+    )
 
 
 # Properties to return via API
@@ -76,9 +84,9 @@ class AICredentialPublic(AICredentialBase):
     is_default: bool
     has_api_key: bool = True  # Always true for existing credentials
     is_oauth_token: bool = False  # True if this is an OAuth token (sk-ant-oat*)
-    # Safe to expose for openai_compatible
-    base_url: str | None = None
-    model: str | None = None
+    # Safe to expose (no secret data)
+    base_url: str | None = None     # For openai_compatible, google
+    model: str | None = None        # For openai_compatible
     expiry_notification_date: datetime | None = None
     created_at: datetime
     updated_at: datetime

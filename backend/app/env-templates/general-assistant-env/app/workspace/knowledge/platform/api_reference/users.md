@@ -51,7 +51,13 @@ Auto-generated from OpenAPI spec. Tag: `users`
   - `username`: string | null
   - `default_sdk_conversation`: string | null
   - `default_sdk_building`: string | null
+  - `default_ai_functions_sdk`: string | null
+  - `default_ai_functions_credential_id`: string | null
   - `general_assistant_enabled`: boolean | null
+  - `default_ai_credential_conversation_id`: string | null
+  - `default_ai_credential_building_id`: string | null
+  - `default_model_override_conversation`: string | null
+  - `default_model_override_building`: string | null
 
 **Response:** `UserPublic`
 

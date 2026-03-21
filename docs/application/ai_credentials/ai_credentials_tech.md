@@ -10,7 +10,7 @@
 - `backend/app/models/user.py` - `ai_credentials_encrypted` field (sync target)
 
 **Routes:**
-- `backend/app/api/routes/ai_credentials.py` - CRUD + set-default + affected-environments endpoints
+- `backend/app/api/routes/ai_credentials.py` - CRUD + set-default + affected-environments + resolve-default endpoints
 - `backend/app/api/main.py` - Router registration
 
 **Services:**
@@ -42,7 +42,7 @@
 - `frontend/src/components/UserSettings/AICredentialDialog.tsx` - Add/edit dialog with type selector, auto-fill expiry
 - `frontend/src/components/UserSettings/AnthropicCredentialsModal.tsx` - Instructions modal for Anthropic API Key / OAuth setup
 - `frontend/src/components/UserSettings/AffectedEnvironmentsDialog.tsx` - Post-update rebuild dialog
-- `frontend/src/components/Environments/AddEnvironment.tsx` - Credential selection UI (default toggle + dropdowns)
+- `frontend/src/components/Environments/AddEnvironment.tsx` - Environment creation dialog with compact summary rows + `EnvModeEditDialog` modal for SDK/credential/model selection per mode
 - `frontend/src/components/Agents/AgentSharingTab.tsx` - Share dialog AI credentials toggle + selection
 - `frontend/src/components/Agents/AcceptShareWizard/WizardStepAICredentials.tsx` - Accept wizard credential step
 - `frontend/src/components/Agents/AcceptShareWizard/AcceptShareWizard.tsx` - Wizard flow with AI credentials step
@@ -59,7 +59,7 @@
 - `id` (UUID, PK)
 - `owner_id` (UUID, FK → user.id, CASCADE)
 - `name` (VARCHAR 255)
-- `type` (VARCHAR 50) - "anthropic" | "minimax" | "openai_compatible"
+- `type` (VARCHAR 50) - "anthropic" | "minimax" | "openai" | "openai_compatible" | "google"
 - `encrypted_data` (TEXT) - Fernet-encrypted JSON
 - `is_default` (BOOLEAN)
 - `expiry_notification_date` (DATETIME, nullable) - Informational expiry reminder
@@ -105,6 +105,7 @@ Indexes: `ix_ai_credential_shares_credential` (ai_credential_id), `ix_ai_credent
 | `GET` | `/api/v1/ai-credentials/{credential_id}` | Get credential details |
 | `PATCH` | `/api/v1/ai-credentials/{credential_id}` | Update credential |
 | `DELETE` | `/api/v1/ai-credentials/{credential_id}` | Delete credential |
+| `GET` | `/api/v1/ai-credentials/resolve-default/{sdk_engine}` | Resolve best default credential for SDK engine (prioritized) |
 | `POST` | `/api/v1/ai-credentials/{credential_id}/set-default` | Set as default, sync to user profile |
 | `GET` | `/api/v1/ai-credentials/{credential_id}/affected-environments` | Get environments using this credential |
 
@@ -122,6 +123,7 @@ Indexes: `ix_ai_credential_shares_credential` (ai_credential_id), `ix_ai_credent
 **Default Management:**
 - `set_default(session, credential_id, user_id)` - Unset previous default, set new, sync to profile
 - `get_default_for_type(session, user_id, cred_type)` - Get default credential for type
+- `resolve_default_credential_for_sdk(session, user_id, sdk_engine)` - Find best default credential for an SDK engine using prioritized resolution (Anthropic > Google > OpenAI > other compatible types by created_at ASC)
 
 **Sharing:**
 - `share_credential(session, credential_id, owner_id, recipient_id)` - Create share link
@@ -163,18 +165,24 @@ Indexes: `ix_ai_credential_shares_credential` (ai_credential_id), `ix_ai_credent
 - Credentials list card with compact rows: name, default star icon, expiry badge, type label, set-default/edit/delete buttons
 - Set default via star icon; triggers `AffectedEnvironmentsDialog` after success
 - Add button opens `AICredentialDialog`
-- SDK Preferences card with three sections:
-  1. Conversation Mode SDK selector (environment-level)
-  2. Building Mode SDK selector (environment-level)
-  3. AI Functions section (below separator, app-level): provider dropdown ("System (default)" / "Personal Anthropic") + conditional credential picker when "Personal Anthropic" is selected
-- Credential picker shows all Anthropic credentials; OAuth tokens (`is_oauth_token: true`) are shown as disabled with "(OAuth - incompatible)" suffix
-- OAuth warning alert shown if the selected or default credential is an OAuth token
-- Missing key warning alert shown if selected SDKs or AI functions provider lacks a default credential
+- SDK Preferences card with compact summary rows for Conversation and Building modes:
+  - Each row shows: mode icon, engine name (bold), resolved credential name (muted), model override if set
+  - Pencil button opens `SDKModeEditDialog` modal with SDK engine, credential, and model override fields
+  - Resolved default indicator shown in modal when "Use Default" is selected (calls `resolve-default/{sdk_engine}` endpoint)
+  - AI Functions section (below separator, app-level): provider dropdown + conditional credential picker
+
+### `SDKModeEditDialog` (inline in `AICredentials.tsx`)
+
+- Modal dialog for editing a single mode's SDK preferences (conversation or building)
+- Three-step cascading form: SDK Engine → Credential (with resolved default indicator) → Model Override
+- Saves only that mode's values; closes on success
 
 ### `AICredentialDialog.tsx` - Add/Edit Dialog
 
 - Name input, type selector (disabled when editing), API key (password field)
+- Supported types: `anthropic`, `minimax`, `openai`, `openai_compatible`, `google`
 - OpenAI Compatible: additional base_url and model inputs
+- Google: optional base_url
 - "Set as default" checkbox
 - Expiry notification date field with auto-fill for Anthropic OAuth tokens
 - Anthropic info banner with "Instructions" button opening `AnthropicCredentialsModal`
@@ -191,6 +199,7 @@ Indexes: `ix_ai_credential_shares_credential` (ai_credential_id), `ix_ai_credent
 **Query Keys:**
 - `["aiCredentialsList"]` - List of named credentials
 - `["aiCredentialsStatus"]` - User's credential status (has_* flags)
+- `["resolveDefaultCredential", sdkEngine]` - Resolved default credential for a given SDK engine
 
 **Mutations:**
 - Create/Update/Delete invalidate both query keys
@@ -213,4 +222,4 @@ Indexes: `ix_ai_credential_shares_credential` (ai_credential_id), `ix_ai_credent
 
 ---
 
-*Last updated: 2026-03-18*
+*Last updated: 2026-03-21*

@@ -24,6 +24,14 @@ Auto-generated from OpenAPI spec. Tag: `ai-credentials`
 
 ---
 
+## GET `/api/v1/ai-credentials/resolve-default/{sdk_engine}`
+**Resolve Default Credential**
+
+**Path parameters:**
+- `sdk_engine`: string
+
+---
+
 ## GET `/api/v1/ai-credentials/{credential_id}`
 **Get Ai Credential**
 

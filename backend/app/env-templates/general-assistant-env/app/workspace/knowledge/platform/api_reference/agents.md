@@ -148,6 +148,8 @@ Auto-generated from OpenAPI spec. Tag: `agents`
   - `config`: object
   - `agent_sdk_conversation`: string | null
   - `agent_sdk_building`: string | null
+  - `model_override_conversation`: string | null
+  - `model_override_building`: string | null
   - `use_default_ai_credentials`: boolean
   - `conversation_ai_credential_id`: string | null
   - `building_ai_credential_id`: string | null

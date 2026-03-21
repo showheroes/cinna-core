@@ -14,9 +14,11 @@ A FastAPI application deployed inside each Docker container at `/app/core/server
 
 Pluggable adapter system supporting multiple AI providers. Each adapter converts SDK-specific messages into a unified `SDKEvent` format. Adapters are registered via a decorator-based registry and selected at runtime based on environment variables.
 
-- **Adapter ID format**: `<adapter-type>/<provider>` (e.g., `claude-code/anthropic`, `claude-code/minimax`)
-- **Current adapters**: Claude Code (Anthropic, MiniMax)
-- **Placeholder adapters**: Google ADK (Gemini, Vertex AI)
+- **Adapter ID format**: `<adapter-type>/<provider>` (e.g., `claude-code/anthropic`, `opencode/openai`)
+- **Three SDK engines:**
+  - **Claude Code** — Anthropic's CLI agent SDK, communicates via Python subprocess (`claude_agent_sdk`). Supports `anthropic`, `minimax`.
+  - **OpenCode** — Open-source multi-provider agent running as an HTTP server (`opencode serve`). Supports `anthropic`, `openai`, `openai_compatible`, `google`. Custom tools are bridged via local MCP servers.
+  - **Google ADK** — Google's Agent Development Kit, runs in-process. Supports `openai_compatible`, `google`.
 
 ### Session Modes
 
@@ -103,8 +105,9 @@ Server-verified metadata injected into system prompts for integration-aware beha
 
 ### Model Selection
 
-- **Building mode**: Default model (Sonnet) for better code generation quality
-- **Conversation mode**: Haiku model for faster responses and lower cost
+- **Building mode**: Default model (Sonnet/larger) for better code generation quality
+- **Conversation mode**: Haiku/smaller model for faster responses and lower cost
+- **Model Override**: Each environment can specify an explicit model per mode (`model_override_building`, `model_override_conversation`). When set, this overrides the adapter's default. Examples: `claude-opus-4`, `gpt-4o`, `gemini-2.5-pro`.
 
 ### Session Context Verification
 
@@ -134,6 +137,10 @@ Backend ──HTTP POST──→ Environment Container (FastAPI)
                            ├──→ Prompt Generator ── builds mode-specific system prompts
                            │        │
                            ├──→ SDK Adapter ── sends to LLM, streams SDKEvents
+                           │        │   ├── ClaudeCodeAdapter (subprocess, port-less)
+                           │        │   ├── OpenCodeAdapter (HTTP → opencode serve :4096)
+                           │        │   │       └── MCP bridge servers (custom tools)
+                           │        │   └── GoogleADKAdapter (in-process library)
                            │        │
                            └──→ Agent Env Service ── workspace file operations
 
@@ -195,6 +202,9 @@ Backend ──HTTP POST──→ Environment Container (FastAPI)
 - `SDK_ADAPTER_BUILDING` - Adapter ID for building mode (default: `claude-code/anthropic`)
 - `SDK_ADAPTER_CONVERSATION` - Adapter ID for conversation mode (default: `claude-code/anthropic`)
 
+**OpenCode Credentials** (injected into `.opencode/` config files, not env vars):
+- All OpenCode provider credentials (Anthropic, OpenAI, Google, OpenAI-compatible) are written to per-mode config JSON files by `_generate_opencode_config_files()` in `environment_lifecycle.py`
+
 **Optional:**
 - `CLAUDE_CODE_PERMISSION_MODE` - Permission mode for SDK (default: `acceptEdits`)
 - `DUMP_LLM_SESSION` - Enable session logging to `/app/workspace/logs/` (`true`/`false`)
@@ -220,13 +230,18 @@ Backend ──HTTP POST──→ Environment Container (FastAPI)
 │   │   ├── adapters/              # SDK adapter implementations
 │   │   │   ├── base.py            # SDKEvent, SDKConfig, BaseSDKAdapter, AdapterRegistry
 │   │   │   ├── claude_code.py     # ClaudeCodeAdapter (claude-code/* variants)
-│   │   │   ├── google_adk.py      # GoogleADKAdapter (placeholder)
+│   │   │   ├── opencode_adapter.py  # OpenCodeAdapter (opencode/* variants, HTTP client)
+│   │   │   ├── google_adk.py      # GoogleADKAdapter (google-adk-wr/* variants)
 │   │   │   └── sqlite_session_service.py  # SQLite-based session persistence
 │   │   └── tools/                 # Custom agent tools
 │   │       ├── knowledge_query.py # RAG knowledge source queries
 │   │       ├── create_agent_task.py  # Agent-to-agent task creation
 │   │       ├── respond_to_task.py    # Task response tool
-│   │       └── update_session_state.py  # Session state modification
+│   │       ├── update_session_state.py  # Session state modification
+│   │       └── mcp_bridge/        # MCP stdio servers for OpenCode custom tools
+│   │           ├── knowledge_server.py   # Wraps knowledge_query tool
+│   │           ├── task_server.py        # Wraps create_agent_task, respond_to_task, update_session_state
+│   │           └── collaboration_server.py  # Wraps create_collaboration, post_finding, get_collaboration_status
 │   └── scripts/
 │       └── get_session_context.py # Stdlib-only helper for agent scripts
 └── workspace/                     # User workspace (volume-mounted, persists across rebuilds)

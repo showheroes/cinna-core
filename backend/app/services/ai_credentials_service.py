@@ -65,7 +65,9 @@ class AICredentialsService:
     ) -> AICredentialPublic:
         """Create a new AI credential"""
         # Validate type-specific fields
-        self._validate_credential_data(data.type, data.api_key, data.base_url, data.model)
+        self._validate_credential_data(
+            data.type, data.api_key, data.base_url, data.model,
+        )
 
         # Prepare data for encryption
         credential_data = AICredentialData(
@@ -138,7 +140,9 @@ class AICredentialsService:
                 logger.info(f"Auto-set OAuth token expiry notification to {credential.expiry_notification_date.date()} (key updated)")
 
         # Validate updated data
-        self._validate_credential_data(credential.type, new_api_key, new_base_url, new_model)
+        self._validate_credential_data(
+            credential.type, new_api_key, new_base_url, new_model,
+        )
 
         # Encrypt updated data
         updated_data = AICredentialData(
@@ -223,6 +227,57 @@ class AICredentialsService:
             AICredential.owner_id == user_id,
             AICredential.type == cred_type.value,
             AICredential.is_default == True,
+        )
+        return session.exec(statement).first()
+
+    def resolve_default_credential_for_sdk(
+        self, session: Session, user_id: uuid.UUID, sdk_engine: str
+    ) -> AICredential | None:
+        """
+        Resolve the best default credential for a given SDK engine.
+
+        Priority order:
+        1. Anthropic credentials marked as default (highest priority)
+        2. Google credentials marked as default
+        3. OpenAI credentials marked as default
+        4. Any other compatible type marked as default, ordered by created_at ASC
+
+        Only credentials with is_default=True AND compatible with the SDK engine
+        are considered.
+        """
+        from app.services.environment_service import SDK_CREDENTIAL_COMPATIBILITY
+
+        compatible_types = SDK_CREDENTIAL_COMPATIBILITY.get(sdk_engine, [])
+        if not compatible_types:
+            return None
+
+        # Try priority types in order
+        priority_types = ["anthropic", "google", "openai"]
+        for cred_type in priority_types:
+            if cred_type not in compatible_types:
+                continue
+            statement = select(AICredential).where(
+                AICredential.owner_id == user_id,
+                AICredential.type == cred_type,
+                AICredential.is_default == True,
+            )
+            result = session.exec(statement).first()
+            if result:
+                return result
+
+        # Fall back to any other compatible default, oldest first
+        other_types = [t for t in compatible_types if t not in priority_types]
+        if not other_types:
+            return None
+
+        statement = (
+            select(AICredential)
+            .where(
+                AICredential.owner_id == user_id,
+                AICredential.is_default == True,
+                AICredential.type.in_(other_types),
+            )
+            .order_by(AICredential.created_at.asc())
         )
         return session.exec(statement).first()
 

@@ -71,6 +71,7 @@ Support both Anthropic API Keys and Claude Code OAuth Tokens with automatic dete
 - **User can override** - Auto-set expiry date can be modified or cleared by the user
 - **Unknown prefixes default to API Key** - If prefix is not recognized, treated as standard API key
 - **Both env vars passed to container** - Docker template includes both `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`; only the appropriate one is populated
+- **OAuth tokens cannot be used for AI Functions** - OAuth tokens (`sk-ant-oat*`) are incompatible with the Anthropic Messages API used for AI utility calls (titles, schedules, SQL generation, etc.). The system rejects them at both the settings save endpoint and the service layer. See [AI Functions SDK Routing](ai_functions_sdk_routing.md)
 
 ## Architecture Overview
 
@@ -91,8 +92,9 @@ Container started → Agent SDK reads the populated env var
 - **AI Credentials Service** - Detection on create/update for expiry auto-set. See [AI Credentials](ai_credentials.md)
 - **Environment Lifecycle** - Detection during `.env` file generation for correct env var
 - **Frontend Dialog** - Auto-fill expiry on OAuth token input, instructions modal
-- **Credentials List** - Expiry badge display with color coding
+- **Credentials List** - Expiry badge display with color coding; `is_oauth_token` field drives UI disabling in AI Functions credential picker
+- **AI Functions SDK Routing** - OAuth tokens rejected for use with AI utility functions. See [AI Functions SDK Routing](ai_functions_sdk_routing.md)
 
 ---
 
-*Last updated: 2026-03-02*
+*Last updated: 2026-03-18*

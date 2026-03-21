@@ -7,7 +7,8 @@ that the backend can process uniformly.
 
 Supported adapters:
 - claude-code/*: Claude Code SDK (Anthropic, MiniMax)
-- google-adk-wr/*: Google ADK Wrapper (placeholder)
+- google-adk-wr/*: Google ADK Wrapper (OpenAI-compatible, Gemini, Vertex)
+- opencode/*: OpenCode multi-provider agent (Anthropic, OpenAI, Google, Bedrock, Azure, etc.)
 """
 
 from .base import (
@@ -19,6 +20,7 @@ from .base import (
 )
 from .claude_code import ClaudeCodeAdapter
 from .google_adk import GoogleADKAdapter
+from .opencode_adapter import OpenCodeAdapter
 
 __all__ = [
     "BaseSDKAdapter",
@@ -28,4 +30,5 @@ __all__ = [
     "AdapterRegistry",
     "ClaudeCodeAdapter",
     "GoogleADKAdapter",
+    "OpenCodeAdapter",
 ]

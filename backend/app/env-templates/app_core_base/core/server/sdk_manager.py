@@ -35,6 +35,7 @@ from .adapters import (
     # Import adapters to register them
     ClaudeCodeAdapter,
     GoogleADKAdapter,
+    OpenCodeAdapter,
 )
 
 # Re-export session tracking functions from claude_code adapter for backward compatibility

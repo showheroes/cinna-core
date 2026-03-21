@@ -22,8 +22,11 @@ class AgentEnvironment(SQLModel, table=True):
     last_health_check: datetime | None = None
     last_activity_at: datetime | None = None  # Last time environment was actively used (message sent, session opened, etc.)
     # SDK selection for agent (immutable after creation)
-    agent_sdk_conversation: str | None = None  # "claude-code/anthropic" | "claude-code/minimax"
-    agent_sdk_building: str | None = None  # "claude-code/anthropic" | "claude-code/minimax"
+    agent_sdk_conversation: str | None = None  # "claude-code/anthropic" | "claude-code/minimax" | "opencode/anthropic"
+    agent_sdk_building: str | None = None  # "claude-code/anthropic" | "claude-code/minimax" | "opencode/anthropic"
+    # Model override per mode (optional; if None, adapter uses its own default)
+    model_override_conversation: str | None = None  # e.g., "gpt-4o-mini", "claude-haiku-4-5"
+    model_override_building: str | None = None  # e.g., "claude-opus-4", "gpt-4o"
     # AI credential linking (if False, use explicitly linked credentials)
     use_default_ai_credentials: bool = Field(default=True)
     conversation_ai_credential_id: uuid.UUID | None = Field(
@@ -41,8 +44,11 @@ class AgentEnvironmentCreate(SQLModel):
     instance_name: str = "Instance"
     type: str = "docker"  # "docker" | "remote_ssh" | "remote_http"
     config: dict = {}
-    agent_sdk_conversation: str | None = None  # "claude-code/anthropic" | "claude-code/minimax"
-    agent_sdk_building: str | None = None  # "claude-code/anthropic" | "claude-code/minimax"
+    agent_sdk_conversation: str | None = None  # "claude-code/anthropic" | "claude-code/minimax" | "opencode/anthropic"
+    agent_sdk_building: str | None = None  # "claude-code/anthropic" | "claude-code/minimax" | "opencode/anthropic"
+    # Model override per mode (optional)
+    model_override_conversation: str | None = None
+    model_override_building: str | None = None
     # AI credential linking
     use_default_ai_credentials: bool = True
     conversation_ai_credential_id: uuid.UUID | None = None
@@ -70,6 +76,9 @@ class AgentEnvironmentPublic(SQLModel):
     last_activity_at: datetime | None
     agent_sdk_conversation: str | None
     agent_sdk_building: str | None
+    # Model override per mode (optional)
+    model_override_conversation: str | None
+    model_override_building: str | None
     # AI credential linking
     use_default_ai_credentials: bool
     conversation_ai_credential_id: uuid.UUID | None

@@ -3,8 +3,7 @@ Google ADK Wrapper Adapter
 
 This adapter handles google-adk-wr/* variants:
 - google-adk-wr/gemini: Google Gemini via ADK
-- google-adk-wr/vertex: Vertex AI via ADK
-- google-adk-wr/openai-compatible: OpenAI-compatible endpoints (e.g., Ollama, vLLM, local deployments)
+- google-adk-wr/openai-compatible: OpenAI-compatible endpoints (e.g., vLLM, local deployments)
 
 The adapter will convert Google ADK responses to the unified SDKEvent format.
 
@@ -222,7 +221,7 @@ def _check_credential_access(input_value: str, tool_type: str) -> str:
 class AgentFactory:
     """
     Factory for creating Google ADK agents based on provider type.
-    Isolates agent creation logic for different providers (openai-compatible, gemini, vertex).
+    Isolates agent creation logic for different providers (openai-compatible, gemini).
     """
 
     @staticmethod
@@ -444,14 +443,13 @@ class GoogleADKAdapter(BaseSDKAdapter):
 
     This adapter supports:
     - google-adk-wr/gemini: Google Gemini via ADK
-    - google-adk-wr/vertex: Vertex AI via ADK
     - google-adk-wr/openai-compatible: OpenAI-compatible endpoints
 
     For openai-compatible, configuration is loaded from .google-adk settings files.
     """
 
     ADAPTER_TYPE = "google-adk-wr"
-    SUPPORTED_PROVIDERS = ["gemini", "vertex", "openai-compatible"]
+    SUPPORTED_PROVIDERS = ["gemini", "openai-compatible"]
 
     # Path to settings directory (inside container: /app/core/.google-adk/)
     SETTINGS_DIR = Path("/app/core/.google-adk")
@@ -533,7 +531,7 @@ class GoogleADKAdapter(BaseSDKAdapter):
         3. Send message and stream responses
         4. Convert responses to SDKEvent format
 
-        For gemini/vertex providers:
+        For gemini provider:
         TODO: Implement full Google ADK integration
         """
         # Handle openai-compatible provider
@@ -548,7 +546,7 @@ class GoogleADKAdapter(BaseSDKAdapter):
                 yield event
             return
 
-        # Handle gemini/vertex providers (not yet implemented)
+        # Handle gemini provider (not yet implemented)
         logger.warning(f"GoogleADKAdapter.send_message_stream called for provider {self.config.provider} but not implemented")
 
         yield SDKEvent(

@@ -24,7 +24,8 @@
 |------|---------|
 | `base.py` | `SDKEvent`, `SDKEventType`, `SDKConfig`, `BaseSDKAdapter`, `AdapterRegistry` |
 | `claude_code.py` | `ClaudeCodeAdapter` - handles `claude-code/anthropic` and `claude-code/minimax` variants |
-| `google_adk.py` | `GoogleADKAdapter` - placeholder for `google-adk-wr/*` variants |
+| `opencode_adapter.py` | `OpenCodeAdapter` - handles all `opencode/*` variants via HTTP client to `opencode serve` |
+| `google_adk.py` | `GoogleADKAdapter` - handles `google-adk-wr/*` variants |
 | `sqlite_session_service.py` | SQLite-based session persistence for adapters |
 | `google_adk_wr_prompts/` | Prompt templates for Google ADK adapter |
 
@@ -38,6 +39,20 @@
 | `create_agent_task.py` | Agent-to-agent task creation (handover) tool |
 | `respond_to_task.py` | Task response tool for incoming delegations — see [Session State Tools](session_state_tools.md) |
 | `update_session_state.py` | Session state modification tool — see [Session State Tools](session_state_tools.md) |
+
+### MCP Bridge Servers (OpenCode custom tools)
+
+**Base path**: `backend/app/env-templates/app_core_base/core/server/tools/mcp_bridge/`
+
+These are lightweight stdio MCP servers that wrap the platform's custom tool functions so OpenCode can invoke them. They are referenced in the generated `opencode.json` under the `mcp` key.
+
+| File | Exposes |
+|------|---------|
+| `knowledge_server.py` | `knowledge_query` tool |
+| `task_server.py` | `create_agent_task`, `respond_to_task`, `update_session_state` tools |
+| `collaboration_server.py` | `create_collaboration`, `post_finding`, `get_collaboration_status` tools |
+
+The same tool implementations used by Claude Code (via `create_sdk_mcp_server()`) are re-used here — the bridge servers are thin wrappers that expose them over stdio MCP protocol.
 
 ### Scripts
 
@@ -63,6 +78,7 @@ No dedicated database tables - the environment core runs inside Docker container
 
 - `Session` model (`backend/app/models/session.py`) - stores `agent_sdk`, `session_metadata["external_session_id"]` for SDK session resumption
 - `Agent` model (`backend/app/models/agent.py`) - stores `workflow_prompt`, `entrypoint_prompt` synced from environment
+- `AgentEnvironment` model (`backend/app/models/environment.py`) - stores `model_override_conversation` and `model_override_building` (nullable strings); these are passed to adapters at runtime to override the default model selection
 
 ## API Endpoints
 
@@ -138,6 +154,21 @@ No dedicated database tables - the environment core runs inside Docker container
 - `ClaudeCodeAdapter.send_message_stream()` - Configures Claude SDK, converts messages to SDKEvent format
 - `ClaudeCodeAdapter.interrupt_session()` - Interrupts running Claude session
 
+**OpenCode**: `backend/app/env-templates/app_core_base/core/server/adapters/opencode_adapter.py`
+
+- `OpenCodeAdapter.__init__()` - Starts `opencode serve` subprocess on port 4096, waits for health
+- `OpenCodeAdapter.send_message_stream()` - Creates/resumes session via HTTP, writes AGENTS.md from system prompt, streams SSE events, yields `SDKEvent` objects
+- `OpenCodeAdapter.interrupt_session()` - Deletes the running OpenCode session
+- `OpenCodeAdapter._start_opencode_server()` - Launches `opencode serve`, manages process lifecycle
+- `OpenCodeAdapter._ensure_server_running()` - Health check + restart if crashed
+- `OpenCodeAdapter._setup_mcp_servers()` - Configures custom tool MCP bridge servers in `opencode.json`
+
+Config files read at startup from `/app/core/.opencode/`:
+- `building_config.json` — model, auth, mcp, permissions for building mode
+- `conversation_config.json` — model, auth, mcp, permissions for conversation mode
+- `AGENTS.md` — system prompt, written per request before message send
+- `session_context.json` — session context written before each message for MCP bridge servers
+
 ### Backend Services
 
 **Message Service**: `backend/app/services/message_service.py`
@@ -150,6 +181,7 @@ No dedicated database tables - the environment core runs inside Docker container
 **Environment Lifecycle**: `backend/app/services/environment_lifecycle.py`
 - `EnvironmentLifecycleManager._update_environment_config()` - Regenerate JWT token, docker-compose.yml, .env
 - `EnvironmentLifecycleManager._generate_auth_token()` - Create 10-year JWT with user ID
+- `EnvironmentLifecycleManager._generate_opencode_config_files()` - Generates per-mode `building_config.json` and `conversation_config.json` in `app/core/.opencode/` with auth credentials and model selection; called during create and rebuild when any mode uses `opencode/*`
 
 ## Frontend Components
 

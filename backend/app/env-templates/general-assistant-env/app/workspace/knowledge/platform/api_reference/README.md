@@ -11,7 +11,7 @@ Each file below documents one API domain.
 | Activities | [activities.md](./activities.md) | 7 |
 | Agent Shares | [agent_shares.md](./agent_shares.md) | 14 |
 | Agents | [agents.md](./agents.md) | 30 |
-| Ai Credentials | [ai_credentials.md](./ai_credentials.md) | 7 |
+| Ai Credentials | [ai_credentials.md](./ai_credentials.md) | 8 |
 | Collaborations | [collaborations.md](./collaborations.md) | 4 |
 | Credentials | [credentials.md](./credentials.md) | 16 |
 | Email Integration | [email_integration.md](./email_integration.md) | 6 |

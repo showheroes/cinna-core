@@ -33,6 +33,22 @@ def list_ai_credentials(
     return AICredentialsPublic(data=credentials, count=len(credentials))
 
 
+@router.get("/resolve-default/{sdk_engine}", response_model=AICredentialPublic | None)
+def resolve_default_credential(
+    session: SessionDep,
+    current_user: CurrentUser,
+    sdk_engine: str,
+) -> Any:
+    """
+    Resolve the best default credential for a given SDK engine.
+    Returns the credential that would be used when 'Use Default' is selected,
+    or null if no matching default credential exists.
+    """
+    return ai_credentials_service.resolve_default_credential_for_sdk(
+        session, current_user.id, sdk_engine
+    )
+
+
 @router.get("/{credential_id}", response_model=AICredentialPublic)
 def get_ai_credential(
     session: SessionDep, current_user: CurrentUser, credential_id: uuid.UUID
