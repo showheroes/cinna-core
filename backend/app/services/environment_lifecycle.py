@@ -827,12 +827,11 @@ class EnvironmentLifecycleManager:
                 was_running=was_running
             )
 
-            # Regenerate SDK settings files after core replacement (MiniMax/OpenAI Compatible settings)
-            # These files are in /app/core/.claude/ or /app/core/.google-adk/ which get replaced during rebuild
+            # Regenerate SDK settings files after core replacement (MiniMax settings)
+            # These files are in /app/core/.claude/ which get replaced during rebuild
             sdk_conversation = environment.agent_sdk_conversation or "claude-code/anthropic"
             sdk_building = environment.agent_sdk_building or "claude-code/anthropic"
             uses_minimax = sdk_conversation == "claude-code/minimax" or sdk_building == "claude-code/minimax"
-            uses_openai_compatible = sdk_conversation == "google-adk-wr/openai-compatible" or sdk_building == "google-adk-wr/openai-compatible"
 
             # Fetch user credentials for SDK settings regeneration
             # If specific credentials are assigned, use ONLY those (no fallback to user profile)
@@ -936,19 +935,6 @@ class EnvironmentLifecycleManager:
                         sdk_conversation
                     )
                     logger.info(f"Regenerated MiniMax settings files after rebuild for environment {environment.id}")
-
-                # Regenerate OpenAI Compatible settings if needed
-                if uses_openai_compatible and openai_compatible_api_key and openai_compatible_base_url:
-                    self._generate_openai_compatible_settings_files(
-                        instance_dir,
-                        environment,
-                        openai_compatible_api_key,
-                        openai_compatible_base_url,
-                        openai_compatible_model or "gpt-4",
-                        sdk_building,
-                        sdk_conversation
-                    )
-                    logger.info(f"Regenerated OpenAI Compatible settings files after rebuild for environment {environment.id}")
 
                 # Regenerate OpenCode config files if needed
                 uses_opencode = sdk_conversation.startswith("opencode") or sdk_building.startswith("opencode")
@@ -1378,7 +1364,6 @@ class EnvironmentLifecycleManager:
         # Check if each SDK is used in any mode
         uses_anthropic = sdk_conversation == "claude-code/anthropic" or sdk_building == "claude-code/anthropic"
         uses_minimax = sdk_conversation == "claude-code/minimax" or sdk_building == "claude-code/minimax"
-        uses_openai_compatible = sdk_conversation == "google-adk-wr/openai-compatible" or sdk_building == "google-adk-wr/openai-compatible"
 
         # 1. Generate root .env file for docker-compose
         agent_personal_database_url = ''  # To be implemented
@@ -1441,7 +1426,7 @@ GOOGLE_API_KEY={google_api_key or ""}
 
 # SDK Adapter Configuration
 # These variables tell the agent-env which adapter to use for each mode
-# Format: <adapter-type>/<provider> (e.g., claude-code/anthropic, claude-code/minimax, google-adk-wr/gemini)
+# Format: <adapter-type>/<provider> (e.g., claude-code/anthropic, claude-code/minimax, opencode/anthropic)
 SDK_ADAPTER_BUILDING={sdk_building}
 SDK_ADAPTER_CONVERSATION={sdk_conversation}
 """
@@ -1470,81 +1455,6 @@ SDK_ADAPTER_CONVERSATION={sdk_conversation}
                 sdk_building,
                 sdk_conversation
             )
-
-        # 4. Generate OpenAI Compatible SDK settings files if OpenAI Compatible is used
-        if uses_openai_compatible and openai_compatible_api_key and openai_compatible_base_url:
-            self._generate_openai_compatible_settings_files(
-                instance_dir,
-                environment,
-                openai_compatible_api_key,
-                openai_compatible_base_url,
-                openai_compatible_model or "gpt-4",  # Default model
-                sdk_building,
-                sdk_conversation
-            )
-
-    def _generate_openai_compatible_settings_files(
-        self,
-        instance_dir: Path,
-        environment: AgentEnvironment,
-        api_key: str,
-        base_url: str,
-        model: str,
-        sdk_building: str,
-        sdk_conversation: str
-    ):
-        """
-        Generate OpenAI Compatible SDK settings files in the core .google-adk folder.
-
-        These files are used by Google ADK adapter to configure the OpenAI-compatible API endpoint.
-        Files are placed in /app/core/.google-adk/ which is part of the core directory.
-
-        The settings.json file contains provider configuration that the adapter reads at runtime
-        to properly initialize the LLM client.
-
-        Note: Since core files are replaced during rebuild, this method must be called
-        AFTER the core files are copied from template.
-
-        Args:
-            instance_dir: Environment instance directory
-            environment: Environment model
-            api_key: OpenAI Compatible API key
-            base_url: OpenAI Compatible API base URL (e.g., https://openai.mycompany.com/api/v1)
-            model: Model name to use (e.g., llama3.2:latest)
-            sdk_building: SDK for building mode
-            sdk_conversation: SDK for conversation mode
-        """
-        import json
-
-        # Settings content for OpenAI Compatible provider
-        openai_compatible_settings = {
-            "providers": {
-                "openai-compatible": {
-                    "api_key": api_key,
-                    "base_url": base_url,
-                    "model": model
-                }
-            }
-        }
-
-        # Create .google-adk directory in core folder
-        # Inside container this will be at /app/core/.google-adk/
-        google_adk_settings_dir = instance_dir / "app" / "core" / ".google-adk"
-        google_adk_settings_dir.mkdir(parents=True, exist_ok=True)
-
-        # Generate building settings file if building mode uses OpenAI Compatible
-        if sdk_building == "google-adk-wr/openai-compatible":
-            building_settings_path = google_adk_settings_dir / "building_settings.json"
-            with open(building_settings_path, 'w') as f:
-                json.dump(openai_compatible_settings, f, indent=2)
-            logger.info(f"Generated OpenAI Compatible building settings for environment {environment.id}")
-
-        # Generate conversation settings file if conversation mode uses OpenAI Compatible
-        if sdk_conversation == "google-adk-wr/openai-compatible":
-            conversation_settings_path = google_adk_settings_dir / "conversation_settings.json"
-            with open(conversation_settings_path, 'w') as f:
-                json.dump(openai_compatible_settings, f, indent=2)
-            logger.info(f"Generated OpenAI Compatible conversation settings for environment {environment.id}")
 
     def _generate_minimax_settings_files(
         self,

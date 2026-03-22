@@ -7,8 +7,7 @@ from sqlmodel import Field, Relationship, SQLModel, Column, Text
 # SDK constants
 SDK_ANTHROPIC = "claude-code/anthropic"
 SDK_MINIMAX = "claude-code/minimax"
-SDK_OPENAI_COMPATIBLE = "google-adk-wr/openai-compatible"
-VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX, SDK_OPENAI_COMPATIBLE]
+VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX]
 
 # AI Functions SDK constants
 VALID_AI_FUNCTIONS_SDK_OPTIONS = ["system", "personal:anthropic"]

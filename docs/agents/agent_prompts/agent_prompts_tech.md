@@ -96,7 +96,7 @@
 ### SDKManager (`sdk_manager.py`)
 
 - `__init__()` - Initializes adapter registry, reads `SDK_ADAPTER_BUILDING` and `SDK_ADAPTER_CONVERSATION` env vars
-- `_get_adapter(mode)` - Gets or creates SDK adapter for specified mode (e.g., "claude-code/anthropic", "google-adk-wr/openai-compatible")
+- `_get_adapter(mode)` - Gets or creates SDK adapter for specified mode (e.g., "claude-code/anthropic", "opencode/openai")
 - Delegates prompt generation and model selection to the adapter, which uses PromptGenerator internally
 
 ### AgentEnvService (`agent_env_service.py`)

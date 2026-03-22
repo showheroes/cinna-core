@@ -34,14 +34,12 @@ const ENV_TEMPLATE_OPTIONS = [
 const SDK_ENGINE_OPTIONS = [
   { value: "claude-code", label: "Claude Code", description: "Anthropic's CLI agent SDK" },
   { value: "opencode", label: "OpenCode", description: "Multi-provider open-source agent (75+ providers)" },
-  { value: "google-adk-wr", label: "Google ADK (simplified)", description: "Google Agent Development Kit" },
 ]
 
 // Compatibility matrix: which credential types each SDK engine supports
 const SDK_CREDENTIAL_COMPATIBILITY: Record<string, string[]> = {
   "claude-code": ["anthropic", "minimax"],
   "opencode": ["anthropic", "openai", "openai_compatible", "google"],
-  "google-adk-wr": ["openai_compatible", "google"],
 }
 
 // Suggested models per credential type (for model override hints)
@@ -57,7 +55,6 @@ const SUGGESTED_MODELS: Record<string, string[]> = {
 const DEFAULT_SDK_FOR_ENGINE: Record<string, string> = {
   "claude-code": "claude-code/anthropic",
   "opencode": "opencode/anthropic",
-  "google-adk-wr": "google-adk-wr/openai-compatible",
 }
 
 // Type display names for resolved default indicator

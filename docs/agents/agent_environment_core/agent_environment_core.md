@@ -15,10 +15,9 @@ A FastAPI application deployed inside each Docker container at `/app/core/server
 Pluggable adapter system supporting multiple AI providers. Each adapter converts SDK-specific messages into a unified `SDKEvent` format. Adapters are registered via a decorator-based registry and selected at runtime based on environment variables.
 
 - **Adapter ID format**: `<adapter-type>/<provider>` (e.g., `claude-code/anthropic`, `opencode/openai`)
-- **Three SDK engines:**
+- **Two SDK engines:**
   - **Claude Code** — Anthropic's CLI agent SDK, communicates via Python subprocess (`claude_agent_sdk`). Supports `anthropic`, `minimax`.
   - **OpenCode** — Open-source multi-provider agent running as an HTTP server (`opencode serve`). Supports `anthropic`, `openai`, `openai_compatible`, `google`. Custom tools are bridged via local MCP servers.
-  - **Google ADK** — Google's Agent Development Kit, runs in-process. Supports `openai_compatible`, `google`.
 
 ### Session Modes
 
@@ -139,10 +138,9 @@ Backend ──HTTP POST──→ Environment Container (FastAPI)
                            ├──→ SDK Adapter ── sends to LLM, streams SDKEvents
                            │        │   ├── ClaudeCodeAdapter (subprocess, port-less)
                            │        │   │       └── ClaudeCodeEventTransformer (message → SDKEvent)
-                           │        │   ├── OpenCodeAdapter (HTTP → opencode serve :4096)
-                           │        │   │       ├── OpenCodeEventTransformer (SSE → SDKEvent)
-                           │        │   │       └── MCP bridge servers (custom tools)
-                           │        │   └── GoogleADKAdapter (in-process library)
+                           │        │   └── OpenCodeAdapter (HTTP → opencode serve :4096)
+                           │        │           ├── OpenCodeEventTransformer (SSE → SDKEvent)
+                           │        │           └── MCP bridge servers (custom tools)
                            │        │
                            └──→ Agent Env Service ── workspace file operations
 
@@ -235,7 +233,6 @@ Backend ──HTTP POST──→ Environment Container (FastAPI)
 │   │   │   ├── claude_code_event_transformer.py  # ClaudeCodeEventTransformer — Claude SDK message → SDKEvent
 │   │   │   ├── opencode_sdk_adapter.py      # OpenCodeAdapter (opencode/* variants, HTTP client)
 │   │   │   ├── opencode_event_transformer.py    # OpenCodeEventTransformer — stateful SSE event translator
-│   │   │   ├── google_adk_sdk_adapter.py    # GoogleADKAdapter (google-adk-wr/* variants)
 │   │   │   ├── tool_name_registry.py  # Unified lowercase tool name convention: maps, PRE_APPROVED_TOOLS, normalize_tool_name()
 │   │   │   └── sqlite_session_service.py  # SQLite-based session persistence
 │   │   └── tools/                 # Custom agent tools

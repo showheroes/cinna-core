@@ -35,14 +35,12 @@ import { AffectedEnvironmentsDialog } from "./AffectedEnvironmentsDialog"
 const SDK_ENGINE_OPTIONS = [
   { value: "claude-code", label: "Claude Code" },
   { value: "opencode", label: "OpenCode" },
-  { value: "google-adk-wr", label: "Google ADK (simplified)" },
 ]
 
 // Compatibility matrix: which credential types each SDK engine supports
 const SDK_CREDENTIAL_COMPATIBILITY: Record<string, string[]> = {
   "claude-code": ["anthropic", "minimax"],
   "opencode": ["anthropic", "openai", "openai_compatible", "google"],
-  "google-adk-wr": ["openai_compatible", "google"],
 }
 
 // Suggested models per credential type
@@ -58,7 +56,6 @@ const SUGGESTED_MODELS: Record<string, string[]> = {
 const DEFAULT_SDK_FOR_ENGINE: Record<string, string> = {
   "claude-code": "claude-code/anthropic",
   "opencode": "opencode/anthropic",
-  "google-adk-wr": "google-adk-wr/openai-compatible",
 }
 
 // Sentinel value for "use default credential" selection

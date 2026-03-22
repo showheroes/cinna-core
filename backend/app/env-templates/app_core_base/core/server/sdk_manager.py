@@ -14,7 +14,7 @@ Adapter ID Format:
     Examples:
     - claude-code/anthropic: Claude Code SDK with Anthropic backend
     - claude-code/minimax: Claude Code SDK with MiniMax backend
-    - google-adk-wr/gemini: Google ADK with Gemini (placeholder)
+    - opencode/anthropic: OpenCode with Anthropic backend
 
 The manager reads these ENV variables and instantiates the appropriate adapter
 for each mode. All adapters produce unified SDKEvent objects that are converted
@@ -34,7 +34,6 @@ from .adapters import (
     BaseSDKAdapter,
     # Import adapters to register them
     ClaudeCodeAdapter,
-    GoogleADKAdapter,
     OpenCodeAdapter,
 )
 

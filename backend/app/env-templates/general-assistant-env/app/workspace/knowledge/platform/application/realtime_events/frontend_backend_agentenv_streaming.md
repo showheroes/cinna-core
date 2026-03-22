@@ -795,7 +795,6 @@ await active_streaming_manager.update_last_flushed_seq(session_id, flush_seq)
 - `env-templates/app_core_base/core/server/adapters/` - Adapter implementations
   - `base.py` - `SDKEvent`, `SDKEventType`, `SDKConfig`, `BaseSDKAdapter`, `AdapterRegistry`
   - `claude_code.py` - `ClaudeCodeAdapter` for claude-code/* variants
-  - `google_adk.py` - `GoogleADKAdapter` placeholder for google-adk-wr/*
 - `env-templates/app_core_base/core/server/sdk_utils.py` - Logging utilities
 - `env-templates/app_core_base/core/server/active_session_manager.py` - Interrupt tracking
 

@@ -21,7 +21,6 @@
 - `server/adapters/claude_code_event_transformer.py` - `ClaudeCodeEventTransformer` — Claude SDK message → SDKEvent
 - `server/adapters/opencode_sdk_adapter.py` - `OpenCodeAdapter` for `opencode/*` variants
 - `server/adapters/opencode_event_transformer.py` - `OpenCodeEventTransformer` — OpenCode SSE → SDKEvent
-- `server/adapters/google_adk_sdk_adapter.py` - `GoogleADKAdapter` placeholder for `google-adk-wr/*`
 - `scripts/get_session_context.py` - Stdlib-only helper for agent scripts to query session context
 - `prompts/BUILDING_AGENT.md` - Building mode system prompt
 - `prompts/WEBAPP_BUILDING.md` - Webapp building instructions (read by agent on demand)
@@ -252,7 +251,7 @@ An optional mixin interface for adapters that can provide direct local filesyste
 **SDK Adapter Configuration**:
 - `SDK_ADAPTER_BUILDING` - Adapter ID for building mode (default: `claude-code/anthropic`)
 - `SDK_ADAPTER_CONVERSATION` - Adapter ID for conversation mode (default: `claude-code/anthropic`)
-- Adapter ID format: `<adapter-type>/<provider>` (e.g., `claude-code/minimax`, `google-adk-wr/gemini`)
+- Adapter ID format: `<adapter-type>/<provider>` (e.g., `claude-code/minimax`, `opencode/openai`)
 
 **Optional**:
 - `CLAUDE_CODE_PERMISSION_MODE` - Permission mode for SDK (default: `acceptEdits`)

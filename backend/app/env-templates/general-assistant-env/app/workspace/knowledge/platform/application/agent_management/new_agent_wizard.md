@@ -45,10 +45,9 @@ When "+ New Agent" is selected:
 - `sdkConversation`: Selected SDK for conversation mode (default: `claude-code/anthropic`)
 - `sdkBuilding`: Selected SDK for building mode (default: `claude-code/anthropic`)
 
-**SDK Engine Options:** Three engine choices per mode
+**SDK Engine Options:** Two engine choices per mode
 - `claude-code` — Claude Code (Anthropic or MiniMax credentials)
 - `opencode` — OpenCode (Anthropic, OpenAI, OpenAI-compatible, Google)
-- `google-adk-wr` — Google ADK (OpenAI-compatible or Google credentials)
 
 **Credential Filtering:** Credential dropdown is filtered by `SDK_CREDENTIAL_COMPATIBILITY` — only credentials whose type is compatible with the selected engine are shown.
 

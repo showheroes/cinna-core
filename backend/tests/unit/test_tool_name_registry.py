@@ -190,7 +190,7 @@ class TestNormalizeToolNameUnknownSdk:
         assert normalize_tool_name("MyCustomTool", sdk="unknown-sdk") == "mycustomtool"
 
     def test_unknown_sdk_already_lowercase_unchanged(self):
-        assert normalize_tool_name("bash", sdk="google-adk") == "bash"
+        assert normalize_tool_name("bash", sdk="unknown-sdk") == "bash"
 
     def test_empty_string_returns_empty(self):
         """Empty string is returned as-is for any SDK."""

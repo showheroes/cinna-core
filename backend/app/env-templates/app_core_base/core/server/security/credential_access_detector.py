@@ -5,7 +5,6 @@ Shared pattern matching module used by SDK interceptors to determine whether
 a tool call targets credential files. Used by:
 
 - credential_guard_hook.py (Claude Code PreToolUse hook)
-- google_adk.py (inline ADK Bash/Read interceptors)
 
 This module has no dependencies beyond the standard library so it can be used
 in standalone hook scripts as well as within the environment server process.

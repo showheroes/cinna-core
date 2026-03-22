@@ -2,20 +2,20 @@
 
 ## Purpose
 
-Allow users to choose different AI SDK engines and providers per agent environment, with per-mode (building vs. conversation) selection, automatic config file generation, and optional per-mode model overrides. Three SDK engines are supported: Claude Code, OpenCode, and Google ADK.
+Allow users to choose different AI SDK engines and providers per agent environment, with per-mode (building vs. conversation) selection, automatic config file generation, and optional per-mode model overrides. Two SDK engines are supported: Claude Code and OpenCode.
 
 ## Core Concepts
 
 | Term | Definition |
 |------|-----------|
-| **SDK Engine** | The runtime technology used (e.g., `claude-code`, `opencode`, `google-adk-wr`) |
+| **SDK Engine** | The runtime technology used (e.g., `claude-code`, `opencode`) |
 | **SDK ID** | Full adapter identifier combining engine and provider (e.g., `claude-code/anthropic`, `opencode/openai`) |
 | **Adapter** | Runtime component inside the agent environment that translates SDK calls to a unified event stream |
 | **SDKEvent** | Unified event object produced by all adapters; the backend processes only this format regardless of SDK |
 | **Building Mode** | Environment state used for agent development and configuration |
 | **Conversation Mode** | Environment state used for executing tasks and chat |
 | **SDK Selection** | Per-environment choice of SDK for each mode — set at creation, immutable afterward |
-| **Config Files** | JSON files generated inside the environment container (`.claude/`, `.google-adk/`, `.opencode/`) that configure the adapter at runtime |
+| **Config Files** | JSON files generated inside the environment container (`.claude/`, `.opencode/`) that configure the adapter at runtime |
 | **AI Credential** | Named, encrypted API key for a specific LLM provider; selected per environment mode |
 | **Model Override** | Optional per-mode field on the environment that overrides the adapter's default model selection |
 | **SDK ↔ Credential Compatibility** | Each SDK engine only works with certain credential types; filtered in UI and validated by backend |
@@ -50,13 +50,6 @@ The event translation layer for each adapter is responsible for converting SDK-s
 | `opencode/openai_compatible` | OpenCode + OpenAI-Compatible | `openai_compatible` | Implemented |
 | `opencode/google` | OpenCode + Google | `google` | Implemented |
 
-### Google ADK Engine
-
-| SDK ID | Display Name | Credential Type | Status |
-|--------|-------------|-----------------|--------|
-| `google-adk-wr/openai-compatible` | OpenAI Compatible | `openai_compatible` | Config ready, adapter skeleton |
-| `google-adk-wr/gemini` | Google Gemini ADK | `google` | Placeholder |
-
 ## SDK ↔ Credential Compatibility Matrix
 
 Each SDK engine only supports certain credential types. This is enforced by backend validation and used for frontend filtering.
@@ -65,7 +58,6 @@ Each SDK engine only supports certain credential types. This is enforced by back
 |------------|----------------------------|
 | `claude-code` | `anthropic`, `minimax` |
 | `opencode` | `anthropic`, `openai`, `openai_compatible`, `google` |
-| `google-adk-wr` | `openai_compatible`, `google` |
 
 Defined as `SDK_CREDENTIAL_COMPATIBILITY` in `backend/app/services/environment_service.py`.
 
@@ -75,7 +67,7 @@ Defined as `SDK_CREDENTIAL_COMPATIBILITY` in `backend/app/services/environment_s
 
 1. User opens User Settings → AI Credentials
 2. In the **Default SDK Preferences** panel, configures defaults per mode (Conversation / Building) using a cascading three-step selection:
-   - **Step 1 — SDK Engine**: Claude Code, OpenCode, or Google ADK (simplified)
+   - **Step 1 — SDK Engine**: Claude Code or OpenCode
    - **Step 2 — Credential**: Dropdown filtered to credentials compatible with the chosen engine; first option is "Use Default" (falls back to the credential of that provider type marked as default)
    - **Step 3 — Model Override** (optional): Free-text field with suggestions per credential type; leave empty to use the SDK adapter's built-in default
 3. User clicks **Save Preferences** — all selections are saved together to the user record
@@ -85,7 +77,7 @@ Defined as `SDK_CREDENTIAL_COMPATIBILITY` in `backend/app/services/environment_s
 
 1. User opens Add Environment dialog
 2. The dialog pre-populates SDK Engine, Credential, and Model Override from the user's saved defaults
-3. User selects **SDK Engine** per mode (building / conversation) — three choices: Claude Code, OpenCode, Google ADK (simplified)
+3. User selects **SDK Engine** per mode (building / conversation) — two choices: Claude Code, OpenCode
 4. **Credential dropdown** is always visible inline (no separate toggle); first option is "Default (use account default)", followed by credentials filtered to the selected engine's compatible types
 5. User optionally sets a **Model Override** for finer control (e.g., `gpt-4o-mini`, `claude-opus-4`)
 6. User confirms → backend validates SDK ↔ credential compatibility → environment is created
@@ -108,7 +100,7 @@ Defined as `SDK_CREDENTIAL_COMPATIBILITY` in `backend/app/services/environment_s
 - **MiniMax conflict prevention:** When MiniMax is selected, `ANTHROPIC_API_KEY` is NOT written to `.env` to avoid SDK conflicts
 - **OpenAI Compatible requires all three fields:** API key, base URL, and model name must all be set
 - **Model override:** `model_override_building` / `model_override_conversation` are optional; when set they override the adapter's default model. Resolution order: explicit override → mode default → SDK default.
-- **Rebuild regeneration:** After an environment rebuild (core replacement), config files are regenerated from stored credentials for all three SDK types
+- **Rebuild regeneration:** After an environment rebuild (core replacement), config files are regenerated from stored credentials for all SDK types
 - **Encrypted storage:** All AI credentials are stored per the named `AICredential` model; no migration needed for new provider types
 - **OpenCode per-mode isolation:** Building and conversation modes each run their own `opencode serve` process on separate ports with separate config directories. No shared state between concurrent sessions.
 
@@ -132,8 +124,6 @@ Backend: environment_lifecycle.py (generate .env + config files per SDK)
          ├── Claude Code / Anthropic → ANTHROPIC_API_KEY in .env
          ├── Claude Code / MiniMax  → .claude/building_settings.json
          │                            .claude/conversation_settings.json
-         ├── Google ADK             → .google-adk/building_settings.json
-         │                            .google-adk/conversation_settings.json
          └── OpenCode               → .opencode/building/opencode.json
                                       .opencode/conversation/opencode.json
                                       (model, provider registration, API key,
@@ -146,7 +136,6 @@ Agent Environment Container
          ▼
 sdk_manager.py → AdapterRegistry → ClaudeCodeAdapter (subprocess python SDK)
                                  → OpenCodeAdapter (HTTP → opencode serve :4096/:4097)
-                                 → GoogleADKAdapter (ADK runner)
          │
          ▼ Each adapter translates SDK-native events
          ▼

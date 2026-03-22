@@ -41,7 +41,6 @@ Each layer is independently deployable and backward-compatible. Existing agents 
 │                                                                  │
 │  core/server/adapters/                                           │
 │    claude_code.py ─────── Phase 1: Claude Code PreToolUse hook  │
-│    google_adk.py ──────── Phase 1: direct Bash/Read interception│
 │                                                                  │
 │  core/server/security/                                           │
 │    credential_guard.py ── credential value store + redactor     │
@@ -85,7 +84,7 @@ Tool executes (or is blocked)
 Agent LLM response
         │
         ▼
-SDK Adapter (claude_code.py / google_adk.py)
+SDK Adapter (claude_code.py)
   emit SDKEvent(type=ASSISTANT, content=...)
         │
         ▼
@@ -164,41 +163,6 @@ This script:
   - `cp\s+.*credentials/`
   - `curl.*file://.*credentials/`
 - `Write`/`Edit` tools: block if targeting credential files (prevents overwriting with attacker-controlled values)
-
-#### Google ADK — Direct Tool Interception
-
-Since the ADK adapter defines `Bash()` and `Read()` as our own Python functions (see `google_adk_sdk_adapter.py`), we intercept directly in those functions — no external hook mechanism needed.
-
-**File**: `backend/app/env-templates/app_core_base/core/server/adapters/google_adk_sdk_adapter.py`
-
-Modify the `Bash()` and `Read()` function definitions:
-
-```python
-def Bash(command: str) -> dict:
-    # Check if command targets credential files
-    if _is_credential_access(command, tool_type="bash"):
-        action = _report_credential_access(command, tool_type="bash")
-        if action == "block":
-            return {
-                "status": "blocked",
-                "command": command,
-                "return_code": 1,
-                "stdout": "",
-                "stderr": "Credential file access denied by security policy."
-            }
-    # ... existing execution logic ...
-
-def Read(file_path: str) -> dict:
-    # Check if path targets credential files
-    if _is_credential_access(file_path, tool_type="read"):
-        action = _report_credential_access(file_path, tool_type="read")
-        if action == "block":
-            return {
-                "status": "blocked",
-                "error": "Credential file access denied by security policy."
-            }
-    # ... existing read logic ...
-```
 
 **Shared helper** (new module): `backend/app/env-templates/app_core_base/core/server/security/credential_access_detector.py`
 
@@ -654,9 +618,6 @@ Defense in depth: Phase 1 tries to prevent access, Phase 2 catches leaks that sl
 - [ ] Create `backend/app/env-templates/app_core_base/core/hooks/credential_guard_hook.py`
 - [ ] Modify `backend/app/services/environment_lifecycle.py`: write hook settings to `/app/core/.claude/settings.json`
 
-**Google ADK adapter**:
-- [ ] Modify `backend/app/env-templates/app_core_base/core/server/adapters/google_adk_sdk_adapter.py`: add credential access checks to `Bash()` and `Read()` functions
-
 ### Phase 2 — Output Redaction
 
 **Environment server**:
@@ -691,7 +652,6 @@ Defense in depth: Phase 1 tries to prevent access, Phase 2 catches leaks that sl
 | `environment_lifecycle.py` | Extended to write Claude Code hook settings into container |
 | `agent_env_service.py` | `update_credentials()` feeds `CredentialGuard` with new credential data |
 | `routes.py` (env server) | SSE stream wrapped with redaction; new `/security/report` proxy endpoint |
-| `google_adk.py` (adapter) | `Bash()` and `Read()` functions extended with credential access checks |
 | `Activity` model | Pattern reference for `SecurityEvent` model design |
 | `AgentGuestShare` model | `guest_share_id` on `SecurityEvent` enables guest-specific queries |
 | `Session` model | `session_id` on `SecurityEvent` links events to sessions |

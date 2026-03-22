@@ -57,7 +57,6 @@ const MAX_MESSAGE_LENGTH = 8000
 const SDK_OPTIONS = [
   { value: "claude-code/anthropic", label: "Anthropic Claude", requiredKey: "anthropic" },
   { value: "claude-code/minimax", label: "MiniMax M2", requiredKey: "minimax" },
-  { value: "google-adk-wr/openai-compatible", label: "OpenAI Compatible", requiredKey: "openai_compatible" },
 ]
 
 function Dashboard() {
@@ -99,7 +98,6 @@ function Dashboard() {
   const getKeyStatus = (sdk: string) => {
     if (sdk === "claude-code/anthropic") return hasAnthropicKey
     if (sdk === "claude-code/minimax") return hasMinimaxKey
-    if (sdk === "google-adk-wr/openai-compatible") return hasOpenaiCompatibleKey
     return false
   }
 

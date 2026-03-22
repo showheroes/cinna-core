@@ -17,7 +17,6 @@ Two distinct abstractions live here:
 
 Supported SDK adapters:
 - claude-code/*: Claude Code SDK (Anthropic, MiniMax)
-- google-adk-wr/*: Google ADK Wrapper (OpenAI-compatible, Gemini, Vertex)
 - opencode/*: OpenCode multi-provider agent (Anthropic, OpenAI, Google, etc.)
 """
 
@@ -31,13 +30,11 @@ from .base import (
 
 # SDK Adapters (canonical locations)
 from .claude_code_sdk_adapter import ClaudeCodeAdapter
-from .google_adk_sdk_adapter import GoogleADKAdapter
 from .opencode_sdk_adapter import OpenCodeAdapter
 
 # Event Transformers
 from .claude_code_event_transformer import ClaudeCodeEventTransformer
 from .opencode_event_transformer import OpenCodeEventTransformer
-from .google_adk_event_transformer import GoogleADKEventTransformer
 
 __all__ = [
     # Base
@@ -48,10 +45,8 @@ __all__ = [
     "AdapterRegistry",
     # SDK Adapters
     "ClaudeCodeAdapter",
-    "GoogleADKAdapter",
     "OpenCodeAdapter",
     # Event Transformers
     "ClaudeCodeEventTransformer",
     "OpenCodeEventTransformer",
-    "GoogleADKEventTransformer",
 ]

@@ -48,7 +48,6 @@ import { UpdateModeToggle, DetachDialog, PushUpdatesModal } from "./CloneManagem
 const SDK_TO_CRED_TYPE: Record<string, string> = {
   "claude-code/anthropic": "anthropic",
   "claude-code/minimax": "minimax",
-  "google-adk-wr/openai-compatible": "openai_compatible",
 }
 
 interface AgentSharingTabProps {

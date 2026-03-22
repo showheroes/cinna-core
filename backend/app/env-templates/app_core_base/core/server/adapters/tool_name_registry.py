@@ -129,7 +129,7 @@ def normalize_tool_name(name: str, sdk: str = "claude-code") -> str:
 
     Args:
         name: Raw tool name from the SDK.
-        sdk: "claude-code", "opencode", or "google-adk".
+        sdk: "claude-code" or "opencode".
 
     Returns:
         Unified lowercase tool name.
@@ -149,5 +149,5 @@ def normalize_tool_name(name: str, sdk: str = "claude-code") -> str:
         # OpenCode built-ins are already lowercase
         return name
 
-    # Unknown SDK or google-adk — lowercase as fallback
+    # Unknown SDK — lowercase as fallback
     return name.lower() if name else name

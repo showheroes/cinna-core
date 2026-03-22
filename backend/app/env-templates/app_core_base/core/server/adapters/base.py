@@ -112,8 +112,8 @@ class SDKConfig:
 
     Populated from environment variables when the adapter is initialized.
     """
-    adapter_id: str  # Full adapter ID (e.g., "claude-code/anthropic", "google-adk-wr/gemini")
-    adapter_type: str  # Adapter type prefix (e.g., "claude-code", "google-adk-wr")
+    adapter_id: str  # Full adapter ID (e.g., "claude-code/anthropic", "opencode/openai")
+    adapter_type: str  # Adapter type prefix (e.g., "claude-code", "opencode")
     provider: str  # Provider suffix (e.g., "anthropic", "minimax", "gemini")
     workspace_dir: str
     permission_mode: str = "acceptEdits"
@@ -169,7 +169,7 @@ class BaseSDKAdapter(ABC):
     """
 
     # Class-level adapter info
-    ADAPTER_TYPE: str = "base"  # Override in subclasses (e.g., "claude-code", "google-adk-wr")
+    ADAPTER_TYPE: str = "base"  # Override in subclasses (e.g., "claude-code", "opencode")
     SUPPORTED_PROVIDERS: list[str] = []  # Override in subclasses
 
     def __init__(self, config: SDKConfig):
@@ -267,7 +267,7 @@ class AdapterRegistry:
         Get adapter class by type prefix.
 
         Args:
-            adapter_type: Adapter type (e.g., "claude-code", "google-adk-wr")
+            adapter_type: Adapter type (e.g., "claude-code", "opencode")
 
         Returns:
             Adapter class or None if not found

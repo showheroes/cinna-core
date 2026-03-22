@@ -16,13 +16,11 @@ from .ai_credentials_service import ai_credentials_service
 from .sdk_constants import (
     SDK_ANTHROPIC,
     SDK_MINIMAX,
-    SDK_OPENAI_COMPATIBLE,
     DEFAULT_SDK,
     VALID_SDK_OPTIONS,
     SDK_TO_CREDENTIAL_TYPE,
     SDK_ENGINE_CLAUDE_CODE,
     SDK_ENGINE_OPENCODE,
-    SDK_ENGINE_GOOGLE_ADK,
     VALID_SDK_ENGINES,
     SDK_CREDENTIAL_COMPATIBILITY,
     CREDENTIAL_TYPE_TO_BAG_KEY,

@@ -10,29 +10,24 @@ from app.models.ai_credential import AICredentialType
 # SDK Provider Constants (full SDK IDs for legacy/backward compat)
 SDK_ANTHROPIC = "claude-code/anthropic"
 SDK_MINIMAX = "claude-code/minimax"
-SDK_OPENAI_COMPATIBLE = "google-adk-wr/openai-compatible"
 DEFAULT_SDK = SDK_ANTHROPIC
-VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX, SDK_OPENAI_COMPATIBLE]
+VALID_SDK_OPTIONS = [SDK_ANTHROPIC, SDK_MINIMAX]
 
 # SDK Engine constants (engine prefix only, without provider suffix)
 SDK_ENGINE_CLAUDE_CODE = "claude-code"
 SDK_ENGINE_OPENCODE = "opencode"
-SDK_ENGINE_GOOGLE_ADK = "google-adk-wr"
-VALID_SDK_ENGINES = [SDK_ENGINE_CLAUDE_CODE, SDK_ENGINE_OPENCODE, SDK_ENGINE_GOOGLE_ADK]
+VALID_SDK_ENGINES = [SDK_ENGINE_CLAUDE_CODE, SDK_ENGINE_OPENCODE]
 
 # SDK to AICredentialType mapping — single source of truth
 SDK_TO_CREDENTIAL_TYPE: dict[str, AICredentialType] = {
     SDK_ANTHROPIC: AICredentialType.ANTHROPIC,
     SDK_MINIMAX: AICredentialType.MINIMAX,
-    SDK_OPENAI_COMPATIBLE: AICredentialType.OPENAI_COMPATIBLE,
     # OpenCode variants
     "opencode/anthropic": AICredentialType.ANTHROPIC,
     "opencode/openai": AICredentialType.OPENAI,
     "opencode/openai_compatible": AICredentialType.OPENAI_COMPATIBLE,
     "opencode/google": AICredentialType.GOOGLE,
     "opencode": AICredentialType.ANTHROPIC,  # default provider
-    # Google ADK variants
-    "google-adk-wr/gemini": AICredentialType.GOOGLE,
 }
 
 # SDK ↔ Credential type compatibility matrix
@@ -40,7 +35,6 @@ SDK_TO_CREDENTIAL_TYPE: dict[str, AICredentialType] = {
 SDK_CREDENTIAL_COMPATIBILITY: dict[str, list[str]] = {
     "claude-code": ["anthropic", "minimax"],
     "opencode": ["anthropic", "openai", "openai_compatible", "google"],
-    "google-adk-wr": ["openai_compatible", "google"],
 }
 
 # Credential type to credential bag key mapping

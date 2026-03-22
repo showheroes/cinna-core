@@ -36,7 +36,6 @@
 - `backend/app/env-templates/app_core_base/core/server/adapters/claude_code_event_transformer.py` — `ClaudeCodeEventTransformer`
 - `backend/app/env-templates/app_core_base/core/server/adapters/opencode_sdk_adapter.py`
 - `backend/app/env-templates/app_core_base/core/server/adapters/opencode_event_transformer.py` — `OpenCodeEventTransformer`
-- `backend/app/env-templates/app_core_base/core/server/adapters/google_adk_sdk_adapter.py`
 - `backend/app/env-templates/app_core_base/core/server/adapters/tool_name_registry.py` — unified lowercase tool name convention: maps, pre-approved set, `normalize_tool_name()`
 - `backend/app/env-templates/app_core_base/core/server/tools/mcp_bridge/knowledge_server.py`
 - `backend/app/env-templates/app_core_base/core/server/tools/mcp_bridge/task_server.py`
@@ -65,9 +64,9 @@
 - `model_override_building: str | None` — optional model override for building mode (e.g., `claude-opus-4`)
 
 **Schema constants** (`backend/app/services/environment_service.py`):
-- `SDK_ANTHROPIC` (`claude-code/anthropic`), `SDK_MINIMAX` (`claude-code/minimax`), `SDK_OPENAI_COMPATIBLE` (`google-adk-wr/openai-compatible`)
-- `SDK_ENGINE_CLAUDE_CODE`, `SDK_ENGINE_OPENCODE`, `SDK_ENGINE_GOOGLE_ADK` — engine-only prefix constants
-- `VALID_SDK_ENGINES` — list of the three valid engine prefixes
+- `SDK_ANTHROPIC` (`claude-code/anthropic`), `SDK_MINIMAX` (`claude-code/minimax`)
+- `SDK_ENGINE_CLAUDE_CODE`, `SDK_ENGINE_OPENCODE` — engine-only prefix constants
+- `VALID_SDK_ENGINES` — list of the two valid engine prefixes
 - `SDK_CREDENTIAL_COMPATIBILITY` — dict mapping engine → list of compatible credential type strings
 - `SDK_TO_CREDENTIAL_TYPE` — full SDK ID → `AICredentialType` mapping including all `opencode/*` variants
 
@@ -96,7 +95,6 @@
 - `_update_environment_config()` — fetches user credentials and triggers env file generation
 - `_generate_env_file()` — writes `.env`; conditionally includes `ANTHROPIC_API_KEY`; calls settings generators for MiniMax, OpenAI Compatible, and OpenCode
 - `_generate_minimax_settings_files()` — writes JSON settings to `app/core/.claude/`
-- `_generate_openai_compatible_settings_files()` — writes JSON settings to `app/core/.google-adk/`
 - `_generate_opencode_config_files()` — writes `opencode.json` to `app/core/.opencode/{mode}/` for each mode that uses `opencode/*`; embeds model selection, provider registration with API key, permission rules, tool flags, and MCP bridge server commands; called at environment creation and rebuild
 - `rebuild_environment()` — after core replacement, regenerates settings files for all adapter types including OpenCode
 
@@ -105,7 +103,7 @@
 **`frontend/src/components/UserSettings/AICredentials.tsx`:**
 - Two-panel layout: AI Credentials list (left) and Default SDK Preferences (right)
 - Default SDK Preferences panel renders two bordered sections (Conversation Mode, Building Mode), each with three cascading controls: SDK Engine select, Credential select, Model Override input
-- SDK Engine options: `claude-code` ("Claude Code"), `opencode` ("OpenCode"), `google-adk-wr` ("Google ADK (simplified)")
+- SDK Engine options: `claude-code` ("Claude Code"), `opencode` ("OpenCode")
 - Credential dropdown filtered via `SDK_CREDENTIAL_COMPATIBILITY` map; first option is "Use Default" (`__default__` sentinel)
 - Model Override input uses `<datalist>` for type-specific suggestions (`SUGGESTED_MODELS` map)
 - All three values per mode saved together via a single "Save Preferences" button (`handleSavePreferences`)
@@ -207,13 +205,6 @@ Stateful translator from raw Claude Agent SDK messages to `SDKEvent` objects. Mi
 - `_handle_assistant_message()` — extracts `TextBlock`, `ThinkingBlock`, `ToolUseBlock`; normalizes tool names via `tool_name_registry`
 - `_handle_result_message()` — emits `DONE` or `INTERRUPTED` based on subtype and interrupt flag
 - `_handle_user_message()` — forwards interrupt notifications, skips other user messages
-
-### GoogleADKAdapter (`adapters/google_adk_sdk_adapter.py`)
-
-- Handles `google-adk-wr/*` variants (openai-compatible, gemini)
-- `_load_settings_for_mode(mode)` — reads `/app/core/.google-adk/{mode}_settings.json`
-- `_get_openai_compatible_config(mode)` — extracts `api_key`, `base_url`, `model` from settings
-- Gemini provider is a placeholder
 
 ### OpenCodeAdapter (`adapters/opencode_sdk_adapter.py`)
 
@@ -321,8 +312,6 @@ MCP tool names visible to the agent follow the pattern `mcp__{server}__{tool}` (
 **Settings file locations inside container:**
 - `app/core/.claude/building_settings.json` — MiniMax building mode config
 - `app/core/.claude/conversation_settings.json` — MiniMax conversation mode config
-- `app/core/.google-adk/building_settings.json` — OpenAI Compatible building mode config
-- `app/core/.google-adk/conversation_settings.json` — OpenAI Compatible conversation mode config
 - `app/core/.opencode/building/opencode.json` — OpenCode building mode server config (port 4096)
 - `app/core/.opencode/conversation/opencode.json` — OpenCode conversation mode server config (port 4097)
 
@@ -345,8 +334,6 @@ MCP tool names visible to the agent follow the pattern `mcp__{server}__{tool}` (
 | `google` | `google/gemini-2.5-pro` | `google/gemini-2.5-flash` |
 
 **MiniMax settings file fields:** `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, model mappings
-
-**OpenAI Compatible settings file fields:** `providers.openai-compatible.api_key`, `providers.openai-compatible.base_url`, `providers.openai-compatible.model`
 
 ## Tests
 

@@ -20,7 +20,6 @@ const getSDKDisplayName = (sdk: string | null | undefined): string => {
   if (!sdk) return "Anthropic"
   if (sdk === "claude-code/anthropic" || sdk === "claude-code") return "Claude Code"
   if (sdk === "claude-code/minimax") return "MiniMax"
-  if (sdk === "google-adk-wr/openai-compatible" || sdk === "google-adk-wr") return "Google ADK"
   if (sdk === "opencode" || sdk === "opencode/anthropic") return "OpenCode"
   // OpenCode with specific provider — show provider in parentheses
   if (sdk === "opencode/openai") return "OpenCode (OpenAI)"
