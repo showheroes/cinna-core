@@ -337,6 +337,112 @@ export type AgentGuestShareUpdate = {
     allow_env_panel?: (boolean | null);
 };
 
+export type AgenticTeamChartPublic = {
+    team: AgenticTeamPublic;
+    nodes: Array<AgenticTeamNodePublic>;
+    connections: Array<AgenticTeamConnectionPublic>;
+};
+
+export type AgenticTeamConnectionCreate = {
+    source_node_id: string;
+    target_node_id: string;
+    connection_prompt?: string;
+    enabled?: boolean;
+};
+
+export type AgenticTeamConnectionPublic = {
+    id: string;
+    team_id: string;
+    source_node_id: string;
+    target_node_id: string;
+    source_node_name: string;
+    target_node_name: string;
+    connection_prompt: string;
+    enabled: boolean;
+    created_at: string;
+    updated_at: string;
+};
+
+export type AgenticTeamConnectionsPublic = {
+    data: Array<AgenticTeamConnectionPublic>;
+    count: number;
+};
+
+export type AgenticTeamConnectionUpdate = {
+    connection_prompt?: (string | null);
+    enabled?: (boolean | null);
+};
+
+export type AgenticTeamCreate = {
+    name: string;
+    icon?: (string | null);
+};
+
+/**
+ * Create request for a team node.
+ * name is NOT included — it is auto-populated from agent.name at service layer.
+ */
+export type AgenticTeamNodeCreate = {
+    agent_id: string;
+    is_lead?: boolean;
+    pos_x?: number;
+    pos_y?: number;
+};
+
+export type AgenticTeamNodePositionUpdate = {
+    id: string;
+    pos_x: number;
+    pos_y: number;
+};
+
+export type AgenticTeamNodePublic = {
+    id: string;
+    team_id: string;
+    agent_id: string;
+    name: string;
+    agent_ui_color_preset: (string | null);
+    node_type: string;
+    is_lead: boolean;
+    pos_x: number;
+    pos_y: number;
+    created_at: string;
+    updated_at: string;
+};
+
+export type AgenticTeamNodesPublic = {
+    data: Array<AgenticTeamNodePublic>;
+    count: number;
+};
+
+/**
+ * Only is_lead, pos_x, and pos_y are updatable.
+ * name and agent_id cannot be changed — delete and re-add to change agent.
+ */
+export type AgenticTeamNodeUpdate = {
+    is_lead?: (boolean | null);
+    pos_x?: (number | null);
+    pos_y?: (number | null);
+};
+
+export type AgenticTeamPublic = {
+    id: string;
+    owner_id: string;
+    name: string;
+    icon: (string | null);
+    created_at: string;
+    updated_at: string;
+};
+
+export type AgenticTeamsPublic = {
+    data: Array<AgenticTeamPublic>;
+    count: number;
+};
+
+export type AgenticTeamUpdate = {
+    name?: (string | null);
+    icon?: (string | null);
+};
+
 /**
  * Schema for creating an agent plugin link.
  */
@@ -2578,6 +2684,121 @@ export type ActivitiesMarkActivitiesAsReadData = {
 export type ActivitiesMarkActivitiesAsReadResponse = ({
     [key: string]: unknown;
 });
+
+export type AgenticTeamsListAgenticTeamsData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type AgenticTeamsListAgenticTeamsResponse = (AgenticTeamsPublic);
+
+export type AgenticTeamsCreateAgenticTeamData = {
+    requestBody: AgenticTeamCreate;
+};
+
+export type AgenticTeamsCreateAgenticTeamResponse = (AgenticTeamPublic);
+
+export type AgenticTeamsGetAgenticTeamData = {
+    teamId: string;
+};
+
+export type AgenticTeamsGetAgenticTeamResponse = (AgenticTeamPublic);
+
+export type AgenticTeamsUpdateAgenticTeamData = {
+    requestBody: AgenticTeamUpdate;
+    teamId: string;
+};
+
+export type AgenticTeamsUpdateAgenticTeamResponse = (AgenticTeamPublic);
+
+export type AgenticTeamsDeleteAgenticTeamData = {
+    teamId: string;
+};
+
+export type AgenticTeamsDeleteAgenticTeamResponse = (Message);
+
+export type AgenticTeamsGetAgenticTeamChartData = {
+    teamId: string;
+};
+
+export type AgenticTeamsGetAgenticTeamChartResponse = (AgenticTeamChartPublic);
+
+export type AgenticTeamsBulkUpdateNodePositionsData = {
+    requestBody: Array<AgenticTeamNodePositionUpdate>;
+    teamId: string;
+};
+
+export type AgenticTeamsBulkUpdateNodePositionsResponse = (Array<AgenticTeamNodePublic>);
+
+export type AgenticTeamsListTeamNodesData = {
+    teamId: string;
+};
+
+export type AgenticTeamsListTeamNodesResponse = (AgenticTeamNodesPublic);
+
+export type AgenticTeamsCreateTeamNodeData = {
+    requestBody: AgenticTeamNodeCreate;
+    teamId: string;
+};
+
+export type AgenticTeamsCreateTeamNodeResponse = (AgenticTeamNodePublic);
+
+export type AgenticTeamsGetTeamNodeData = {
+    nodeId: string;
+    teamId: string;
+};
+
+export type AgenticTeamsGetTeamNodeResponse = (AgenticTeamNodePublic);
+
+export type AgenticTeamsUpdateTeamNodeData = {
+    nodeId: string;
+    requestBody: AgenticTeamNodeUpdate;
+    teamId: string;
+};
+
+export type AgenticTeamsUpdateTeamNodeResponse = (AgenticTeamNodePublic);
+
+export type AgenticTeamsDeleteTeamNodeData = {
+    nodeId: string;
+    teamId: string;
+};
+
+export type AgenticTeamsDeleteTeamNodeResponse = (Message);
+
+export type AgenticTeamsListTeamConnectionsData = {
+    teamId: string;
+};
+
+export type AgenticTeamsListTeamConnectionsResponse = (AgenticTeamConnectionsPublic);
+
+export type AgenticTeamsCreateTeamConnectionData = {
+    requestBody: AgenticTeamConnectionCreate;
+    teamId: string;
+};
+
+export type AgenticTeamsCreateTeamConnectionResponse = (AgenticTeamConnectionPublic);
+
+export type AgenticTeamsGetTeamConnectionData = {
+    connId: string;
+    teamId: string;
+};
+
+export type AgenticTeamsGetTeamConnectionResponse = (AgenticTeamConnectionPublic);
+
+export type AgenticTeamsUpdateTeamConnectionData = {
+    connId: string;
+    requestBody: AgenticTeamConnectionUpdate;
+    teamId: string;
+};
+
+export type AgenticTeamsUpdateTeamConnectionResponse = (AgenticTeamConnectionPublic);
+
+export type AgenticTeamsDeleteTeamConnectionData = {
+    connId: string;
+    teamId: string;
+};
+
+export type AgenticTeamsDeleteTeamConnectionResponse = (Message);
 
 export type AgentsReadAgentsData = {
     limit?: number;

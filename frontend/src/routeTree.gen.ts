@@ -30,12 +30,14 @@ import { Route as LayoutAgentsRouteImport } from './routes/_layout/agents'
 import { Route as LayoutActivitiesRouteImport } from './routes/_layout/activities'
 import { Route as LayoutSessionsIndexRouteImport } from './routes/_layout/sessions.index'
 import { Route as LayoutDashboardsIndexRouteImport } from './routes/_layout/dashboards.index'
+import { Route as LayoutAgenticTeamsIndexRouteImport } from './routes/_layout/agentic-teams.index'
 import { Route as CredentialsOauthCallbackRouteImport } from './routes/credentials/oauth/callback'
 import { Route as LayoutTaskTaskIdRouteImport } from './routes/_layout/task/$taskId'
 import { Route as LayoutSessionSessionIdRouteImport } from './routes/_layout/session/$sessionId'
 import { Route as LayoutKnowledgeSourceSourceIdRouteImport } from './routes/_layout/knowledge-source/$sourceId'
 import { Route as LayoutDashboardsDashboardIdRouteImport } from './routes/_layout/dashboards.$dashboardId'
 import { Route as LayoutCredentialCredentialIdRouteImport } from './routes/_layout/credential/$credentialId'
+import { Route as LayoutAgenticTeamsTeamIdRouteImport } from './routes/_layout/agentic-teams.$teamId'
 import { Route as LayoutAgentCreatingRouteImport } from './routes/_layout/agent/creating'
 import { Route as LayoutAgentAgentIdRouteImport } from './routes/_layout/agent/$agentId'
 import { Route as LayoutAdminUsersRouteImport } from './routes/_layout/admin/users'
@@ -152,6 +154,11 @@ const LayoutDashboardsIndexRoute = LayoutDashboardsIndexRouteImport.update({
   path: '/dashboards/',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutAgenticTeamsIndexRoute = LayoutAgenticTeamsIndexRouteImport.update({
+  id: '/agentic-teams/',
+  path: '/agentic-teams/',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const CredentialsOauthCallbackRoute =
   CredentialsOauthCallbackRouteImport.update({
     id: '/credentials/oauth/callback',
@@ -184,6 +191,12 @@ const LayoutCredentialCredentialIdRoute =
   LayoutCredentialCredentialIdRouteImport.update({
     id: '/credential/$credentialId',
     path: '/credential/$credentialId',
+    getParentRoute: () => LayoutRoute,
+  } as any)
+const LayoutAgenticTeamsTeamIdRoute =
+  LayoutAgenticTeamsTeamIdRouteImport.update({
+    id: '/agentic-teams/$teamId',
+    path: '/agentic-teams/$teamId',
     getParentRoute: () => LayoutRoute,
   } as any)
 const LayoutAgentCreatingRoute = LayoutAgentCreatingRouteImport.update({
@@ -266,12 +279,14 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof LayoutAdminUsersRoute
   '/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/agent/creating': typeof LayoutAgentCreatingRoute
+  '/agentic-teams/$teamId': typeof LayoutAgenticTeamsTeamIdRoute
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/dashboards/$dashboardId': typeof LayoutDashboardsDashboardIdRoute
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
+  '/agentic-teams': typeof LayoutAgenticTeamsIndexRoute
   '/dashboards': typeof LayoutDashboardsIndexRoute
   '/sessions/': typeof LayoutSessionsIndexRoute
   '/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
@@ -303,12 +318,14 @@ export interface FileRoutesByTo {
   '/admin/users': typeof LayoutAdminUsersRoute
   '/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/agent/creating': typeof LayoutAgentCreatingRoute
+  '/agentic-teams/$teamId': typeof LayoutAgenticTeamsTeamIdRoute
   '/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/dashboards/$dashboardId': typeof LayoutDashboardsDashboardIdRoute
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
+  '/agentic-teams': typeof LayoutAgenticTeamsIndexRoute
   '/dashboards': typeof LayoutDashboardsIndexRoute
   '/sessions': typeof LayoutSessionsIndexRoute
   '/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
@@ -343,12 +360,14 @@ export interface FileRoutesById {
   '/_layout/admin/users': typeof LayoutAdminUsersRoute
   '/_layout/agent/$agentId': typeof LayoutAgentAgentIdRouteWithChildren
   '/_layout/agent/creating': typeof LayoutAgentCreatingRoute
+  '/_layout/agentic-teams/$teamId': typeof LayoutAgenticTeamsTeamIdRoute
   '/_layout/credential/$credentialId': typeof LayoutCredentialCredentialIdRoute
   '/_layout/dashboards/$dashboardId': typeof LayoutDashboardsDashboardIdRoute
   '/_layout/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/_layout/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/_layout/task/$taskId': typeof LayoutTaskTaskIdRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
+  '/_layout/agentic-teams/': typeof LayoutAgenticTeamsIndexRoute
   '/_layout/dashboards/': typeof LayoutDashboardsIndexRoute
   '/_layout/sessions/': typeof LayoutSessionsIndexRoute
   '/_layout/admin/marketplace/$marketplaceId': typeof LayoutAdminMarketplaceMarketplaceIdRoute
@@ -383,12 +402,14 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/agent/$agentId'
     | '/agent/creating'
+    | '/agentic-teams/$teamId'
     | '/credential/$credentialId'
     | '/dashboards/$dashboardId'
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
     | '/task/$taskId'
     | '/credentials/oauth/callback'
+    | '/agentic-teams'
     | '/dashboards'
     | '/sessions/'
     | '/admin/marketplace/$marketplaceId'
@@ -420,12 +441,14 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/agent/$agentId'
     | '/agent/creating'
+    | '/agentic-teams/$teamId'
     | '/credential/$credentialId'
     | '/dashboards/$dashboardId'
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
     | '/task/$taskId'
     | '/credentials/oauth/callback'
+    | '/agentic-teams'
     | '/dashboards'
     | '/sessions'
     | '/admin/marketplace/$marketplaceId'
@@ -459,12 +482,14 @@ export interface FileRouteTypes {
     | '/_layout/admin/users'
     | '/_layout/agent/$agentId'
     | '/_layout/agent/creating'
+    | '/_layout/agentic-teams/$teamId'
     | '/_layout/credential/$credentialId'
     | '/_layout/dashboards/$dashboardId'
     | '/_layout/knowledge-source/$sourceId'
     | '/_layout/session/$sessionId'
     | '/_layout/task/$taskId'
     | '/credentials/oauth/callback'
+    | '/_layout/agentic-teams/'
     | '/_layout/dashboards/'
     | '/_layout/sessions/'
     | '/_layout/admin/marketplace/$marketplaceId'
@@ -638,6 +663,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutDashboardsIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/agentic-teams/': {
+      id: '/_layout/agentic-teams/'
+      path: '/agentic-teams'
+      fullPath: '/agentic-teams'
+      preLoaderRoute: typeof LayoutAgenticTeamsIndexRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/credentials/oauth/callback': {
       id: '/credentials/oauth/callback'
       path: '/credentials/oauth/callback'
@@ -678,6 +710,13 @@ declare module '@tanstack/react-router' {
       path: '/credential/$credentialId'
       fullPath: '/credential/$credentialId'
       preLoaderRoute: typeof LayoutCredentialCredentialIdRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/agentic-teams/$teamId': {
+      id: '/_layout/agentic-teams/$teamId'
+      path: '/agentic-teams/$teamId'
+      fullPath: '/agentic-teams/$teamId'
+      preLoaderRoute: typeof LayoutAgenticTeamsTeamIdRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/agent/creating': {
@@ -792,11 +831,13 @@ interface LayoutRouteChildren {
   LayoutAdminUsersRoute: typeof LayoutAdminUsersRoute
   LayoutAgentAgentIdRoute: typeof LayoutAgentAgentIdRouteWithChildren
   LayoutAgentCreatingRoute: typeof LayoutAgentCreatingRoute
+  LayoutAgenticTeamsTeamIdRoute: typeof LayoutAgenticTeamsTeamIdRoute
   LayoutCredentialCredentialIdRoute: typeof LayoutCredentialCredentialIdRoute
   LayoutDashboardsDashboardIdRoute: typeof LayoutDashboardsDashboardIdRoute
   LayoutKnowledgeSourceSourceIdRoute: typeof LayoutKnowledgeSourceSourceIdRoute
   LayoutSessionSessionIdRoute: typeof LayoutSessionSessionIdRoute
   LayoutTaskTaskIdRoute: typeof LayoutTaskTaskIdRoute
+  LayoutAgenticTeamsIndexRoute: typeof LayoutAgenticTeamsIndexRoute
   LayoutDashboardsIndexRoute: typeof LayoutDashboardsIndexRoute
   LayoutAdminMarketplaceMarketplaceIdRoute: typeof LayoutAdminMarketplaceMarketplaceIdRoute
   LayoutEnvironmentEnvIdDatabaseRoute: typeof LayoutEnvironmentEnvIdDatabaseRoute
@@ -818,11 +859,13 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminUsersRoute: LayoutAdminUsersRoute,
   LayoutAgentAgentIdRoute: LayoutAgentAgentIdRouteWithChildren,
   LayoutAgentCreatingRoute: LayoutAgentCreatingRoute,
+  LayoutAgenticTeamsTeamIdRoute: LayoutAgenticTeamsTeamIdRoute,
   LayoutCredentialCredentialIdRoute: LayoutCredentialCredentialIdRoute,
   LayoutDashboardsDashboardIdRoute: LayoutDashboardsDashboardIdRoute,
   LayoutKnowledgeSourceSourceIdRoute: LayoutKnowledgeSourceSourceIdRoute,
   LayoutSessionSessionIdRoute: LayoutSessionSessionIdRoute,
   LayoutTaskTaskIdRoute: LayoutTaskTaskIdRoute,
+  LayoutAgenticTeamsIndexRoute: LayoutAgenticTeamsIndexRoute,
   LayoutDashboardsIndexRoute: LayoutDashboardsIndexRoute,
   LayoutAdminMarketplaceMarketplaceIdRoute:
     LayoutAdminMarketplaceMarketplaceIdRoute,

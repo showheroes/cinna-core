@@ -8,6 +8,8 @@ import { MailServerSettings } from "@/components/UserSettings/MailServerSettings
 import { SSHKeys } from "@/components/UserSettings/SSHKeys"
 import UserInformation from "@/components/UserSettings/UserInformation"
 import { WorkspaceSettings } from "@/components/UserSettings/WorkspaceSettings"
+import { AgenticTeamSettings } from "@/components/AgenticTeams/AgenticTeamSettings"
+import { DashboardSettings } from "@/components/UserSettings/DashboardSettings"
 import { HashTabs, TabConfig } from "@/components/Common/HashTabs"
 import useAuth from "@/hooks/useAuth"
 import { usePageHeader } from "@/routes/_layout"
@@ -43,7 +45,17 @@ function UserSettings() {
 
   const tabs: TabConfig[] = [
     { value: "my-profile", title: "My profile", content: <UserInformation /> },
-    { value: "interface", title: "Interface", content: <WorkspaceSettings /> },
+    {
+      value: "interface",
+      title: "Interface",
+      content: (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <WorkspaceSettings />
+          <AgenticTeamSettings />
+          <DashboardSettings />
+        </div>
+      ),
+    },
     { value: "ai-credentials", title: "AI Credentials", content: <AICredentialsSettings /> },
     { value: "general-assistant", title: "General Assistant", content: <GeneralAssistantSettings /> },
     { value: "mail-servers", title: "Mail Servers", content: <MailServerSettings /> },

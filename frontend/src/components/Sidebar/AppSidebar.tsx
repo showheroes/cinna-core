@@ -6,6 +6,7 @@ import { SidebarAppearance } from "@/components/Common/Appearance"
 import { Logo } from "@/components/Common/Logo"
 import { WebSocketStatus } from "@/components/Common/WebSocketStatus"
 import { SidebarWorkspaceSwitcher } from "@/components/Common/WorkspaceSwitcher"
+import { AgenticTeamsSwitcher } from "@/components/AgenticTeams/AgenticTeamsSwitcher"
 import {
   Sidebar,
   SidebarContent,
@@ -136,6 +137,7 @@ export function AppSidebar() {
       <SidebarFooter>
         <WebSocketStatus />
         <SidebarDashboardSwitcher />
+        <AgenticTeamsSwitcher />
         <SidebarWorkspaceSwitcher />
         <KnowledgeSourcesMenu />
         <SidebarAppearance />

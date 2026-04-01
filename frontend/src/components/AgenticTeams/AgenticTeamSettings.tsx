@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  UserWorkspacesService,
-  type UserWorkspacePublic,
+  AgenticTeamsService,
+  type AgenticTeamPublic,
 } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -75,29 +75,29 @@ function IconSelector({
   )
 }
 
-function WorkspaceFormDialog({
+export function AgenticTeamFormDialog({
   open,
   onClose,
-  workspace,
+  team,
   onSubmit,
   isPending,
 }: {
   open: boolean
   onClose: () => void
-  workspace?: UserWorkspacePublic | null
+  team?: AgenticTeamPublic | null
   onSubmit: (name: string, icon: string) => void
   isPending: boolean
 }) {
   const [name, setName] = useState("")
-  const [icon, setIcon] = useState("folder-kanban")
-  const isEdit = !!workspace
+  const [icon, setIcon] = useState("users")
+  const isEdit = !!team
 
   useEffect(() => {
     if (open) {
-      setName(workspace?.name ?? "")
-      setIcon(workspace?.icon ?? "folder-kanban")
+      setName(team?.name ?? "")
+      setIcon(team?.icon ?? "users")
     }
-  }, [open, workspace])
+  }, [open, team])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -111,20 +111,20 @@ function WorkspaceFormDialog({
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>
-              {isEdit ? "Edit Workspace" : "Create Workspace"}
+              {isEdit ? "Edit Agentic Team" : "Create Agentic Team"}
             </DialogTitle>
             <DialogDescription>
               {isEdit
-                ? "Update workspace name and icon."
-                : "Create a workspace to organize your agents, credentials, and sessions."}
+                ? "Update the team name and icon."
+                : "Create a named agentic team to define agent orchestration topology."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="ws-name">Name</Label>
+              <Label htmlFor="team-name">Name</Label>
               <Input
-                id="ws-name"
-                placeholder="e.g., Financial Data, Email Management"
+                id="team-name"
+                placeholder="e.g., Content Pipeline, IT Support Team"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 autoFocus
@@ -156,27 +156,27 @@ function WorkspaceFormDialog({
   )
 }
 
-export function WorkspaceSettings() {
+export function AgenticTeamSettings() {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const [createOpen, setCreateOpen] = useState(false)
-  const [editWorkspace, setEditWorkspace] = useState<UserWorkspacePublic | null>(null)
+  const [editTeam, setEditTeam] = useState<AgenticTeamPublic | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
-  const { data: workspacesData, isLoading } = useQuery({
-    queryKey: ["userWorkspaces"],
-    queryFn: () => UserWorkspacesService.readWorkspaces(),
+  const { data: teamsData, isLoading } = useQuery({
+    queryKey: ["agenticTeams"],
+    queryFn: () => AgenticTeamsService.listAgenticTeams(),
   })
 
   const createMutation = useMutation({
     mutationFn: (data: { name: string; icon: string }) =>
-      UserWorkspacesService.createWorkspace({ requestBody: data }),
+      AgenticTeamsService.createAgenticTeam({ requestBody: data }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["userWorkspaces"] })
-      showSuccessToast("Workspace created")
+      queryClient.invalidateQueries({ queryKey: ["agenticTeams"] })
+      showSuccessToast("Agentic team created")
       setCreateOpen(false)
     },
-    onError: () => showErrorToast("Failed to create workspace"),
+    onError: () => showErrorToast("Failed to create agentic team"),
   })
 
   const updateMutation = useMutation({
@@ -187,66 +187,66 @@ export function WorkspaceSettings() {
       id: string
       data: { name?: string; icon?: string }
     }) =>
-      UserWorkspacesService.updateWorkspace({
-        workspaceId: id,
+      AgenticTeamsService.updateAgenticTeam({
+        teamId: id,
         requestBody: data,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["userWorkspaces"] })
-      showSuccessToast("Workspace updated")
-      setEditWorkspace(null)
+      queryClient.invalidateQueries({ queryKey: ["agenticTeams"] })
+      showSuccessToast("Agentic team updated")
+      setEditTeam(null)
     },
-    onError: () => showErrorToast("Failed to update workspace"),
+    onError: () => showErrorToast("Failed to update agentic team"),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) =>
-      UserWorkspacesService.deleteWorkspace({ workspaceId: id }),
+      AgenticTeamsService.deleteAgenticTeam({ teamId: id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["userWorkspaces"] })
-      showSuccessToast("Workspace deleted")
+      queryClient.invalidateQueries({ queryKey: ["agenticTeams"] })
+      showSuccessToast("Agentic team deleted")
       setDeleteId(null)
     },
-    onError: () => showErrorToast("Failed to delete workspace"),
+    onError: () => showErrorToast("Failed to delete agentic team"),
   })
 
   return (
     <>
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle>Workspaces</CardTitle>
+          <CardTitle>Agentic Teams</CardTitle>
           <CardDescription>
-            Organize agents, credentials, and sessions into workspaces.
+            Define agent orchestration teams — visual org-charts that wire agents together with handover prompts.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4 mr-1.5" />
-            New Workspace
+            New Agentic Team
           </Button>
 
           {isLoading ? (
             <div className="text-sm text-muted-foreground">
-              Loading workspaces...
+              Loading agentic teams...
             </div>
-          ) : workspacesData && workspacesData.data.length > 0 ? (
+          ) : teamsData && teamsData.data.length > 0 ? (
             <Table>
               <TableBody>
-                {workspacesData.data.map((ws) => {
-                  const Icon = getWorkspaceIcon(ws.icon)
+                {teamsData.data.map((team) => {
+                  const Icon = getWorkspaceIcon(team.icon)
                   return (
-                    <TableRow key={ws.id} className="h-9">
+                    <TableRow key={team.id} className="h-9">
                       <TableCell className="px-2 py-1">
                         <Icon className="h-4 w-4 text-muted-foreground" />
                       </TableCell>
-                      <TableCell className="px-2 py-1 font-medium text-sm">{ws.name}</TableCell>
+                      <TableCell className="px-2 py-1 font-medium text-sm">{team.name}</TableCell>
                       <TableCell className="px-2 py-1 text-right">
                         <div className="flex gap-1 justify-end">
                           <Button
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7"
-                            onClick={() => setEditWorkspace(ws)}
+                            onClick={() => setEditTeam(team)}
                             title="Edit"
                           >
                             <Pencil className="h-3.5 w-3.5" />
@@ -255,7 +255,7 @@ export function WorkspaceSettings() {
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7"
-                            onClick={() => setDeleteId(ws.id)}
+                            onClick={() => setDeleteId(team.id)}
                             title="Delete"
                           >
                             <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -269,28 +269,28 @@ export function WorkspaceSettings() {
             </Table>
           ) : (
             <div className="text-sm text-muted-foreground">
-              No workspaces yet. All entities belong to the Default workspace.
+              No agentic teams yet. Create your first team to define agent orchestration topology.
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Create Workspace Dialog */}
-      <WorkspaceFormDialog
+      {/* Create Team Dialog */}
+      <AgenticTeamFormDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onSubmit={(name, icon) => createMutation.mutate({ name, icon })}
         isPending={createMutation.isPending}
       />
 
-      {/* Edit Workspace Dialog */}
-      <WorkspaceFormDialog
-        open={!!editWorkspace}
-        onClose={() => setEditWorkspace(null)}
-        workspace={editWorkspace}
+      {/* Edit Team Dialog */}
+      <AgenticTeamFormDialog
+        open={!!editTeam}
+        onClose={() => setEditTeam(null)}
+        team={editTeam}
         onSubmit={(name, icon) =>
-          editWorkspace &&
-          updateMutation.mutate({ id: editWorkspace.id, data: { name, icon } })
+          editTeam &&
+          updateMutation.mutate({ id: editTeam.id, data: { name, icon } })
         }
         isPending={updateMutation.isPending}
       />
@@ -302,10 +302,10 @@ export function WorkspaceSettings() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Workspace</AlertDialogTitle>
+            <AlertDialogTitle>Delete Agentic Team</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure? Entities in this workspace will move to the Default
-              workspace. This action cannot be undone.
+              Are you sure? This will delete the team and all its nodes and connections.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

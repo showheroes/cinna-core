@@ -3787,6 +3787,458 @@ export const AgentWebappSharesPublicSchema = {
     title: 'AgentWebappSharesPublic'
 } as const;
 
+export const AgenticTeamChartPublicSchema = {
+    properties: {
+        team: {
+            '$ref': '#/components/schemas/AgenticTeamPublic'
+        },
+        nodes: {
+            items: {
+                '$ref': '#/components/schemas/AgenticTeamNodePublic'
+            },
+            type: 'array',
+            title: 'Nodes'
+        },
+        connections: {
+            items: {
+                '$ref': '#/components/schemas/AgenticTeamConnectionPublic'
+            },
+            type: 'array',
+            title: 'Connections'
+        }
+    },
+    type: 'object',
+    required: ['team', 'nodes', 'connections'],
+    title: 'AgenticTeamChartPublic'
+} as const;
+
+export const AgenticTeamConnectionCreateSchema = {
+    properties: {
+        source_node_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Source Node Id'
+        },
+        target_node_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Target Node Id'
+        },
+        connection_prompt: {
+            type: 'string',
+            maxLength: 2000,
+            title: 'Connection Prompt',
+            default: ''
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled',
+            default: true
+        }
+    },
+    type: 'object',
+    required: ['source_node_id', 'target_node_id'],
+    title: 'AgenticTeamConnectionCreate'
+} as const;
+
+export const AgenticTeamConnectionPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        team_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Team Id'
+        },
+        source_node_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Source Node Id'
+        },
+        target_node_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Target Node Id'
+        },
+        source_node_name: {
+            type: 'string',
+            title: 'Source Node Name'
+        },
+        target_node_name: {
+            type: 'string',
+            title: 'Target Node Name'
+        },
+        connection_prompt: {
+            type: 'string',
+            title: 'Connection Prompt'
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'team_id', 'source_node_id', 'target_node_id', 'source_node_name', 'target_node_name', 'connection_prompt', 'enabled', 'created_at', 'updated_at'],
+    title: 'AgenticTeamConnectionPublic'
+} as const;
+
+export const AgenticTeamConnectionUpdateSchema = {
+    properties: {
+        connection_prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Connection Prompt'
+        },
+        enabled: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Enabled'
+        }
+    },
+    type: 'object',
+    title: 'AgenticTeamConnectionUpdate'
+} as const;
+
+export const AgenticTeamConnectionsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AgenticTeamConnectionPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AgenticTeamConnectionsPublic'
+} as const;
+
+export const AgenticTeamCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        icon: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Icon'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'AgenticTeamCreate'
+} as const;
+
+export const AgenticTeamNodeCreateSchema = {
+    properties: {
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        is_lead: {
+            type: 'boolean',
+            title: 'Is Lead',
+            default: false
+        },
+        pos_x: {
+            type: 'number',
+            title: 'Pos X',
+            default: 0
+        },
+        pos_y: {
+            type: 'number',
+            title: 'Pos Y',
+            default: 0
+        }
+    },
+    type: 'object',
+    required: ['agent_id'],
+    title: 'AgenticTeamNodeCreate',
+    description: `Create request for a team node.
+name is NOT included — it is auto-populated from agent.name at service layer.`
+} as const;
+
+export const AgenticTeamNodePositionUpdateSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        pos_x: {
+            type: 'number',
+            title: 'Pos X'
+        },
+        pos_y: {
+            type: 'number',
+            title: 'Pos Y'
+        }
+    },
+    type: 'object',
+    required: ['id', 'pos_x', 'pos_y'],
+    title: 'AgenticTeamNodePositionUpdate'
+} as const;
+
+export const AgenticTeamNodePublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        team_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Team Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        agent_ui_color_preset: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Ui Color Preset'
+        },
+        node_type: {
+            type: 'string',
+            title: 'Node Type'
+        },
+        is_lead: {
+            type: 'boolean',
+            title: 'Is Lead'
+        },
+        pos_x: {
+            type: 'number',
+            title: 'Pos X'
+        },
+        pos_y: {
+            type: 'number',
+            title: 'Pos Y'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'team_id', 'agent_id', 'name', 'agent_ui_color_preset', 'node_type', 'is_lead', 'pos_x', 'pos_y', 'created_at', 'updated_at'],
+    title: 'AgenticTeamNodePublic'
+} as const;
+
+export const AgenticTeamNodeUpdateSchema = {
+    properties: {
+        is_lead: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Is Lead'
+        },
+        pos_x: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Pos X'
+        },
+        pos_y: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Pos Y'
+        }
+    },
+    type: 'object',
+    title: 'AgenticTeamNodeUpdate',
+    description: `Only is_lead, pos_x, and pos_y are updatable.
+name and agent_id cannot be changed — delete and re-add to change agent.`
+} as const;
+
+export const AgenticTeamNodesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AgenticTeamNodePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AgenticTeamNodesPublic'
+} as const;
+
+export const AgenticTeamPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        icon: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Icon'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'owner_id', 'name', 'icon', 'created_at', 'updated_at'],
+    title: 'AgenticTeamPublic'
+} as const;
+
+export const AgenticTeamUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        icon: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Icon'
+        }
+    },
+    type: 'object',
+    title: 'AgenticTeamUpdate'
+} as const;
+
+export const AgenticTeamsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AgenticTeamPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AgenticTeamsPublic'
+} as const;
+
 export const AgentsPublicSchema = {
     properties: {
         data: {

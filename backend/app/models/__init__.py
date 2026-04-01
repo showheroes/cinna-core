@@ -376,6 +376,25 @@ from .agent_collaboration import (
     CreateCollaborationRequest,
     CreateCollaborationResponse,
 )
+from .agentic_team import (
+    AgenticTeam,
+    AgenticTeamCreate,
+    AgenticTeamUpdate,
+    AgenticTeamPublic,
+    AgenticTeamsPublic,
+    AgenticTeamNode,
+    AgenticTeamNodeCreate,
+    AgenticTeamNodeUpdate,
+    AgenticTeamNodePublic,
+    AgenticTeamNodesPublic,
+    AgenticTeamNodePositionUpdate,
+    AgenticTeamConnection,
+    AgenticTeamConnectionCreate,
+    AgenticTeamConnectionUpdate,
+    AgenticTeamConnectionPublic,
+    AgenticTeamConnectionsPublic,
+    AgenticTeamChartPublic,
+)
 
 __all__ = [
     # Core
@@ -719,4 +738,22 @@ __all__ = [
     "PostFindingResponse",
     "CreateCollaborationRequest",
     "CreateCollaborationResponse",
+    # AgenticTeams
+    "AgenticTeam",
+    "AgenticTeamCreate",
+    "AgenticTeamUpdate",
+    "AgenticTeamPublic",
+    "AgenticTeamsPublic",
+    "AgenticTeamNode",
+    "AgenticTeamNodeCreate",
+    "AgenticTeamNodeUpdate",
+    "AgenticTeamNodePublic",
+    "AgenticTeamNodesPublic",
+    "AgenticTeamNodePositionUpdate",
+    "AgenticTeamConnection",
+    "AgenticTeamConnectionCreate",
+    "AgenticTeamConnectionUpdate",
+    "AgenticTeamConnectionPublic",
+    "AgenticTeamConnectionsPublic",
+    "AgenticTeamChartPublic",
 ]
