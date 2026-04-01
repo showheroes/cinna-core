@@ -1,12 +1,14 @@
 """
 Input Tasks API routes.
 
-Provides CRUD operations for input task management.
+Provides CRUD operations for input task management, plus collaboration endpoints
+for comments, attachments, subtasks, and short-code access.
 """
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
@@ -14,6 +16,7 @@ from app.models import (
     InputTaskUpdate,
     InputTaskPublic,
     InputTaskPublicExtended,
+    InputTaskDetailPublic,
     InputTasksPublicExtended,
     InputTaskStatus,
     RefineTaskRequest,
@@ -25,6 +28,11 @@ from app.models import (
     SessionsPublic,
     SessionPublic,
     Message,
+    TaskCommentCreate,
+    TaskCommentPublic,
+    TaskCommentsPublic,
+    TaskAttachmentPublic,
+    TaskAttachmentsPublic,
 )
 from app.models.file_upload import FileUploadPublic
 from app.services.input_task_service import (
@@ -36,6 +44,8 @@ from app.services.input_task_service import (
     ValidationError,
 )
 from app.services.session_service import SessionService
+from app.services.task_comment_service import TaskCommentService
+from app.services.task_attachment_service import TaskAttachmentService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -99,6 +109,9 @@ def list_tasks(
     limit: int = 100,
     status: str | None = None,
     user_workspace_id: str | None = None,
+    root_only: bool = False,
+    team_id: uuid.UUID | None = None,
+    priority: str | None = None,
 ) -> Any:
     """
     List user's input tasks.
@@ -107,15 +120,18 @@ def list_tasks(
         skip: Number of records to skip
         limit: Number of records to return
         status: Filter by status. Can be:
-            - "active": NEW, REFINING, RUNNING, PENDING_INPUT, ERROR
+            - "active": NEW, REFINING, OPEN, IN_PROGRESS, BLOCKED, ERROR
             - "completed": COMPLETED
             - "archived": ARCHIVED
             - "all": No filter
-            - Specific status name (e.g., "new", "running")
+            - Specific status name (e.g., "new", "in_progress")
         user_workspace_id: Optional workspace filter
             - None (not provided): returns all tasks
             - Empty string (""): filters for default workspace (NULL)
             - UUID string: filters for that workspace
+        root_only: If true, only return root tasks (parent_task_id IS NULL)
+        team_id: Filter by team UUID
+        priority: Filter by priority (low, normal, high, urgent)
     """
     try:
         data, count = InputTaskService.list_tasks_extended(
@@ -125,6 +141,9 @@ def list_tasks(
             user_workspace_id=user_workspace_id,
             skip=skip,
             limit=limit,
+            root_only=root_only,
+            team_id=team_id,
+            priority=priority,
         )
         return InputTasksPublicExtended(data=data, count=count)
     except InputTaskError as e:
@@ -362,14 +381,17 @@ def archive_task(
     Archive a completed or error task.
     """
     try:
-        task = InputTaskService.get_task_with_ownership_check(
+        InputTaskService.get_task_with_ownership_check(
             db_session=session,
             task_id=id,
             user_id=current_user.id,
         )
 
-        updated_task = InputTaskService.update_status(
-            db_session=session, task=task, status=InputTaskStatus.ARCHIVED
+        updated_task = InputTaskService.update_task_status(
+            db_session=session,
+            task_id=id,
+            new_status=InputTaskStatus.ARCHIVED,
+            changed_by_user_id=current_user.id,
         )
         return updated_task
     except InputTaskError as e:
@@ -487,5 +509,285 @@ def detach_file_from_task(
 
         return Message(message="File removed from task")
 
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+# ── Collaboration Endpoints (Phase A) ──────────────────────────────────────────
+
+@router.get("/by-code/{short_code}", response_model=InputTaskPublicExtended)
+def get_task_by_code(
+    session: SessionDep,
+    current_user: CurrentUser,
+    short_code: str,
+) -> Any:
+    """Get a task by its short code (e.g., TASK-42)."""
+    try:
+        task = InputTaskService.get_task_by_short_code(
+            db_session=session,
+            short_code=short_code,
+            user_id=current_user.id,
+        )
+        return InputTaskService.get_task_extended(
+            db_session=session,
+            task_id=task.id,
+            user_id=current_user.id,
+        )
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.get("/by-code/{short_code}/detail", response_model=InputTaskDetailPublic)
+def get_task_detail_by_code(
+    session: SessionDep,
+    current_user: CurrentUser,
+    short_code: str,
+) -> Any:
+    """Get full task detail (comments, attachments, subtasks, history) by short code."""
+    try:
+        task = InputTaskService.get_task_by_short_code(
+            db_session=session,
+            short_code=short_code,
+            user_id=current_user.id,
+        )
+        return InputTaskService.get_task_detail(
+            db_session=session,
+            task_id=task.id,
+            user_id=current_user.id,
+        )
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.get("/by-code/{short_code}/tree")
+def get_task_tree_by_code(
+    session: SessionDep,
+    current_user: CurrentUser,
+    short_code: str,
+) -> Any:
+    """Get recursive subtask tree for a task identified by short code."""
+    try:
+        task = InputTaskService.get_task_by_short_code(
+            db_session=session,
+            short_code=short_code,
+            user_id=current_user.id,
+        )
+        return InputTaskService.get_task_tree(
+            db_session=session,
+            task_id=task.id,
+            user_id=current_user.id,
+        )
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.get("/{id}/detail", response_model=InputTaskDetailPublic)
+def get_task_detail(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Any:
+    """Get full task detail (comments, attachments, subtasks, history) by UUID."""
+    try:
+        return InputTaskService.get_task_detail(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
+        )
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+# ── Comments ───────────────────────────────────────────────────────────────────
+
+@router.get("/{id}/comments/", response_model=TaskCommentsPublic)
+def list_task_comments(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    skip: int = 0,
+    limit: int = 100,
+) -> Any:
+    """List comments on a task in chronological order."""
+    try:
+        InputTaskService.get_task_with_ownership_check(
+            db_session=session, task_id=id, user_id=current_user.id
+        )
+        comments, count = TaskCommentService.list_comments(
+            db_session=session, task_id=id, skip=skip, limit=limit
+        )
+        return TaskCommentsPublic(data=comments, count=count)
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.post("/{id}/comments/", response_model=TaskCommentPublic)
+def add_task_comment(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    comment_in: TaskCommentCreate,
+) -> Any:
+    """Add a comment to a task (user-initiated)."""
+    try:
+        InputTaskService.get_task_with_ownership_check(
+            db_session=session, task_id=id, user_id=current_user.id
+        )
+        comment = TaskCommentService.add_comment(
+            db_session=session,
+            task_id=id,
+            data=comment_in,
+            author_user_id=current_user.id,
+        )
+        return TaskCommentService._to_public(session, comment)
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.delete("/{id}/comments/{comment_id}")
+def delete_task_comment(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    comment_id: uuid.UUID,
+) -> Message:
+    """Delete a comment from a task."""
+    success = TaskCommentService.delete_comment(
+        db_session=session,
+        comment_id=comment_id,
+        user_id=current_user.id,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return Message(message="Comment deleted")
+
+
+# ── Attachments ────────────────────────────────────────────────────────────────
+
+@router.get("/{id}/attachments/", response_model=TaskAttachmentsPublic)
+def list_task_attachments(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Any:
+    """List attachments for a task."""
+    try:
+        InputTaskService.get_task_with_ownership_check(
+            db_session=session, task_id=id, user_id=current_user.id
+        )
+        attachments = TaskAttachmentService.list_attachments(
+            db_session=session, task_id=id
+        )
+        return TaskAttachmentsPublic(data=attachments, count=len(attachments))
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.post("/{id}/attachments/", response_model=TaskAttachmentPublic)
+async def upload_task_attachment(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    file: UploadFile = File(...),
+) -> Any:
+    """Upload a file attachment to a task."""
+    try:
+        InputTaskService.get_task_with_ownership_check(
+            db_session=session, task_id=id, user_id=current_user.id
+        )
+        attachment = await TaskAttachmentService.upload_attachment(
+            db_session=session,
+            task_id=id,
+            file=file,
+            uploaded_by_user_id=current_user.id,
+        )
+        return TaskAttachmentService._to_public(session, attachment)
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.get("/{id}/attachments/{attachment_id}/download")
+def download_task_attachment(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> Any:
+    """Download a task attachment file."""
+    file_path, filename, content_type = TaskAttachmentService.get_download_stream(
+        db_session=session,
+        task_id=id,
+        attachment_id=attachment_id,
+        user_id=current_user.id,
+    )
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type=content_type,
+    )
+
+
+@router.delete("/{id}/attachments/{attachment_id}")
+def delete_task_attachment(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> Message:
+    """Delete a task attachment."""
+    success = TaskAttachmentService.delete_attachment(
+        db_session=session,
+        task_id=id,
+        attachment_id=attachment_id,
+        user_id=current_user.id,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return Message(message="Attachment deleted")
+
+
+# ── Subtasks ───────────────────────────────────────────────────────────────────
+
+@router.get("/{id}/subtasks/", response_model=InputTasksPublicExtended)
+def list_subtasks(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Any:
+    """List direct subtasks of a task."""
+    try:
+        InputTaskService.get_task_with_ownership_check(
+            db_session=session, task_id=id, user_id=current_user.id
+        )
+        data, count = InputTaskService.list_subtasks(
+            db_session=session, parent_task_id=id
+        )
+        return InputTasksPublicExtended(data=data, count=count)
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.post("/{id}/subtasks/", response_model=InputTaskPublic)
+def create_subtask(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    subtask_in: InputTaskCreate,
+) -> Any:
+    """Create a subtask under a parent task (user-initiated)."""
+    try:
+        InputTaskService.get_task_with_ownership_check(
+            db_session=session, task_id=id, user_id=current_user.id
+        )
+        # Set parent_task_id on the create data
+        subtask_in.parent_task_id = id
+        task = InputTaskService.create_task(
+            db_session=session,
+            user_id=current_user.id,
+            data=subtask_in,
+        )
+        return task
     except InputTaskError as e:
         _handle_service_error(e)

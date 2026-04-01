@@ -429,6 +429,7 @@ export type AgenticTeamPublic = {
     owner_id: string;
     name: string;
     icon: (string | null);
+    task_prefix?: (string | null);
     created_at: string;
     updated_at: string;
 };
@@ -441,6 +442,7 @@ export type AgenticTeamsPublic = {
 export type AgenticTeamUpdate = {
     name?: (string | null);
     icon?: (string | null);
+    task_prefix?: (string | null);
 };
 
 /**
@@ -619,6 +621,42 @@ export type AgentSharesPublic = {
 export type AgentsPublic = {
     data: Array<AgentPublic>;
     count: number;
+};
+
+/**
+ * Agent request to create a subtask (team context required)
+ */
+export type AgentSubtaskCreate = {
+    title: string;
+    description?: (string | null);
+    assigned_to?: (string | null);
+    priority?: string;
+    task?: (string | null);
+};
+
+export type AgentTaskCommentCreate = {
+    content: string;
+    comment_type?: string;
+    file_paths?: (Array<(string)> | null);
+};
+
+/**
+ * Generic response for agent task operations
+ */
+export type AgentTaskOperationResponse = {
+    success: boolean;
+    task?: (string | null);
+    message?: (string | null);
+    error?: (string | null);
+};
+
+/**
+ * Agent request to explicitly update task status (edge cases only)
+ */
+export type AgentTaskStatusUpdate = {
+    status: string;
+    reason?: (string | null);
+    task?: (string | null);
 };
 
 export type AgentUpdate = {
@@ -931,6 +969,10 @@ export type Body_mcp_oauth_revoke_token = {
 export type Body_mcp_upload_upload_file_to_mcp = {
     file: (Blob | File);
     workspace_path?: string;
+};
+
+export type Body_tasks_upload_task_attachment = {
+    file: (Blob | File);
 };
 
 export type BulkDeleteRequest = {
@@ -1402,6 +1444,59 @@ export type InputTaskCreate = {
     auto_execute?: boolean;
     source_session_id?: (string | null);
     file_ids?: (Array<(string)> | null);
+    title?: (string | null);
+    priority?: string;
+    team_id?: (string | null);
+    assigned_node_id?: (string | null);
+    parent_task_id?: (string | null);
+};
+
+/**
+ * Full task detail including comments, attachments, subtasks, and status history
+ */
+export type InputTaskDetailPublic = {
+    id: string;
+    owner_id: string;
+    original_message: string;
+    current_description: string;
+    status: string;
+    selected_agent_id: (string | null);
+    session_id: (string | null);
+    user_workspace_id: (string | null);
+    agent_initiated: boolean;
+    auto_execute: boolean;
+    source_session_id: (string | null);
+    source_email_message_id?: (string | null);
+    source_agent_id?: (string | null);
+    auto_feedback: boolean;
+    error_message: (string | null);
+    created_at: string;
+    updated_at: string;
+    executed_at: (string | null);
+    completed_at: (string | null);
+    archived_at: (string | null);
+    short_code?: (string | null);
+    sequence_number?: (number | null);
+    title?: (string | null);
+    priority?: string;
+    parent_task_id?: (string | null);
+    team_id?: (string | null);
+    assigned_node_id?: (string | null);
+    created_by_node_id?: (string | null);
+    subtask_count?: number;
+    subtask_completed_count?: number;
+    agent_name?: (string | null);
+    refinement_history?: Array<unknown>;
+    todo_progress?: (Array<unknown> | null);
+    sessions_count?: number;
+    latest_session_id?: (string | null);
+    attached_files?: Array<FileUploadPublic>;
+    assigned_node_name?: (string | null);
+    team_name?: (string | null);
+    comments?: Array<unknown>;
+    attachments?: Array<unknown>;
+    subtasks?: Array<unknown>;
+    status_history?: Array<unknown>;
 };
 
 export type InputTaskPublic = {
@@ -1425,10 +1520,20 @@ export type InputTaskPublic = {
     executed_at: (string | null);
     completed_at: (string | null);
     archived_at: (string | null);
+    short_code?: (string | null);
+    sequence_number?: (number | null);
+    title?: (string | null);
+    priority?: string;
+    parent_task_id?: (string | null);
+    team_id?: (string | null);
+    assigned_node_id?: (string | null);
+    created_by_node_id?: (string | null);
+    subtask_count?: number;
+    subtask_completed_count?: number;
 };
 
 /**
- * Extended response with agent name and sessions count
+ * Extended response with agent name, sessions count, and collaboration data
  */
 export type InputTaskPublicExtended = {
     id: string;
@@ -1451,14 +1556,24 @@ export type InputTaskPublicExtended = {
     executed_at: (string | null);
     completed_at: (string | null);
     archived_at: (string | null);
+    short_code?: (string | null);
+    sequence_number?: (number | null);
+    title?: (string | null);
+    priority?: string;
+    parent_task_id?: (string | null);
+    team_id?: (string | null);
+    assigned_node_id?: (string | null);
+    created_by_node_id?: (string | null);
+    subtask_count?: number;
+    subtask_completed_count?: number;
     agent_name?: (string | null);
     refinement_history?: Array<unknown>;
     todo_progress?: (Array<unknown> | null);
     sessions_count?: number;
     latest_session_id?: (string | null);
     attached_files?: Array<FileUploadPublic>;
-    result_state?: (string | null);
-    result_summary?: (string | null);
+    assigned_node_name?: (string | null);
+    team_name?: (string | null);
 };
 
 export type InputTasksPublicExtended = {
@@ -1469,6 +1584,9 @@ export type InputTasksPublicExtended = {
 export type InputTaskUpdate = {
     current_description?: (string | null);
     selected_agent_id?: (string | null);
+    title?: (string | null);
+    priority?: (string | null);
+    assigned_node_id?: (string | null);
 };
 
 export type ItemCreate = {
@@ -2224,6 +2342,56 @@ export type SSHKeysPublic = {
 
 export type SSHKeyUpdate = {
     name?: (string | null);
+};
+
+export type TaskAttachmentPublic = {
+    id: string;
+    task_id: string;
+    comment_id: (string | null);
+    file_name: string;
+    file_path: string;
+    file_size: (number | null);
+    content_type: (string | null);
+    uploaded_by_agent_id: (string | null);
+    uploaded_by_user_id: (string | null);
+    source_agent_id: (string | null);
+    source_workspace_path: (string | null);
+    created_at: string;
+    uploaded_by_name?: (string | null);
+    source_agent_name?: (string | null);
+    download_url?: (string | null);
+};
+
+export type TaskAttachmentsPublic = {
+    data: Array<TaskAttachmentPublic>;
+    count: number;
+};
+
+export type TaskCommentCreate = {
+    content: string;
+    comment_type?: string;
+};
+
+export type TaskCommentPublic = {
+    id: string;
+    task_id: string;
+    content: string;
+    comment_type: string;
+    author_node_id: (string | null);
+    author_agent_id: (string | null);
+    author_user_id: (string | null);
+    comment_meta: ({
+    [key: string]: unknown;
+} | null);
+    created_at: string;
+    author_name?: (string | null);
+    author_role?: (string | null);
+    inline_attachments?: Array<unknown>;
+};
+
+export type TaskCommentsPublic = {
+    data: Array<TaskCommentPublic>;
+    count: number;
 };
 
 export type TaskTriggerCreateExactDate = {
@@ -3086,6 +3254,40 @@ export type AgentSharesDismissUpdateRequestData = {
 };
 
 export type AgentSharesDismissUpdateRequestResponse = (CloneUpdateRequestPublic);
+
+export type AgentTasksAgentAddCommentData = {
+    requestBody: AgentTaskCommentCreate;
+    taskId: string;
+};
+
+export type AgentTasksAgentAddCommentResponse = (TaskCommentPublic);
+
+export type AgentTasksAgentUpdateStatusData = {
+    requestBody: AgentTaskStatusUpdate;
+    taskId: string;
+};
+
+export type AgentTasksAgentUpdateStatusResponse = (AgentTaskOperationResponse);
+
+export type AgentTasksAgentCreateSubtaskData = {
+    requestBody: AgentSubtaskCreate;
+    taskId: string;
+};
+
+export type AgentTasksAgentCreateSubtaskResponse = (AgentTaskOperationResponse);
+
+export type AgentTasksAgentListTasksData = {
+    scope?: string;
+    status?: (string | null);
+};
+
+export type AgentTasksAgentListTasksResponse = (InputTasksPublicExtended);
+
+export type AgentTasksAgentGetTaskDetailsData = {
+    taskId: string;
+};
+
+export type AgentTasksAgentGetTaskDetailsResponse = (unknown);
 
 export type AiCredentialsListAiCredentialsResponse = (AICredentialsPublic);
 
@@ -4154,8 +4356,11 @@ export type TasksCreateTaskResponse = (InputTaskPublic);
 
 export type TasksListTasksData = {
     limit?: number;
+    priority?: (string | null);
+    rootOnly?: boolean;
     skip?: number;
     status?: (string | null);
+    teamId?: (string | null);
     userWorkspaceId?: (string | null);
 };
 
@@ -4228,6 +4433,92 @@ export type TasksDetachFileFromTaskData = {
 };
 
 export type TasksDetachFileFromTaskResponse = (Message);
+
+export type TasksGetTaskByCodeData = {
+    shortCode: string;
+};
+
+export type TasksGetTaskByCodeResponse = (InputTaskPublicExtended);
+
+export type TasksGetTaskDetailByCodeData = {
+    shortCode: string;
+};
+
+export type TasksGetTaskDetailByCodeResponse = (InputTaskDetailPublic);
+
+export type TasksGetTaskTreeByCodeData = {
+    shortCode: string;
+};
+
+export type TasksGetTaskTreeByCodeResponse = (unknown);
+
+export type TasksGetTaskDetailData = {
+    id: string;
+};
+
+export type TasksGetTaskDetailResponse = (InputTaskDetailPublic);
+
+export type TasksListTaskCommentsData = {
+    id: string;
+    limit?: number;
+    skip?: number;
+};
+
+export type TasksListTaskCommentsResponse = (TaskCommentsPublic);
+
+export type TasksAddTaskCommentData = {
+    id: string;
+    requestBody: TaskCommentCreate;
+};
+
+export type TasksAddTaskCommentResponse = (TaskCommentPublic);
+
+export type TasksDeleteTaskCommentData = {
+    commentId: string;
+    id: string;
+};
+
+export type TasksDeleteTaskCommentResponse = (Message);
+
+export type TasksListTaskAttachmentsData = {
+    id: string;
+};
+
+export type TasksListTaskAttachmentsResponse = (TaskAttachmentsPublic);
+
+export type TasksUploadTaskAttachmentData = {
+    formData: Body_tasks_upload_task_attachment;
+    id: string;
+};
+
+export type TasksUploadTaskAttachmentResponse = (TaskAttachmentPublic);
+
+export type TasksDownloadTaskAttachmentData = {
+    attachmentId: string;
+    id: string;
+};
+
+export type TasksDownloadTaskAttachmentResponse = (unknown);
+
+export type TasksDeleteTaskAttachmentData = {
+    attachmentId: string;
+    id: string;
+};
+
+export type TasksDeleteTaskAttachmentResponse = (Message);
+
+export type TasksListSubtasksData = {
+    id: string;
+};
+
+export type TasksListSubtasksResponse = (InputTasksPublicExtended);
+
+export type TasksCreateSubtaskData = {
+    id: string;
+    requestBody: InputTaskCreate;
+};
+
+export type TasksCreateSubtaskResponse = (InputTaskPublic);
 
 export type TaskTriggersCreateScheduleTriggerData = {
     requestBody: TaskTriggerCreateSchedule;

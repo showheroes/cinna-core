@@ -8,16 +8,22 @@ import {
   AlertCircle,
   Archive,
   Circle,
+  Ban,
 } from "lucide-react"
 
 type TaskStatus =
   | "new"
   | "refining"
-  | "running"
-  | "pending_input"
+  | "open"
+  | "in_progress"
+  | "blocked"
   | "completed"
   | "error"
+  | "cancelled"
   | "archived"
+  // Legacy statuses for backwards compatibility
+  | "running"
+  | "pending_input"
 
 interface TaskStatusBadgeProps {
   status: TaskStatus | string
@@ -31,22 +37,27 @@ const statusConfig: Record<
   new: {
     label: "New",
     icon: <Sparkles className="h-3 w-3" />,
-    className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    className: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
   },
   refining: {
     label: "Refining",
     icon: <Edit className="h-3 w-3" />,
     className: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
   },
-  running: {
-    label: "Running",
-    icon: <Play className="h-3 w-3" />,
-    className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  open: {
+    label: "Open",
+    icon: <Circle className="h-3 w-3" />,
+    className: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
   },
-  pending_input: {
-    label: "Pending Input",
+  in_progress: {
+    label: "In Progress",
+    icon: <Play className="h-3 w-3" />,
+    className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  },
+  blocked: {
+    label: "Blocked",
     icon: <Clock className="h-3 w-3" />,
-    className: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+    className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
   },
   completed: {
     label: "Completed",
@@ -58,10 +69,26 @@ const statusConfig: Record<
     icon: <AlertCircle className="h-3 w-3" />,
     className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
   },
+  cancelled: {
+    label: "Cancelled",
+    icon: <Ban className="h-3 w-3" />,
+    className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  },
   archived: {
     label: "Archived",
     icon: <Archive className="h-3 w-3" />,
-    className: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
+    className: "bg-gray-100 text-gray-500 dark:bg-gray-900/30 dark:text-gray-500",
+  },
+  // Legacy statuses mapped to new equivalents
+  running: {
+    label: "In Progress",
+    icon: <Play className="h-3 w-3" />,
+    className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  },
+  pending_input: {
+    label: "Blocked",
+    icon: <Clock className="h-3 w-3" />,
+    className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
   },
 }
 

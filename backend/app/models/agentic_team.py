@@ -23,6 +23,7 @@ class AgenticTeamCreate(AgenticTeamBase):
 class AgenticTeamUpdate(SQLModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     icon: str | None = Field(default=None, max_length=50)
+    task_prefix: str | None = Field(default=None, max_length=10)
 
 
 class AgenticTeam(AgenticTeamBase, table=True):
@@ -32,6 +33,9 @@ class AgenticTeam(AgenticTeamBase, table=True):
     owner_id: uuid.UUID = Field(
         foreign_key="user.id", nullable=False, ondelete="CASCADE"
     )
+    # Task prefix for short-code generation (e.g., "HR" → HR-1, HR-2)
+    # When NULL, tasks in this team use the default "TASK" prefix
+    task_prefix: str | None = Field(default=None, max_length=10)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
 
@@ -41,6 +45,7 @@ class AgenticTeamPublic(SQLModel):
     owner_id: uuid.UUID
     name: str
     icon: str | None
+    task_prefix: str | None = None
     created_at: datetime
     updated_at: datetime
 

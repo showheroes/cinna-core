@@ -54,6 +54,15 @@ export const EventTypes = {
   TASK_CREATED: "task_created",
   TASK_STATUS_UPDATED: "task_status_changed",
 
+  // Task collaboration events
+  // Note: TASK_STATUS_CHANGED is an alias for TASK_STATUS_UPDATED (same wire value).
+  // Prefer TASK_STATUS_CHANGED for new code. TASK_STATUS_UPDATED kept for back-compat.
+  TASK_COMMENT_ADDED: "task_comment_added",
+  TASK_STATUS_CHANGED: "task_status_changed",
+  TASK_ATTACHMENT_ADDED: "task_attachment_added",
+  SUBTASK_COMPLETED: "subtask_completed",
+  TASK_SUBTASK_CREATED: "task_subtask_created",
+
   // Generic notification
   NOTIFICATION: "notification",
 } as const

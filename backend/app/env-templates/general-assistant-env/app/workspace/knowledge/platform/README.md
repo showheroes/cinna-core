@@ -35,7 +35,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | **AI Credential** | LLM provider API key (Claude, OpenAI, etc.) for agent runtime |
 | **Knowledge Source** | Git-based repository of documentation agents can query via RAG |
 | **Agent Plugin** | Marketplace capability that extends agent functionality |
-| **Input Task** | User-submitted task that goes through refinement before agent execution |
+| **Input Task** | User-submitted task that goes through refinement before agent execution; extended with short-code IDs, comments, attachments, status history, and subtask delegation |
 | **Task Trigger** | Automated rule (CRON, webhook, date) that creates tasks for an agent |
 | **Agent Share** | Clone-based sharing of an agent with another user, including credential requirements |
 | **Guest Share** | Token-based limited access to an agent for unauthenticated users |
@@ -63,6 +63,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | [application](#application) | User-facing platform features - authentication, integrations, real-time events, workspaces | 17 features |
 | [knowledge](#knowledge) | Git-based knowledge sources, vector search, RAG | 1 feature |
 | [sharing](#sharing) | Agent sharing, guest access, workspace collaboration | 3 features |
+| [agentic_teams](#agentic_teams) | Visual org-chart builder for agent orchestration topology — teams, nodes, connections | 1 feature |
 | [development](#development) | Backend/frontend patterns, AI functions, debugging | 4 features |
 
 ---
@@ -80,7 +81,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | agent_schedulers | Multi-schedule CRON execution with natural language input and per-schedule prompts | [business logic](agents/agent_schedulers/agent_schedulers.md) \| [tech](agents/agent_schedulers/agent_schedulers_tech.md) |
 | agent_handover | Agent-to-agent task delegation and inbox creation | [business logic](agents/agent_handover/agent_handover.md) \| [tech](agents/agent_handover/agent_handover_tech.md) |
 | agent_collaboration | Fan-out/fan-in multi-agent coordination with shared findings context | [business logic](agents/agent_collaboration/agent_collaboration.md) \| [tech](agents/agent_collaboration/agent_collaboration_tech.md) |
-| agent_environment_core | Server-side core running inside Docker containers: HTTP API, SDK adapters, prompt generation. Three SDK engines: Claude Code (Anthropic/MiniMax), OpenCode (Anthropic, OpenAI, Google, OpenAI-compatible), Google ADK (OpenAI-compatible/Google). Each environment links separate AI credentials per mode (building/conversation) with optional per-mode model overrides. OpenCode uses MCP bridge servers for custom tools. | [business logic](agents/agent_environment_core/agent_environment_core.md) \| [tech](agents/agent_environment_core/agent_environment_core_tech.md) \| [multi-sdk](agents/agent_environment_core/multi_sdk.md) \| [multi-sdk tech](agents/agent_environment_core/multi_sdk_tech.md) \| [knowledge tool](agents/agent_environment_core/knowledge_tool.md) \| [create agent task tool](agents/agent_environment_core/create_agent_task_tool.md) \| [tools approval](agents/agent_environment_core/tools_approval_management.md) \| [tools approval tech](agents/agent_environment_core/tools_approval_management_tech.md) |
+| agent_environment_core | Server-side core running inside Docker containers: HTTP API, SDK adapters, prompt generation. Two SDK engines: Claude Code (Anthropic/MiniMax), OpenCode (Anthropic, OpenAI, Google, OpenAI-compatible). Each environment links separate AI credentials per mode (building/conversation) with optional per-mode model overrides. OpenCode uses MCP bridge servers for custom tools. All adapters emit unified lowercase tool names via `tool_name_registry.py`. | [business logic](agents/agent_environment_core/agent_environment_core.md) \| [tech](agents/agent_environment_core/agent_environment_core_tech.md) \| [multi-sdk](agents/agent_environment_core/multi_sdk.md) \| [multi-sdk tech](agents/agent_environment_core/multi_sdk_tech.md) \| [knowledge tool](agents/agent_environment_core/knowledge_tool.md) \| [create agent task tool](agents/agent_environment_core/create_agent_task_tool.md) \| [tools approval](agents/agent_environment_core/tools_approval_management.md) \| [tools approval tech](agents/agent_environment_core/tools_approval_management_tech.md) |
 | agent_environment_data_management | Environment data flow, cloning, syncing operations | [business logic](agents/agent_environment_data_management/agent_environment_data_management.md) \| [tech](agents/agent_environment_data_management/agent_environment_data_management_tech.md) |
 | agent_credentials | Credential syncing to agent environments, whitelisting, redaction, OAuth refresh | [business logic](agents/agent_credentials/agent_credentials.md) \| [tech](agents/agent_credentials/agent_credentials_tech.md) \| [oauth](agents/agent_credentials/oauth_credentials.md) \| [whitelist](agents/agent_credentials/credentials_whitelist.md) \| [google SA](agents/agent_credentials/google_service_account.md) \| [sharing](agents/agent_credentials/credential_sharing.md) \| [security hardening](agents/agent_credentials/credential_security_hardening.md) \| [security hardening tech](agents/agent_credentials/credential_security_hardening_tech.md) |
 | agent_file_management | File upload/download, workspace file viewing, storage quota, garbage collection | [business logic](agents/agent_file_management/agent_file_management.md) \| [tech](agents/agent_file_management/agent_file_management_tech.md) \| [remote db viewer](agents/agent_file_management/remote_database_viewer.md) |
@@ -90,7 +91,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| input_tasks | Task submission, vague request refinement, execution workflow, bi-directional agent feedback | [business logic](application/input_tasks/input_tasks.md) \| [tech](application/input_tasks/input_tasks_tech.md) |
+| input_tasks | Task submission, AI refinement, execution workflow, comments (agent findings/results), file attachments, short-code IDs (TASK-1/HR-42), status history, subtask delegation, team-scoped tasks | [business logic](application/input_tasks/input_tasks.md) \| [tech](application/input_tasks/input_tasks_tech.md) |
 | task_triggers | Automated triggers - CRON schedules, webhooks, date-based | [business logic](application/input_tasks/task_triggers.md) \| [tech](application/input_tasks/task_triggers_tech.md) |
 | tools_approval | Agent tool execution approval management | [business logic](agents/agent_environment_core/tools_approval_management.md) \| [tech](agents/agent_environment_core/tools_approval_management_tech.md) |
 
@@ -137,6 +138,12 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | agent_sharing | Clone-based agent sharing, credential requirements, push updates, guest access | [business logic](agents/agent_sharing/agent_sharing.md) \| [tech](agents/agent_sharing/agent_sharing_tech.md) \| [accept wizard](agents/agent_sharing/accept_share_wizard_widget.md) \| [guest sharing](agents/agent_sharing/guest_sharing.md) \| [guest tech](agents/agent_sharing/guest_sharing_tech.md) |
 | workspaces | Workspace isolation, entity separation, multi-workspace support | [business logic](application/user_workspaces/user_workspaces.md) |
 
+### agentic_teams
+
+| Feature | Description | Docs |
+|---------|-------------|------|
+| agentic_teams | Visual org-chart builder — users define named agentic teams, add agent nodes, and wire directed connections with handover prompts. Owner-only access, workspace-independent, MVP Blueprint phase. Sidebar switcher + Settings card + interactive React Flow chart with edit/view mode, auto-arrange (Dagre), and bulk position persistence. Teams define a `task_prefix` (e.g., "HR") used when generating short-code IDs for team-scoped tasks; directed connections enforce subtask delegation topology. | [business logic](agentic_teams/agentic_teams/agentic_teams.md) \| [tech](agentic_teams/agentic_teams/agentic_teams_tech.md) |
+
 ### development
 
 | Feature | Description | Docs |
@@ -162,4 +169,4 @@ User ──→ Frontend (React) ──→ Backend API (FastAPI) ──→ Servic
 
 ---
 
-*Last updated: 2026-03-15*
+*Last updated: 2026-04-01*

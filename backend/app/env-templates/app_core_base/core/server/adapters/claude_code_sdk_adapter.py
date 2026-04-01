@@ -250,46 +250,46 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
                 # Add custom tools for conversation mode
                 if mode == "conversation":
                     try:
-                        from ..tools.create_agent_task import create_agent_task
-                        from ..tools.update_session_state import update_session_state
-                        from ..tools.respond_to_task import respond_to_task
-                        from ..tools.create_collaboration import create_collaboration
-                        from ..tools.post_finding import post_finding
-                        from ..tools.get_collaboration_status import get_collaboration_status
+                        from ..tools.agent_task_add_comment import agent_task_add_comment
+                        from ..tools.agent_task_update_status import agent_task_update_status
+                        from ..tools.agent_task_create_task import agent_task_create_task
+                        from ..tools.agent_task_create_subtask import agent_task_create_subtask
+                        from ..tools.agent_task_get_details import agent_task_get_details
+                        from ..tools.agent_task_list_tasks import agent_task_list_tasks
 
-                        task_tools = [
-                            create_agent_task,
-                            update_session_state,
-                            respond_to_task,
-                            create_collaboration,
-                            post_finding,
-                            get_collaboration_status,
+                        agent_task_tools = [
+                            agent_task_add_comment,
+                            agent_task_update_status,
+                            agent_task_create_task,
+                            agent_task_create_subtask,
+                            agent_task_get_details,
+                            agent_task_list_tasks,
                         ]
 
-                        task_server = create_sdk_mcp_server(
-                            name="task",
+                        agent_task_server = create_sdk_mcp_server(
+                            name="agent_task",
                             version="1.0.0",
-                            tools=task_tools
+                            tools=agent_task_tools
                         )
                         if options.mcp_servers:
-                            options.mcp_servers["task"] = task_server
+                            options.mcp_servers["agent_task"] = agent_task_server
                         else:
-                            options.mcp_servers = {"task": task_server}
-                        options.allowed_tools.append("mcp__task__create_agent_task")
-                        options.allowed_tools.append("mcp__task__update_session_state")
-                        options.allowed_tools.append("mcp__task__respond_to_task")
-                        options.allowed_tools.append("mcp__task__create_collaboration")
-                        options.allowed_tools.append("mcp__task__post_finding")
-                        options.allowed_tools.append("mcp__task__get_collaboration_status")
+                            options.mcp_servers = {"agent_task": agent_task_server}
+                        options.allowed_tools.append("mcp__agent_task__add_comment")
+                        options.allowed_tools.append("mcp__agent_task__update_status")
+                        options.allowed_tools.append("mcp__agent_task__create_task")
+                        options.allowed_tools.append("mcp__agent_task__create_subtask")
+                        options.allowed_tools.append("mcp__agent_task__get_details")
+                        options.allowed_tools.append("mcp__agent_task__list_tasks")
                         logger.info(
-                            "Added task tools (create_agent_task, update_session_state, "
-                            "respond_to_task, create_collaboration, post_finding, "
-                            "get_collaboration_status) for conversation mode"
+                            "Added agent task tools (add_comment, update_status, "
+                            "create_task, create_subtask, get_details, list_tasks) "
+                            "for conversation mode"
                         )
                     except ImportError as e:
-                        logger.warning(f"Could not import task tools: {e}")
+                        logger.warning(f"Could not import agent task tools: {e}")
                     except Exception as e:
-                        logger.warning(f"Could not setup task tools: {e}")
+                        logger.warning(f"Could not setup agent task tools: {e}")
 
                 # Load plugins for current mode
                 try:

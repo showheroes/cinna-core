@@ -44,19 +44,14 @@ CLAUDE_CODE_TOOL_NAME_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # OpenCode MCP bridge tool name unification
 #
-# OpenCode runs collaboration tools on a separate "collaboration" MCP server,
-# producing names like mcp__collaboration__create_collaboration.
-# Claude Code bundles them on the "task" server: mcp__task__create_collaboration.
+# OpenCode runs all agent task tools on the "agent_task" MCP server,
+# producing names like mcp__agent_task__add_comment.
+# Claude Code bundles them on the same "agent_task" server.
 #
-# We unify to the mcp__task__* prefix so the backend and frontend only need
-# one set of names.
+# No remapping needed — both adapters use the "agent_task" server name.
 # ---------------------------------------------------------------------------
 
-OPENCODE_MCP_TOOL_NAME_MAP: dict[str, str] = {
-    "mcp__collaboration__create_collaboration": "mcp__task__create_collaboration",
-    "mcp__collaboration__post_finding": "mcp__task__post_finding",
-    "mcp__collaboration__get_collaboration_status": "mcp__task__get_collaboration_status",
-}
+OPENCODE_MCP_TOOL_NAME_MAP: dict[str, str] = {}
 
 # ---------------------------------------------------------------------------
 # Canonical pre-approved tools (lowercase)
@@ -75,13 +70,13 @@ PRE_APPROVED_TOOLS: frozenset[str] = frozenset([
     "list", "patch",
     # MCP bridge tools (knowledge)
     "mcp__knowledge__query_integration_knowledge",
-    # MCP bridge tools (task + collaboration — unified under task server)
-    "mcp__task__create_agent_task",
-    "mcp__task__update_session_state",
-    "mcp__task__respond_to_task",
-    "mcp__task__create_collaboration",
-    "mcp__task__post_finding",
-    "mcp__task__get_collaboration_status",
+    # MCP bridge tools (agent task)
+    "mcp__agent_task__add_comment",
+    "mcp__agent_task__update_status",
+    "mcp__agent_task__create_task",
+    "mcp__agent_task__create_subtask",
+    "mcp__agent_task__get_details",
+    "mcp__agent_task__list_tasks",
 ])
 
 # ---------------------------------------------------------------------------
@@ -143,7 +138,7 @@ def normalize_tool_name(name: str, sdk: str = "claude-code") -> str:
         return name.lower() if name else name
 
     if sdk == "opencode":
-        # Remap collaboration MCP tools to unified task prefix
+        # Apply any MCP tool name remappings (currently none)
         if name in OPENCODE_MCP_TOOL_NAME_MAP:
             return OPENCODE_MCP_TOOL_NAME_MAP[name]
         # OpenCode built-ins are already lowercase

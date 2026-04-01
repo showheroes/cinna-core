@@ -2,7 +2,8 @@
 Input Task models for task management workflow.
 
 Input tasks allow users to receive, refine, and execute incoming tasks through
-an AI-assisted preparation workflow.
+an AI-assisted preparation workflow. Extended for the task-based collaboration
+system: short-code IDs, hierarchy, team assignment, priority.
 """
 import uuid
 from datetime import datetime, UTC
@@ -14,14 +15,39 @@ from app.models.file_upload import FileUploadPublic
 
 
 class InputTaskStatus:
-    """Status values for input tasks"""
-    NEW = "new"  # Just created, needs refinement
-    REFINING = "refining"  # Currently being refined with AI
-    RUNNING = "running"  # Session created and running
-    PENDING_INPUT = "pending_input"  # Session waiting for user input
-    COMPLETED = "completed"  # Session completed successfully
-    ERROR = "error"  # Session ended with error
-    ARCHIVED = "archived"  # Archived by user
+    """Status values for input tasks (clean set — running/pending_input removed)"""
+    NEW = "new"              # Created, awaiting refinement or assignment
+    REFINING = "refining"   # User actively refining with AI
+    OPEN = "open"            # Refined and assigned, ready for agent execution
+    IN_PROGRESS = "in_progress"  # Agent actively working
+    BLOCKED = "blocked"     # Agent blocked, waiting for external input or dependency
+    COMPLETED = "completed"  # Task finished successfully
+    ERROR = "error"          # Task failed
+    CANCELLED = "cancelled"  # Task cancelled by user or agent
+    ARCHIVED = "archived"   # Archived by user
+
+    # Legacy aliases — kept for backward compatibility during migration
+    RUNNING = "in_progress"      # Old: running → in_progress
+    PENDING_INPUT = "blocked"    # Old: pending_input → blocked
+
+    # Valid status values (for validation)
+    ALL_STATUSES = {
+        "new", "refining", "open", "in_progress", "blocked",
+        "completed", "error", "cancelled", "archived",
+    }
+
+    # Valid transitions: {from_status: {allowed_to_statuses}}
+    VALID_TRANSITIONS: dict[str, set[str]] = {
+        "new": {"refining", "open", "in_progress", "cancelled", "archived"},
+        "refining": {"new", "open", "in_progress"},
+        "open": {"in_progress", "cancelled"},
+        "in_progress": {"completed", "blocked", "cancelled", "error"},
+        "blocked": {"in_progress", "cancelled"},
+        "completed": {"archived"},
+        "error": {"new", "in_progress", "archived"},
+        "cancelled": {"archived"},
+        "archived": set(),
+    }
 
 
 class RefinementHistoryItem(SQLModel):
@@ -43,6 +69,10 @@ class InputTask(InputTaskBase, table=True):
     __table_args__ = (
         # Compound index for efficient lookup by owner and status
         Index("ix_input_task_owner_status", "owner_id", "status"),
+        # New indexes for collaboration features
+        Index("ix_input_task_parent_task_id", "parent_task_id"),
+        Index("ix_input_task_team_id", "team_id"),
+        Index("ix_input_task_assigned_node_id", "assigned_node_id"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -85,6 +115,32 @@ class InputTask(InputTaskBase, table=True):
     completed_at: datetime | None = None
     archived_at: datetime | None = None
 
+    # ── New collaboration columns ──────────────────────────────────────────────
+    # Short code: globally unique per owner (e.g., "TASK-1", "HR-42")
+    short_code: str | None = Field(default=None, max_length=20)
+    # Monotonic sequence number from user.task_sequence_counter
+    sequence_number: int | None = Field(default=None)
+    # Human-readable title (derived from original_message on creation, editable)
+    title: str | None = Field(default=None, max_length=500)
+    # Priority: low / normal / high / urgent
+    priority: str = Field(default="normal", max_length=20)
+    # Subtask hierarchy: parent task (SET NULL on parent delete)
+    parent_task_id: uuid.UUID | None = Field(
+        default=None, foreign_key="input_task.id", ondelete="SET NULL"
+    )
+    # Team association (optional — team-scoped tasks only)
+    team_id: uuid.UUID | None = Field(
+        default=None, foreign_key="agentic_team.id", ondelete="SET NULL"
+    )
+    # The team node assigned to this task (role context for team tasks)
+    assigned_node_id: uuid.UUID | None = Field(
+        default=None, foreign_key="agentic_team_node.id", ondelete="SET NULL"
+    )
+    # Which team node created this task (for agent-initiated subtasks; NULL for user-created)
+    created_by_node_id: uuid.UUID | None = Field(
+        default=None, foreign_key="agentic_team_node.id", ondelete="SET NULL"
+    )
+
 
 # Create schema
 class InputTaskCreate(SQLModel):
@@ -97,12 +153,22 @@ class InputTaskCreate(SQLModel):
     source_session_id: uuid.UUID | None = None
     # File attachments
     file_ids: list[uuid.UUID] | None = None
+    # Collaboration fields
+    title: str | None = Field(default=None, max_length=500)
+    priority: str = "normal"
+    team_id: uuid.UUID | None = None
+    assigned_node_id: uuid.UUID | None = None
+    parent_task_id: uuid.UUID | None = None
 
 
 # Update schema
 class InputTaskUpdate(SQLModel):
     current_description: str | None = Field(default=None, min_length=1, max_length=10000)
     selected_agent_id: uuid.UUID | None = None
+    # Collaboration fields
+    title: str | None = Field(default=None, max_length=500)
+    priority: str | None = None
+    assigned_node_id: uuid.UUID | None = None
 
 
 # API response schemas
@@ -129,19 +195,39 @@ class InputTaskPublic(SQLModel):
     executed_at: datetime | None
     completed_at: datetime | None
     archived_at: datetime | None
+    # Collaboration fields
+    short_code: str | None = None
+    sequence_number: int | None = None
+    title: str | None = None
+    priority: str = "normal"
+    parent_task_id: uuid.UUID | None = None
+    team_id: uuid.UUID | None = None
+    assigned_node_id: uuid.UUID | None = None
+    created_by_node_id: uuid.UUID | None = None
+    # Computed counts (populated by service layer)
+    subtask_count: int = 0
+    subtask_completed_count: int = 0
 
 
 class InputTaskPublicExtended(InputTaskPublic):
-    """Extended response with agent name and sessions count"""
+    """Extended response with agent name, sessions count, and collaboration data"""
     agent_name: str | None = None
     refinement_history: list = Field(default_factory=list)
     todo_progress: list | None = None
     sessions_count: int = 0
     latest_session_id: uuid.UUID | None = None
     attached_files: list[FileUploadPublic] = Field(default_factory=list)
-    # Session result state (joined from linked session)
-    result_state: str | None = None
-    result_summary: str | None = None
+    # Team/node display names (resolved by service layer)
+    assigned_node_name: str | None = None
+    team_name: str | None = None
+
+
+class InputTaskDetailPublic(InputTaskPublicExtended):
+    """Full task detail including comments, attachments, subtasks, and status history"""
+    comments: list = Field(default_factory=list)       # list[TaskCommentPublic]
+    attachments: list = Field(default_factory=list)    # list[TaskAttachmentPublic]
+    subtasks: list = Field(default_factory=list)       # list[InputTaskPublic]
+    status_history: list = Field(default_factory=list) # list[TaskStatusHistoryPublic]
 
 
 class InputTasksPublic(SQLModel):
@@ -192,4 +278,38 @@ class SendAnswerResponse(SQLModel):
     success: bool
     queue_entry_id: uuid.UUID | None = None
     generated_reply: str | None = None
+    error: str | None = None
+
+
+# Agent-facing request/response models (for MCP tools and internal agent API)
+
+class AgentTaskStatusUpdate(SQLModel):
+    """Agent request to explicitly update task status (edge cases only)"""
+    status: str  # blocked / completed / cancelled
+    reason: str | None = None
+    task: str | None = None  # short_code; defaults to agent's current task
+
+
+class AgentSubtaskCreate(SQLModel):
+    """Agent request to create a subtask (team context required)"""
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=10000)
+    assigned_to: str | None = None  # Agent name or team node name to assign to
+    priority: str = "normal"
+    task: str | None = None  # parent short_code; defaults to agent's current task
+
+
+class AgentTaskCreate(SQLModel):
+    """Agent request to create a new task"""
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=10000)
+    assigned_to: str | None = None  # Agent name to assign to
+    priority: str = "normal"
+
+
+class AgentTaskOperationResponse(SQLModel):
+    """Generic response for agent task operations"""
+    success: bool
+    task: str | None = None          # short_code of the task
+    message: str | None = None
     error: str | None = None

@@ -39,13 +39,13 @@ PRE_ALLOWED_TOOLS = frozenset([
     "list", "patch",
     # MCP bridge tools (knowledge)
     "mcp__knowledge__query_integration_knowledge",
-    # MCP bridge tools (task + collaboration — unified under task prefix)
-    "mcp__task__create_agent_task",
-    "mcp__task__update_session_state",
-    "mcp__task__respond_to_task",
-    "mcp__task__create_collaboration",
-    "mcp__task__post_finding",
-    "mcp__task__get_collaboration_status",
+    # MCP bridge tools (agent task)
+    "mcp__agent_task__add_comment",
+    "mcp__agent_task__update_status",
+    "mcp__agent_task__create_task",
+    "mcp__agent_task__create_subtask",
+    "mcp__agent_task__get_details",
+    "mcp__agent_task__list_tasks",
 ])
 
 # Metadata keys to forward from streaming events to response_metadata

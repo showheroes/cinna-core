@@ -90,6 +90,8 @@ class User(UserBase, table=True):
     default_model_override_building: str | None = Field(default=None, max_length=255)
     # General Assistant feature flag
     general_assistant_enabled: bool = Field(default=False)
+    # Per-user monotonic counter for short-code generation (TASK-1, TASK-2, ...)
+    task_sequence_counter: int = Field(default=0)
     items: List["app.models.item.Item"] = Relationship(back_populates="owner", cascade_delete=True)
     agents: List["app.models.agent.Agent"] = Relationship(back_populates="owner", cascade_delete=True)
     credentials: List["app.models.credential.Credential"] = Relationship(back_populates="owner", cascade_delete=True)

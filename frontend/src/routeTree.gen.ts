@@ -32,6 +32,7 @@ import { Route as LayoutSessionsIndexRouteImport } from './routes/_layout/sessio
 import { Route as LayoutDashboardsIndexRouteImport } from './routes/_layout/dashboards.index'
 import { Route as LayoutAgenticTeamsIndexRouteImport } from './routes/_layout/agentic-teams.index'
 import { Route as CredentialsOauthCallbackRouteImport } from './routes/credentials/oauth/callback'
+import { Route as LayoutTasksShortCodeRouteImport } from './routes/_layout/tasks.$shortCode'
 import { Route as LayoutTaskTaskIdRouteImport } from './routes/_layout/task/$taskId'
 import { Route as LayoutSessionSessionIdRouteImport } from './routes/_layout/session/$sessionId'
 import { Route as LayoutKnowledgeSourceSourceIdRouteImport } from './routes/_layout/knowledge-source/$sourceId'
@@ -165,6 +166,11 @@ const CredentialsOauthCallbackRoute =
     path: '/credentials/oauth/callback',
     getParentRoute: () => rootRouteImport,
   } as any)
+const LayoutTasksShortCodeRoute = LayoutTasksShortCodeRouteImport.update({
+  id: '/$shortCode',
+  path: '/$shortCode',
+  getParentRoute: () => LayoutTasksRoute,
+} as any)
 const LayoutTaskTaskIdRoute = LayoutTaskTaskIdRouteImport.update({
   id: '/task/$taskId',
   path: '/task/$taskId',
@@ -268,7 +274,7 @@ export interface FileRoutesByFullPath {
   '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/sessions': typeof LayoutSessionsRouteWithChildren
   '/settings': typeof LayoutSettingsRoute
-  '/tasks': typeof LayoutTasksRoute
+  '/tasks': typeof LayoutTasksRouteWithChildren
   '/dashboard-fullscreen/$dashboardId': typeof DashboardFullscreenDashboardIdRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
@@ -285,6 +291,7 @@ export interface FileRoutesByFullPath {
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/task/$taskId': typeof LayoutTaskTaskIdRoute
+  '/tasks/$shortCode': typeof LayoutTasksShortCodeRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/agentic-teams': typeof LayoutAgenticTeamsIndexRoute
   '/dashboards': typeof LayoutDashboardsIndexRoute
@@ -307,7 +314,7 @@ export interface FileRoutesByTo {
   '/items': typeof LayoutItemsRoute
   '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/settings': typeof LayoutSettingsRoute
-  '/tasks': typeof LayoutTasksRoute
+  '/tasks': typeof LayoutTasksRouteWithChildren
   '/dashboard-fullscreen/$dashboardId': typeof DashboardFullscreenDashboardIdRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
@@ -324,6 +331,7 @@ export interface FileRoutesByTo {
   '/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/task/$taskId': typeof LayoutTaskTaskIdRoute
+  '/tasks/$shortCode': typeof LayoutTasksShortCodeRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/agentic-teams': typeof LayoutAgenticTeamsIndexRoute
   '/dashboards': typeof LayoutDashboardsIndexRoute
@@ -349,7 +357,7 @@ export interface FileRoutesById {
   '/_layout/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/_layout/sessions': typeof LayoutSessionsRouteWithChildren
   '/_layout/settings': typeof LayoutSettingsRoute
-  '/_layout/tasks': typeof LayoutTasksRoute
+  '/_layout/tasks': typeof LayoutTasksRouteWithChildren
   '/dashboard-fullscreen/$dashboardId': typeof DashboardFullscreenDashboardIdRoute
   '/guest/$guestShareToken': typeof GuestGuestShareTokenRoute
   '/guest/file-viewer': typeof GuestFileViewerRoute
@@ -366,6 +374,7 @@ export interface FileRoutesById {
   '/_layout/knowledge-source/$sourceId': typeof LayoutKnowledgeSourceSourceIdRoute
   '/_layout/session/$sessionId': typeof LayoutSessionSessionIdRoute
   '/_layout/task/$taskId': typeof LayoutTaskTaskIdRoute
+  '/_layout/tasks/$shortCode': typeof LayoutTasksShortCodeRoute
   '/credentials/oauth/callback': typeof CredentialsOauthCallbackRoute
   '/_layout/agentic-teams/': typeof LayoutAgenticTeamsIndexRoute
   '/_layout/dashboards/': typeof LayoutDashboardsIndexRoute
@@ -408,6 +417,7 @@ export interface FileRouteTypes {
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
     | '/task/$taskId'
+    | '/tasks/$shortCode'
     | '/credentials/oauth/callback'
     | '/agentic-teams'
     | '/dashboards'
@@ -447,6 +457,7 @@ export interface FileRouteTypes {
     | '/knowledge-source/$sourceId'
     | '/session/$sessionId'
     | '/task/$taskId'
+    | '/tasks/$shortCode'
     | '/credentials/oauth/callback'
     | '/agentic-teams'
     | '/dashboards'
@@ -488,6 +499,7 @@ export interface FileRouteTypes {
     | '/_layout/knowledge-source/$sourceId'
     | '/_layout/session/$sessionId'
     | '/_layout/task/$taskId'
+    | '/_layout/tasks/$shortCode'
     | '/credentials/oauth/callback'
     | '/_layout/agentic-teams/'
     | '/_layout/dashboards/'
@@ -677,6 +689,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CredentialsOauthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_layout/tasks/$shortCode': {
+      id: '/_layout/tasks/$shortCode'
+      path: '/$shortCode'
+      fullPath: '/tasks/$shortCode'
+      preLoaderRoute: typeof LayoutTasksShortCodeRouteImport
+      parentRoute: typeof LayoutTasksRoute
+    }
     '/_layout/task/$taskId': {
       id: '/_layout/task/$taskId'
       path: '/task/$taskId'
@@ -806,6 +825,18 @@ const LayoutSessionsRouteWithChildren = LayoutSessionsRoute._addFileChildren(
   LayoutSessionsRouteChildren,
 )
 
+interface LayoutTasksRouteChildren {
+  LayoutTasksShortCodeRoute: typeof LayoutTasksShortCodeRoute
+}
+
+const LayoutTasksRouteChildren: LayoutTasksRouteChildren = {
+  LayoutTasksShortCodeRoute: LayoutTasksShortCodeRoute,
+}
+
+const LayoutTasksRouteWithChildren = LayoutTasksRoute._addFileChildren(
+  LayoutTasksRouteChildren,
+)
+
 interface LayoutAgentAgentIdRouteChildren {
   LayoutAgentAgentIdConversationsRoute: typeof LayoutAgentAgentIdConversationsRoute
 }
@@ -825,7 +856,7 @@ interface LayoutRouteChildren {
   LayoutKnowledgeSourcesRoute: typeof LayoutKnowledgeSourcesRoute
   LayoutSessionsRoute: typeof LayoutSessionsRouteWithChildren
   LayoutSettingsRoute: typeof LayoutSettingsRoute
-  LayoutTasksRoute: typeof LayoutTasksRoute
+  LayoutTasksRoute: typeof LayoutTasksRouteWithChildren
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutAdminMarketplacesRoute: typeof LayoutAdminMarketplacesRoute
   LayoutAdminUsersRoute: typeof LayoutAdminUsersRoute
@@ -853,7 +884,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutKnowledgeSourcesRoute: LayoutKnowledgeSourcesRoute,
   LayoutSessionsRoute: LayoutSessionsRouteWithChildren,
   LayoutSettingsRoute: LayoutSettingsRoute,
-  LayoutTasksRoute: LayoutTasksRoute,
+  LayoutTasksRoute: LayoutTasksRouteWithChildren,
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutAdminMarketplacesRoute: LayoutAdminMarketplacesRoute,
   LayoutAdminUsersRoute: LayoutAdminUsersRoute,

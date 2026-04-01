@@ -247,6 +247,7 @@ from .input_task import (
     InputTaskUpdate,
     InputTaskPublic,
     InputTaskPublicExtended,
+    InputTaskDetailPublic,
     InputTasksPublic,
     InputTasksPublicExtended,
     InputTaskStatus,
@@ -257,6 +258,29 @@ from .input_task import (
     ExecuteTaskResponse,
     SendAnswerRequest,
     SendAnswerResponse,
+    AgentTaskStatusUpdate,
+    AgentSubtaskCreate,
+    AgentTaskCreate,
+    AgentTaskOperationResponse,
+)
+from .task_comment import (
+    TaskComment,
+    TaskCommentBase,
+    TaskCommentCreate,
+    AgentTaskCommentCreate,
+    TaskCommentPublic,
+    TaskCommentsPublic,
+)
+from .task_attachment import (
+    TaskAttachment,
+    TaskAttachmentBase,
+    TaskAttachmentPublic,
+    TaskAttachmentsPublic,
+)
+from .task_status_history import (
+    TaskStatusHistory,
+    TaskStatusHistoryPublic,
+    TaskStatusHistoriesPublic,
 )
 from .task_trigger import (
     TaskTrigger,
@@ -628,6 +652,7 @@ __all__ = [
     "InputTaskUpdate",
     "InputTaskPublic",
     "InputTaskPublicExtended",
+    "InputTaskDetailPublic",
     "InputTasksPublic",
     "InputTasksPublicExtended",
     "InputTaskStatus",
@@ -638,6 +663,26 @@ __all__ = [
     "ExecuteTaskResponse",
     "SendAnswerRequest",
     "SendAnswerResponse",
+    "AgentTaskStatusUpdate",
+    "AgentSubtaskCreate",
+    "AgentTaskCreate",
+    "AgentTaskOperationResponse",
+    # Task Comments
+    "TaskComment",
+    "TaskCommentBase",
+    "TaskCommentCreate",
+    "AgentTaskCommentCreate",
+    "TaskCommentPublic",
+    "TaskCommentsPublic",
+    # Task Attachments
+    "TaskAttachment",
+    "TaskAttachmentBase",
+    "TaskAttachmentPublic",
+    "TaskAttachmentsPublic",
+    # Task Status History
+    "TaskStatusHistory",
+    "TaskStatusHistoryPublic",
+    "TaskStatusHistoriesPublic",
     # Task Triggers
     "TaskTrigger",
     "TriggerType",

@@ -233,90 +233,154 @@ class PromptGenerator:
             logger.error(f"Failed to scan knowledge directory: {e}")
             return None
 
-    def _load_task_creation_prompt(self) -> Optional[str]:
-        """
-        Load task creation prompt from agent_handover_config.json file.
-
-        Returns the handover_prompt field which contains instructions for using
-        the create_agent_task tool in conversation mode. This prompt covers both:
-        - Direct handover (to configured target agents)
-        - Inbox task creation (for user review)
-
-        Returns:
-            Task creation prompt string if exists, None otherwise
-        """
-        import json
-
-        handover_config_path = self.workspace_dir / "docs" / "agent_handover_config.json"
-
-        if not handover_config_path.exists():
-            logger.debug(f"agent_handover_config.json not found at {handover_config_path}")
-            return None
-
-        try:
-            with open(handover_config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                handover_prompt = config.get("handover_prompt", "").strip()
-
-                if handover_prompt:
-                    logger.info(f"Loaded task creation prompt ({len(handover_prompt)} chars)")
-                    return handover_prompt
-                else:
-                    logger.debug("Task creation prompt is empty")
-                    return None
-        except Exception as e:
-            logger.error(f"Failed to load agent_handover_config.json: {e}")
-            return None
-
     @staticmethod
-    def build_collaboration_context_section(session_context: dict | None) -> str | None:
+    def build_task_context_section(session_context: dict | None) -> str | None:
         """
-        Build a system prompt section for agents participating in a collaboration.
+        Build a system prompt section with the agent's current task context.
 
-        Reads collaboration fields from session_context (injected by backend) and
-        generates a human-readable section so the agent understands its role.
+        Reads task fields from session_context (injected by backend) and generates
+        a human-readable section covering:
+        - Task identity (short_code, title, description, status, priority)
+        - Task origin (who created it, parent task if subtask)
+        - Reporting instructions (use add_comment, status is auto-managed)
+        - Team context (team name, role, downstream delegation targets) — team agents only
+        - Delegation instructions — team agents with downstream connections only
+        - Completion protocol
 
         Args:
             session_context: Dict from session_state["session_context"], or None.
 
         Returns:
-            Markdown section string, or None if not a collaboration session.
+            Markdown section string, or None if session has no linked task.
         """
         if not session_context:
             return None
 
-        collaboration_id = session_context.get("collaboration_id")
-        if not collaboration_id:
+        task_short_code = session_context.get("task_short_code")
+        if not task_short_code:
             return None
 
-        title = session_context.get("collaboration_title", "Unnamed Collaboration")
-        description = session_context.get("collaboration_description", "")
-        role = session_context.get("collaboration_role", "")
-        other_participants = session_context.get("collaboration_other_participants", [])
+        task_title = session_context.get("task_title", "")
+        task_description = session_context.get("task_description", "")
+        task_priority = session_context.get("task_priority", "normal")
+        task_status = session_context.get("task_status", "in_progress")
 
-        lines = [
-            "\n\n---\n",
-            "## Collaboration Context\n",
-            f"You are participating in a collaboration: **\"{title}\"**",
-        ]
+        # Creator info
+        created_by_name = session_context.get("task_created_by_name")
+        created_by_type = session_context.get("task_created_by_type")  # "user" | "agent"
 
-        if description:
-            lines.append(f"\n**Objective**: {description}")
+        # Parent task info (for subtasks)
+        parent_short_code = session_context.get("parent_task_short_code")
+        parent_title = session_context.get("parent_task_title", "")
+        parent_description = session_context.get("parent_task_description", "")
+        parent_agent_name = session_context.get("parent_assigned_agent_name")
+        parent_node_name = session_context.get("parent_node_name")
+        delegation_reason = session_context.get("delegation_connection_prompt")  # connection_prompt from parent → this node
 
-        if role:
-            lines.append(f"\n**Your role / task**: {role}")
+        # Team context
+        team_name = session_context.get("team_name")
+        node_name = session_context.get("node_name")
+        downstream_members: list[dict] = session_context.get("downstream_team_members") or []
 
-        if other_participants:
-            participants_str = ", ".join(other_participants)
-            lines.append(f"\n**Other participants**: {participants_str}")
+        lines = ["\n\n---\n"]
 
-        lines.append(f"\n**Collaboration ID**: `{collaboration_id}`")
+        # --- Current task ---
+        lines.append(f"## Your Current Task: {task_short_code}")
+        if task_title:
+            lines.append(f"Title: {task_title}")
+        lines.append(f"Priority: {task_priority}")
+        lines.append(f"Status: {task_status}")
+
+        if task_description:
+            lines.append(f"\nDescription:\n{task_description}")
+
+        # --- Task origin (standalone tasks only — subtasks use the parent task block below) ---
+        if created_by_name and created_by_type and not parent_short_code:
+            lines.append(f"\n## Task Origin")
+            lines.append(f"This task was created by: {created_by_name} ({created_by_type})")
+            if created_by_type == "agent" and delegation_reason and not parent_short_code:
+                lines.append(f"Context: {delegation_reason}")
+
+        # --- Team context (at top, before reporting) ---
+        if team_name and node_name:
+            lines.append(f"\n## Team Context")
+            lines.append(f"Team: {team_name}")
+            lines.append(f"Your Role: {node_name} (in the {team_name} team)")
+
+        # --- Parent task context (subtasks only) ---
+        if parent_short_code:
+            lines.append(f"\n## Task Origin")
+            lines.append(f'Parent task: {parent_short_code} — "{parent_title}"')
+            if parent_agent_name:
+                node_info = f" ({parent_node_name})" if parent_node_name else ""
+                lines.append(f"Delegated by: {parent_agent_name}{node_info}")
+            if delegation_reason:
+                lines.append(f"Why you received this: {delegation_reason}")
+            if parent_description:
+                lines.append(f"Parent description: {parent_description}")
+            if parent_agent_name:
+                lines.append(
+                    f"\nYour job is to complete this subtask and report results. "
+                    f"The delegating agent ({parent_agent_name}) will aggregate your "
+                    f"findings with other subtask results."
+                )
+
+        # --- Reporting instructions (all agents) ---
+        lines.append(f"\n## Reporting Your Work")
+        lines.append(f"- Use `mcp__agent_task__add_comment` to post findings, results, and deliverables")
+        lines.append(f"- Attach files to your comments using the `files` parameter")
+        lines.append(f"- Your task status is managed automatically:")
+        lines.append(f"  - When you start working: status is already \"in_progress\"")
+        lines.append(f"  - When you finish: status auto-completes when your session ends")
         lines.append(
-            "\nWhen you complete your task, call `update_session_state` with "
-            "`state=\"completed\"` and a clear summary. "
-            "Use `post_finding` to share intermediate results with other participants. "
-            "Use `get_collaboration_status` to see overall progress and other agents' findings."
+            f"  - Use `mcp__agent_task__update_status(status=\"blocked\", reason=\"...\")` "
+            f"only if you're stuck and need external help"
         )
+
+        # --- Team delegation (team agents only) ---
+        if team_name:
+            if downstream_members:
+                lines.append(f"\n## Team Members You Can Delegate To")
+                for member in downstream_members:
+                    target_node = member.get("node_name", "")
+                    target_agent = member.get("agent_name", "")
+                    target_desc = member.get("agent_description", "")
+                    connection_prompt = member.get("connection_prompt", "")
+
+                    member_line = f"- **{target_node}** ({target_agent})"
+                    if target_desc:
+                        member_line += f": {target_desc}"
+                    lines.append(member_line)
+                    if connection_prompt:
+                        lines.append(f"  Connection context: \"{connection_prompt}\"")
+
+                lines.append(f"\n## Delegation")
+                lines.append(
+                    f"- If your task is complex or spans multiple responsibilities, "
+                    f"use `mcp__agent_task__create_subtask` to delegate parts to team members listed above"
+                )
+                lines.append(f"- Each subtask you create will be automatically assigned and executed by the target agent")
+                lines.append(f"- Monitor subtask progress with `mcp__agent_task__get_details`")
+                lines.append(f"- You'll receive notifications when subtasks complete")
+                lines.append(f"- Read subtask comments and attachments to gather results")
+                lines.append(f"- Aggregate all subtask results before completing your own task")
+            else:
+                lines.append(
+                    f"\nYou are a leaf node in the team — you execute work directly rather than delegating."
+                )
+
+        # --- Completion protocol ---
+        lines.append(f"\n## Completion Protocol")
+        lines.append(f"1. Post comments as you work — share findings, intermediate results")
+        if downstream_members:
+            lines.append(f"2. If you delegated subtasks: wait for all to complete, read their comments, aggregate")
+            lines.append(f"3. Post a final summary comment with your complete results")
+            lines.append(f"4. Attach any deliverable files")
+            lines.append(f"5. Your task will auto-complete when your session ends successfully")
+        else:
+            lines.append(f"2. Post a final summary comment with your complete results")
+            lines.append(f"3. Attach any deliverable files")
+            lines.append(f"4. Your task will auto-complete when your session ends successfully")
 
         return "\n".join(lines)
 
@@ -605,31 +669,11 @@ class PromptGenerator:
             conversation_prompt_parts.append(session_context_section)
             logger.info("Included session context section in conversation mode prompt")
 
-        # Append collaboration context if this session is part of a collaboration
-        collaboration_context_section = self.build_collaboration_context_section(session_context)
-        if collaboration_context_section:
-            conversation_prompt_parts.append(collaboration_context_section)
-            logger.info("Included collaboration context section in conversation mode prompt")
-
-        # Append task creation prompt if it exists (includes handover and inbox task instructions)
-        task_creation_prompt = self._load_task_creation_prompt()
-        if task_creation_prompt:
-            conversation_prompt_parts.append(
-                f"\n\n---\n\n{task_creation_prompt}"
-            )
-            logger.info("Included task creation prompt in conversation mode prompt")
-
-        # Append session state reporting instructions
-        conversation_prompt_parts.append(
-            "\n\n---\n\n"
-            "## MANDATORY RULE: Session State Reporting\n\n"
-            "**RULE**: If your response asks the user ANYTHING (question, confirmation, clarification) "
-            "you MUST call the `update_session_state` tool with `state=\"needs_input\"`. "
-            "If you encounter an unrecoverable error, call it with `state=\"error\"`. "
-            "Do NOT call this tool when you complete the task successfully — the system handles that.\n\n"
-            "You MUST call this tool EVERY TIME you ask a question. No exceptions. "
-            "The user will NOT see your question unless you call this tool.\n"
-        )
+        # Append task context if this session is linked to a task
+        task_context_section = self.build_task_context_section(session_context)
+        if task_context_section:
+            conversation_prompt_parts.append(task_context_section)
+            logger.info("Included task context section in conversation mode prompt")
 
         # Combine all parts into a single system prompt string
         if conversation_prompt_parts:

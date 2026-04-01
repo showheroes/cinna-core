@@ -1,11 +1,14 @@
 """
-Task MCP Bridge Server.
+Agent Task MCP Bridge Server.
 
 Exposes the following tools as an MCP stdio server so that OpenCode agents
 can call them via the local MCP server config in opencode.json:
-  - create_agent_task
-  - update_session_state
-  - respond_to_task
+  - add_comment
+  - update_status
+  - create_task
+  - create_subtask
+  - get_details
+  - list_tasks
 
 Session context (backend_session_id) is read at call time from:
     /app/core/.opencode/session_context.json
@@ -38,11 +41,11 @@ AGENT_AUTH_TOKEN = os.getenv("AGENT_AUTH_TOKEN", "")
 # MCP bridge servers are spawned by opencode serve with cwd = runtime dir,
 # so reading from cwd works for per-mode dirs (/tmp/.opencode_{mode}).
 SESSION_CONTEXT_PATH = Path("session_context.json")
-HANDOVER_CONFIG_PATH = Path("/app/workspace/docs/agent_handover_config.json")
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _read_backend_session_id() -> str | None:
     """Read the current backend_session_id from the session context file."""
@@ -53,16 +56,6 @@ def _read_backend_session_id() -> str | None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not read session_context.json: %s", exc)
     return None
-
-
-def _load_handover_config() -> dict:
-    """Load handover configuration from the workspace docs directory."""
-    try:
-        if HANDOVER_CONFIG_PATH.exists():
-            return json.loads(HANDOVER_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to load handover config: %s", exc)
-    return {"handovers": []}
 
 
 def _auth_headers() -> dict[str, str]:
@@ -81,174 +74,149 @@ def _check_backend_config() -> str | None:
     return None
 
 
+def _resolve_task_id(client: httpx.Client, short_code: str) -> tuple[str | None, str | None]:
+    """
+    Resolve a task short_code to a task_id.
+
+    Returns:
+        (task_id, error_string) — exactly one of them is None.
+    """
+    try:
+        resp = client.get(
+            f"{BACKEND_URL}/api/v1/agent/tasks/by-code/{short_code}",
+            headers=_auth_headers(),
+        )
+        if resp.status_code == 404:
+            return None, f"Error: Task '{short_code}' not found"
+        if resp.status_code != 200:
+            return None, f"Error: Failed to resolve task '{short_code}' (HTTP {resp.status_code})"
+        task_id = resp.json().get("task_id")
+        if not task_id:
+            return None, f"Error: Could not resolve task ID for '{short_code}'"
+        return task_id, None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"Error: Failed to resolve task: {exc}"
+
+
 # ---------------------------------------------------------------------------
 # FastMCP server
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("task")
+mcp = FastMCP("agent_task")
 
 
 @mcp.tool()
-def create_agent_task(
-    task_message: str,
-    target_agent_id: str = "",
-    target_agent_name: str = "",
+def add_comment(
+    content: str,
+    files: list[str] | None = None,
+    task: str = "",
 ) -> str:
     """
-    Create a task for another agent (direct handover) or for the user's inbox.
+    Post a comment on a task to report findings, results, or progress.
 
-    Use with target_agent_id for direct handover to a configured agent.
-    Use without target_agent_id to create an inbox task for user review.
+    The primary way to share work with the user and other agents. Optionally
+    attach workspace files to the comment. Defaults to the current task if
+    'task' is not specified.
 
     Args:
-        task_message: The task description or message (required).
-        target_agent_id: UUID of the target agent (optional, for direct handover).
-        target_agent_name: Name of the target agent (required if target_agent_id provided).
+        content: Comment text (required, markdown supported).
+        files: Workspace file paths to attach (optional).
+        task: Short code of the target task (optional, defaults to current task).
     """
-    task_message = task_message.strip()
-    target_agent_id = target_agent_id.strip()
-    target_agent_name = target_agent_name.strip()
+    content = content.strip()
+    task_short_code = task.strip() or None
 
-    if not task_message:
-        return "Error: task_message parameter is required"
+    if not content:
+        return "Error: content is required"
 
     config_error = _check_backend_config()
     if config_error:
         return config_error
 
-    if target_agent_id:
-        if not target_agent_name:
-            return "Error: target_agent_name is required when target_agent_id is provided"
-
-        config = _load_handover_config()
-        configured_ids = [h.get("id") for h in config.get("handovers", [])]
-        if target_agent_id not in configured_ids:
-            available = ", ".join(
-                h.get("name", "Unknown") for h in config.get("handovers", [])
-            )
-            return (
-                f"Error: Handover to agent '{target_agent_name}' ({target_agent_id}) "
-                f"is not configured. Available handovers: {available}"
-            )
-
     source_session_id = _read_backend_session_id()
     if not source_session_id:
-        return "Error: Backend session ID not available. Cannot create task."
-
-    payload: dict = {
-        "task_message": task_message,
-        "source_session_id": source_session_id,
-    }
-    if target_agent_id:
-        payload["target_agent_id"] = target_agent_id
-        payload["target_agent_name"] = target_agent_name
+        return "Error: Backend session ID not available. Cannot post comment."
 
     try:
         with httpx.Client(timeout=30.0) as client:
+            task_id: str | None = None
+            if task_short_code:
+                task_id, err = _resolve_task_id(client, task_short_code)
+                if err:
+                    return err
+
+            url_path = (
+                f"/api/v1/agent/tasks/{task_id}/comment"
+                if task_id
+                else "/api/v1/agent/tasks/current/comment"
+            )
+            payload: dict = {
+                "content": content,
+                "source_session_id": source_session_id,
+            }
+            if files:
+                payload["file_paths"] = files
+
             resp = client.post(
-                f"{BACKEND_URL}/api/v1/agents/tasks/create",
+                f"{BACKEND_URL}{url_path}",
                 json=payload,
                 headers=_auth_headers(),
             )
 
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("success"):
-                return data.get(
-                    "message",
-                    (
-                        f"Successfully handed over to agent '{target_agent_name}'."
-                        if target_agent_id
-                        else "Task created in user's inbox."
-                    ),
-                )
-            return f"Task creation failed: {data.get('error', 'Unknown error')}"
+            comment_id = data.get("comment_id")
+            result_task = data.get("task", task_short_code or "")
+            attachments_count = data.get("attachments_count", 0)
+            parts = [f"Comment posted on task {result_task} (comment_id: {comment_id})."]
+            if attachments_count:
+                parts.append(f"Attached {attachments_count} file(s).")
+            return " ".join(parts)
 
         if resp.status_code == 401:
-            return "Error: Authentication failed. Invalid authentication token."
+            return "Error: Authentication failed."
+        if resp.status_code == 404:
+            return "Error: Task not found or not accessible."
 
-        return f"Error: Task creation request failed (HTTP {resp.status_code}): {resp.text}"
+        return f"Error: Request failed (HTTP {resp.status_code}): {resp.text}"
 
     except httpx.TimeoutException:
-        return "Error: Task creation request timed out. Please try again."
+        return "Error: Request timed out."
     except httpx.RequestError as exc:
         return f"Error: Failed to connect to backend: {exc}"
     except Exception as exc:  # noqa: BLE001
-        logger.error("Unexpected error in create_agent_task: %s", exc, exc_info=True)
+        logger.error("Unexpected error in add_comment: %s", exc, exc_info=True)
         return f"Error: Unexpected error: {exc}"
 
 
 @mcp.tool()
-def update_session_state(state: str, summary: str) -> str:
+def update_status(
+    status: str,
+    reason: str = "",
+    task: str = "",
+) -> str:
     """
-    Report the outcome of the current session.
+    Update a task's status.
 
-    Call this when you have finished processing, need user input, or encountered
-    an error. This notifies the user even if they are offline.
+    Use ONLY for edge cases: 'blocked' (waiting for external input or a
+    dependency), 'completed' (explicit early completion), or 'cancelled'
+    (task is not actionable). Standard transitions are handled automatically
+    by the backend. Defaults to the current task if 'task' is not specified.
 
     Args:
-        state: One of "completed", "needs_input", or "error".
-        summary: Description of the result, question, or error.
+        status: New status — blocked/completed/cancelled (required).
+        reason: Explanation for the change (optional).
+        task: Short code of the target task (optional, defaults to current task).
     """
-    state = state.strip()
-    summary = summary.strip()
+    status = status.strip()
+    reason_val = reason.strip() or None
+    task_short_code = task.strip() or None
 
-    if state not in ("completed", "needs_input", "error"):
-        return "Error: state must be 'completed', 'needs_input', or 'error'"
-
-    if not summary:
-        return "Error: summary is required"
-
-    config_error = _check_backend_config()
-    if config_error:
-        return config_error
-
-    session_id = _read_backend_session_id()
-    if not session_id:
-        return "Error: Backend session ID not available"
-
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.post(
-                f"{BACKEND_URL}/api/v1/agents/sessions/update-state",
-                json={"session_id": session_id, "state": state, "summary": summary},
-                headers=_auth_headers(),
-            )
-
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("success"):
-                return f"Session state updated to '{state}': {summary}"
-            return f"Failed to update session state: {data.get('error', 'Unknown error')}"
-
-        return f"Error: Request failed (HTTP {resp.status_code})"
-
-    except httpx.TimeoutException:
-        return "Error: Request timed out"
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Unexpected error in update_session_state: %s", exc, exc_info=True)
-        return f"Error: {exc}"
-
-
-@mcp.tool()
-def respond_to_task(task_id: str, message: str) -> str:
-    """
-    Send a message to a sub-task's session.
-
-    Use this to answer clarification requests from sub-tasks you created, or to
-    provide additional context.
-
-    Args:
-        task_id: UUID of the sub-task to respond to.
-        message: Message content for the target agent.
-    """
-    task_id = task_id.strip()
-    message = message.strip()
-
-    if not task_id:
-        return "Error: task_id is required"
-    if not message:
-        return "Error: message is required"
+    allowed = {"blocked", "completed", "cancelled"}
+    if not status:
+        return "Error: status is required"
+    if status not in allowed:
+        return f"Error: status must be one of: {', '.join(sorted(allowed))}"
 
     config_error = _check_backend_config()
     if config_error:
@@ -256,33 +224,416 @@ def respond_to_task(task_id: str, message: str) -> str:
 
     source_session_id = _read_backend_session_id()
     if not source_session_id:
-        return "Error: Backend session ID not available"
+        return "Error: Backend session ID not available."
 
     try:
         with httpx.Client(timeout=30.0) as client:
+            task_id: str | None = None
+            if task_short_code:
+                task_id, err = _resolve_task_id(client, task_short_code)
+                if err:
+                    return err
+
+            url_path = (
+                f"/api/v1/agent/tasks/{task_id}/status"
+                if task_id
+                else "/api/v1/agent/tasks/current/status"
+            )
+            payload: dict = {
+                "status": status,
+                "source_session_id": source_session_id,
+            }
+            if reason_val:
+                payload["reason"] = reason_val
+
             resp = client.post(
-                f"{BACKEND_URL}/api/v1/agents/tasks/respond",
-                json={
-                    "task_id": task_id,
-                    "message": message,
-                    "source_session_id": source_session_id,
-                },
+                f"{BACKEND_URL}{url_path}",
+                json=payload,
                 headers=_auth_headers(),
             )
 
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("success"):
-                return f"Message sent to sub-task {task_id}"
-            return f"Failed to respond to task: {data.get('error', 'Unknown error')}"
+            result_task = data.get("task", task_short_code or "")
+            previous_status = data.get("previous_status", "")
+            new_status = data.get("new_status", status)
+            return f"Task {result_task} status updated: {previous_status} → {new_status}."
 
-        return f"Error: Request failed (HTTP {resp.status_code})"
+        if resp.status_code == 401:
+            return "Error: Authentication failed."
+        if resp.status_code == 404:
+            return "Error: Task not found or not accessible."
+        if resp.status_code == 422:
+            return f"Error: Invalid status transition — {resp.text}"
+
+        return f"Error: Request failed (HTTP {resp.status_code}): {resp.text}"
 
     except httpx.TimeoutException:
-        return "Error: Request timed out"
+        return "Error: Request timed out."
+    except httpx.RequestError as exc:
+        return f"Error: Failed to connect to backend: {exc}"
     except Exception as exc:  # noqa: BLE001
-        logger.error("Unexpected error in respond_to_task: %s", exc, exc_info=True)
-        return f"Error: {exc}"
+        logger.error("Unexpected error in update_status: %s", exc, exc_info=True)
+        return f"Error: Unexpected error: {exc}"
+
+
+@mcp.tool()
+def create_task(
+    title: str,
+    description: str = "",
+    assigned_to: str = "",
+    priority: str = "",
+) -> str:
+    """
+    Create a new task.
+
+    For team agents, the task inherits the team context. Returns the task's
+    short code (e.g. TASK-5 or HR-42).
+
+    Args:
+        title: What needs to be done (required).
+        description: Detailed context (optional).
+        assigned_to: Agent or team member name to assign to (optional).
+        priority: low/normal/high/urgent (optional, defaults to normal).
+    """
+    title = title.strip()
+    description_val = description.strip() or None
+    assigned_to_val = assigned_to.strip() or None
+    priority_val = priority.strip() or None
+
+    if not title:
+        return "Error: title is required"
+
+    config_error = _check_backend_config()
+    if config_error:
+        return config_error
+
+    source_session_id = _read_backend_session_id()
+    if not source_session_id:
+        return "Error: Backend session ID not available."
+
+    payload: dict = {
+        "title": title,
+        "source_session_id": source_session_id,
+    }
+    if description_val:
+        payload["description"] = description_val
+    if assigned_to_val:
+        payload["assigned_to"] = assigned_to_val
+    if priority_val:
+        payload["priority"] = priority_val
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{BACKEND_URL}/api/v1/agent/tasks/create",
+                json=payload,
+                headers=_auth_headers(),
+            )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            task_short_code = data.get("task", "")
+            result_assigned_to = data.get("assigned_to")
+            parts = [f"Task {task_short_code} created."]
+            if result_assigned_to:
+                parts.append(f"Assigned to: {result_assigned_to}.")
+            return " ".join(parts)
+
+        if resp.status_code == 401:
+            return "Error: Authentication failed."
+        if resp.status_code == 422:
+            return f"Error: Invalid request — {resp.text}"
+
+        return f"Error: Request failed (HTTP {resp.status_code}): {resp.text}"
+
+    except httpx.TimeoutException:
+        return "Error: Request timed out."
+    except httpx.RequestError as exc:
+        return f"Error: Failed to connect to backend: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected error in create_task: %s", exc, exc_info=True)
+        return f"Error: Unexpected error: {exc}"
+
+
+@mcp.tool()
+def create_subtask(
+    title: str,
+    description: str = "",
+    assigned_to: str = "",
+    priority: str = "",
+) -> str:
+    """
+    Create a subtask under the current task and delegate to a team member.
+
+    Only available in team context. Delegation is restricted to connected
+    downstream nodes listed in your team context.
+
+    Args:
+        title: What needs to be done (required).
+        description: Detailed context (optional).
+        assigned_to: Team member name to delegate to (optional).
+        priority: low/normal/high/urgent (optional, defaults to normal).
+    """
+    title = title.strip()
+    description_val = description.strip() or None
+    assigned_to_val = assigned_to.strip() or None
+    priority_val = priority.strip() or None
+
+    if not title:
+        return "Error: title is required"
+
+    config_error = _check_backend_config()
+    if config_error:
+        return config_error
+
+    source_session_id = _read_backend_session_id()
+    if not source_session_id:
+        return "Error: Backend session ID not available."
+
+    payload: dict = {
+        "title": title,
+        "source_session_id": source_session_id,
+    }
+    if description_val:
+        payload["description"] = description_val
+    if assigned_to_val:
+        payload["assigned_to"] = assigned_to_val
+    if priority_val:
+        payload["priority"] = priority_val
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{BACKEND_URL}/api/v1/agent/tasks/current/subtask",
+                json=payload,
+                headers=_auth_headers(),
+            )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            subtask_short_code = data.get("task", "")
+            parent_short_code = data.get("parent_task", "")
+            result_assigned_to = data.get("assigned_to")
+            parts = [f"Subtask {subtask_short_code} created under {parent_short_code}."]
+            if result_assigned_to:
+                parts.append(f"Assigned to: {result_assigned_to}.")
+            return " ".join(parts)
+
+        if resp.status_code == 401:
+            return "Error: Authentication failed."
+        if resp.status_code == 403:
+            return "Error: Subtask creation requires team context. This tool is only available for team agents."
+        if resp.status_code == 404:
+            return "Error: Current task not found or not accessible."
+        if resp.status_code == 422:
+            return f"Error: Invalid request — {resp.text}"
+
+        return f"Error: Request failed (HTTP {resp.status_code}): {resp.text}"
+
+    except httpx.TimeoutException:
+        return "Error: Request timed out."
+    except httpx.RequestError as exc:
+        return f"Error: Failed to connect to backend: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected error in create_subtask: %s", exc, exc_info=True)
+        return f"Error: Unexpected error: {exc}"
+
+
+@mcp.tool()
+def get_details(task: str = "") -> str:
+    """
+    Get full details of a task.
+
+    Returns title, description, status, priority, assigned agent, recent
+    comments (last 10), subtasks list, and subtask progress. Defaults to the
+    current task if 'task' is not specified.
+
+    Args:
+        task: Short code of the target task (optional, defaults to current task).
+    """
+    task_short_code = task.strip() or None
+
+    config_error = _check_backend_config()
+    if config_error:
+        return config_error
+
+    source_session_id = _read_backend_session_id()
+    if not source_session_id:
+        return "Error: Backend session ID not available."
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            task_id: str | None = None
+            if task_short_code:
+                task_id, err = _resolve_task_id(client, task_short_code)
+                if err:
+                    return err
+
+            url_path = (
+                f"/api/v1/agent/tasks/{task_id}/details"
+                if task_id
+                else "/api/v1/agent/tasks/current/details"
+            )
+            resp = client.get(
+                f"{BACKEND_URL}{url_path}",
+                params={"source_session_id": source_session_id},
+                headers=_auth_headers(),
+            )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            lines = [
+                f"## Task {data.get('short_code', '')} — {data.get('title', '(no title)')}",
+                f"**Status**: {data.get('status', '')}  |  **Priority**: {data.get('priority', 'normal')}",
+            ]
+            if data.get("assigned_to"):
+                lines.append(f"**Assigned to**: {data['assigned_to']}")
+            if data.get("created_by"):
+                lines.append(f"**Created by**: {data['created_by']}")
+
+            description = data.get("description")
+            if description:
+                lines.append(f"\n**Description**:\n{description}")
+
+            progress = data.get("subtask_progress") or {}
+            if progress.get("total", 0) > 0:
+                lines.append(
+                    f"\n**Subtask Progress**: {progress.get('completed', 0)}/{progress.get('total', 0)} completed"
+                    f" ({progress.get('in_progress', 0)} in progress, {progress.get('blocked', 0)} blocked)"
+                )
+
+            subtasks = data.get("subtasks") or []
+            if subtasks:
+                lines.append(f"\n**Subtasks** ({len(subtasks)}):")
+                for st in subtasks:
+                    lines.append(
+                        f"  - [{st.get('status', '?').upper()}] {st.get('task', '')} — "
+                        f"{st.get('title', '')} (assigned: {st.get('assigned_to') or 'unassigned'})"
+                    )
+
+            comments = data.get("recent_comments") or []
+            if comments:
+                lines.append(f"\n**Recent Comments** (last {len(comments)}):")
+                for c in comments:
+                    author = c.get("author", "unknown")
+                    created_at = c.get("created_at", "")
+                    has_files = c.get("has_files", False)
+                    comment_content = c.get("content", "")
+                    file_indicator = " [+files]" if has_files else ""
+                    lines.append(
+                        f"\n  **{author}** ({created_at}){file_indicator}:\n  {comment_content[:300]}"
+                    )
+            else:
+                lines.append("\n**Recent Comments**: None")
+
+            return "\n".join(lines)
+
+        if resp.status_code == 401:
+            return "Error: Authentication failed."
+        if resp.status_code == 404:
+            return "Error: Task not found or not accessible."
+
+        return f"Error: Request failed (HTTP {resp.status_code}): {resp.text}"
+
+    except httpx.TimeoutException:
+        return "Error: Request timed out."
+    except httpx.RequestError as exc:
+        return f"Error: Failed to connect to backend: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected error in get_details: %s", exc, exc_info=True)
+        return f"Error: Unexpected error: {exc}"
+
+
+@mcp.tool()
+def list_tasks(
+    status: str = "",
+    scope: str = "assigned",
+) -> str:
+    """
+    List tasks visible to you.
+
+    Use 'scope' to filter: 'assigned' (tasks assigned to you, default),
+    'created' (tasks you created/delegated), 'team' (all tasks in your team
+    — team agents only). Optionally filter by status.
+
+    Args:
+        status: Filter by status (optional).
+        scope: assigned/created/team (optional, defaults to assigned).
+    """
+    status_filter = status.strip() or None
+    scope_val = scope.strip() or "assigned"
+
+    allowed_scopes = {"assigned", "created", "team"}
+    if scope_val not in allowed_scopes:
+        return f"Error: scope must be one of: {', '.join(sorted(allowed_scopes))}"
+
+    config_error = _check_backend_config()
+    if config_error:
+        return config_error
+
+    source_session_id = _read_backend_session_id()
+    if not source_session_id:
+        return "Error: Backend session ID not available."
+
+    params: dict = {
+        "scope": scope_val,
+        "source_session_id": source_session_id,
+    }
+    if status_filter:
+        params["status"] = status_filter
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(
+                f"{BACKEND_URL}/api/v1/agent/tasks/my-tasks",
+                params=params,
+                headers=_auth_headers(),
+            )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            tasks = data.get("tasks") or []
+
+            if not tasks:
+                filter_desc = f" with status '{status_filter}'" if status_filter else ""
+                return f"No tasks found (scope: {scope_val}{filter_desc})."
+
+            lines = [f"## Tasks (scope: {scope_val}, {len(tasks)} found)"]
+            for t in tasks:
+                short_code = t.get("task", "")
+                task_title = t.get("title", "(no title)")
+                task_status = t.get("status", "")
+                task_priority = t.get("priority", "normal")
+                task_assigned = t.get("assigned_to") or "unassigned"
+
+                progress = t.get("subtask_progress") or {}
+                progress_str = ""
+                if progress.get("total", 0) > 0:
+                    progress_str = f" [{progress.get('completed', 0)}/{progress.get('total', 0)} subtasks]"
+
+                priority_indicator = " !" if task_priority == "high" else (" !!" if task_priority == "urgent" else "")
+                lines.append(
+                    f"\n- **{short_code}**{priority_indicator} [{task_status.upper()}] {task_title}"
+                    f"\n  Assigned: {task_assigned}{progress_str}"
+                )
+
+            return "\n".join(lines)
+
+        if resp.status_code == 401:
+            return "Error: Authentication failed."
+        if resp.status_code == 403:
+            return "Error: 'team' scope is only available for team agents."
+
+        return f"Error: Request failed (HTTP {resp.status_code}): {resp.text}"
+
+    except httpx.TimeoutException:
+        return "Error: Request timed out."
+    except httpx.RequestError as exc:
+        return f"Error: Failed to connect to backend: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected error in list_tasks: %s", exc, exc_info=True)
+        return f"Error: Unexpected error: {exc}"
 
 
 # ---------------------------------------------------------------------------

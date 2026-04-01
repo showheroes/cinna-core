@@ -28,9 +28,7 @@ Pluggable adapter system supporting multiple AI providers. Each adapter converts
 
 Extension tools that give agents additional capabilities beyond built-in SDK tools:
 - **Knowledge Query** - RAG-based queries against indexed knowledge sources
-- **Create Agent Task** - Handover delegation to other agents
-- **Respond to Task** - Reply to tasks received from other agents
-- **Update Session State** - Modify session metadata during execution
+- **Agent Task Tools** - Six `mcp__agent_task__*` tools for task collaboration: add comments (with file attachments), update status, create tasks, create subtasks (team agents only), get task details, list tasks
 
 ### Unified Event Format
 
@@ -157,9 +155,67 @@ Backend ──HTTP POST──→ Environment Container (FastAPI)
 - **Agent Environment Data Management** - Prompt sync and credential sync operations. See [Data Management](../agent_environment_data_management/agent_environment_data_management.md)
 - **Knowledge Query Tool** - RAG-based knowledge queries from building mode. See [Knowledge Tool](knowledge_tool.md) aspect and [Knowledge Sources](../../application/knowledge_sources/knowledge_sources.md)
 - **Agent Handover** - Create/respond task tools enable agent-to-agent delegation. See [Agent Handover](../agent_handover/agent_handover.md) and [Create Agent Task Tool](create_agent_task_tool.md)
-- **Input Tasks** - Session state tools let agents report task outcomes and exchange clarifications. See [Session State Tools](session_state_tools.md) and [Input Tasks](../../application/input_tasks/input_tasks.md)
+- **Input Tasks** - Six `mcp__agent_task__*` tools let agents report findings as comments, attach files, manage status, and delegate subtasks. See [Input Tasks](../../application/input_tasks/input_tasks.md)
 - **Tools Approval** - Plugin-provided tools require explicit user approval before autonomous use; approval state synced to environments. See [Tools Approval Management](tools_approval_management.md)
 - **Agent Webapp** - Three dedicated endpoints serve static files, execute Python data scripts, and report webapp metadata from `/app/workspace/webapp/`. See [Agent Webapp](../agent_webapp/agent_webapp.md)
+
+## Agent Task MCP Tools
+
+All task tools are pre-approved (no per-call user confirmation required). They are injected into the system prompt only when the session is linked to a task (`source_task_id` is set). Building mode sessions do not receive task tools.
+
+### Tool Set
+
+**`mcp__agent_task__add_comment`** — Primary reporting tool. Post findings, results, and progress as comments on the task. Accepts optional `files` (list of workspace paths) to attach deliverables.
+
+**`mcp__agent_task__update_status`** — Edge-case status override. Use only for: `blocked` (waiting for external input), explicit `completed` (before session ends), or `cancelled`. Standard transitions (`in_progress`, `completed`) are handled automatically by the backend from session lifecycle events.
+
+**`mcp__agent_task__create_task`** — Create a new standalone task. For team agents, the task inherits the team context. Replaces the old `create_agent_task` tool.
+
+**`mcp__agent_task__create_subtask`** — Team agents only. Create a child task under the current task and optionally assign it to a connected team member. The team connection topology is enforced — target agent must be reachable via a directed connection from the calling agent's node.
+
+**`mcp__agent_task__get_details`** — Read the current task's full detail: title, description, status, priority, recent comments (last 10), and subtask progress summary.
+
+**`mcp__agent_task__list_tasks`** — List tasks by scope: `assigned` (default — tasks assigned to this agent), `created` (tasks this agent created), or `team` (all tasks in the agent's team; team agents only).
+
+### Tool Availability
+
+| Tool | Standalone Agent (with task) | Team Agent |
+|------|------------------------------|------------|
+| `mcp__agent_task__add_comment` | Yes | Yes |
+| `mcp__agent_task__update_status` | Yes | Yes |
+| `mcp__agent_task__get_details` | Yes | Yes |
+| `mcp__agent_task__list_tasks` | Yes | Yes |
+| `mcp__agent_task__create_task` | Yes | Yes |
+| `mcp__agent_task__create_subtask` | No | Yes |
+
+### Removed Tools (Breaking Change)
+
+The following tools from the previous MCP task server were removed and replaced:
+
+| Removed Tool | Replacement |
+|--------------|------------|
+| `mcp__agent_task__create_agent_task` | `mcp__agent_task__create_task` |
+| `mcp__agent_task__update_session_state` | `mcp__agent_task__update_status` |
+| `mcp__agent_task__respond_to_task` | `mcp__agent_task__add_comment` on parent task |
+| `mcp__agent_task__create_collaboration` | `mcp__agent_task__create_subtask` (multiple calls) |
+| `mcp__agent_task__post_finding` | `mcp__agent_task__add_comment` |
+| `mcp__agent_task__get_collaboration_status` | `mcp__agent_task__get_details` |
+
+All old tools are removed from the MCP server, prompt templates, and pre-approved tool lists.
+
+### Task Context Prompt Injection
+
+When a session is created for a task, the system prompt includes a task context section. Content varies based on team membership:
+
+**Standalone agent:** task short code, title, priority, status, description, creator identity, and reporting instructions ("use `mcp__agent_task__add_comment` to post findings").
+
+**Team agent (extends standalone):** additionally includes team name, the agent's node role name, parent task context (if subtask — who delegated and why via connection prompt), and the list of downstream team members available for delegation.
+
+### MCP Server File
+
+`backend/app/env-templates/app_core_base/core/server/tools/mcp_bridge/task_server.py` — MCP stdio bridge server that wraps all six `mcp__agent_task__*` tools for OpenCode adapter. Claude Code adapter registers tools directly via `claude_code_sdk_adapter.py`.
+
+---
 
 ## API Endpoints
 

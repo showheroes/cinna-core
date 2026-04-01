@@ -8,8 +8,8 @@ its local MCP server config.
 
 Servers:
 - knowledge_server.py  — query_integration_knowledge (building mode)
-- task_server.py       — create_agent_task, update_session_state, respond_to_task
-- collaboration_server.py — create_collaboration, post_finding, get_collaboration_status
+- task_server.py       — add_comment, update_status, create_task, create_subtask,
+                         get_details, list_tasks (agent_task server, conversation mode)
 
 Session context (backend_session_id, opencode_session_id) is shared via a JSON
 file written by the OpenCodeAdapter before each message into the per-mode

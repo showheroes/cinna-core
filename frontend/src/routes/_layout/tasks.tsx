@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState, useCallback } from "react"
-import { Plus, MessageSquare, Play, Sparkles, Circle, CheckCircle2, List, Archive, Loader2, MoreVertical, Trash2, Layers, FileText, Mail } from "lucide-react"
+import { Plus, MessageSquare, Play, Sparkles, Circle, CheckCircle2, List, Archive, Loader2, MoreVertical, Trash2, Layers, FileText, Mail, LayoutDashboard } from "lucide-react"
 
 import { TasksService, AgentsService } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -11,8 +11,9 @@ import { TaskStatusBadge } from "@/components/Tasks/TaskStatusBadge"
 import { CreateTaskDialog } from "@/components/Tasks/CreateTaskDialog"
 import { TaskSessionsModal } from "@/components/Tasks/TaskSessionsModal"
 import { TaskTodoProgress, type TodoItem } from "@/components/Tasks/TaskTodoProgress"
+import { TaskBoard } from "@/components/Tasks/TaskBoard"
 import { RelativeTime } from "@/components/Common/RelativeTime"
-import { useEventSubscription, EventTypes } from "@/hooks/useEventBus"
+import { useEventSubscription, useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -29,6 +30,8 @@ export const Route = createFileRoute("/_layout/tasks")({
   component: TasksList,
 })
 
+type ViewMode = "list" | "board"
+
 type StatusFilter = "active" | "completed" | "archived" | "all"
 
 function TasksList() {
@@ -40,6 +43,7 @@ function TasksList() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [sessionsModalTaskId, setSessionsModalTaskId] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>("board")
 
   // Real-time to-do progress tracking for tasks
   const [taskTodos, setTaskTodos] = useState<Record<string, TodoItem[]>>({})
@@ -52,6 +56,27 @@ function TasksList() {
     }
   }, [])
   useEventSubscription(EventTypes.TASK_TODO_UPDATED, handleTodoUpdate)
+
+  // Show toast notifications for task collaboration events
+  const handleTaskCollaborationEvent = useCallback(
+    (event: { type: string; meta?: { short_code?: string; agent_name?: string; author_name?: string } }) => {
+      const { short_code, agent_name, author_name } = event.meta || {}
+      const code = short_code || "Task"
+
+      if (event.type === EventTypes.SUBTASK_COMPLETED && agent_name) {
+        showSuccessToast(`${code} completed by ${agent_name}`)
+      } else if (event.type === EventTypes.TASK_COMMENT_ADDED) {
+        const author = author_name || "Someone"
+        showSuccessToast(`New comment on ${code} by ${author}`)
+      }
+    },
+    [showSuccessToast],
+  )
+
+  useMultiEventSubscription(
+    [EventTypes.SUBTASK_COMPLETED, EventTypes.TASK_COMMENT_ADDED],
+    handleTaskCollaborationEvent,
+  )
 
   const autoRefineMutation = useMutation({
     mutationFn: (taskId: string) =>
@@ -214,14 +239,44 @@ function TasksList() {
             Manage and refine your incoming tasks
           </p>
         </div>
-        <Button onClick={() => setCreateDialogOpen(true)} size="sm">
-          <Plus className="h-4 w-4 mr-2" />
-          New Task
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center border rounded-md overflow-hidden">
+            <button
+              onClick={() => setViewMode("board")}
+              className={cn(
+                "px-2.5 py-1.5 text-xs flex items-center gap-1.5 transition-colors",
+                viewMode === "board"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted"
+              )}
+            >
+              <LayoutDashboard className="h-3.5 w-3.5" />
+              Board
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={cn(
+                "px-2.5 py-1.5 text-xs flex items-center gap-1.5 transition-colors",
+                viewMode === "list"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted"
+              )}
+            >
+              <List className="h-3.5 w-3.5" />
+              List
+            </button>
+          </div>
+          <Button onClick={() => setCreateDialogOpen(true)} size="sm">
+            <Plus className="h-4 w-4 mr-2" />
+            New Task
+          </Button>
+        </div>
       </div>
     )
     return () => setHeaderContent(null)
-  }, [setHeaderContent])
+    // viewMode is required in deps: the JSX passed to setHeaderContent uses it for
+    // active-class styling on the toggle buttons and must re-fire when it changes.
+  }, [setHeaderContent, viewMode])
 
   const handleTaskClick = (task: InputTaskPublicExtended) => {
     // For tasks with a session, navigate directly to the session
@@ -275,6 +330,16 @@ function TasksList() {
   }
 
   const tasks = tasksData?.data || []
+
+  if (viewMode === "board") {
+    return (
+      <div className="p-6 md:p-8 overflow-y-auto h-full" key={activeWorkspaceId ?? "default"}>
+        <div className="mx-auto max-w-7xl">
+          <TaskBoard />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 md:p-8 overflow-y-auto h-full" key={activeWorkspaceId ?? "default"}>

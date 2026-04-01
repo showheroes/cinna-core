@@ -3254,6 +3254,175 @@ export const AgentSharesPublicSchema = {
     description: 'List response for agent shares'
 } as const;
 
+export const AgentSubtaskCreateSchema = {
+    properties: {
+        title: {
+            type: 'string',
+            maxLength: 500,
+            minLength: 1,
+            title: 'Title'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 10000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        assigned_to: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Assigned To'
+        },
+        priority: {
+            type: 'string',
+            title: 'Priority',
+            default: 'normal'
+        },
+        task: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task'
+        }
+    },
+    type: 'object',
+    required: ['title'],
+    title: 'AgentSubtaskCreate',
+    description: 'Agent request to create a subtask (team context required)'
+} as const;
+
+export const AgentTaskCommentCreateSchema = {
+    properties: {
+        content: {
+            type: 'string',
+            maxLength: 10000,
+            minLength: 1,
+            title: 'Content'
+        },
+        comment_type: {
+            type: 'string',
+            maxLength: 30,
+            title: 'Comment Type',
+            default: 'message'
+        },
+        file_paths: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'File Paths'
+        }
+    },
+    type: 'object',
+    required: ['content'],
+    title: 'AgentTaskCommentCreate'
+} as const;
+
+export const AgentTaskOperationResponseSchema = {
+    properties: {
+        success: {
+            type: 'boolean',
+            title: 'Success'
+        },
+        task: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task'
+        },
+        message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['success'],
+    title: 'AgentTaskOperationResponse',
+    description: 'Generic response for agent task operations'
+} as const;
+
+export const AgentTaskStatusUpdateSchema = {
+    properties: {
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        reason: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reason'
+        },
+        task: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task'
+        }
+    },
+    type: 'object',
+    required: ['status'],
+    title: 'AgentTaskStatusUpdate',
+    description: 'Agent request to explicitly update task status (edge cases only)'
+} as const;
+
 export const AgentUpdateSchema = {
     properties: {
         name: {
@@ -4172,6 +4341,17 @@ export const AgenticTeamPublicSchema = {
             ],
             title: 'Icon'
         },
+        task_prefix: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Prefix'
+        },
         created_at: {
             type: 'string',
             format: 'date-time',
@@ -4214,6 +4394,18 @@ export const AgenticTeamUpdateSchema = {
                 }
             ],
             title: 'Icon'
+        },
+        task_prefix: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 10
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Prefix'
         }
     },
     type: 'object',
@@ -4567,6 +4759,19 @@ export const Body_mcp_upload_upload_file_to_mcpSchema = {
     type: 'object',
     required: ['file'],
     title: 'Body_mcp-upload-upload_file_to_mcp'
+} as const;
+
+export const Body_tasks_upload_task_attachmentSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_tasks-upload_task_attachment'
 } as const;
 
 export const BulkDeleteRequestSchema = {
@@ -6366,11 +6571,426 @@ export const InputTaskCreateSchema = {
                 }
             ],
             title: 'File Ids'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 500
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        priority: {
+            type: 'string',
+            title: 'Priority',
+            default: 'normal'
+        },
+        team_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Team Id'
+        },
+        assigned_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Assigned Node Id'
+        },
+        parent_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Task Id'
         }
     },
     type: 'object',
     required: ['original_message'],
     title: 'InputTaskCreate'
+} as const;
+
+export const InputTaskDetailPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        original_message: {
+            type: 'string',
+            title: 'Original Message'
+        },
+        current_description: {
+            type: 'string',
+            title: 'Current Description'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        selected_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Agent Id'
+        },
+        session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Id'
+        },
+        user_workspace_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Workspace Id'
+        },
+        agent_initiated: {
+            type: 'boolean',
+            title: 'Agent Initiated'
+        },
+        auto_execute: {
+            type: 'boolean',
+            title: 'Auto Execute'
+        },
+        source_session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Session Id'
+        },
+        source_email_message_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Email Message Id'
+        },
+        source_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Agent Id'
+        },
+        auto_feedback: {
+            type: 'boolean',
+            title: 'Auto Feedback'
+        },
+        error_message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error Message'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        executed_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Executed At'
+        },
+        completed_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Completed At'
+        },
+        archived_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Archived At'
+        },
+        short_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Short Code'
+        },
+        sequence_number: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sequence Number'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        priority: {
+            type: 'string',
+            title: 'Priority',
+            default: 'normal'
+        },
+        parent_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Task Id'
+        },
+        team_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Team Id'
+        },
+        assigned_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Assigned Node Id'
+        },
+        created_by_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created By Node Id'
+        },
+        subtask_count: {
+            type: 'integer',
+            title: 'Subtask Count',
+            default: 0
+        },
+        subtask_completed_count: {
+            type: 'integer',
+            title: 'Subtask Completed Count',
+            default: 0
+        },
+        agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Name'
+        },
+        refinement_history: {
+            items: {},
+            type: 'array',
+            title: 'Refinement History'
+        },
+        todo_progress: {
+            anyOf: [
+                {
+                    items: {},
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Todo Progress'
+        },
+        sessions_count: {
+            type: 'integer',
+            title: 'Sessions Count',
+            default: 0
+        },
+        latest_session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Latest Session Id'
+        },
+        attached_files: {
+            items: {
+                '$ref': '#/components/schemas/FileUploadPublic'
+            },
+            type: 'array',
+            title: 'Attached Files'
+        },
+        assigned_node_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Assigned Node Name'
+        },
+        team_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Team Name'
+        },
+        comments: {
+            items: {},
+            type: 'array',
+            title: 'Comments'
+        },
+        attachments: {
+            items: {},
+            type: 'array',
+            title: 'Attachments'
+        },
+        subtasks: {
+            items: {},
+            type: 'array',
+            title: 'Subtasks'
+        },
+        status_history: {
+            items: {},
+            type: 'array',
+            title: 'Status History'
+        }
+    },
+    type: 'object',
+    required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'auto_feedback', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
+    title: 'InputTaskDetailPublic',
+    description: 'Full task detail including comments, attachments, subtasks, and status history'
 } as const;
 
 export const InputTaskPublicSchema = {
@@ -6537,6 +7157,102 @@ export const InputTaskPublicSchema = {
                 }
             ],
             title: 'Archived At'
+        },
+        short_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Short Code'
+        },
+        sequence_number: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sequence Number'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        priority: {
+            type: 'string',
+            title: 'Priority',
+            default: 'normal'
+        },
+        parent_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Task Id'
+        },
+        team_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Team Id'
+        },
+        assigned_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Assigned Node Id'
+        },
+        created_by_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created By Node Id'
+        },
+        subtask_count: {
+            type: 'integer',
+            title: 'Subtask Count',
+            default: 0
+        },
+        subtask_completed_count: {
+            type: 'integer',
+            title: 'Subtask Completed Count',
+            default: 0
         }
     },
     type: 'object',
@@ -6709,6 +7425,102 @@ export const InputTaskPublicExtendedSchema = {
             ],
             title: 'Archived At'
         },
+        short_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Short Code'
+        },
+        sequence_number: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sequence Number'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        priority: {
+            type: 'string',
+            title: 'Priority',
+            default: 'normal'
+        },
+        parent_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Task Id'
+        },
+        team_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Team Id'
+        },
+        assigned_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Assigned Node Id'
+        },
+        created_by_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created By Node Id'
+        },
+        subtask_count: {
+            type: 'integer',
+            title: 'Subtask Count',
+            default: 0
+        },
+        subtask_completed_count: {
+            type: 'integer',
+            title: 'Subtask Completed Count',
+            default: 0
+        },
         agent_name: {
             anyOf: [
                 {
@@ -6761,7 +7573,7 @@ export const InputTaskPublicExtendedSchema = {
             type: 'array',
             title: 'Attached Files'
         },
-        result_state: {
+        assigned_node_name: {
             anyOf: [
                 {
                     type: 'string'
@@ -6770,9 +7582,9 @@ export const InputTaskPublicExtendedSchema = {
                     type: 'null'
                 }
             ],
-            title: 'Result State'
+            title: 'Assigned Node Name'
         },
-        result_summary: {
+        team_name: {
             anyOf: [
                 {
                     type: 'string'
@@ -6781,13 +7593,13 @@ export const InputTaskPublicExtendedSchema = {
                     type: 'null'
                 }
             ],
-            title: 'Result Summary'
+            title: 'Team Name'
         }
     },
     type: 'object',
     required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'auto_feedback', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
     title: 'InputTaskPublicExtended',
-    description: 'Extended response with agent name and sessions count'
+    description: 'Extended response with agent name, sessions count, and collaboration data'
 } as const;
 
 export const InputTaskUpdateSchema = {
@@ -6816,6 +7628,41 @@ export const InputTaskUpdateSchema = {
                 }
             ],
             title: 'Selected Agent Id'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 500
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        priority: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Priority'
+        },
+        assigned_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Assigned Node Id'
         }
     },
     type: 'object',
@@ -10360,6 +11207,315 @@ export const SourceStatusSchema = {
     enum: ['pending', 'connected', 'error', 'disconnected'],
     title: 'SourceStatus',
     description: 'Status of a knowledge source.'
+} as const;
+
+export const TaskAttachmentPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        comment_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Comment Id'
+        },
+        file_name: {
+            type: 'string',
+            title: 'File Name'
+        },
+        file_path: {
+            type: 'string',
+            title: 'File Path'
+        },
+        file_size: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'File Size'
+        },
+        content_type: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content Type'
+        },
+        uploaded_by_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Uploaded By Agent Id'
+        },
+        uploaded_by_user_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Uploaded By User Id'
+        },
+        source_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Agent Id'
+        },
+        source_workspace_path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Workspace Path'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        uploaded_by_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Uploaded By Name'
+        },
+        source_agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Agent Name'
+        },
+        download_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Download Url'
+        }
+    },
+    type: 'object',
+    required: ['id', 'task_id', 'comment_id', 'file_name', 'file_path', 'file_size', 'content_type', 'uploaded_by_agent_id', 'uploaded_by_user_id', 'source_agent_id', 'source_workspace_path', 'created_at'],
+    title: 'TaskAttachmentPublic'
+} as const;
+
+export const TaskAttachmentsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/TaskAttachmentPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'TaskAttachmentsPublic'
+} as const;
+
+export const TaskCommentCreateSchema = {
+    properties: {
+        content: {
+            type: 'string',
+            maxLength: 10000,
+            minLength: 1,
+            title: 'Content'
+        },
+        comment_type: {
+            type: 'string',
+            maxLength: 30,
+            title: 'Comment Type',
+            default: 'message'
+        }
+    },
+    type: 'object',
+    required: ['content'],
+    title: 'TaskCommentCreate'
+} as const;
+
+export const TaskCommentPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        comment_type: {
+            type: 'string',
+            title: 'Comment Type'
+        },
+        author_node_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Author Node Id'
+        },
+        author_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Author Agent Id'
+        },
+        author_user_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Author User Id'
+        },
+        comment_meta: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Comment Meta'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        author_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Author Name'
+        },
+        author_role: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Author Role'
+        },
+        inline_attachments: {
+            items: {},
+            type: 'array',
+            title: 'Inline Attachments'
+        }
+    },
+    type: 'object',
+    required: ['id', 'task_id', 'content', 'comment_type', 'author_node_id', 'author_agent_id', 'author_user_id', 'comment_meta', 'created_at'],
+    title: 'TaskCommentPublic'
+} as const;
+
+export const TaskCommentsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/TaskCommentPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'TaskCommentsPublic'
 } as const;
 
 export const TaskTriggerCreateExactDateSchema = {

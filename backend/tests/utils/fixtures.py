@@ -50,6 +50,8 @@ BACKGROUND_TASK_TARGETS_BASE = [
 BACKGROUND_TASK_TARGETS_FULL = BACKGROUND_TASK_TARGETS_BASE + [
     "app.services.session_service.create_task_with_error_logging",
     "app.services.input_task_service.create_task_with_error_logging",
+    "app.services.task_comment_service.create_task_with_error_logging",
+    "app.services.task_attachment_service.create_task_with_error_logging",
     "app.utils.create_task_with_error_logging",
 ]
 

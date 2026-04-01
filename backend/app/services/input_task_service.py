@@ -12,12 +12,20 @@ from app.models import (
     InputTask,
     InputTaskCreate,
     InputTaskUpdate,
+    InputTaskPublic,
     InputTaskPublicExtended,
+    InputTaskDetailPublic,
     InputTaskStatus,
     Agent,
     Session,
     SessionMessage,
     SessionCreate,
+    TaskStatusHistory,
+    TaskStatusHistoryPublic,
+    TaskComment,
+    TaskCommentPublic,
+    TaskAttachment,
+    TaskAttachmentPublic,
 )
 from app.models.event import EventType
 from app.models.email_message import EmailMessage
@@ -153,8 +161,9 @@ class InputTaskService:
             return [
                 InputTaskStatus.NEW,
                 InputTaskStatus.REFINING,
-                InputTaskStatus.RUNNING,
-                InputTaskStatus.PENDING_INPUT,
+                InputTaskStatus.OPEN,
+                InputTaskStatus.IN_PROGRESS,
+                InputTaskStatus.BLOCKED,
                 InputTaskStatus.ERROR,
             ]
         elif status == "completed":
@@ -248,6 +257,9 @@ class InputTaskService:
         user_workspace_id: str | None = None,
         skip: int = 0,
         limit: int = 100,
+        root_only: bool = False,
+        team_id: UUID | None = None,
+        priority: str | None = None,
     ) -> tuple[list[InputTaskPublicExtended], int]:
         """
         List user's tasks with extended info.
@@ -279,6 +291,9 @@ class InputTaskService:
             apply_workspace_filter=apply_workspace_filter,
             skip=skip,
             limit=limit,
+            root_only=root_only,
+            team_id=team_id,
+            priority=priority,
         )
 
         data = []
@@ -286,12 +301,15 @@ class InputTaskService:
             sessions_count, latest_session_id = SessionService.get_task_sessions_info(
                 db_session=db_session, task_id=task.id
             )
+            subtask_progress = InputTaskService.get_subtask_progress(db_session, task.id)
             data.append(
                 InputTaskPublicExtended(
                     **task.model_dump(),
                     agent_name=agent_name,
                     sessions_count=sessions_count,
                     latest_session_id=latest_session_id,
+                    subtask_count=subtask_progress["total"],
+                    subtask_completed_count=subtask_progress["completed"],
                 )
             )
 
@@ -357,19 +375,81 @@ class InputTaskService:
     # ==================== CRUD Operations ====================
 
     @staticmethod
+    def _generate_short_code(
+        db_session: DBSession,
+        owner_id: UUID,
+        team_id: UUID | None = None,
+    ) -> tuple[str, int]:
+        """
+        Atomically generate a short code for a new task.
+
+        Increments the user's task_sequence_counter and returns the new counter
+        along with the formatted short code (e.g., "TASK-42" or "HR-42").
+
+        Args:
+            db_session: Database session
+            owner_id: User UUID who owns the task
+            team_id: Optional team UUID (to look up team prefix)
+
+        Returns:
+            Tuple of (short_code string, sequence_number int)
+        """
+        from sqlalchemy import text
+        from app.models.user import User
+
+        # Atomically increment and fetch the new counter
+        result = db_session.exec(
+            text(
+                'UPDATE "user" SET task_sequence_counter = task_sequence_counter + 1 '
+                'WHERE id = CAST(:uid AS uuid) RETURNING task_sequence_counter'
+            ).bindparams(uid=str(owner_id))
+        ).first()
+
+        if result is None:
+            # Fallback: read current value
+            user = db_session.get(User, owner_id)
+            counter = (user.task_sequence_counter if user else 0) + 1
+        else:
+            counter = result[0]
+
+        # Determine prefix
+        prefix = "TASK"
+        if team_id:
+            from app.models.agentic_team import AgenticTeam
+            team = db_session.get(AgenticTeam, team_id)
+            if team and team.task_prefix:
+                prefix = team.task_prefix.upper()
+
+        short_code = f"{prefix}-{counter}"
+        return short_code, counter
+
+    @staticmethod
     def create_task(
         db_session: DBSession,
         user_id: UUID,
         data: InputTaskCreate,
     ) -> InputTask:
         """
-        Create a new input task.
+        Create a new input task with auto-generated short code.
 
         Args:
             db_session: Database session
             user_id: User ID creating the task
             data: Task creation data (including agent_initiated, auto_execute, source_session_id, file_ids)
         """
+        # Generate short code
+        short_code, sequence_number = InputTaskService._generate_short_code(
+            db_session=db_session,
+            owner_id=user_id,
+            team_id=data.team_id if hasattr(data, 'team_id') else None,
+        )
+
+        # Derive title from original_message if not provided
+        title = getattr(data, 'title', None)
+        if not title:
+            first_line = data.original_message.strip().split('\n')[0]
+            title = first_line[:500] if len(first_line) > 500 else first_line
+
         task = InputTask(
             owner_id=user_id,
             original_message=data.original_message,
@@ -381,6 +461,13 @@ class InputTaskService:
             source_session_id=data.source_session_id,
             status=InputTaskStatus.NEW,
             refinement_history=[],
+            short_code=short_code,
+            sequence_number=sequence_number,
+            title=title,
+            priority=getattr(data, 'priority', 'normal') or 'normal',
+            team_id=getattr(data, 'team_id', None),
+            assigned_node_id=getattr(data, 'assigned_node_id', None),
+            parent_task_id=getattr(data, 'parent_task_id', None),
         )
         db_session.add(task)
         db_session.commit()
@@ -587,6 +674,9 @@ class InputTaskService:
         skip: int = 0,
         limit: int = 100,
         order_desc: bool = True,
+        root_only: bool = False,
+        team_id: UUID | None = None,
+        priority: str | None = None,
     ) -> tuple[list[tuple[InputTask, str | None]], int]:
         """
         List user's tasks with agent names.
@@ -618,6 +708,14 @@ class InputTaskService:
         # Apply workspace filter
         if apply_workspace_filter:
             statement = statement.where(InputTask.user_workspace_id == user_workspace_id)
+
+        # Apply new filters
+        if root_only:
+            statement = statement.where(InputTask.parent_task_id == None)  # noqa: E711
+        if team_id:
+            statement = statement.where(InputTask.team_id == team_id)
+        if priority:
+            statement = statement.where(InputTask.priority == priority)
 
         # Get count before pagination
         count_statement = statement.with_only_columns(InputTask.id)
@@ -691,7 +789,7 @@ class InputTaskService:
             task.error_message = None
 
         # Update timestamps based on status
-        if status == InputTaskStatus.RUNNING:
+        if status == InputTaskStatus.IN_PROGRESS and task.executed_at is None:
             task.executed_at = datetime.now(UTC)
         elif status == InputTaskStatus.COMPLETED:
             task.completed_at = datetime.now(UTC)
@@ -760,9 +858,9 @@ class InputTaskService:
         task: InputTask,
         session_id: UUID,
     ) -> InputTask:
-        """Link a session to the task"""
+        """Link a session to the task and transition to in_progress."""
         task.session_id = session_id
-        task.status = InputTaskStatus.RUNNING
+        task.status = InputTaskStatus.IN_PROGRESS
         task.executed_at = datetime.now(UTC)
         task.updated_at = datetime.now(UTC)
 
@@ -792,8 +890,8 @@ class InputTaskService:
 
         # Only reset tasks that are in execution phase
         execution_statuses = [
-            InputTaskStatus.RUNNING,
-            InputTaskStatus.PENDING_INPUT,
+            InputTaskStatus.IN_PROGRESS,
+            InputTaskStatus.BLOCKED,
             InputTaskStatus.COMPLETED,
             InputTaskStatus.ERROR,
         ]
@@ -1039,18 +1137,18 @@ class InputTaskService:
             if unanswered_count:
                 has_pending_input = True
 
-        # Apply priority: error > pending_input > running > completed
+        # Apply priority: error > blocked > in_progress > completed
         if has_error:
             return InputTaskStatus.ERROR
         if has_pending_input:
-            return InputTaskStatus.PENDING_INPUT
+            return InputTaskStatus.BLOCKED
         if has_running:
-            return InputTaskStatus.RUNNING
+            return InputTaskStatus.IN_PROGRESS
         if all_completed:
             return InputTaskStatus.COMPLETED
 
         # Default: session exists but not streaming
-        return InputTaskStatus.RUNNING
+        return InputTaskStatus.IN_PROGRESS
 
     @staticmethod
     def sync_task_status_from_sessions(
@@ -1078,8 +1176,8 @@ class InputTaskService:
 
         # Only sync for tasks in execution phase
         execution_statuses = [
-            InputTaskStatus.RUNNING,
-            InputTaskStatus.PENDING_INPUT,
+            InputTaskStatus.IN_PROGRESS,
+            InputTaskStatus.BLOCKED,
             InputTaskStatus.COMPLETED,
             InputTaskStatus.ERROR,
         ]
@@ -1134,17 +1232,17 @@ class InputTaskService:
 
                 # Only update if task is in execution phase
                 if task.status in [
-                    InputTaskStatus.RUNNING,
-                    InputTaskStatus.PENDING_INPUT,
+                    InputTaskStatus.IN_PROGRESS,
+                    InputTaskStatus.BLOCKED,
                     InputTaskStatus.COMPLETED,
                     InputTaskStatus.ERROR,
                 ]:
                     InputTaskService.update_status(
                         db_session=db,
                         task=task,
-                        status=InputTaskStatus.RUNNING,
+                        status=InputTaskStatus.IN_PROGRESS,
                     )
-                    logger.info(f"Task {task.id} status synced to RUNNING (STREAM_STARTED)")
+                    logger.info(f"Task {task.id} status synced to IN_PROGRESS (STREAM_STARTED)")
 
         except Exception as e:
             logger.error(f"Error handling STREAM_STARTED for task sync: {e}", exc_info=True)
@@ -1213,8 +1311,8 @@ class InputTaskService:
 
                 # Only update if task is in execution phase
                 if task.status in [
-                    InputTaskStatus.RUNNING,
-                    InputTaskStatus.PENDING_INPUT,
+                    InputTaskStatus.IN_PROGRESS,
+                    InputTaskStatus.BLOCKED,
                     InputTaskStatus.COMPLETED,
                     InputTaskStatus.ERROR,
                 ]:
@@ -1750,3 +1848,832 @@ class InputTaskService:
             db_session.commit()
 
         return count
+
+    # ==================== Collaboration Methods (Phase A) ====================
+
+    @staticmethod
+    def get_task_by_short_code(
+        db_session: DBSession,
+        short_code: str,
+        user_id: UUID,
+    ) -> InputTask:
+        """
+        Get a task by its short code (e.g., 'TASK-42').
+
+        Args:
+            db_session: Database session
+            short_code: Task short code
+            user_id: Requesting user (ownership check)
+
+        Returns:
+            InputTask
+
+        Raises:
+            TaskNotFoundError: If not found or not owned by user
+        """
+        task = db_session.exec(
+            select(InputTask).where(
+                InputTask.short_code == short_code,
+                InputTask.owner_id == user_id,
+            )
+        ).first()
+        if not task:
+            raise TaskNotFoundError(f"Task {short_code} not found")
+        return task
+
+    @staticmethod
+    def update_task_status(
+        db_session: DBSession,
+        task_id: UUID,
+        new_status: str,
+        changed_by_agent_id: UUID | None = None,
+        changed_by_user_id: UUID | None = None,
+        changed_by_system: bool = False,
+        reason: str | None = None,
+    ) -> InputTask:
+        """
+        Update task status with full audit trail (history record + system comment).
+
+        Validates transition rules. Records a TaskStatusHistory entry and posts
+        a system comment so the transition appears in the task's activity feed.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+            new_status: Target status
+            changed_by_agent_id: Agent that triggered the change (or None)
+            changed_by_user_id: User that triggered the change (or None)
+            changed_by_system: True if platform-triggered (no agent/user attribution)
+            reason: Optional explanation for the change
+
+        Returns:
+            Updated InputTask
+
+        Raises:
+            TaskNotFoundError: If task not found
+            ValidationError: If transition is invalid
+        """
+        task = db_session.get(InputTask, task_id)
+        if not task:
+            raise TaskNotFoundError()
+
+        from_status = task.status
+
+        # Validate the transition
+        valid_nexts = InputTaskStatus.VALID_TRANSITIONS.get(from_status, set())
+        if new_status not in valid_nexts and new_status != from_status:
+            raise ValidationError(
+                f"Cannot transition task from '{from_status}' to '{new_status}'. "
+                f"Valid transitions: {sorted(valid_nexts)}"
+            )
+
+        if new_status == from_status:
+            return task  # No-op
+
+        # Create immutable status history record
+        history = TaskStatusHistory(
+            task_id=task_id,
+            from_status=from_status,
+            to_status=new_status,
+            changed_by_agent_id=changed_by_agent_id,
+            changed_by_user_id=changed_by_user_id,
+            reason=reason,
+        )
+        db_session.add(history)
+
+        # Post system comment visible in activity feed
+        comment_content = InputTaskService._build_status_change_comment(
+            from_status=from_status,
+            to_status=new_status,
+            agent_id=changed_by_agent_id,
+            user_id=changed_by_user_id,
+            is_system=changed_by_system,
+            reason=reason,
+            db_session=db_session,
+        )
+        from app.services.task_comment_service import TaskCommentService
+        TaskCommentService.add_system_comment(
+            db_session=db_session,
+            task_id=task_id,
+            content=comment_content,
+            comment_type="status_change",
+            comment_meta={"from_status": from_status, "to_status": new_status},
+        )
+
+        # Update task
+        task.status = new_status
+        task.updated_at = datetime.now(UTC)
+
+        if new_status == InputTaskStatus.IN_PROGRESS and task.executed_at is None:
+            task.executed_at = datetime.now(UTC)
+        elif new_status == InputTaskStatus.COMPLETED:
+            task.completed_at = datetime.now(UTC)
+        elif new_status == InputTaskStatus.ARCHIVED:
+            task.archived_at = datetime.now(UTC)
+
+        db_session.add(task)
+        db_session.commit()
+        db_session.refresh(task)
+
+        # Emit real-time event
+        create_task_with_error_logging(
+            event_service.emit_event(
+                event_type=EventType.TASK_STATUS_CHANGED,
+                model_id=task_id,
+                user_id=task.owner_id,
+                meta={
+                    "task_id": str(task_id),
+                    "short_code": task.short_code,
+                    "from_status": from_status,
+                    "to_status": new_status,
+                    "changed_by_agent_id": str(changed_by_agent_id) if changed_by_agent_id else None,
+                    "changed_by_user_id": str(changed_by_user_id) if changed_by_user_id else None,
+                }
+            ),
+            task_name=f"emit_task_status_changed_{task_id}"
+        )
+
+        # If completed and has parent, notify parent
+        if new_status == InputTaskStatus.COMPLETED and task.parent_task_id:
+            create_task_with_error_logging(
+                InputTaskService._notify_parent_task_async(
+                    parent_task_id=task.parent_task_id,
+                    completed_subtask_short_code=task.short_code or str(task_id),
+                    completed_subtask_agent_id=task.selected_agent_id,
+                ),
+                task_name=f"notify_parent_task_{task.parent_task_id}"
+            )
+
+        logger.info(f"Task {task_id} status: {from_status} → {new_status}")
+        return task
+
+    @staticmethod
+    def _build_status_change_comment(
+        from_status: str,
+        to_status: str,
+        agent_id: UUID | None,
+        user_id: UUID | None,
+        is_system: bool,
+        reason: str | None,
+        db_session: DBSession,
+    ) -> str:
+        """Build a human-readable status change comment."""
+        actor = "System"
+        if agent_id:
+            agent = db_session.get(Agent, agent_id)
+            actor = agent.name if agent else "Agent"
+        elif user_id:
+            from app.models.user import User
+            user = db_session.get(User, user_id)
+            actor = user.full_name or user.email if user else "User"
+
+        msg = f"Status changed from **{from_status}** to **{to_status}**"
+        if not is_system and actor != "System":
+            msg = f"{actor}: {msg}"
+        if reason:
+            msg += f" — {reason}"
+        return msg
+
+    @staticmethod
+    async def _notify_parent_task_async(
+        parent_task_id: UUID,
+        completed_subtask_short_code: str,
+        completed_subtask_agent_id: UUID | None,
+    ) -> None:
+        """
+        Notify the parent task that a subtask has completed.
+
+        Posts a system comment on the parent and checks if all subtasks are done.
+        """
+        try:
+            from app.core.db import create_session as make_db
+            with make_db() as db:
+                parent_task = db.get(InputTask, parent_task_id)
+                if not parent_task:
+                    return
+
+                # Resolve completing agent name
+                agent_name = "Agent"
+                if completed_subtask_agent_id:
+                    agent = db.get(Agent, completed_subtask_agent_id)
+                    if agent:
+                        agent_name = agent.name
+
+                # Post system comment on parent
+                from app.services.task_comment_service import TaskCommentService
+                TaskCommentService.add_system_comment(
+                    db_session=db,
+                    task_id=parent_task_id,
+                    content=f"Subtask **{completed_subtask_short_code}** completed by {agent_name}",
+                    comment_type="system",
+                )
+
+                # Check if all subtasks are completed
+                subtasks = db.exec(
+                    select(InputTask).where(InputTask.parent_task_id == parent_task_id)
+                ).all()
+                total = len(subtasks)
+                completed_count = sum(1 for s in subtasks if s.status == InputTaskStatus.COMPLETED)
+
+                if total > 0 and completed_count == total:
+                    TaskCommentService.add_system_comment(
+                        db_session=db,
+                        task_id=parent_task_id,
+                        content=f"All {total} subtasks completed — ready to finalize",
+                        comment_type="system",
+                    )
+
+                # Emit subtask completed event
+                create_task_with_error_logging(
+                    event_service.emit_event(
+                        event_type=EventType.SUBTASK_COMPLETED,
+                        model_id=parent_task_id,
+                        user_id=parent_task.owner_id,
+                        meta={
+                            "parent_task_id": str(parent_task_id),
+                            "parent_short_code": parent_task.short_code,
+                            "subtask_short_code": completed_subtask_short_code,
+                            "agent_name": agent_name,
+                        }
+                    ),
+                    task_name=f"emit_subtask_completed_{parent_task_id}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error notifying parent task {parent_task_id}: {e}", exc_info=True)
+
+    @staticmethod
+    def get_task_detail(
+        db_session: DBSession,
+        task_id: UUID,
+        user_id: UUID,
+    ) -> InputTaskDetailPublic:
+        """
+        Get full task detail including comments, attachments, subtasks, and status history.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+            user_id: Requesting user (ownership check)
+
+        Returns:
+            InputTaskDetailPublic with all related data
+
+        Raises:
+            TaskNotFoundError, PermissionDeniedError
+        """
+        task = db_session.get(InputTask, task_id)
+        if not task:
+            raise TaskNotFoundError()
+        if task.owner_id != user_id:
+            raise PermissionDeniedError()
+
+        # Resolve agent name
+        agent_name = None
+        if task.selected_agent_id:
+            agent = db_session.get(Agent, task.selected_agent_id)
+            if agent:
+                agent_name = agent.name
+
+        # Resolve assigned node and team names
+        assigned_node_name = None
+        team_name = None
+        if task.assigned_node_id:
+            from app.models.agentic_team import AgenticTeamNode
+            node = db_session.get(AgenticTeamNode, task.assigned_node_id)
+            if node:
+                assigned_node_name = node.name
+        if task.team_id:
+            from app.models.agentic_team import AgenticTeam
+            team = db_session.get(AgenticTeam, task.team_id)
+            if team:
+                team_name = team.name
+
+        # Load sessions info
+        sessions_count, latest_session_id = SessionService.get_task_sessions_info(
+            db_session=db_session, task_id=task_id
+        )
+
+        # Load comments
+        from app.services.task_comment_service import TaskCommentService
+        comments, _ = TaskCommentService.list_comments(db_session=db_session, task_id=task_id)
+
+        # Load standalone attachments
+        from app.services.task_attachment_service import TaskAttachmentService
+        attachments = TaskAttachmentService.list_attachments(db_session=db_session, task_id=task_id)
+
+        # Load subtasks
+        subtasks_raw = db_session.exec(
+            select(InputTask)
+            .where(InputTask.parent_task_id == task_id)
+            .order_by(InputTask.created_at.asc())
+        ).all()
+        subtasks = [
+            InputTaskPublic(
+                **subtask.model_dump(),
+                subtask_count=InputTaskService.get_subtask_progress(db_session, subtask.id)["total"],
+                subtask_completed_count=InputTaskService.get_subtask_progress(db_session, subtask.id)["completed"],
+            )
+            for subtask in subtasks_raw
+        ]
+
+        # Load status history
+        history_raw = db_session.exec(
+            select(TaskStatusHistory)
+            .where(TaskStatusHistory.task_id == task_id)
+            .order_by(TaskStatusHistory.created_at.asc())
+        ).all()
+        status_history = []
+        for h in history_raw:
+            changed_by_name = None
+            if h.changed_by_agent_id:
+                a = db_session.get(Agent, h.changed_by_agent_id)
+                changed_by_name = a.name if a else None
+            elif h.changed_by_user_id:
+                from app.models.user import User
+                u = db_session.get(User, h.changed_by_user_id)
+                changed_by_name = (u.full_name or u.email) if u else None
+            status_history.append(TaskStatusHistoryPublic(
+                id=h.id,
+                task_id=h.task_id,
+                from_status=h.from_status,
+                to_status=h.to_status,
+                changed_by_agent_id=h.changed_by_agent_id,
+                changed_by_user_id=h.changed_by_user_id,
+                reason=h.reason,
+                created_at=h.created_at,
+                changed_by_name=changed_by_name,
+            ))
+
+        # Compute subtask counts for this task
+        subtask_progress = InputTaskService.get_subtask_progress(db_session, task_id)
+
+        # Attached files (legacy)
+        attached_files = InputTaskService.get_task_files(db_session=db_session, task_id=task_id)
+        attached_files_public = [FileUploadPublic.model_validate(f) for f in attached_files]
+
+        return InputTaskDetailPublic(
+            **task.model_dump(),
+            agent_name=agent_name,
+            assigned_node_name=assigned_node_name,
+            team_name=team_name,
+            sessions_count=sessions_count,
+            latest_session_id=latest_session_id,
+            attached_files=attached_files_public,
+            subtask_count=subtask_progress["total"],
+            subtask_completed_count=subtask_progress["completed"],
+            comments=comments,
+            attachments=attachments,
+            subtasks=subtasks,
+            status_history=status_history,
+        )
+
+    @staticmethod
+    def get_subtask_progress(
+        db_session: DBSession,
+        task_id: UUID,
+    ) -> dict:
+        """
+        Get subtask progress counts for a task.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+
+        Returns:
+            Dict with keys: total, completed, in_progress, blocked
+        """
+        subtasks = db_session.exec(
+            select(InputTask).where(InputTask.parent_task_id == task_id)
+        ).all()
+
+        total = len(subtasks)
+        completed = sum(1 for s in subtasks if s.status == InputTaskStatus.COMPLETED)
+        in_progress = sum(1 for s in subtasks if s.status == InputTaskStatus.IN_PROGRESS)
+        blocked = sum(1 for s in subtasks if s.status == InputTaskStatus.BLOCKED)
+
+        return {
+            "total": total,
+            "completed": completed,
+            "in_progress": in_progress,
+            "blocked": blocked,
+        }
+
+    @staticmethod
+    def create_subtask(
+        db_session: DBSession,
+        parent_task_id: UUID,
+        creating_agent_id: UUID,
+        data,  # AgentSubtaskCreate
+    ) -> InputTask:
+        """
+        Create a subtask (team agents only).
+
+        Validates that:
+        - Parent task has team_id
+        - Creating agent has a node in that team
+        - If assigned_to provided, target node is connected to creator's node
+
+        Args:
+            db_session: Database session
+            parent_task_id: Parent task UUID
+            creating_agent_id: Agent creating the subtask
+            data: AgentSubtaskCreate with title, description, assigned_to, priority
+
+        Returns:
+            Created InputTask (subtask)
+
+        Raises:
+            TaskNotFoundError, ValidationError
+        """
+        parent = db_session.get(InputTask, parent_task_id)
+        if not parent:
+            raise TaskNotFoundError(f"Parent task {parent_task_id} not found")
+
+        if not parent.team_id:
+            raise ValidationError("Subtask delegation requires team context (parent task has no team_id)")
+
+        # Verify creating agent is in the team
+        from app.models.agentic_team import AgenticTeamNode, AgenticTeamConnection
+        creator_node = db_session.exec(
+            select(AgenticTeamNode).where(
+                AgenticTeamNode.team_id == parent.team_id,
+                AgenticTeamNode.agent_id == creating_agent_id,
+            )
+        ).first()
+
+        if not creator_node:
+            raise ValidationError(
+                f"Agent is not a member of the task's team — cannot create subtasks"
+            )
+
+        # Resolve assignment if provided
+        assigned_agent_id = None
+        assigned_node_id = None
+        if data.assigned_to:
+            # Find target node by name within the team
+            target_node = db_session.exec(
+                select(AgenticTeamNode).where(
+                    AgenticTeamNode.team_id == parent.team_id,
+                    AgenticTeamNode.name == data.assigned_to,
+                )
+            ).first()
+            if not target_node:
+                raise ValidationError(f"Team member '{data.assigned_to}' not found in this team")
+
+            # Verify connection exists from creator to target
+            connection = db_session.exec(
+                select(AgenticTeamConnection).where(
+                    AgenticTeamConnection.team_id == parent.team_id,
+                    AgenticTeamConnection.source_node_id == creator_node.id,
+                    AgenticTeamConnection.target_node_id == target_node.id,
+                    AgenticTeamConnection.enabled == True,
+                )
+            ).first()
+            if not connection:
+                raise ValidationError(
+                    f"Cannot delegate to '{data.assigned_to}' — no connection in team topology"
+                )
+
+            assigned_node_id = target_node.id
+            assigned_agent_id = target_node.agent_id
+
+        # Create the subtask
+        subtask_create = InputTaskCreate(
+            original_message=f"{data.title}\n\n{data.description or ''}".strip(),
+            selected_agent_id=assigned_agent_id,
+            user_workspace_id=parent.user_workspace_id,
+            agent_initiated=True,
+            auto_execute=bool(assigned_agent_id),
+            source_session_id=None,
+            title=data.title,
+            priority=data.priority,
+            team_id=parent.team_id,
+            assigned_node_id=assigned_node_id,
+            parent_task_id=parent_task_id,
+        )
+        subtask = InputTaskService.create_task(
+            db_session=db_session,
+            user_id=parent.owner_id,
+            data=subtask_create,
+        )
+
+        # Set created_by_node_id (not in InputTaskCreate, set directly)
+        subtask.created_by_node_id = creator_node.id
+        db_session.add(subtask)
+        db_session.commit()
+        db_session.refresh(subtask)
+
+        # Post system comment on parent
+        from app.services.task_comment_service import TaskCommentService
+        assigned_name = data.assigned_to or "unassigned"
+        TaskCommentService.add_system_comment(
+            db_session=db_session,
+            task_id=parent_task_id,
+            content=f"Created subtask **{subtask.short_code}** → {assigned_name}",
+            comment_type="system",
+        )
+
+        # Emit event
+        create_task_with_error_logging(
+            event_service.emit_event(
+                event_type=EventType.TASK_SUBTASK_CREATED,
+                model_id=parent_task_id,
+                user_id=parent.owner_id,
+                meta={
+                    "parent_task_id": str(parent_task_id),
+                    "parent_short_code": parent.short_code,
+                    "subtask_short_code": subtask.short_code,
+                    "assigned_to": assigned_name,
+                }
+            ),
+            task_name=f"emit_subtask_created_{subtask.id}"
+        )
+
+        # If assigned and auto_execute: create session for target agent
+        if assigned_agent_id and subtask.auto_execute:
+            create_task_with_error_logging(
+                InputTaskService._auto_execute_subtask(db_session, subtask),
+                task_name=f"auto_execute_subtask_{subtask.id}"
+            )
+
+        logger.info(f"Subtask {subtask.short_code} created under {parent.short_code}")
+        return subtask
+
+    @staticmethod
+    async def _auto_execute_subtask(
+        db_session: DBSession,
+        subtask: InputTask,
+    ) -> None:
+        """Auto-execute a newly created subtask by creating a session."""
+        try:
+            if not subtask.selected_agent_id:
+                return
+            from app.core.db import create_session as make_db
+            with make_db() as db:
+                task = db.get(InputTask, subtask.id)
+                if not task:
+                    return
+                user_id = task.owner_id
+                success, _, error = await InputTaskService.execute_task(
+                    db_session=db,
+                    task=task,
+                    user_id=user_id,
+                    message_to_send=task.current_description,
+                )
+                if not success:
+                    logger.warning(f"Auto-execute subtask {subtask.id} failed: {error}")
+        except Exception as e:
+            logger.error(f"Error auto-executing subtask {subtask.id}: {e}", exc_info=True)
+
+    @staticmethod
+    def get_task_tree(
+        db_session: DBSession,
+        task_id: UUID,
+        user_id: UUID,
+        max_depth: int = 5,
+    ) -> dict:
+        """
+        Get recursive subtask tree for a task.
+
+        Args:
+            db_session: Database session
+            task_id: Root task UUID
+            user_id: Requesting user (ownership check)
+            max_depth: Maximum recursion depth
+
+        Returns:
+            Dict with task info and nested subtasks
+        """
+        task = db_session.get(InputTask, task_id)
+        if not task or task.owner_id != user_id:
+            raise TaskNotFoundError()
+
+        def _build_node(t: InputTask, depth: int) -> dict:
+            node: dict = {
+                "id": str(t.id),
+                "short_code": t.short_code,
+                "title": t.title or t.original_message[:100],
+                "status": t.status,
+                "priority": t.priority,
+                "selected_agent_id": str(t.selected_agent_id) if t.selected_agent_id else None,
+            }
+            if depth < max_depth:
+                children = db_session.exec(
+                    select(InputTask).where(InputTask.parent_task_id == t.id)
+                ).all()
+                node["subtasks"] = [_build_node(c, depth + 1) for c in children]
+            else:
+                node["subtasks"] = []
+            return node
+
+        return _build_node(task, 0)
+
+    @staticmethod
+    def update_task_status_from_agent(
+        db_session: DBSession,
+        task_id: UUID,
+        agent_id: UUID,
+        data,  # AgentTaskStatusUpdate
+    ) -> InputTask:
+        """
+        Agent explicitly updates task status (edge cases: blocked, completed, cancelled).
+
+        Verifies the agent is assigned to the task before allowing the update.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+            agent_id: Agent requesting the change
+            data: AgentTaskStatusUpdate with status and optional reason
+
+        Returns:
+            Updated InputTask
+
+        Raises:
+            TaskNotFoundError, PermissionDeniedError, ValidationError
+        """
+        task = db_session.get(InputTask, task_id)
+        if not task:
+            raise TaskNotFoundError()
+
+        if task.selected_agent_id != agent_id:
+            raise PermissionDeniedError("Only the assigned agent can update task status")
+
+        allowed_agent_statuses = {"blocked", "completed", "cancelled"}
+        if data.status not in allowed_agent_statuses:
+            raise ValidationError(
+                f"Agent can only set status to: {sorted(allowed_agent_statuses)}"
+            )
+
+        return InputTaskService.update_task_status(
+            db_session=db_session,
+            task_id=task_id,
+            new_status=data.status,
+            changed_by_agent_id=agent_id,
+            reason=data.reason,
+        )
+
+    @staticmethod
+    def list_subtasks(
+        db_session: DBSession,
+        parent_task_id: UUID,
+    ) -> tuple[list[InputTaskPublicExtended], int]:
+        """
+        List direct subtasks of a task with progress counts.
+
+        Args:
+            db_session: Database session
+            parent_task_id: Parent task UUID
+
+        Returns:
+            Tuple of (list of extended public subtasks, total count)
+        """
+        subtasks = db_session.exec(
+            select(InputTask)
+            .where(InputTask.parent_task_id == parent_task_id)
+            .order_by(InputTask.created_at.asc())
+        ).all()
+
+        data = []
+        for t in subtasks:
+            progress = InputTaskService.get_subtask_progress(db_session, t.id)
+            data.append(
+                InputTaskPublicExtended(
+                    **t.model_dump(),
+                    subtask_count=progress["total"],
+                    subtask_completed_count=progress["completed"],
+                )
+            )
+        return data, len(data)
+
+    @staticmethod
+    def list_agent_tasks(
+        db_session: DBSession,
+        user_id: UUID,
+        status: str | None = None,
+        scope: str = "assigned",
+    ) -> tuple[list[InputTaskPublicExtended], int]:
+        """
+        List tasks for agent MCP tool consumption.
+
+        Args:
+            db_session: Database session
+            user_id: Owner user UUID (agent-env calls via user JWT)
+            status: Optional status filter string (passed to parse_status_filter)
+            scope: "assigned" (default) | "created" | "team" — currently all return
+                   owner-scoped tasks; scope filtering is a future enhancement
+
+        Returns:
+            Tuple of (list of extended public tasks, total count)
+        """
+        status_filter = InputTaskService.parse_status_filter(status)
+
+        stmt = select(InputTask).where(InputTask.owner_id == user_id)
+        if status_filter:
+            stmt = stmt.where(InputTask.status.in_(status_filter))
+
+        tasks = db_session.exec(
+            stmt.order_by(InputTask.created_at.desc()).limit(100)
+        ).all()
+
+        data = []
+        for t in tasks:
+            progress = InputTaskService.get_subtask_progress(db_session, t.id)
+            agent_name = None
+            if t.selected_agent_id:
+                agent = db_session.get(Agent, t.selected_agent_id)
+                agent_name = agent.name if agent else None
+            data.append(
+                InputTaskPublicExtended(
+                    **t.model_dump(),
+                    agent_name=agent_name,
+                    subtask_count=progress["total"],
+                    subtask_completed_count=progress["completed"],
+                )
+            )
+        return data, len(data)
+
+    @staticmethod
+    def get_agent_task_details(
+        db_session: DBSession,
+        task_id: UUID,
+        user_id: UUID,
+    ) -> dict:
+        """
+        Get task details formatted for agent MCP tool consumption.
+
+        Returns a simplified dict view with recent comments, subtask list, and
+        progress counts — optimised for the mcp__agent_task__get_details tool.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+            user_id: Requesting user (ownership check)
+
+        Returns:
+            Dict with task, title, description, status, priority, assigned_to,
+            recent_comments, subtasks, subtask_progress keys.
+
+        Raises:
+            TaskNotFoundError: If task not found or not owned by user
+        """
+        task = InputTaskService.get_task_with_ownership_check(
+            db_session=db_session,
+            task_id=task_id,
+            user_id=user_id,
+        )
+
+        # Resolve assigned agent name
+        agent_name = None
+        if task.selected_agent_id:
+            agent = db_session.get(Agent, task.selected_agent_id)
+            if agent:
+                agent_name = agent.name
+
+        # Recent comments (last 10, oldest first for context)
+        from app.services.task_comment_service import TaskCommentService
+        comments, _ = TaskCommentService.list_comments(
+            db_session=db_session, task_id=task_id, skip=0, limit=10
+        )
+        recent_comments = [
+            {
+                "author": c.author_name or "System",
+                "content": c.content,
+                "created_at": c.created_at.isoformat(),
+                "has_files": len(c.inline_attachments) > 0,
+            }
+            for c in comments[-10:]
+        ]
+
+        # Subtask progress
+        progress = InputTaskService.get_subtask_progress(db_session, task_id)
+
+        # Subtasks list
+        subtasks_raw = db_session.exec(
+            select(InputTask).where(InputTask.parent_task_id == task_id)
+        ).all()
+        subtasks = []
+        for s in subtasks_raw:
+            sub_agent_name = None
+            if s.selected_agent_id:
+                a = db_session.get(Agent, s.selected_agent_id)
+                sub_agent_name = a.name if a else None
+            subtasks.append({
+                "task": s.short_code,
+                "title": s.title or s.original_message[:100],
+                "status": s.status,
+                "assigned_to": sub_agent_name,
+            })
+
+        return {
+            "task": task.short_code,
+            "title": task.title or task.original_message[:100],
+            "description": task.current_description,
+            "status": task.status,
+            "priority": task.priority,
+            "assigned_to": agent_name,
+            "recent_comments": recent_comments,
+            "subtasks": subtasks,
+            "subtask_progress": progress,
+        }

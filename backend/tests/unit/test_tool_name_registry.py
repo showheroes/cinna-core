@@ -3,7 +3,7 @@ Unit tests for the tool_name_registry module.
 
 Tests cover:
 - normalize_tool_name() for Claude Code PascalCase → lowercase mapping
-- normalize_tool_name() for OpenCode mcp__collaboration__* → mcp__task__* remapping
+- normalize_tool_name() for OpenCode passthrough (no remapping after consolidation)
 - normalize_tool_name() passthrough for already-lowercase names
 - normalize_tool_name() fallback for unknown SDK
 - normalize_tool_input() camelCase → snake_case conversion
@@ -95,7 +95,7 @@ class TestNormalizeToolNameClaudeCode:
 
     def test_mcp_tool_passes_through_unchanged(self):
         """MCP tools (already lowercase) pass through unmodified for Claude Code."""
-        mcp_name = "mcp__task__create_agent_task"
+        mcp_name = "mcp__agent_task__add_comment"
         assert normalize_tool_name(mcp_name, sdk="claude-code") == mcp_name
 
     def test_mcp_knowledge_tool_passes_through(self):
@@ -125,30 +125,11 @@ class TestNormalizeToolNameClaudeCode:
 
 
 class TestNormalizeToolNameOpenCode:
-    """normalize_tool_name with sdk='opencode' remaps collaboration prefix."""
+    """normalize_tool_name with sdk='opencode' passes through MCP tool names."""
 
-    def test_create_collaboration_remapped(self):
-        assert normalize_tool_name(
-            "mcp__collaboration__create_collaboration", sdk="opencode"
-        ) == "mcp__task__create_collaboration"
-
-    def test_post_finding_remapped(self):
-        assert normalize_tool_name(
-            "mcp__collaboration__post_finding", sdk="opencode"
-        ) == "mcp__task__post_finding"
-
-    def test_get_collaboration_status_remapped(self):
-        assert normalize_tool_name(
-            "mcp__collaboration__get_collaboration_status", sdk="opencode"
-        ) == "mcp__task__get_collaboration_status"
-
-    def test_all_opencode_mcp_remappings_covered(self):
-        """Every entry in OPENCODE_MCP_TOOL_NAME_MAP normalizes correctly."""
-        for original, unified in OPENCODE_MCP_TOOL_NAME_MAP.items():
-            assert normalize_tool_name(original, sdk="opencode") == unified, (
-                f"normalize_tool_name('{original}', sdk='opencode') "
-                f"should return '{unified}'"
-            )
+    def test_opencode_mcp_map_is_empty(self):
+        """No remapping needed — both adapters use the same server name."""
+        assert OPENCODE_MCP_TOOL_NAME_MAP == {}
 
     def test_builtin_bash_passes_through(self):
         """OpenCode built-ins are already lowercase and pass through unchanged."""
@@ -163,9 +144,9 @@ class TestNormalizeToolNameOpenCode:
     def test_builtin_patch_passes_through(self):
         assert normalize_tool_name("patch", sdk="opencode") == "patch"
 
-    def test_mcp_task_tools_pass_through(self):
-        """mcp__task__* tools that are already unified pass through unchanged."""
-        mcp_task = "mcp__task__create_agent_task"
+    def test_mcp_agent_task_tools_pass_through(self):
+        """mcp__agent_task__* tools pass through unchanged."""
+        mcp_task = "mcp__agent_task__add_comment"
         assert normalize_tool_name(mcp_task, sdk="opencode") == mcp_task
 
     def test_knowledge_tool_passes_through(self):
@@ -226,12 +207,12 @@ class TestPreApprovedTools:
     # MCP bridge tools
     @pytest.mark.parametrize("tool", [
         "mcp__knowledge__query_integration_knowledge",
-        "mcp__task__create_agent_task",
-        "mcp__task__update_session_state",
-        "mcp__task__respond_to_task",
-        "mcp__task__create_collaboration",
-        "mcp__task__post_finding",
-        "mcp__task__get_collaboration_status",
+        "mcp__agent_task__add_comment",
+        "mcp__agent_task__update_status",
+        "mcp__agent_task__create_task",
+        "mcp__agent_task__create_subtask",
+        "mcp__agent_task__get_details",
+        "mcp__agent_task__list_tasks",
     ])
     def test_mcp_bridge_tool_is_pre_approved(self, tool):
         assert tool in PRE_APPROVED_TOOLS, f"'{tool}' should be in PRE_APPROVED_TOOLS"
@@ -251,17 +232,20 @@ class TestPreApprovedTools:
                 f"PascalCase '{tool}' should not be in PRE_APPROVED_TOOLS"
             )
 
-    def test_old_collaboration_prefix_not_present(self):
-        """Old mcp__collaboration__* names are not in PRE_APPROVED_TOOLS."""
+    def test_old_tool_names_not_present(self):
+        """Old tool names (pre-refactor) are not in PRE_APPROVED_TOOLS."""
         old_tools = [
+            "mcp__task__create_agent_task",
+            "mcp__task__update_session_state",
+            "mcp__task__respond_to_task",
             "mcp__collaboration__create_collaboration",
             "mcp__collaboration__post_finding",
             "mcp__collaboration__get_collaboration_status",
         ]
         for tool in old_tools:
             assert tool not in PRE_APPROVED_TOOLS, (
-                f"Old collaboration prefix '{tool}' should not be in PRE_APPROVED_TOOLS; "
-                f"use mcp__task__* instead"
+                f"Old tool name '{tool}' should not be in PRE_APPROVED_TOOLS; "
+                f"use mcp__agent_task__* instead"
             )
 
     def test_pre_approved_tools_is_frozenset(self):
@@ -278,12 +262,9 @@ class TestPreApprovedTools:
                 f"normalize_tool_name('{pascal_name}') should produce '{lower_name}'"
             )
 
-    def test_opencode_unified_collaboration_tools_are_pre_approved(self):
-        """Unified mcp__task__ collaboration tool names are in PRE_APPROVED_TOOLS."""
-        for _, unified in OPENCODE_MCP_TOOL_NAME_MAP.items():
-            assert unified in PRE_APPROVED_TOOLS, (
-                f"Unified tool name '{unified}' should be in PRE_APPROVED_TOOLS"
-            )
+    def test_opencode_mcp_map_is_empty(self):
+        """No remapping needed — OPENCODE_MCP_TOOL_NAME_MAP is empty after consolidation."""
+        assert len(OPENCODE_MCP_TOOL_NAME_MAP) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -320,38 +301,11 @@ class TestClaudeCodeToolNameMap:
 
 
 class TestOpenCodeMcpToolNameMap:
-    """Validate collaboration prefix remapping."""
+    """Validate OpenCode MCP tool name map — no remapping needed after consolidation."""
 
-    def test_all_keys_have_collaboration_prefix(self):
-        """All source keys use mcp__collaboration__* prefix."""
-        for key in OPENCODE_MCP_TOOL_NAME_MAP:
-            assert key.startswith("mcp__collaboration__"), (
-                f"Key '{key}' should start with 'mcp__collaboration__'"
-            )
-
-    def test_all_values_have_task_prefix(self):
-        """All target values use mcp__task__* prefix."""
-        for value in OPENCODE_MCP_TOOL_NAME_MAP.values():
-            assert value.startswith("mcp__task__"), (
-                f"Value '{value}' should start with 'mcp__task__'"
-            )
-
-    def test_tool_suffix_preserved(self):
-        """The tool name suffix (after server prefix) is preserved in remapping."""
-        for key, value in OPENCODE_MCP_TOOL_NAME_MAP.items():
-            key_suffix = key.replace("mcp__collaboration__", "")
-            value_suffix = value.replace("mcp__task__", "")
-            assert key_suffix == value_suffix, (
-                f"Tool suffix mismatch: '{key}' → '{value}' "
-                f"('{key_suffix}' != '{value_suffix}')"
-            )
-
-    def test_no_collaboration_server_prefix_in_values(self):
-        """Remapped values must use mcp__task__ prefix, not mcp__collaboration__."""
-        for value in OPENCODE_MCP_TOOL_NAME_MAP.values():
-            assert not value.startswith("mcp__collaboration__"), (
-                f"Value '{value}' should not use 'mcp__collaboration__' prefix after remapping"
-            )
+    def test_map_is_empty(self):
+        """No remapping needed — both adapters use the same 'agent_task' server name."""
+        assert OPENCODE_MCP_TOOL_NAME_MAP == {}
 
 
 # ---------------------------------------------------------------------------

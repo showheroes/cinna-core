@@ -191,7 +191,7 @@ class TestKnowledgeServer:
 # ---------------------------------------------------------------------------
 
 class TestTaskServer:
-    """Tests for task_server.py: create_agent_task, update_session_state, respond_to_task."""
+    """Tests for task_server.py: add_comment, update_status, create_task, create_subtask, get_details, list_tasks."""
 
     @pytest.fixture(autouse=True)
     def set_env(self, monkeypatch):
@@ -216,16 +216,15 @@ class TestTaskServer:
         )
         return ctx_file
 
-    def test_create_inbox_task_success(self, tmp_path):
-        """create_agent_task creates an inbox task when no target_agent_id provided."""
+    def test_create_task_success(self, tmp_path):
+        """create_task creates a task and returns the short code."""
         mod = self._import_module()
         ctx_file = self._mock_session_context(tmp_path)
         mod.SESSION_CONTEXT_PATH = ctx_file
 
         mock_resp = _make_httpx_response(200, {
-            "success": True,
-            "task_id": "task-uuid-1",
-            "message": "Task created in user's inbox.",
+            "task": "TASK-1",
+            "assigned_to": None,
         })
 
         with patch("httpx.Client") as mock_client_cls:
@@ -235,37 +234,41 @@ class TestTaskServer:
             mock_client.post.return_value = mock_resp
             mock_client_cls.return_value = mock_client
 
-            result = mod.create_agent_task(task_message="Please analyze the logs")
+            result = mod.create_task(title="Please analyze the logs")
 
-        assert "inbox" in result.lower() or "created" in result.lower()
+        assert "created" in result.lower() or "TASK-1" in result
 
-    def test_create_task_missing_message_returns_error(self, tmp_path):
-        """create_agent_task returns error when task_message is empty."""
+    def test_create_task_missing_title_returns_error(self, tmp_path):
+        """create_task returns error when title is empty."""
         mod = self._import_module()
         ctx_file = self._mock_session_context(tmp_path)
         mod.SESSION_CONTEXT_PATH = ctx_file
 
-        result = mod.create_agent_task(task_message="  ")
+        result = mod.create_task(title="  ")
         assert "Error:" in result
-        assert "task_message" in result.lower()
+        assert "title" in result.lower()
 
     def test_create_task_missing_backend_session_returns_error(self, tmp_path):
-        """create_agent_task returns error when session_context.json is missing."""
+        """create_task returns error when session_context.json is missing."""
         mod = self._import_module()
         # Point to a non-existent file
         mod.SESSION_CONTEXT_PATH = tmp_path / "nonexistent.json"
 
-        result = mod.create_agent_task(task_message="Analyze logs")
+        result = mod.create_task(title="Analyze logs")
         assert "Error:" in result
         assert "session" in result.lower()
 
-    def test_update_session_state_completed(self, tmp_path):
-        """update_session_state correctly posts 'completed' state."""
+    def test_update_status_completed(self, tmp_path):
+        """update_status correctly posts 'completed' status."""
         mod = self._import_module()
         ctx_file = self._mock_session_context(tmp_path)
         mod.SESSION_CONTEXT_PATH = ctx_file
 
-        mock_resp = _make_httpx_response(200, {"success": True})
+        mock_resp = _make_httpx_response(200, {
+            "task": "TASK-1",
+            "previous_status": "in_progress",
+            "new_status": "completed",
+        })
         with patch("httpx.Client") as mock_client_cls:
             mock_client = MagicMock()
             mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -273,144 +276,30 @@ class TestTaskServer:
             mock_client.post.return_value = mock_resp
             mock_client_cls.return_value = mock_client
 
-            result = mod.update_session_state(
-                state="completed", summary="All tasks finished successfully."
-            )
+            result = mod.update_status(status="completed")
 
         assert "completed" in result.lower()
 
-    def test_update_session_state_invalid_state_returns_error(self, tmp_path):
-        """update_session_state returns error for invalid state value."""
+    def test_update_status_invalid_status_returns_error(self, tmp_path):
+        """update_status returns error for invalid status value."""
         mod = self._import_module()
         ctx_file = self._mock_session_context(tmp_path)
         mod.SESSION_CONTEXT_PATH = ctx_file
 
-        result = mod.update_session_state(state="invalid_state", summary="Done")
+        result = mod.update_status(status="invalid_status")
         assert "Error:" in result
-        assert "state" in result.lower()
+        assert "status" in result.lower()
 
-    def test_respond_to_task_success(self, tmp_path):
-        """respond_to_task sends message and confirms success."""
-        mod = self._import_module()
-        ctx_file = self._mock_session_context(tmp_path)
-        mod.SESSION_CONTEXT_PATH = ctx_file
-
-        mock_resp = _make_httpx_response(200, {"success": True})
-        with patch("httpx.Client") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.post.return_value = mock_resp
-            mock_client_cls.return_value = mock_client
-
-            result = mod.respond_to_task(
-                task_id="task-uuid-1",
-                message="Here is the additional context you requested.",
-            )
-
-        assert "sent" in result.lower() or "success" in result.lower()
-
-    def test_respond_to_task_missing_task_id_returns_error(self, tmp_path):
-        """respond_to_task returns error when task_id is empty."""
-        mod = self._import_module()
-        ctx_file = self._mock_session_context(tmp_path)
-        mod.SESSION_CONTEXT_PATH = ctx_file
-
-        result = mod.respond_to_task(task_id="", message="Some context")
-        assert "Error:" in result
-        assert "task_id" in result.lower()
-
-
-# ---------------------------------------------------------------------------
-# collaboration_server tests
-# ---------------------------------------------------------------------------
-
-class TestCollaborationServer:
-    """Tests for collaboration_server.py: create_collaboration, post_finding, get_collaboration_status."""
-
-    @pytest.fixture(autouse=True)
-    def set_env(self, monkeypatch):
-        monkeypatch.setenv("BACKEND_URL", "http://backend:8000")
-        monkeypatch.setenv("AGENT_AUTH_TOKEN", "test-token")
-
-    def _import_module(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "collaboration_server", _BRIDGE_DIR / "collaboration_server.py"
-        )
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod
-
-    def _mock_session_context(self, tmp_path, backend_session_id="backend-sess-456"):
-        ctx_file = tmp_path / "session_context.json"
-        ctx_file.write_text(
-            json.dumps({"backend_session_id": backend_session_id, "opencode_session_id": "oc-sess-2"}),
-            encoding="utf-8",
-        )
-        return ctx_file
-
-    def test_create_collaboration_success(self, tmp_path):
-        """create_collaboration dispatches subtasks and returns collaboration ID."""
+    def test_add_comment_success(self, tmp_path):
+        """add_comment posts a comment and returns confirmation."""
         mod = self._import_module()
         ctx_file = self._mock_session_context(tmp_path)
         mod.SESSION_CONTEXT_PATH = ctx_file
 
         mock_resp = _make_httpx_response(200, {
-            "success": True,
-            "collaboration_id": "collab-uuid-1",
-            "subtask_count": 2,
-        })
-        subtasks = [
-            {"target_agent_id": "agent-1-uuid", "task_message": "Analyze revenue data"},
-            {"target_agent_id": "agent-2-uuid", "task_message": "Analyze customer churn"},
-        ]
-
-        with patch("httpx.Client") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.post.return_value = mock_resp
-            mock_client_cls.return_value = mock_client
-
-            result = mod.create_collaboration(
-                title="Q4 Analysis",
-                subtasks=subtasks,
-                description="Comprehensive Q4 review",
-            )
-
-        assert "collab-uuid-1" in result
-        assert "2 subtask" in result
-
-    def test_create_collaboration_missing_title_returns_error(self, tmp_path):
-        """create_collaboration returns error when title is empty."""
-        mod = self._import_module()
-        ctx_file = self._mock_session_context(tmp_path)
-        mod.SESSION_CONTEXT_PATH = ctx_file
-
-        result = mod.create_collaboration(title="  ", subtasks=[])
-        assert "Error:" in result
-        assert "title" in result.lower()
-
-    def test_create_collaboration_empty_subtasks_returns_error(self, tmp_path):
-        """create_collaboration returns error when subtasks list is empty."""
-        mod = self._import_module()
-        ctx_file = self._mock_session_context(tmp_path)
-        mod.SESSION_CONTEXT_PATH = ctx_file
-
-        result = mod.create_collaboration(title="Test", subtasks=[])
-        assert "Error:" in result
-        assert "subtask" in result.lower()
-
-    def test_post_finding_success(self, tmp_path):
-        """post_finding successfully posts a finding to the collaboration."""
-        mod = self._import_module()
-        ctx_file = self._mock_session_context(tmp_path)
-        mod.SESSION_CONTEXT_PATH = ctx_file
-
-        mock_resp = _make_httpx_response(200, {
-            "success": True,
-            "findings": ["Revenue is up 15%", "New finding here"],
+            "comment_id": "comment-uuid-1",
+            "task": "TASK-1",
+            "attachments_count": 0,
         })
 
         with patch("httpx.Client") as mock_client_cls:
@@ -420,73 +309,19 @@ class TestCollaborationServer:
             mock_client.post.return_value = mock_resp
             mock_client_cls.return_value = mock_client
 
-            result = mod.post_finding(
-                collaboration_id="collab-uuid-1",
-                finding="Revenue is up 15% quarter over quarter",
-            )
+            result = mod.add_comment(content="Here is the analysis result.")
 
-        assert "posted successfully" in result.lower()
-        assert "2" in result  # total findings count
+        assert "posted" in result.lower() or "comment" in result.lower()
 
-    def test_get_collaboration_status_success(self, tmp_path):
-        """get_collaboration_status returns formatted status with subtasks and findings."""
+    def test_add_comment_missing_content_returns_error(self, tmp_path):
+        """add_comment returns error when content is empty."""
         mod = self._import_module()
         ctx_file = self._mock_session_context(tmp_path)
         mod.SESSION_CONTEXT_PATH = ctx_file
 
-        mock_resp = _make_httpx_response(200, {
-            "status": "in_progress",
-            "title": "Q4 Analysis",
-            "description": "Comprehensive Q4 review",
-            "subtasks": [
-                {
-                    "target_agent_name": "Revenue Agent",
-                    "status": "completed",
-                    "result_summary": "Revenue up 15%",
-                },
-                {
-                    "target_agent_name": "Churn Agent",
-                    "status": "in_progress",
-                    "result_summary": "",
-                },
-            ],
-            "shared_context": {
-                "findings": ["Revenue is up 15% QoQ"],
-            },
-        })
-
-        with patch("httpx.Client") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.get.return_value = mock_resp
-            mock_client_cls.return_value = mock_client
-
-            result = mod.get_collaboration_status(collaboration_id="collab-uuid-1")
-
-        assert "Q4 Analysis" in result
-        assert "in_progress" in result.lower()
-        assert "Revenue Agent" in result
-        assert "COMPLETED" in result
-        assert "Revenue is up 15% QoQ" in result
-
-    def test_get_collaboration_status_not_found(self, tmp_path):
-        """get_collaboration_status returns not-found message on 404."""
-        mod = self._import_module()
-        ctx_file = self._mock_session_context(tmp_path)
-        mod.SESSION_CONTEXT_PATH = ctx_file
-
-        mock_resp = _make_httpx_response(404)
-        with patch("httpx.Client") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.get.return_value = mock_resp
-            mock_client_cls.return_value = mock_client
-
-            result = mod.get_collaboration_status(collaboration_id="nonexistent")
-
-        assert "not found" in result.lower()
+        result = mod.add_comment(content="  ")
+        assert "Error:" in result
+        assert "content" in result.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -600,5 +435,4 @@ class TestOpenCodeAdapterPhase4:
         source = lifecycle_path.read_text(encoding="utf-8")
         assert "knowledge_server.py" in source
         assert "task_server.py" in source
-        assert "collaboration_server.py" in source
         assert '"mcp_bridge"' in source or "'mcp_bridge'" in source or "mcp_bridge" in source

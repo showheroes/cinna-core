@@ -10,6 +10,8 @@ Each file below documents one API domain.
 | Access Tokens | [access_tokens.md](./access_tokens.md) | 5 |
 | Activities | [activities.md](./activities.md) | 7 |
 | Agent Shares | [agent_shares.md](./agent_shares.md) | 14 |
+| Agent Tasks | [agent_tasks.md](./agent_tasks.md) | 5 |
+| Agentic Teams | [agentic_teams.md](./agentic_teams.md) | 17 |
 | Agents | [agents.md](./agents.md) | 30 |
 | Ai Credentials | [ai_credentials.md](./ai_credentials.md) | 8 |
 | Collaborations | [collaborations.md](./collaborations.md) | 4 |
@@ -29,7 +31,7 @@ Each file below documents one API domain.
 | Sessions | [sessions.md](./sessions.md) | 9 |
 | Ssh Keys | [ssh_keys.md](./ssh_keys.md) | 6 |
 | Task Triggers | [task_triggers.md](./task_triggers.md) | 16 |
-| Tasks | [tasks.md](./tasks.md) | 13 |
+| Tasks | [tasks.md](./tasks.md) | 26 |
 | User Workspaces | [user_workspaces.md](./user_workspaces.md) | 5 |
 | Users | [users.md](./users.md) | 16 |
 | Webapp | [webapp.md](./webapp.md) | 4 |

@@ -57,6 +57,13 @@ class EventType:
     TASK_CREATED = "task_created"
     TASK_STATUS_UPDATED = "task_status_changed"
 
+    # Task collaboration events (new)
+    TASK_COMMENT_ADDED = "task_comment_added"
+    TASK_STATUS_CHANGED = "task_status_changed"   # alias for TASK_STATUS_UPDATED
+    TASK_ATTACHMENT_ADDED = "task_attachment_added"
+    SUBTASK_COMPLETED = "subtask_completed"
+    TASK_SUBTASK_CREATED = "task_subtask_created"
+
     # Generic notification
     NOTIFICATION = "notification"
 

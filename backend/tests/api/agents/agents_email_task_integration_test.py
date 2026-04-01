@@ -251,7 +251,7 @@ def test_email_task_mode_full_flow(
     assert len(agent_messages) >= 1
     assert agent_response_text in agent_messages[-1]["content"]
 
-    # Verify task is now linked to session and running
+    # Verify task is now linked to session and in_progress
     task_r = client.get(
         f"{settings.API_V1_STR}/tasks/{task_id}",
         headers=superuser_token_headers,
@@ -259,7 +259,7 @@ def test_email_task_mode_full_flow(
     assert task_r.status_code == 200
     updated_task = task_r.json()
     assert updated_task["session_id"] == session_id
-    assert updated_task["status"] == "running"
+    assert updated_task["status"] == "in_progress"
 
     # email_task_incoming activity still present (link_session doesn't fire status events)
     incoming_activities = _get_activities(

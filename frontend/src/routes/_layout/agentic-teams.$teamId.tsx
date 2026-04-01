@@ -8,6 +8,7 @@ import {
   EllipsisVertical,
   Pencil,
   Trash2,
+  ClipboardList,
 } from "lucide-react"
 
 import { AgenticTeamsService } from "@/client"
@@ -16,6 +17,7 @@ import { usePageHeader } from "@/routes/_layout"
 import PendingItems from "@/components/Pending/PendingItems"
 import { AgenticTeamChart } from "@/components/AgenticTeams/AgenticTeamChart"
 import { AgenticTeamFormDialog } from "@/components/AgenticTeams/AgenticTeamSettings"
+import { TaskBoard } from "@/components/Tasks/TaskBoard"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -34,6 +36,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { cn } from "@/lib/utils"
 import useCustomToast from "@/hooks/useCustomToast"
 
 export const Route = createFileRoute("/_layout/agentic-teams/$teamId")({
@@ -58,6 +61,7 @@ function AgenticTeamChartPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [activeTab, setActiveTab] = useState<"chart" | "tasks">("chart")
 
   const { data: chartData, isLoading } = useQuery({
     queryKey: ["agenticTeamChart", teamId],
@@ -76,7 +80,7 @@ function AgenticTeamChartPage() {
   })
 
   const updateTeamMutation = useMutation({
-    mutationFn: (data: { name?: string; icon?: string }) =>
+    mutationFn: (data: { name?: string; icon?: string; task_prefix?: string | null }) =>
       AgenticTeamsService.updateAgenticTeam({ teamId, requestBody: data }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenticTeams"] })
@@ -203,30 +207,59 @@ function AgenticTeamChartPage() {
     if (team) {
       setHeaderContent(
         <>
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             <Network className="h-4 w-4 text-muted-foreground shrink-0" />
             <span className="font-medium truncate">{team.name}</span>
+            {/* Tab navigation */}
+            <div className="flex items-center border rounded-md overflow-hidden ml-2">
+              <button
+                onClick={() => setActiveTab("chart")}
+                className={cn(
+                  "px-2.5 py-1 text-xs flex items-center gap-1.5 transition-colors",
+                  activeTab === "chart"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                )}
+              >
+                <Network className="h-3.5 w-3.5" />
+                Chart
+              </button>
+              <button
+                onClick={() => setActiveTab("tasks")}
+                className={cn(
+                  "px-2.5 py-1 text-xs flex items-center gap-1.5 transition-colors",
+                  activeTab === "tasks"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                )}
+              >
+                <ClipboardList className="h-3.5 w-3.5" />
+                Tasks
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="icon"
-              variant={isEditMode ? "default" : "outline"}
-              onClick={() => setIsEditMode((v) => !v)}
-              className="h-8 w-8 group"
-              title={isEditMode ? "Lock Layout" : "Edit Layout"}
-            >
-              {isEditMode ? (
-                <>
-                  <Unlock className="h-4 w-4 group-hover:hidden" />
-                  <Lock className="h-4 w-4 hidden group-hover:block" />
-                </>
-              ) : (
-                <>
-                  <Lock className="h-4 w-4 group-hover:hidden" />
-                  <Unlock className="h-4 w-4 hidden group-hover:block" />
-                </>
-              )}
-            </Button>
+            {activeTab === "chart" && (
+              <Button
+                size="icon"
+                variant={isEditMode ? "default" : "outline"}
+                onClick={() => setIsEditMode((v) => !v)}
+                className="h-8 w-8 group"
+                title={isEditMode ? "Lock Layout" : "Edit Layout"}
+              >
+                {isEditMode ? (
+                  <>
+                    <Unlock className="h-4 w-4 group-hover:hidden" />
+                    <Lock className="h-4 w-4 hidden group-hover:block" />
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-4 w-4 group-hover:hidden" />
+                    <Unlock className="h-4 w-4 hidden group-hover:block" />
+                  </>
+                )}
+              </Button>
+            )}
             <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="shrink-0">
@@ -261,7 +294,7 @@ function AgenticTeamChartPage() {
       )
     }
     return () => setHeaderContent(null)
-  }, [team, setHeaderContent, isEditMode, menuOpen])
+  }, [team, setHeaderContent, isEditMode, menuOpen, activeTab])
 
   if (isLoading) {
     return <PendingItems />
@@ -278,31 +311,37 @@ function AgenticTeamChartPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 relative">
-        <AgenticTeamChart
-          teamId={teamId}
-          nodes={chartData.nodes}
-          connections={chartData.connections}
-          isEditMode={isEditMode}
-          onCreateNode={(agentId, isLead) =>
-            createNodeMutation.mutate({ agentId, isLead })
-          }
-          onUpdateNode={(nodeId, updates) =>
-            updateNodeMutation.mutate({ nodeId, updates })
-          }
-          onDeleteNode={(nodeId) => deleteNodeMutation.mutate(nodeId)}
-          onBulkUpdatePositions={(positions) =>
-            bulkUpdatePositionsMutation.mutate(positions)
-          }
-          onCreateConnection={(sourceId, targetId) =>
-            createConnectionMutation.mutate({ sourceId, targetId })
-          }
-          onUpdateConnection={(connId, prompt, enabled) =>
-            updateConnectionMutation.mutate({ connId, prompt, enabled })
-          }
-          onDeleteConnection={(connId) => deleteConnectionMutation.mutate(connId)}
-          isCreatingNode={createNodeMutation.isPending}
-          isCreatingConnection={updateConnectionMutation.isPending}
-        />
+        {activeTab === "chart" ? (
+          <AgenticTeamChart
+            teamId={teamId}
+            nodes={chartData.nodes}
+            connections={chartData.connections}
+            isEditMode={isEditMode}
+            onCreateNode={(agentId, isLead) =>
+              createNodeMutation.mutate({ agentId, isLead })
+            }
+            onUpdateNode={(nodeId, updates) =>
+              updateNodeMutation.mutate({ nodeId, updates })
+            }
+            onDeleteNode={(nodeId) => deleteNodeMutation.mutate(nodeId)}
+            onBulkUpdatePositions={(positions) =>
+              bulkUpdatePositionsMutation.mutate(positions)
+            }
+            onCreateConnection={(sourceId, targetId) =>
+              createConnectionMutation.mutate({ sourceId, targetId })
+            }
+            onUpdateConnection={(connId, prompt, enabled) =>
+              updateConnectionMutation.mutate({ connId, prompt, enabled })
+            }
+            onDeleteConnection={(connId) => deleteConnectionMutation.mutate(connId)}
+            isCreatingNode={createNodeMutation.isPending}
+            isCreatingConnection={updateConnectionMutation.isPending}
+          />
+        ) : (
+          <div className="p-6 overflow-y-auto h-full">
+            <TaskBoard teamId={teamId} />
+          </div>
+        )}
       </div>
 
       {/* Edit Team Dialog */}
@@ -310,8 +349,8 @@ function AgenticTeamChartPage() {
         open={showEditDialog}
         onClose={() => setShowEditDialog(false)}
         team={team}
-        onSubmit={(name, icon) =>
-          updateTeamMutation.mutate({ name, icon })
+        onSubmit={(name, icon, taskPrefix) =>
+          updateTeamMutation.mutate({ name, icon, task_prefix: taskPrefix ?? null })
         }
         isPending={updateTeamMutation.isPending}
       />
