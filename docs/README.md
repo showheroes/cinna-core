@@ -40,7 +40,6 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | **Agent Share** | Clone-based sharing of an agent with another user, including credential requirements |
 | **Guest Share** | Token-based limited access to an agent for unauthenticated users |
 | **Handover** | Agent-to-agent task delegation within the platform |
-| **Collaboration** | Fan-out/fan-in multi-agent coordination where a coordinator dispatches subtasks to multiple agents simultaneously |
 | **Workspace** | Isolation boundary for user's agents, sessions, and resources |
 | **AI Function** | LLM utility for text generation, classification, extraction with multi-provider cascade fallback |
 | **Building Mode** | Agent environment state for configuration and development |
@@ -57,7 +56,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 
 | Domain | Description | Features |
 |--------|-------------|----------|
-| [agents](#agents) | Core agent lifecycle - creation, configuration, environments, sessions, chat, file management | 12 features |
+| [agents](#agents) | Core agent lifecycle - creation, configuration, environments, sessions, chat, file management | 11 features |
 | [tasks](#tasks) | Task submission, refinement, triggers, and scheduling | 3 features |
 | [credentials](#credentials) | Credential management, encryption, AI provider keys | 1 feature |
 | [application](#application) | User-facing platform features - authentication, integrations, real-time events, workspaces | 17 features |
@@ -80,7 +79,6 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | agent_plugins | Plugin marketplace integration, capability loading | [business logic](agents/agent_plugins/agent_plugins.md) \| [tech](agents/agent_plugins/agent_plugins_tech.md) |
 | agent_schedulers | Multi-schedule CRON execution with natural language input and per-schedule prompts | [business logic](agents/agent_schedulers/agent_schedulers.md) \| [tech](agents/agent_schedulers/agent_schedulers_tech.md) |
 | agent_handover | Agent-to-agent task delegation and inbox creation | [business logic](agents/agent_handover/agent_handover.md) \| [tech](agents/agent_handover/agent_handover_tech.md) |
-| agent_collaboration | Fan-out/fan-in multi-agent coordination with shared findings context | [business logic](agents/agent_collaboration/agent_collaboration.md) \| [tech](agents/agent_collaboration/agent_collaboration_tech.md) |
 | agent_environment_core | Server-side core running inside Docker containers: HTTP API, SDK adapters, prompt generation. Two SDK engines: Claude Code (Anthropic/MiniMax), OpenCode (Anthropic, OpenAI, Google, OpenAI-compatible). Each environment links separate AI credentials per mode (building/conversation) with optional per-mode model overrides. OpenCode uses MCP bridge servers for custom tools. All adapters emit unified lowercase tool names via `tool_name_registry.py`. | [business logic](agents/agent_environment_core/agent_environment_core.md) \| [tech](agents/agent_environment_core/agent_environment_core_tech.md) \| [multi-sdk](agents/agent_environment_core/multi_sdk.md) \| [multi-sdk tech](agents/agent_environment_core/multi_sdk_tech.md) \| [knowledge tool](agents/agent_environment_core/knowledge_tool.md) \| [create agent task tool](agents/agent_environment_core/create_agent_task_tool.md) \| [tools approval](agents/agent_environment_core/tools_approval_management.md) \| [tools approval tech](agents/agent_environment_core/tools_approval_management_tech.md) |
 | agent_environment_data_management | Environment data flow, cloning, syncing operations | [business logic](agents/agent_environment_data_management/agent_environment_data_management.md) \| [tech](agents/agent_environment_data_management/agent_environment_data_management_tech.md) |
 | agent_credentials | Credential syncing to agent environments, whitelisting, redaction, OAuth refresh | [business logic](agents/agent_credentials/agent_credentials.md) \| [tech](agents/agent_credentials/agent_credentials_tech.md) \| [oauth](agents/agent_credentials/oauth_credentials.md) \| [whitelist](agents/agent_credentials/credentials_whitelist.md) \| [google SA](agents/agent_credentials/google_service_account.md) \| [sharing](agents/agent_credentials/credential_sharing.md) \| [security hardening](agents/agent_credentials/credential_security_hardening.md) \| [security hardening tech](agents/agent_credentials/credential_security_hardening_tech.md) |
@@ -169,4 +167,4 @@ User ──→ Frontend (React) ──→ Backend API (FastAPI) ──→ Servic
 
 ---
 
-*Last updated: 2026-04-01*
+*Last updated: 2026-04-02*

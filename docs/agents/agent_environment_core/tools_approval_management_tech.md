@@ -77,7 +77,7 @@
 
 **Tool Name Registry** (container): `backend/app/env-templates/app_core_base/core/server/adapters/tool_name_registry.py`
 - `CLAUDE_CODE_TOOL_NAME_MAP` — PascalCase → lowercase mapping for all Claude Code built-in tools
-- `OPENCODE_MCP_TOOL_NAME_MAP` — `mcp__collaboration__*` → `mcp__task__*` unification for OpenCode
+- `OPENCODE_MCP_TOOL_NAME_MAP` — reserved for future MCP tool name remapping (currently empty)
 - `PRE_APPROVED_TOOLS` — canonical frozenset of all pre-approved tool names (unified lowercase)
 - `normalize_tool_name(name, sdk)` — normalizes any tool name to the unified lowercase convention; used by all adapters when emitting `tools_init` and `TOOL_USE` events
 
@@ -86,7 +86,7 @@
 All tool names throughout the system use **unified lowercase**:
 - Claude Code natively emits PascalCase names (`Read`, `Bash`, `WebFetch`). The `ClaudeCodeAdapter` normalizes these to lowercase (`read`, `bash`, `webfetch`) before emitting `SDKEvent` objects.
 - OpenCode natively emits lowercase names — no normalization needed for built-ins.
-- OpenCode runs collaboration tools on a separate `collaboration` MCP server (`mcp__collaboration__*`), but these are remapped to the unified `mcp__task__*` prefix to match Claude Code.
+- Both Claude Code and OpenCode register agent task tools on the `agent_task` MCP server, producing unified `mcp__agent_task__*` names.
 - Google ADK tools are defined as lowercase Python functions (`bash`, `read`).
 
 The backend `message_service.py` maintains a `PRE_ALLOWED_TOOLS` set that mirrors `tool_name_registry.PRE_APPROVED_TOOLS`. Tool comparison uses `.lower()` on both sides for backward compatibility with legacy PascalCase data that may exist in the database from before this convention was established.

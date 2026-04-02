@@ -21,13 +21,20 @@ ALLOWED_SCOPES = frozenset(["assigned", "created", "team"])
 
 
 @tool(
-    "agent_task_list_tasks",
+    "list_tasks",
     "List tasks visible to you. Use 'scope' to filter: "
     "'assigned' (tasks assigned to you, default), "
     "'created' (tasks you created/delegated), "
     "'team' (all tasks in your team — team agents only). "
     "Optionally filter by status.",
-    {"status": str, "scope": str},
+    {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "description": "Filter by status (optional)"},
+            "scope": {"type": "string", "description": "assigned/created/team (optional, defaults to assigned)"},
+        },
+        "required": [],
+    },
 )
 async def agent_task_list_tasks(args: dict[str, Any]) -> dict[str, Any]:
     """

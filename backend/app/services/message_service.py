@@ -271,17 +271,97 @@ def _build_session_context(
         if mcp_meta:
             context["mcp_user_email"] = mcp_meta.authenticated_user_email
 
-    # Enrich with collaboration context if this session belongs to a subtask
+    # Enrich with task context if this session is linked to an InputTask
     try:
-        from app.services.agent_collaboration_service import AgentCollaborationService
-        collab_context = AgentCollaborationService.get_collaboration_by_session(
-            session=db,
-            session_id=session_db.id,
-        )
-        if collab_context:
-            context.update(collab_context)
+        from app.models.input_task import InputTask
+        task = db.exec(
+            select(InputTask).where(InputTask.session_id == session_db.id).limit(1)
+        ).first()
+        if task:
+            context["task_short_code"] = task.short_code
+            context["task_title"] = task.title or ""
+            context["task_description"] = task.current_description or ""
+            context["task_priority"] = task.priority or "normal"
+            context["task_status"] = task.status or "in_progress"
+
+            # Creator info
+            if task.agent_initiated and task.source_agent_id:
+                source_agent = db.get(Agent, task.source_agent_id)
+                context["task_created_by_name"] = source_agent.name if source_agent else "Unknown Agent"
+                context["task_created_by_type"] = "agent"
+            else:
+                from app.models.user import User as UserModel
+                creator = db.get(UserModel, task.owner_id)
+                context["task_created_by_name"] = (creator.full_name or creator.email) if creator else "Unknown User"
+                context["task_created_by_type"] = "user"
+
+            # Parent task context (subtasks)
+            parent_task = None
+            if task.parent_task_id:
+                parent_task = db.get(InputTask, task.parent_task_id)
+                if parent_task:
+                    context["parent_task_short_code"] = parent_task.short_code
+                    context["parent_task_title"] = parent_task.title or ""
+                    context["parent_task_description"] = parent_task.current_description or ""
+                    if parent_task.selected_agent_id:
+                        parent_agent = db.get(Agent, parent_task.selected_agent_id)
+                        if parent_agent:
+                            context["parent_assigned_agent_name"] = parent_agent.name
+                    if parent_task.assigned_node_id:
+                        from app.models.agentic_team import AgenticTeamNode
+                        parent_node = db.get(AgenticTeamNode, parent_task.assigned_node_id)
+                        if parent_node:
+                            context["parent_node_name"] = parent_node.name
+
+            # Team context
+            if task.team_id:
+                from app.models.agentic_team import AgenticTeam
+                team = db.get(AgenticTeam, task.team_id)
+                if team:
+                    context["team_name"] = team.name
+
+            # Node context + downstream members
+            if task.assigned_node_id:
+                from app.models.agentic_team import AgenticTeamNode, AgenticTeamConnection
+                node = db.get(AgenticTeamNode, task.assigned_node_id)
+                if node:
+                    context["node_name"] = node.name
+
+                # Find downstream connections
+                downstream_conns = db.exec(
+                    select(AgenticTeamConnection).where(
+                        AgenticTeamConnection.source_node_id == task.assigned_node_id,
+                        AgenticTeamConnection.enabled == True,
+                    )
+                ).all()
+                if downstream_conns:
+                    downstream_members = []
+                    for conn in downstream_conns:
+                        target_node = db.get(AgenticTeamNode, conn.target_node_id)
+                        if target_node:
+                            target_agent = db.get(Agent, target_node.agent_id) if target_node.agent_id else None
+                            downstream_members.append({
+                                "node_name": target_node.name,
+                                "agent_name": target_agent.name if target_agent else "",
+                                "agent_description": target_agent.description if target_agent else "",
+                                "connection_prompt": conn.connection_prompt or "",
+                            })
+                    if downstream_members:
+                        context["downstream_team_members"] = downstream_members
+
+            # Delegation connection prompt (for subtasks with team context)
+            if parent_task and task.assigned_node_id and parent_task.assigned_node_id:
+                from app.models.agentic_team import AgenticTeamConnection
+                delegation_conn = db.exec(
+                    select(AgenticTeamConnection).where(
+                        AgenticTeamConnection.source_node_id == parent_task.assigned_node_id,
+                        AgenticTeamConnection.target_node_id == task.assigned_node_id,
+                    )
+                ).first()
+                if delegation_conn:
+                    context["delegation_connection_prompt"] = delegation_conn.connection_prompt or ""
     except Exception as e:
-        logger.debug(f"Collaboration context lookup failed (non-critical): {e}")
+        logger.warning(f"Task context enrichment failed (non-critical): {e}", exc_info=True)
 
     return context
 

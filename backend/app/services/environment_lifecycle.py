@@ -1653,8 +1653,8 @@ SDK_ADAPTER_CONVERSATION={sdk_conversation}
             model = model_override or provider_defaults.get(mode, "anthropic/claude-sonnet-4-5")
 
             # MCP bridge servers expose platform custom tools to OpenCode agents.
-            # All three servers are registered for both modes so the agent can
-            # use whichever is relevant based on the system prompt instructions.
+            # Server names must match Claude Code's MCP server names so both
+            # adapters produce identical tool names (mcp__{server}__{tool}).
             mcp_bridge_servers = {
                 "knowledge": {
                     "type": "local",
@@ -1664,19 +1664,11 @@ SDK_ADAPTER_CONVERSATION={sdk_conversation}
                     ],
                     "enabled": True,
                 },
-                "task": {
+                "agent_task": {
                     "type": "local",
                     "command": [
                         "python3",
                         "/app/core/server/tools/mcp_bridge/task_server.py",
-                    ],
-                    "enabled": True,
-                },
-                "collaboration": {
-                    "type": "local",
-                    "command": [
-                        "python3",
-                        "/app/core/server/tools/mcp_bridge/collaboration_server.py",
                     ],
                     "enabled": True,
                 },

@@ -17,7 +17,7 @@ class AgenticTeamBase(SQLModel):
 
 
 class AgenticTeamCreate(AgenticTeamBase):
-    pass
+    task_prefix: str | None = Field(default=None, max_length=10)
 
 
 class AgenticTeamUpdate(SQLModel):

@@ -20,12 +20,20 @@ from ..sdk_manager import get_backend_session_id
 
 
 @tool(
-    "agent_task_add_comment",
+    "add_comment",
     "Post a comment on a task to report findings, results, or progress. "
     "The primary way to share work with the user and other agents. "
     "Optionally attach workspace files to the comment. "
     "Defaults to the current task if 'task' is not specified.",
-    {"content": str, "files": list, "task": str},
+    {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "Comment text (required, markdown supported)"},
+            "files": {"type": "array", "items": {"type": "string"}, "description": "Workspace file paths to attach (optional)"},
+            "task": {"type": "string", "description": "Short code of target task (optional, defaults to current task)"},
+        },
+        "required": ["content"],
+    },
 )
 async def agent_task_add_comment(args: dict[str, Any]) -> dict[str, Any]:
     """

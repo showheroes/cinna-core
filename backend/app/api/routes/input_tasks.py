@@ -374,7 +374,7 @@ def send_task_email_answer(
 
 
 @router.post("/{id}/archive", response_model=InputTaskPublic)
-def archive_task(
+async def archive_task(
     session: SessionDep, current_user: CurrentUser, id: uuid.UUID
 ) -> Any:
     """
@@ -622,7 +622,7 @@ def list_task_comments(
 
 
 @router.post("/{id}/comments/", response_model=TaskCommentPublic)
-def add_task_comment(
+async def add_task_comment(
     *,
     session: SessionDep,
     current_user: CurrentUser,

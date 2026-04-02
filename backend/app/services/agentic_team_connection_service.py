@@ -1,7 +1,6 @@
 from uuid import UUID
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.models.agentic_team import (
@@ -12,6 +11,36 @@ from app.models.agentic_team import (
     AgenticTeamConnectionPublic,
 )
 from app.services.agentic_team_service import AgenticTeamService
+from app.services.handover_connection_sync_service import HandoverConnectionSyncService
+
+
+class TeamConnectionError(Exception):
+    """Base exception for team connection service errors."""
+
+    def __init__(self, message: str, status_code: int = 400):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
+
+
+class ConnectionNotFoundError(TeamConnectionError):
+    def __init__(self, message: str = "Connection not found"):
+        super().__init__(message, status_code=404)
+
+
+class NodeNotFoundError(TeamConnectionError):
+    def __init__(self, message: str = "Node not found"):
+        super().__init__(message, status_code=404)
+
+
+class SelfConnectionError(TeamConnectionError):
+    def __init__(self, message: str = "Source and target nodes must be different"):
+        super().__init__(message, status_code=400)
+
+
+class DuplicateConnectionError(TeamConnectionError):
+    def __init__(self, message: str = "A connection between these nodes already exists"):
+        super().__init__(message, status_code=409)
 
 
 class AgenticTeamConnectionService:
@@ -27,7 +56,7 @@ class AgenticTeamConnectionService:
         AgenticTeamService.get_team(session, team_id, user_id)
         conn = session.get(AgenticTeamConnection, conn_id)
         if not conn or conn.team_id != team_id:
-            raise HTTPException(status_code=404, detail="Connection not found")
+            raise ConnectionNotFoundError()
         return conn
 
     @staticmethod
@@ -52,20 +81,17 @@ class AgenticTeamConnectionService:
 
         # 2. Prevent self-connection
         if data.source_node_id == data.target_node_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Source and target nodes must be different",
-            )
+            raise SelfConnectionError()
 
         # 3. Verify source node belongs to this team
         source_node = session.get(AgenticTeamNode, data.source_node_id)
         if not source_node or source_node.team_id != team_id:
-            raise HTTPException(status_code=404, detail="Source node not found")
+            raise NodeNotFoundError("Source node not found")
 
         # 4. Verify target node belongs to this team
         target_node = session.get(AgenticTeamNode, data.target_node_id)
         if not target_node or target_node.team_id != team_id:
-            raise HTTPException(status_code=404, detail="Target node not found")
+            raise NodeNotFoundError("Target node not found")
 
         # 5. Prevent duplicate connection
         duplicate_stmt = select(AgenticTeamConnection).where(
@@ -74,10 +100,7 @@ class AgenticTeamConnectionService:
             AgenticTeamConnection.target_node_id == data.target_node_id,
         )
         if session.exec(duplicate_stmt).first():
-            raise HTTPException(
-                status_code=409,
-                detail="A connection between these nodes already exists",
-            )
+            raise DuplicateConnectionError()
 
         # 6. Create
         conn = AgenticTeamConnection(
@@ -90,6 +113,12 @@ class AgenticTeamConnectionService:
         session.add(conn)
         session.commit()
         session.refresh(conn)
+
+        # 7. Sync AgentHandoverConfig
+        HandoverConnectionSyncService.sync_handover_for_connection_created(
+            session, source_node, target_node, data.connection_prompt, enabled=data.enabled
+        )
+
         return conn
 
     @staticmethod
@@ -109,6 +138,15 @@ class AgenticTeamConnectionService:
         session.add(conn)
         session.commit()
         session.refresh(conn)
+
+        # Sync AgentHandoverConfig
+        source_node = session.get(AgenticTeamNode, conn.source_node_id)
+        target_node = session.get(AgenticTeamNode, conn.target_node_id)
+        if source_node and target_node:
+            HandoverConnectionSyncService.sync_handover_for_connection_updated(
+                session, source_node, target_node, conn, update_dict
+            )
+
         return conn
 
     @staticmethod
@@ -118,8 +156,19 @@ class AgenticTeamConnectionService:
         conn = AgenticTeamConnectionService.get_connection(
             session, team_id, conn_id, user_id
         )
+
+        # Capture agent IDs before deletion for handover cleanup
+        source_node = session.get(AgenticTeamNode, conn.source_node_id)
+        target_node = session.get(AgenticTeamNode, conn.target_node_id)
+
         session.delete(conn)
         session.commit()
+
+        # Remove handover config if no other connections exist between these agents
+        if source_node and target_node:
+            HandoverConnectionSyncService.sync_handover_for_connection_deleted(
+                session, source_node, target_node
+            )
 
     @staticmethod
     def connection_to_public(

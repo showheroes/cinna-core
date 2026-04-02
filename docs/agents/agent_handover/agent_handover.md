@@ -17,7 +17,7 @@ Compact 2-3 sentence natural language instruction (stored in `handover_prompt`) 
 - **Context to pass** — what data to include in the task message
 - **Message format** — how the handover message should look
 
-Kept compact because it is injected as a tool description into the agent's LLM context; shorter descriptions reduce token usage and improve comprehension.
+Kept compact because it is appended directly to the conversation mode system prompt; shorter instructions reduce token usage and improve comprehension. The consolidated `handover_prompt` field from `{workspace}/docs/agent_handover_config.json` is loaded by `PromptGenerator._load_handover_prompt()` and appended at the end of `generate_conversation_mode_prompt()`, after the task context section.
 
 ### Direct Handover Mode
 
@@ -47,8 +47,8 @@ Handovers can be toggled on/off. Disabled handovers are excluded from the agent'
 
 1. Source agent is in conversation mode; user sends a message
 2. System prompt includes all enabled handovers as tool descriptions
-3. Agent detects the trigger condition and calls `mcp__task__create_agent_task` with the task message and `target_agent_id`
-4. Tool calls `POST /api/v1/agents/tasks/create` on the backend with `source_session_id`
+3. Agent detects the trigger condition and calls `mcp__agent_task__create_task` with the title, description, and `assigned_to` (target agent name)
+4. Tool calls `POST /api/v1/agent/tasks/create` on the backend with `source_session_id`
 5. Backend creates `InputTask` (`agent_initiated=true`, `auto_execute=true`)
 6. If target agent has a `refiner_prompt`, task message is auto-refined via AI
 7. New session is created for the target agent linked to the task; refined message is sent
@@ -57,8 +57,8 @@ Handovers can be toggled on/off. Disabled handovers are excluded from the agent'
 
 ### 3. Runtime — Inbox Task
 
-1. Agent calls `mcp__task__create_agent_task` without a `target_agent_id`
-2. Tool calls `POST /api/v1/agents/tasks/create` on the backend
+1. Agent calls `mcp__agent_task__create_task` without an `assigned_to` name
+2. Tool calls `POST /api/v1/agent/tasks/create` on the backend
 3. Backend creates `InputTask` (`agent_initiated=true`, `auto_execute=false`); no session is created
 4. Backend logs a system message in the source session with `task_id` and `inbox_task=true`
 5. User sees the system message with a clickable **View task** link and processes it manually

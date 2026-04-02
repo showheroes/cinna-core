@@ -31,16 +31,16 @@ The task system also serves as the primary **collaboration surface** for agent w
 ### Flow 1: User-Initiated Task
 
 1. User creates a task with an initial message description (title and priority are optional)
-2. System auto-generates `short_code` (e.g., `TASK-1`) and derives a title
-3. User opens the task detail page
-4. Left panel: description editor, agent selector, execute button, sessions list
-5. Right panel: task comments and attachments; AI refinement chat
-6. User sends refinement comments — AI refines description and provides feedback
-7. User continues refining or clicks Execute
+2. System auto-generates `short_code` (e.g., `TASK-1`) and derives a title; if a team is selected with no agent specified, the team's lead agent is auto-assigned
+3. User opens the task detail page at `/task/$taskId` (accessible by UUID or short code)
+4. Left body: editable description, attachments section, tabbed section (Comments / Sessions / Sub-tasks / Activity) — all content areas use full available width
+5. Right sidebar: Status, Priority dropdown, Assignee (agent selector modal), Team (team selector modal), Triggers, Subtask progress, Dates, Execute button
+6. User sends refinement comments or text-selection requests via the inline input bar — AI refines description and provides feedback
+7. User continues refining or clicks Execute; execution stays on the task page and shows live session progress in the Sessions tab
 8. System creates a session linked to the task via `source_task_id`
-9. Session start automatically transitions task status to `in_progress`
+9. Session start automatically transitions task status to `in_progress`; real-time session events update the Sessions tab without leaving the page
 10. Agent works and posts comments with findings; files are attached to comments
-11. Session completion automatically transitions task to `completed`
+11. Session completion automatically transitions task to `completed` only if all subtasks are also completed; if incomplete subtasks remain, task stays `in_progress`; task can be re-executed (Execute button becomes "Run Again")
 12. User sees the full comment thread and any deliverable files
 13. User archives completed tasks
 
@@ -70,10 +70,11 @@ The task system also serves as the primary **collaboration surface** for agent w
 4. Each subtask is created with the team prefix (e.g., `HR-2`, `HR-3`), auto-executed for target agents
 5. Each sub-agent posts comments with their results; attaches files; session completes
 6. System posts a system comment on the parent task: "Subtask HR-2 completed by Recruiting Agent"
-7. Lead agent receives notification; reads subtask comments via `mcp__agent_task__get_details`
-8. Lead agent aggregates results, posts a summary comment on `HR-1`, attaches final report
-9. Lead agent's session completes; parent task transitions to `completed`
-10. User sees the full task tree with all subtask work at a glance
+7. System delivers a feedback message to the lead agent's session (via `source_session_id`): "[Sub-task completed] HR-2 completed by Recruiting Agent. Read results with mcp__agent_task__get_details tool." If the session is idle, streaming auto-triggers so the lead agent processes the notification immediately
+8. Lead agent reads subtask comments via `mcp__agent_task__get_details`
+9. Lead agent aggregates results, posts a summary comment on `HR-1`, attaches final report
+10. Lead agent's session completes; parent task transitions to `completed`
+11. User sees the full task tree with all subtask work at a glance
 
 ### Flow 5: Email-Originated Task
 
@@ -98,6 +99,8 @@ The task system also serves as the primary **collaboration surface** for agent w
 | `cancelled` | Cancelled by user or agent | — |
 | `archived` | Archived by user | — |
 
+**Archival**: Users can archive a task from any non-archived status. Archived tasks are excluded from subtask progress counts.
+
 **Automatic status management**: The backend infers status from the session lifecycle. Agents should not call `mcp__agent_task__update_status` for normal completion — only for edge cases (`blocked`, explicit `cancelled`, or early `completed` before the session ends).
 
 **Removed statuses (migrated)**:
@@ -107,9 +110,12 @@ The task system also serves as the primary **collaboration surface** for agent w
 ### Session-to-Task Status Sync
 
 - Session start → task = `in_progress` (system comment: "Agent {name} started working")
-- Session completion → task = `completed` (system comment; triggers parent notification if subtask)
+- Session completion → task = `completed` only if ALL subtasks are also completed; if incomplete subtasks remain, task stays `in_progress` (system comment; triggers parent notification if subtask)
 - Session error → task = `error` (system comment with error details)
 - If task has `parent_task_id` and transitions to `completed` → system comment posted on parent; parent agent notified
+- Idle active sessions (no streaming, no pending input) do not block task completion — only actively running or pending sessions count
+- Incomplete subtasks (non-archived, non-completed) block task completion — even if all sessions are done, the task remains `in_progress` until every subtask reaches `completed` or `archived`
+- On task completion or error, if `source_session_id` is set and `auto_feedback` is enabled, a feedback message is delivered to the source session (e.g., `[Sub-task completed] HR-2 completed by Agent Name`). If the source session is idle, streaming is auto-triggered so the parent agent processes the notification immediately
 
 ### Short Code Generation
 
@@ -137,12 +143,19 @@ The task system also serves as the primary **collaboration surface** for agent w
 - Attachments can be linked to a specific comment (`comment_id`) or standalone on the task
 - Download endpoint: `GET /api/v1/tasks/{task_id}/attachments/{attachment_id}/download`
 
+### Team Assignment Rules
+
+- A task's team can be changed after creation via `PATCH /api/v1/tasks/{id}` (the `InputTaskUpdate` model now includes `team_id`)
+- When the team is changed via the UI, the frontend immediately fetches team nodes, finds the lead node (`is_lead=True`), and updates `selected_agent_id` and `assigned_node_id` to match the lead agent
+- At task creation, if `team_id` is provided but neither `selected_agent_id` nor `assigned_node_id` is set, the service layer auto-assigns the team's lead node agent
+
 ### Subtask Rules
 
 - Only agents in a **team context** can create subtasks (requires `team_id` on parent task)
 - Delegation is topology-constrained: the creating agent's node must have a directed connection to the target node in the team graph
 - Orphaned subtasks become root tasks on parent delete (SET NULL, not CASCADE)
 - Subtask inherits `team_id` and `owner_id` from parent; gets its own short code with the team prefix
+- Subtask records `source_session_id` from the creating agent's session, enabling automatic feedback delivery on completion
 
 ### Refinement Rules
 
@@ -155,7 +168,9 @@ The task system also serves as the primary **collaboration surface** for agent w
 
 - Task must have a selected agent to execute
 - Agent must have an active environment to execute
-- Archived tasks cannot be re-executed without first becoming active
+- Only `running` (legacy alias for `in_progress`) and `archived` statuses block execution; tasks in `completed`, `error`, `cancelled`, and other non-archived statuses can be re-executed
+- Execute action stays on the task detail page — it does not navigate away; live session progress is shown in the sessions block via real-time events
+- The Execute button label changes to "Run Again" when one or more sessions already exist for the task
 
 ### Todo Progress Tracking
 
@@ -184,7 +199,8 @@ Task (1, parent) ─────────────────────
 Agent Collaboration (team context):
 Parent Task ──create_subtask──> Subtask ──auto_execute──> Target Agent Session
       ↑                                                           │
-      └──── system comment on parent ◄── session completed ───────┘
+      ├──── system comment on parent ◄── session completed ───────┘
+      └──── feedback message to parent's session (auto_feedback) ──┘
 ```
 
 ## Integration Points

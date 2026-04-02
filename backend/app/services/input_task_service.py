@@ -32,6 +32,7 @@ from app.models.email_message import EmailMessage
 from app.models.outgoing_email_queue import OutgoingEmailQueue, OutgoingEmailStatus
 from app.models.agent_email_integration import AgentEmailIntegration
 from app.models.file_upload import FileUpload, FileUploadPublic, InputTaskFile
+from app.models.agentic_team import AgenticTeamNode
 from app.core.db import engine, create_session
 from app.utils import create_task_with_error_logging
 from app.services.session_service import SessionService
@@ -450,11 +451,26 @@ class InputTaskService:
             first_line = data.original_message.strip().split('\n')[0]
             title = first_line[:500] if len(first_line) > 500 else first_line
 
+        # Auto-assign team lead agent when team is selected but no agent specified
+        selected_agent_id = data.selected_agent_id
+        assigned_node_id = getattr(data, 'assigned_node_id', None)
+        team_id = getattr(data, 'team_id', None)
+        if team_id and not selected_agent_id and not assigned_node_id:
+            lead_node = db_session.exec(
+                select(AgenticTeamNode).where(
+                    AgenticTeamNode.team_id == team_id,
+                    AgenticTeamNode.is_lead == True,  # noqa: E712
+                )
+            ).first()
+            if lead_node:
+                selected_agent_id = lead_node.agent_id
+                assigned_node_id = lead_node.id
+
         task = InputTask(
             owner_id=user_id,
             original_message=data.original_message,
             current_description=data.original_message,  # Start with same as original
-            selected_agent_id=data.selected_agent_id,
+            selected_agent_id=selected_agent_id,
             user_workspace_id=data.user_workspace_id,
             agent_initiated=data.agent_initiated,
             auto_execute=data.auto_execute,
@@ -465,8 +481,8 @@ class InputTaskService:
             sequence_number=sequence_number,
             title=title,
             priority=getattr(data, 'priority', 'normal') or 'normal',
-            team_id=getattr(data, 'team_id', None),
-            assigned_node_id=getattr(data, 'assigned_node_id', None),
+            team_id=team_id,
+            assigned_node_id=assigned_node_id,
             parent_task_id=getattr(data, 'parent_task_id', None),
         )
         db_session.add(task)
@@ -557,6 +573,157 @@ class InputTaskService:
                     # Continue with original message if refinement fails
 
         return task, message_to_send
+
+    @staticmethod
+    async def create_task_from_agent(
+        db_session: DBSession,
+        user_id: UUID,
+        data,  # AgentTaskCreate
+    ) -> tuple[InputTask, str | None]:
+        """
+        Create a task from an agent MCP tool call.
+
+        Resolves session context, agent name, and team inheritance, then creates
+        and optionally auto-executes the task.
+
+        Args:
+            db_session: Database session
+            user_id: Owner user ID (from agent auth token)
+            data: AgentTaskCreate with title, description, assigned_to, priority,
+                  source_session_id
+
+        Returns:
+            Tuple of (task, resolved_agent_name)
+
+        Raises:
+            ValidationError: If source session is provided but not found
+        """
+        from app.models.agentic_team import AgenticTeamNode as _AgenticTeamNode
+        from app.services.message_service import MessageService
+
+        source_session_id = data.source_session_id
+        user_workspace_id = None
+        team_id = None
+
+        # Resolve source session context
+        if source_session_id:
+            source_session = db_session.get(Session, source_session_id)
+            if not source_session:
+                raise ValidationError("Source session not found")
+            user_workspace_id = source_session.user_workspace_id
+
+            # Inherit team context from the calling session's task
+            current_task = db_session.exec(
+                select(InputTask).where(
+                    InputTask.session_id == source_session_id,
+                )
+            ).first()
+            if current_task and current_task.team_id:
+                team_id = current_task.team_id
+
+        # Resolve assigned_to (name → agent_id)
+        selected_agent_id = None
+        assigned_node_id = None
+        resolved_name = None
+
+        if data.assigned_to:
+            if team_id:
+                # Team context: try node name first
+                target_node = db_session.exec(
+                    select(_AgenticTeamNode).where(
+                        _AgenticTeamNode.team_id == team_id,
+                        _AgenticTeamNode.name == data.assigned_to,
+                    )
+                ).first()
+                if target_node:
+                    selected_agent_id = target_node.agent_id
+                    assigned_node_id = target_node.id
+                    resolved_name = target_node.name
+
+            if not selected_agent_id:
+                # Fallback: resolve by agent name across user's agents
+                agent = db_session.exec(
+                    select(Agent).where(
+                        Agent.owner_id == user_id,
+                        Agent.name == data.assigned_to,
+                    )
+                ).first()
+                if agent:
+                    selected_agent_id = agent.id
+                    resolved_name = agent.name
+
+        # Build task message from title + description
+        message = data.title
+        if data.description:
+            message = f"{data.title}\n\n{data.description}"
+
+        task_data = InputTaskCreate(
+            original_message=message,
+            selected_agent_id=selected_agent_id,
+            user_workspace_id=user_workspace_id,
+            agent_initiated=True,
+            auto_execute=bool(selected_agent_id),
+            source_session_id=source_session_id,
+            title=data.title,
+            priority=data.priority,
+            team_id=team_id,
+            assigned_node_id=assigned_node_id,
+        )
+
+        if selected_agent_id:
+            task, message_to_send = InputTaskService.create_task_with_auto_refine(
+                db_session=db_session,
+                user_id=user_id,
+                data=task_data,
+            )
+
+            # Auto-execute: create session and send message
+            success, new_session, error = await InputTaskService.execute_task(
+                db_session=db_session,
+                task=task,
+                user_id=user_id,
+                message_to_send=message_to_send,
+            )
+
+            if not success:
+                raise ValidationError(error or "Failed to execute task")
+
+            # Post system message to source session
+            if source_session_id:
+                MessageService.create_message(
+                    session=db_session,
+                    session_id=source_session_id,
+                    role="system",
+                    content=f"Task {task.short_code} created and assigned to {resolved_name}",
+                    message_metadata={
+                        "task_created": True,
+                        "task_id": str(task.id),
+                        "target_agent_name": resolved_name,
+                        "session_id": str(new_session.id) if new_session else None,
+                    },
+                )
+        else:
+            # Inbox task (no agent assigned)
+            task = InputTaskService.create_task(
+                db_session=db_session,
+                user_id=user_id,
+                data=task_data,
+            )
+
+            if source_session_id:
+                MessageService.create_message(
+                    session=db_session,
+                    session_id=source_session_id,
+                    role="system",
+                    content=f"Task {task.short_code} created in inbox",
+                    message_metadata={
+                        "task_created": True,
+                        "task_id": str(task.id),
+                        "inbox_task": True,
+                    },
+                )
+
+        return task, resolved_name
 
     @staticmethod
     async def execute_task(
@@ -1077,14 +1244,14 @@ class InputTaskService:
     @staticmethod
     def compute_status_from_sessions(db_session: DBSession, task_id: UUID) -> str | None:
         """
-        Compute task status from all connected sessions.
+        Compute task status from all connected sessions and subtasks.
 
         Status computation logic (priority order):
         - If ANY session has status='error' → ERROR
-        - If ANY session has unanswered tool_questions → PENDING_INPUT
-        - If ANY session is active with interaction_status='running' → RUNNING
-        - If ALL sessions are completed → COMPLETED
-        - Otherwise → RUNNING (active but not streaming)
+        - If ANY session has unanswered tool_questions → BLOCKED
+        - If ANY session is active with interaction_status='running' → IN_PROGRESS
+        - If ALL sessions are completed AND all subtasks are completed → COMPLETED
+        - Otherwise → IN_PROGRESS (active but not streaming, or subtasks pending)
 
         Args:
             db_session: Database session
@@ -1118,7 +1285,15 @@ class InputTaskService:
 
             # Check if session is not completed
             if session.status != "completed":
-                all_completed = False
+                # Idle active sessions (not streaming, no pending work) don't block
+                # task completion — only actively running sessions do
+                is_idle = (
+                    session.status == "active"
+                    and session.interaction_status == ""
+                    and session.result_state != "needs_input"
+                )
+                if not is_idle:
+                    all_completed = False
             elif session.result_state == "needs_input":
                 # Session stream completed but agent is waiting for input
                 all_completed = False
@@ -1137,6 +1312,12 @@ class InputTaskService:
             if unanswered_count:
                 has_pending_input = True
 
+        # Check subtask completion — incomplete subtasks block task completion
+        if all_completed:
+            subtask_progress = InputTaskService.get_subtask_progress(db_session, task_id)
+            if subtask_progress["total"] > 0 and subtask_progress["completed"] < subtask_progress["total"]:
+                all_completed = False
+
         # Apply priority: error > blocked > in_progress > completed
         if has_error:
             return InputTaskStatus.ERROR
@@ -1147,7 +1328,7 @@ class InputTaskService:
         if all_completed:
             return InputTaskStatus.COMPLETED
 
-        # Default: session exists but not streaming
+        # Default: session exists but not streaming, or subtasks still pending
         return InputTaskStatus.IN_PROGRESS
 
     @staticmethod
@@ -1251,6 +1432,9 @@ class InputTaskService:
     async def handle_stream_completed(event_data: dict[str, Any]) -> None:
         """
         React to STREAM_COMPLETED events and compute task status from sessions.
+        When a task transitions to completed and has a source_session_id,
+        delivers a feedback message to the originating session so the parent
+        agent can continue its work.
 
         Args:
             event_data: Full event dict with type, model_id, meta, user_id, timestamp
@@ -1277,6 +1461,30 @@ class InputTaskService:
                 if updated_task:
                     logger.info(
                         f"Task {updated_task.id} status synced to {updated_task.status} (STREAM_COMPLETED)"
+                    )
+
+                # Notify source session when task completes
+                task = updated_task or db.get(InputTask, session.source_task_id)
+                if (
+                    task
+                    and task.status == InputTaskStatus.COMPLETED
+                    and task.source_session_id
+                    and task.auto_feedback
+                    and not task.feedback_delivered
+                ):
+                    short_code = task.short_code or str(task.id)[:8]
+                    agent_name = "Agent"
+                    if task.selected_agent_id:
+                        agent = db.get(Agent, task.selected_agent_id)
+                        if agent:
+                            agent_name = agent.name
+
+                    summary = (
+                        f"{short_code} completed by {agent_name}. "
+                        f"Read results with mcp__agent_task__get_details tool (task=\"{short_code}\")."
+                    )
+                    await InputTaskService.deliver_feedback_to_source(
+                        db, task, "completed", summary
                     )
 
         except Exception as e:
@@ -1323,6 +1531,13 @@ class InputTaskService:
                         error_message=error_message,
                     )
                     logger.info(f"Task {task.id} status synced to ERROR (STREAM_ERROR)")
+
+                    # Notify source session about the error
+                    if task.source_session_id and task.auto_feedback and not task.feedback_delivered:
+                        short_code = task.short_code or str(task.id)[:8]
+                        await InputTaskService.deliver_feedback_to_source(
+                            db, task, "error", f"{short_code} failed: {error_message}"
+                        )
 
         except Exception as e:
             logger.error(f"Error handling STREAM_ERROR for task sync: {e}", exc_info=True)
@@ -1414,25 +1629,6 @@ class InputTaskService:
                 task = updated_task or db.get(InputTask, session.source_task_id)
                 if not task:
                     return
-
-                # Hook: update collaboration subtask status if this session is a collaboration subtask
-                try:
-                    from app.services.agent_collaboration_service import AgentCollaborationService
-                    found, collab_complete = AgentCollaborationService.handle_subtask_state_update(
-                        session=db,
-                        subtask_session_id=UUID(session_id),
-                        state=state,
-                        summary=summary,
-                    )
-                    if found:
-                        logger.info(
-                            f"Collaboration subtask state updated for session {session_id}: "
-                            f"state={state}, collab_complete={collab_complete}"
-                        )
-                except Exception as collab_err:
-                    logger.warning(
-                        f"Collaboration subtask state update failed (non-critical): {collab_err}"
-                    )
 
                 # Deliver feedback if auto_feedback enabled and not already delivered
                 if task.auto_feedback and not task.feedback_delivered:
@@ -2244,7 +2440,10 @@ class InputTaskService:
             Dict with keys: total, completed, in_progress, blocked
         """
         subtasks = db_session.exec(
-            select(InputTask).where(InputTask.parent_task_id == task_id)
+            select(InputTask).where(
+                InputTask.parent_task_id == task_id,
+                InputTask.status != InputTaskStatus.ARCHIVED,
+            )
         ).all()
 
         total = len(subtasks)
@@ -2345,7 +2544,7 @@ class InputTaskService:
             user_workspace_id=parent.user_workspace_id,
             agent_initiated=True,
             auto_execute=bool(assigned_agent_id),
-            source_session_id=None,
+            source_session_id=data.source_session_id,
             title=data.title,
             priority=data.priority,
             team_id=parent.team_id,

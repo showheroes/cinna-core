@@ -33,7 +33,7 @@ System prompt construction for agent environments. Each agent environment operat
 ### Executing a Workflow (Conversation Mode)
 
 1. User (or scheduler) sends a message to a conversation mode session
-2. System prompt assembles: WORKFLOW_PROMPT.md + scripts/README.md + credentials/README.md + knowledge topics
+2. System prompt assembles: WORKFLOW_PROMPT.md + scripts/README.md + credentials/README.md + knowledge topics + environment context + session context + task context (if session is linked to a task) + handover instructions (if any handovers are configured)
 3. Conversation agent executes scripts, parses outputs (JSON, CSV), rephrases results in natural language
 4. Agent communicates results to user conversationally
 
@@ -120,6 +120,10 @@ Conversation Mode:
     + scripts/README.md (available tools)
     + credentials/README.md (available credentials)
     + knowledge/ topic names
+    + environment context
+    + session context (integration type, session ID, sender, etc.)
+    + task context (short_code, title, priority, team, delegation — if session has a linked task)
+    + handover instructions (from agent_handover_config.json — if any handovers configured)
     → Plain string prompt
 
 Sync Flow:
@@ -145,3 +149,4 @@ Sync Flow:
 - **[A2A Protocol](../../application/a2a_integration/a2a_protocol/a2a_protocol.md)** - Workflow prompt changes trigger A2A skills regeneration
 - **[Multi SDK](../agent_environment_core/multi_sdk.md)** - SDK adapter selection determines model and prompt format per mode
 - **[Knowledge Management](../../application/knowledge_sources/knowledge_sources.md)** - Knowledge topic folders listed in prompts; agents read files on-demand
+- **[Agent Handover](../agent_handover/agent_handover.md)** - The consolidated `handover_prompt` from `{workspace}/docs/agent_handover_config.json` is appended at the end of conversation mode prompts so agents know when and how to delegate work

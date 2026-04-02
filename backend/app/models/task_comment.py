@@ -53,6 +53,7 @@ class AgentTaskCommentCreate(SQLModel):
     comment_type: str = Field(default="message", max_length=30)
     # Workspace file paths to attach (agent-env resolves these to actual files)
     file_paths: list[str] | None = None
+    source_session_id: uuid.UUID | None = None  # Calling session UUID (set by MCP tool)
 
 
 # API response schema

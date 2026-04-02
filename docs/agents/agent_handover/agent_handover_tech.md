@@ -39,8 +39,8 @@
 
 **Runtime:**
 - `backend/app/env-templates/app_core_base/core/server/adapters/claude_code_sdk_adapter.py` — tool registration (conversation mode only), global session state with async lock, helper functions
-- `backend/app/env-templates/app_core_base/core/server/prompt_generator.py` — `_load_task_creation_prompt()`, system prompt injection
-- `backend/app/env-templates/app_core_base/core/server/tools/create_agent_task.py` — tool implementation
+- `backend/app/env-templates/app_core_base/core/server/prompt_generator.py` — `_load_handover_prompt()` reads the `handover_prompt` field from `{workspace}/docs/agent_handover_config.json`; appended to the conversation mode system prompt by `generate_conversation_mode_prompt()` after the task context section
+- `backend/app/env-templates/app_core_base/core/server/tools/agent_task_create_task.py` — create_agent_task tool implementation (split from the former single-file tool)
 
 **Workspace Storage:**
 - `{workspace}/docs/agent_handover_config.json` — runtime config: array of handovers (id, name, prompt) + consolidated `handover_prompt`
@@ -96,7 +96,7 @@ All routes are in `backend/app/api/routes/agents.py`:
 - `verify_agent_access(agent_id, user_id)` — checks agent exists and user has ownership; raises domain exceptions
 - `list_configs(agent_id, user_id)` — lists all handover configs for source agent with target agent names resolved
 - `create_config(agent_id, user_id, data)` — creates handover config; validates target agent access, prevents self-handover, syncs to agent-env
-- `update_config(agent_id, handover_id, user_id, data)` — updates prompt/enabled/auto_feedback fields, syncs to agent-env
+- `update_config(agent_id, handover_id, user_id, data)` — updates prompt/enabled fields, syncs to agent-env
 - `delete_config(agent_id, handover_id, user_id)` — deletes config permanently, syncs to agent-env
 - `generate_handover_prompt(agent_id, target_agent_id, user_id)` — validates both agents, delegates to `AIFunctionsService`
 

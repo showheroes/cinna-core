@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
@@ -194,6 +195,26 @@ class PromptGenerator:
                 return None
         else:
             logger.debug(f"credentials/README.md not found at {credentials_readme_path}")
+            return None
+
+    def _load_handover_prompt(self) -> Optional[str]:
+        """Load handover prompt from docs/agent_handover_config.json if exists."""
+        config_path = self.workspace_dir / "docs" / "agent_handover_config.json"
+        if not config_path.exists():
+            logger.debug(f"agent_handover_config.json not found at {config_path}")
+            return None
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            handover_prompt = config.get("handover_prompt", "")
+            if handover_prompt.strip():
+                logger.info(f"Loaded handover prompt ({len(handover_prompt)} chars)")
+                return handover_prompt.strip()
+            else:
+                logger.debug("handover_prompt is empty in agent_handover_config.json")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to load agent_handover_config.json: {e}")
             return None
 
     def _get_knowledge_topics(self) -> Optional[str]:
@@ -674,6 +695,12 @@ class PromptGenerator:
         if task_context_section:
             conversation_prompt_parts.append(task_context_section)
             logger.info("Included task context section in conversation mode prompt")
+
+        # Append handover prompt if agent has configured handovers
+        handover_prompt_content = self._load_handover_prompt()
+        if handover_prompt_content:
+            conversation_prompt_parts.append(handover_prompt_content)
+            logger.info("Included handover prompt in conversation mode prompt")
 
         # Combine all parts into a single system prompt string
         if conversation_prompt_parts:

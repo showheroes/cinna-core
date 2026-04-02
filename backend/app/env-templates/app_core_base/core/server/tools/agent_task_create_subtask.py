@@ -20,12 +20,21 @@ from ..sdk_manager import get_backend_session_id
 
 
 @tool(
-    "agent_task_create_subtask",
+    "create_subtask",
     "Create a subtask under the current task and delegate it to a connected team member. "
     "Only available in team context. Delegation is restricted to connected downstream nodes "
     "listed in your team context. "
     "Returns the subtask short code and parent task short code.",
-    {"title": str, "description": str, "assigned_to": str, "priority": str},
+    {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "What needs to be done (required)"},
+            "description": {"type": "string", "description": "Detailed context (optional)"},
+            "assigned_to": {"type": "string", "description": "Team member name to delegate to (optional)"},
+            "priority": {"type": "string", "description": "low/normal/high/urgent (optional, defaults to normal)"},
+        },
+        "required": ["title"],
+    },
 )
 async def agent_task_create_subtask(args: dict[str, Any]) -> dict[str, Any]:
     """

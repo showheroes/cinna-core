@@ -29,9 +29,6 @@ class AgentHandoverConfig(SQLModel, table=True):
     # Enable/disable without deleting
     enabled: bool = Field(default=True)
 
-    # Auto-trigger source agent when sub-task reports state
-    auto_feedback: bool = Field(default=True)
-
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -62,7 +59,6 @@ class HandoverConfigUpdate(SQLModel):
     """Request to update handover configuration."""
     handover_prompt: str | None = None
     enabled: bool | None = None
-    auto_feedback: bool | None = None
 
 
 class HandoverConfigPublic(SQLModel):
@@ -73,7 +69,6 @@ class HandoverConfigPublic(SQLModel):
     target_agent_name: str  # Included for UI display
     handover_prompt: str
     enabled: bool
-    auto_feedback: bool
     created_at: datetime
     updated_at: datetime
 

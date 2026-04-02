@@ -15,6 +15,7 @@ from app.models import (
     HandoverConfigPublic,
     HandoverConfigsPublic,
 )
+from app.services.handover_connection_sync_service import HandoverConnectionSyncService
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,6 @@ class AgentHandoverService:
             target_agent_name=target_agent.name if target_agent else "Unknown",
             handover_prompt=config.handover_prompt,
             enabled=config.enabled,
-            auto_feedback=config.auto_feedback,
             created_at=config.created_at,
             updated_at=config.updated_at,
         )
@@ -139,6 +139,11 @@ class AgentHandoverService:
         session.commit()
         session.refresh(config)
 
+        # Sync: create team connections for any teams containing both agents as nodes
+        HandoverConnectionSyncService.sync_connections_for_handover_created(
+            session, agent_id, data.target_agent_id, data.handover_prompt, enabled=True
+        )
+
         await AgentService.sync_agent_handover_config(session, agent_id)
 
         return AgentHandoverService._config_to_public(session, config)
@@ -168,9 +173,6 @@ class AgentHandoverService:
             config.handover_prompt = data.handover_prompt
         if data.enabled is not None:
             config.enabled = data.enabled
-        if data.auto_feedback is not None:
-            config.auto_feedback = data.auto_feedback
-
         config.updated_at = datetime.now(UTC)
         session.add(config)
         session.commit()
@@ -200,8 +202,16 @@ class AgentHandoverService:
         if not config or config.source_agent_id != agent_id:
             raise HandoverNotFoundError()
 
+        source_agent_id = config.source_agent_id
+        target_agent_id = config.target_agent_id
+
         session.delete(config)
         session.commit()
+
+        # Sync: remove team connections that correspond to this handover
+        HandoverConnectionSyncService.sync_connections_for_handover_deleted(
+            session, source_agent_id, target_agent_id
+        )
 
         await AgentService.sync_agent_handover_config(session, agent_id)
 

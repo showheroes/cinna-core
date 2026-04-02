@@ -83,12 +83,10 @@ export function AgentHandovers({ agent, readOnly = false }: AgentHandoversProps)
       handoverId,
       prompt,
       enabled,
-      auto_feedback,
     }: {
       handoverId: string
       prompt?: string
       enabled?: boolean
-      auto_feedback?: boolean
     }) =>
       AgentsService.updateHandoverConfig({
         id: agent.id,
@@ -96,7 +94,6 @@ export function AgentHandovers({ agent, readOnly = false }: AgentHandoversProps)
         requestBody: {
           handover_prompt: prompt,
           enabled,
-          auto_feedback,
         },
       }),
     onSuccess: (_, variables) => {
@@ -171,10 +168,6 @@ export function AgentHandovers({ agent, readOnly = false }: AgentHandoversProps)
 
   const handleToggleEnabled = (handoverId: string, enabled: boolean) => {
     updateHandoverMutation.mutate({ handoverId, enabled })
-  }
-
-  const handleToggleAutoFeedback = (handoverId: string, auto_feedback: boolean) => {
-    updateHandoverMutation.mutate({ handoverId, auto_feedback })
   }
 
   const handleDelete = (handoverId: string) => {
@@ -344,41 +337,6 @@ export function AgentHandovers({ agent, readOnly = false }: AgentHandoversProps)
                     </div>
                   )}
 
-                  {/* Auto-feedback toggle */}
-                  {!readOnly && (
-                    <div className="flex items-center justify-between pt-2 border-t mt-2">
-                      <div>
-                        <p className="text-sm font-medium">Auto-respond to feedback</p>
-                        <p className="text-xs text-muted-foreground">
-                          Automatically trigger source agent when sub-task reports state
-                        </p>
-                      </div>
-                      <label className="flex cursor-pointer select-none items-center">
-                        <div className="relative">
-                          <input
-                            type="checkbox"
-                            checked={handover.auto_feedback}
-                            onChange={(e) =>
-                              handleToggleAutoFeedback(handover.id, e.target.checked)
-                            }
-                            className="sr-only"
-                          />
-                          <div
-                            className={`block h-6 w-11 rounded-full transition-colors ${
-                              handover.auto_feedback
-                                ? "bg-emerald-500"
-                                : "bg-gray-300 dark:bg-gray-600"
-                            }`}
-                          ></div>
-                          <div
-                            className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                              handover.auto_feedback ? "translate-x-5" : ""
-                            }`}
-                          ></div>
-                        </div>
-                      </label>
-                    </div>
-                  )}
                 </>
               )}
             </div>

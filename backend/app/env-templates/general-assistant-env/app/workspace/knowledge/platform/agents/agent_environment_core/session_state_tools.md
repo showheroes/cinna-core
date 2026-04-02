@@ -4,61 +4,64 @@
 
 Two MCP tools running inside agent Docker containers that implement bi-directional communication between a target agent (executing a task) and the source agent (that created the task via handover). Available only in **conversation mode**.
 
-- **`update_session_state`** — called by the target agent to declare its session outcome
-- **`respond_to_task`** — called by the source agent to reply to a sub-task clarification request
+- **`update_status`** — called by the target agent to declare task outcome (edge cases only; standard completion is automatic)
+- **`add_comment`** — called by agents to post findings, results, and replies on tasks
 
 ## How They Work
 
-### update_session_state
+### update_status
 
-The target agent calls this tool when it finishes work, needs clarification, or encounters an unrecoverable error.
+The target agent calls this tool for edge-case status updates: `blocked` (waiting for external input), explicit `completed` (before session ends), or `cancelled`. Standard `in_progress` and `completed` transitions are handled automatically by the backend from session lifecycle events.
 
-1. Agent invokes `mcp__task__update_session_state` with a `state` and `summary`
-2. Tool makes authenticated `POST /api/v1/agents/sessions/update-state` with the current backend session ID
-3. Backend stores `result_state` and `result_summary` on the Session model
-4. Backend emits `SESSION_STATE_UPDATED` event — two handlers fire:
-   - `ActivityService.handle_session_state_updated()` → creates an offline activity notification for the user
-   - `InputTaskService.handle_session_state_updated()` → if `auto_feedback=true`, delivers a feedback message to the source session
-5. If the source session is idle when feedback arrives, the source agent is automatically triggered to process it
+**Parameters:** `status` (required), `reason` (optional), `task` (optional short code — defaults to current task)
 
-**States:**
+1. Agent invokes `mcp__agent_task__update_status` with `status`, optional `reason`, optional `task` short code
+2. If `task` short code provided: tool first calls `GET /api/v1/agent/tasks/by-code/{short_code}` to resolve the UUID, then posts to `POST /api/v1/agent/tasks/{task_id}/status`
+3. If no `task` provided (default): tool posts to `POST /api/v1/agent/tasks/current/status` with `source_session_id`; backend resolves the current task from the session
+4. Backend validates the status transition and updates the task
+5. Backend creates a `TaskStatusHistory` record and system comment
+6. Backend emits `TASK_STATUS_CHANGED` event
 
-| State | Meaning | Source Agent Sees |
-|-------|---------|------------------|
-| `completed` | Task finished successfully | `[Sub-task completed] {summary}` |
-| `needs_input` | Agent needs clarification from source | `[Sub-task needs input] {summary}` |
-| `error` | Unrecoverable failure | `[Sub-task error] {summary}` |
+**Edge-case statuses:**
 
-### respond_to_task
+| Status | When to Use |
+|--------|-------------|
+| `blocked` | Agent is waiting for external input or resources |
+| `completed` | Agent wants to mark done before session naturally ends |
+| `cancelled` | Task is no longer viable |
 
-The source agent calls this tool after receiving a `[Sub-task needs input]` feedback message.
+### add_comment
 
-1. Source agent invokes `mcp__task__respond_to_task` with `task_id` and `message`
-2. Tool makes authenticated `POST /api/v1/agents/tasks/respond`
-3. Backend verifies the source session owns the task, resets `result_state` to null (session back in progress)
-4. Backend sends `message` to the target session via `SessionService.send_session_message()`
-5. Target agent continues processing with the provided answer
+Agents use this tool to post findings, results, and progress as comments on their task. This is the primary reporting mechanism for task work.
+
+**Parameters:** `content` (required), `files` (optional — workspace file paths to attach), `task` (optional short code — defaults to current task)
+
+1. Agent invokes `mcp__agent_task__add_comment` with `content`, optional `files` (workspace paths), optional `task` short code
+2. If `task` short code provided: tool first calls `GET /api/v1/agent/tasks/by-code/{short_code}` to resolve the UUID, then posts to `POST /api/v1/agent/tasks/{task_id}/comment`
+3. If no `task` provided (default): tool posts to `POST /api/v1/agent/tasks/current/comment` with `source_session_id`; backend resolves the current task from the session
+4. Backend creates a `TaskComment` with `comment_type="agent"`, optionally attaching workspace files
+5. Comment appears in the task's comment thread visible to the user
 
 ## Registration
 
-- Both tools registered in the `task` MCP server alongside `create_agent_task`
+- Both tools registered in the `agent_task` MCP server alongside `create_task`, `create_subtask`, `get_details`, `list_tasks`
 - Registered in the Claude Code adapter only when `mode == "conversation"`
-- Full tool names: `mcp__task__update_session_state`, `mcp__task__respond_to_task`
-- Both listed in backend's pre-allowed tools — agents can invoke without per-call user approval
+- Full tool names: `mcp__agent_task__update_status`, `mcp__agent_task__add_comment`
+- All listed in backend's pre-allowed tools — agents can invoke without per-call user approval
 
 ## System Prompt Integration
 
-### Target Agent Prompt (all conversation-mode sessions)
+### Task Context Section (all conversation-mode sessions with linked task)
 
-`prompt_generator.py` appends a "Session State Reporting" section to every conversation-mode system prompt:
-- Instructs agent to call `update_session_state` when finished, needing clarification, or on unrecoverable error
-- Explains the three valid states and when to use each
+`prompt_generator.py:build_task_context_section()` appends task reporting instructions to every conversation-mode session that has a linked task:
+- Instructs agent to use `mcp__agent_task__add_comment` to post findings and results
+- Explains that `mcp__agent_task__update_status` is for edge cases only (blocked, explicit completed, cancelled)
+- Standard completion is automatic when the session ends
 
 ### Source Agent Prompt (agents with handover configs)
 
 `agent_service.py:sync_agent_handover_config()` appends a "Handling Sub-Task Feedback" section:
-- Describes the three message prefixes the source agent will receive
-- Instructs use of `respond_to_task` when a sub-task reports `needs_input`
+- Describes the notification messages the source agent receives when subtasks complete, need input, or error
 - Explains auto-triggering behavior (source agent may be awakened automatically)
 
 ## Authentication
@@ -70,25 +73,29 @@ Same bearer token mechanism as other agent-env → backend calls:
 ## File References
 
 - **Tool implementations**:
-  - `backend/app/env-templates/app_core_base/core/server/tools/update_session_state.py`
-  - `backend/app/env-templates/app_core_base/core/server/tools/respond_to_task.py`
+  - `backend/app/env-templates/app_core_base/core/server/tools/agent_task_update_status.py`
+  - `backend/app/env-templates/app_core_base/core/server/tools/agent_task_add_comment.py`
+- **MCP bridge (OpenCode)**: `backend/app/env-templates/app_core_base/core/server/tools/mcp_bridge/task_server.py`
 - **Adapter registration**: `backend/app/env-templates/app_core_base/core/server/adapters/claude_code_sdk_adapter.py`
-- **Target agent prompt injection**: `backend/app/env-templates/app_core_base/core/server/prompt_generator.py`
+- **Task context prompt injection**: `backend/app/env-templates/app_core_base/core/server/prompt_generator.py` — `build_task_context_section()`
 - **Source agent prompt injection**: `backend/app/services/agent_service.py` — `sync_agent_handover_config()`
 - **Backend endpoints**:
-  - `backend/app/api/routes/agents.py` — `POST /api/v1/agents/sessions/update-state`
-  - `backend/app/api/routes/agents.py` — `POST /api/v1/agents/tasks/respond`
-- **Event handlers**:
-  - `backend/app/services/input_task_service.py` — `handle_session_state_updated()`, `deliver_feedback_to_source()`
+  - `backend/app/api/routes/task_agent_api.py` — `GET /api/v1/agent/tasks/by-code/{short_code}` (short code → UUID resolution)
+  - `backend/app/api/routes/task_agent_api.py` — `POST /api/v1/agent/tasks/current/status` (session-resolved variant)
+  - `backend/app/api/routes/task_agent_api.py` — `POST /api/v1/agent/tasks/{task_id}/status` (explicit task_id variant)
+  - `backend/app/api/routes/task_agent_api.py` — `POST /api/v1/agent/tasks/current/comment` (session-resolved variant)
+  - `backend/app/api/routes/task_agent_api.py` — `POST /api/v1/agent/tasks/{task_id}/comment` (explicit task_id variant)
+- **Session event handlers**:
+  - `backend/app/services/input_task_service.py` — `handle_session_completed()`, `handle_session_error()`
   - `backend/app/services/activity_service.py` — `handle_session_state_updated()`
 - **Pre-allowed list**: `backend/app/services/message_service.py`
 
 ## Related Docs
 
-- [Input Tasks](../../application/input_tasks/input_tasks.md) — feature documentation: task lifecycle, bi-directional feedback flows, auto-feedback rules
-- [Input Tasks Tech](../../application/input_tasks/input_tasks_tech.md) — backend services, session model additions, event handler registration
+- [Input Tasks](../../application/input_tasks/input_tasks.md) — feature documentation: task lifecycle, subtask delegation, comments
+- [Input Tasks Tech](../../application/input_tasks/input_tasks_tech.md) — backend services, task agent API, session event handlers
 - [Create Agent Task Tool](create_agent_task_tool.md) — sibling tool: creates the task that these tools later report on
-- [Agent Handover](../agent_handover/agent_handover.md) — feature that configures auto_feedback per handover target
+- [Agent Handover](../agent_handover/agent_handover.md) — feature that configures handover targets and prompts
 - [Agent Environment Core](agent_environment_core.md) — parent feature: server running inside Docker containers
 
 ---

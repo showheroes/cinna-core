@@ -20,11 +20,17 @@ from ..sdk_manager import get_backend_session_id
 
 
 @tool(
-    "agent_task_get_details",
+    "get_details",
     "Get full details of a task: title, description, status, priority, assigned agent, "
     "recent comments (last 10), subtasks list, and subtask progress. "
     "Defaults to the current task if 'task' is not specified.",
-    {"task": str},
+    {
+        "type": "object",
+        "properties": {
+            "task": {"type": "string", "description": "Short code of target task (optional, defaults to current task)"},
+        },
+        "required": [],
+    },
 )
 async def agent_task_get_details(args: dict[str, Any]) -> dict[str, Any]:
     """
@@ -144,7 +150,8 @@ async def agent_task_get_details(args: dict[str, Any]) -> dict[str, Any]:
                     has_files = c.get("has_files", False)
                     comment_content = c.get("content", "")
                     file_indicator = " [+files]" if has_files else ""
-                    lines.append(f"\n  **{author}** ({created_at}){file_indicator}:\n  {comment_content[:300]}")
+                    truncated = comment_content[:3000] + ("... [truncated]" if len(comment_content) > 3000 else "")
+                    lines.append(f"\n  **{author}** ({created_at}){file_indicator}:\n  {truncated}")
             else:
                 lines.append("\n**Recent Comments**: None")
 

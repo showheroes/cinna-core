@@ -388,18 +388,6 @@ from .user_dashboard import (
     UserDashboardBlockPromptActionUpdate,
     UserDashboardBlockPromptActionPublic,
 )
-from .agent_collaboration import (
-    AgentCollaboration,
-    CollaborationSubtask,
-    CollaborationSubtaskCreate,
-    CollaborationSubtaskPublic,
-    AgentCollaborationCreate,
-    AgentCollaborationPublic,
-    PostFindingRequest,
-    PostFindingResponse,
-    CreateCollaborationRequest,
-    CreateCollaborationResponse,
-)
 from .agentic_team import (
     AgenticTeam,
     AgenticTeamCreate,
@@ -772,17 +760,6 @@ __all__ = [
     "UserDashboardBlockPromptActionCreate",
     "UserDashboardBlockPromptActionUpdate",
     "UserDashboardBlockPromptActionPublic",
-    # Agent Collaboration
-    "AgentCollaboration",
-    "CollaborationSubtask",
-    "CollaborationSubtaskCreate",
-    "CollaborationSubtaskPublic",
-    "AgentCollaborationCreate",
-    "AgentCollaborationPublic",
-    "PostFindingRequest",
-    "PostFindingResponse",
-    "CreateCollaborationRequest",
-    "CreateCollaborationResponse",
     # AgenticTeams
     "AgenticTeam",
     "AgenticTeamCreate",

@@ -9,21 +9,30 @@ The caller authenticates as the task owner using their JWT; the agent identity i
 derived from the task record itself.
 
 Routes:
-  POST  /agent/tasks/{task_id}/comment    — Agent posts comment (with optional files)
-  POST  /agent/tasks/{task_id}/status     — Agent updates task status (edge cases)
-  POST  /agent/tasks/{task_id}/subtask    — Agent creates subtask (team context)
-  GET   /agent/tasks/my-tasks             — Agent lists assigned tasks
-  GET   /agent/tasks/{task_id}/details    — Agent gets task detail
+  POST  /agent/tasks/create              — Agent creates a new standalone task
+  GET   /agent/tasks/by-code/{code}      — Resolve short code to task_id UUID
+  POST  /agent/tasks/current/comment     — Agent posts comment (session-resolved task)
+  POST  /agent/tasks/current/status      — Agent updates status (session-resolved task)
+  GET   /agent/tasks/current/details     — Agent gets details (session-resolved task)
+  POST  /agent/tasks/current/subtask     — Agent creates subtask under its current task
+  POST  /agent/tasks/{task_id}/comment   — Agent posts comment (explicit task_id)
+  POST  /agent/tasks/{task_id}/status    — Agent updates task status (explicit task_id)
+  POST  /agent/tasks/{task_id}/subtask   — Agent creates subtask (explicit task_id)
+  GET   /agent/tasks/my-tasks            — Agent lists assigned tasks
+  GET   /agent/tasks/{task_id}/details   — Agent gets task detail (explicit task_id)
 """
 import logging
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
+    InputTask,
     InputTasksPublicExtended,
+    AgentTaskCreate,
     AgentTaskStatusUpdate,
     AgentSubtaskCreate,
     AgentTaskOperationResponse,
@@ -45,6 +54,191 @@ router = APIRouter(tags=["agent-tasks"])
 def _handle_error(e: InputTaskError) -> None:
     """Convert service exceptions to HTTP exceptions."""
     raise HTTPException(status_code=e.status_code, detail=e.message)
+
+
+def _resolve_task_from_session(
+    db_session, session_id: uuid.UUID,
+) -> InputTask:
+    """Resolve the current task linked to a session. Raises ValidationError if not found."""
+    task = db_session.exec(
+        select(InputTask).where(InputTask.session_id == session_id)
+    ).first()
+    if not task:
+        raise ValidationError("No task linked to this session")
+    return task
+
+
+@router.post("/agent/tasks/create", response_model=AgentTaskOperationResponse)
+async def agent_create_task(
+    *,
+    db_session: SessionDep,
+    current_user: CurrentUser,
+    data: AgentTaskCreate,
+) -> Any:
+    """
+    Agent creates a new standalone task.
+
+    If assigned_to is provided, resolves agent by name and auto-executes.
+    For team agents, the task inherits team context from the calling session's task.
+
+    Called by the mcp__agent_task__create_task MCP tool.
+    """
+    try:
+        task, resolved_name = await InputTaskService.create_task_from_agent(
+            db_session=db_session,
+            user_id=current_user.id,
+            data=data,
+        )
+        return AgentTaskOperationResponse(
+            success=True,
+            task=task.short_code,
+            assigned_to=resolved_name,
+            message=f"Task {task.short_code} created",
+        )
+    except InputTaskError as e:
+        _handle_error(e)
+
+
+@router.get("/agent/tasks/by-code/{short_code}")
+def agent_resolve_task_by_code(
+    *,
+    db_session: SessionDep,
+    current_user: CurrentUser,
+    short_code: str,
+) -> Any:
+    """
+    Resolve a task short code (e.g. HR-17) to a task_id UUID.
+
+    Called by MCP tools that accept a short_code param and need the UUID
+    for subsequent API calls.
+    """
+    try:
+        task = InputTaskService.get_task_by_short_code(
+            db_session=db_session,
+            short_code=short_code,
+            user_id=current_user.id,
+        )
+        return {"task_id": str(task.id), "short_code": task.short_code}
+    except InputTaskError as e:
+        _handle_error(e)
+
+
+@router.post("/agent/tasks/current/comment", response_model=TaskCommentPublic)
+async def agent_add_comment_current(
+    *,
+    db_session: SessionDep,
+    current_user: CurrentUser,
+    data: AgentTaskCommentCreate,
+) -> Any:
+    """
+    Agent posts a comment on its current task (resolved from session).
+
+    Called by the mcp__agent_task__add_comment MCP tool when no task short code is specified.
+    """
+    try:
+        if not data.source_session_id:
+            raise ValidationError("source_session_id is required")
+        task = _resolve_task_from_session(db_session, data.source_session_id)
+        comment = TaskCommentService.add_comment_from_agent(
+            db_session=db_session,
+            task_id=task.id,
+            agent_id=task.selected_agent_id,
+            data=data,
+        )
+        return TaskCommentService._to_public(db_session, comment)
+    except InputTaskError as e:
+        _handle_error(e)
+
+
+@router.post("/agent/tasks/current/status", response_model=AgentTaskOperationResponse)
+async def agent_update_status_current(
+    *,
+    db_session: SessionDep,
+    current_user: CurrentUser,
+    data: AgentTaskStatusUpdate,
+) -> Any:
+    """
+    Agent updates status of its current task (resolved from session).
+
+    Called by the mcp__agent_task__update_status MCP tool when no task short code is specified.
+    """
+    try:
+        if not data.source_session_id:
+            raise ValidationError("source_session_id is required")
+        task = _resolve_task_from_session(db_session, data.source_session_id)
+        if not task.selected_agent_id:
+            raise ValidationError("Current task has no assigned agent")
+        updated = InputTaskService.update_task_status_from_agent(
+            db_session=db_session,
+            task_id=task.id,
+            agent_id=task.selected_agent_id,
+            data=data,
+        )
+        return AgentTaskOperationResponse(
+            success=True,
+            task=updated.short_code,
+            message=f"Status updated to {data.status}",
+        )
+    except InputTaskError as e:
+        _handle_error(e)
+
+
+@router.get("/agent/tasks/current/details")
+def agent_get_task_details_current(
+    db_session: SessionDep,
+    current_user: CurrentUser,
+    source_session_id: uuid.UUID,
+) -> Any:
+    """
+    Agent gets details of its current task (resolved from session).
+
+    Called by the mcp__agent_task__get_details MCP tool when no task short code is specified.
+    """
+    try:
+        task = _resolve_task_from_session(db_session, source_session_id)
+        return InputTaskService.get_agent_task_details(
+            db_session=db_session,
+            task_id=task.id,
+            user_id=current_user.id,
+        )
+    except InputTaskError as e:
+        _handle_error(e)
+
+
+@router.post("/agent/tasks/current/subtask", response_model=AgentTaskOperationResponse)
+async def agent_create_subtask_current(
+    *,
+    db_session: SessionDep,
+    current_user: CurrentUser,
+    data: AgentSubtaskCreate,
+) -> Any:
+    """
+    Agent creates a subtask under its current task (resolved from session).
+
+    Called by the mcp__agent_task__create_subtask MCP tool.
+    """
+    try:
+        if not data.source_session_id:
+            raise ValidationError("source_session_id is required")
+        current_task = _resolve_task_from_session(db_session, data.source_session_id)
+        if not current_task.selected_agent_id:
+            raise ValidationError("Current task has no assigned agent")
+
+        subtask = InputTaskService.create_subtask(
+            db_session=db_session,
+            parent_task_id=current_task.id,
+            creating_agent_id=current_task.selected_agent_id,
+            data=data,
+        )
+        return AgentTaskOperationResponse(
+            success=True,
+            task=subtask.short_code,
+            parent_task=current_task.short_code,
+            assigned_to=data.assigned_to,
+            message=f"Subtask {subtask.short_code} created under {current_task.short_code}",
+        )
+    except InputTaskError as e:
+        _handle_error(e)
 
 
 @router.post("/agent/tasks/{task_id}/comment", response_model=TaskCommentPublic)
@@ -151,7 +345,9 @@ async def agent_create_subtask(
         return AgentTaskOperationResponse(
             success=True,
             task=subtask.short_code,
-            message=f"Subtask {subtask.short_code} created",
+            parent_task=task.short_code,
+            assigned_to=data.assigned_to,
+            message=f"Subtask {subtask.short_code} created under {task.short_code}",
         )
     except InputTaskError as e:
         _handle_error(e)

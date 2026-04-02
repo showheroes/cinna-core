@@ -521,8 +521,9 @@ def get_details(task: str = "") -> str:
                     has_files = c.get("has_files", False)
                     comment_content = c.get("content", "")
                     file_indicator = " [+files]" if has_files else ""
+                    truncated = comment_content[:3000] + ("... [truncated]" if len(comment_content) > 3000 else "")
                     lines.append(
-                        f"\n  **{author}** ({created_at}){file_indicator}:\n  {comment_content[:300]}"
+                        f"\n  **{author}** ({created_at}){file_indicator}:\n  {truncated}"
                     )
             else:
                 lines.append("\n**Recent Comments**: None")

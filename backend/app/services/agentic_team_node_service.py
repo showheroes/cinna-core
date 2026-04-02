@@ -1,7 +1,6 @@
 from uuid import UUID
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.models.agent import Agent
@@ -13,6 +12,36 @@ from app.models.agentic_team import (
     AgenticTeamNodePositionUpdate,
 )
 from app.services.agentic_team_service import AgenticTeamService
+from app.services.handover_connection_sync_service import HandoverConnectionSyncService
+
+
+class TeamNodeError(Exception):
+    """Base exception for team node service errors."""
+
+    def __init__(self, message: str, status_code: int = 400):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
+
+
+class NodeNotFoundError(TeamNodeError):
+    def __init__(self, message: str = "Node not found"):
+        super().__init__(message, status_code=404)
+
+
+class AgentNotFoundError(TeamNodeError):
+    def __init__(self, message: str = "Agent not found"):
+        super().__init__(message, status_code=404)
+
+
+class DuplicateNodeError(TeamNodeError):
+    def __init__(self, message: str = "This agent is already in the team"):
+        super().__init__(message, status_code=409)
+
+
+class InvalidNodeError(TeamNodeError):
+    def __init__(self, message: str = "One or more node IDs do not belong to this team"):
+        super().__init__(message, status_code=400)
 
 
 class AgenticTeamNodeService:
@@ -28,7 +57,7 @@ class AgenticTeamNodeService:
         AgenticTeamService.get_team(session, team_id, user_id)  # raises 404 if bad
         node = session.get(AgenticTeamNode, node_id)
         if not node or node.team_id != team_id:
-            raise HTTPException(status_code=404, detail="Node not found")
+            raise NodeNotFoundError()
         return node
 
     @staticmethod
@@ -49,7 +78,7 @@ class AgenticTeamNodeService:
         # 2. Verify agent ownership
         agent = session.get(Agent, data.agent_id)
         if not agent or agent.owner_id != user_id:
-            raise HTTPException(status_code=404, detail="Agent not found")
+            raise AgentNotFoundError()
 
         # 3. Prevent duplicate agent in same team
         duplicate_stmt = select(AgenticTeamNode).where(
@@ -57,9 +86,7 @@ class AgenticTeamNodeService:
             AgenticTeamNode.agent_id == data.agent_id,
         )
         if session.exec(duplicate_stmt).first():
-            raise HTTPException(
-                status_code=409, detail="This agent is already in the team"
-            )
+            raise DuplicateNodeError()
 
         # 4. If setting as lead: unmark any existing lead in this team
         if data.is_lead:
@@ -85,6 +112,10 @@ class AgenticTeamNodeService:
         session.add(node)
         session.commit()
         session.refresh(node)
+
+        # 6. Auto-create connections from existing handover configs
+        HandoverConnectionSyncService.sync_connections_for_node_added(session, node, team_id)
+
         return node
 
     @staticmethod
@@ -145,10 +176,7 @@ class AgenticTeamNodeService:
         # 3. Validate all IDs belong to this team
         for pos in positions:
             if pos.id not in valid_ids:
-                raise HTTPException(
-                    status_code=400,
-                    detail="One or more node IDs do not belong to this team",
-                )
+                raise InvalidNodeError()
 
         # 4. Build lookup and update positions
         node_map = {node.id: node for node in team_nodes}

@@ -188,7 +188,7 @@ MSG_ASSISTANT_TOOL_USE_MCP = AssistantMessage(
     content=[
         ToolUseBlock(
             id="toolu_mcp_001",
-            name="mcp__task__create_agent_task",
+            name="mcp__agent_task__create_task",
             input={"task": "Process invoices", "agent_id": "abc-123"},
         )
     ],
@@ -361,7 +361,7 @@ class TestAssistantMessage:
     def test_mcp_tool_name_preserved(self, transformer):
         """MCP tool names (already lowercase) should pass through."""
         result = transformer.translate(MSG_ASSISTANT_TOOL_USE_MCP, SESSION_ID)
-        assert result.tool_name == "mcp__task__create_agent_task"
+        assert result.tool_name == "mcp__agent_task__create_task"
 
     def test_tool_result_block_skipped(self, transformer):
         """ToolResultBlock should be skipped (produces empty ASSISTANT)."""
@@ -771,10 +771,10 @@ class TestToolNameNormalization:
             content=[
                 ToolUseBlock(
                     id="t1",
-                    name="mcp__task__create_agent_task",
+                    name="mcp__agent_task__create_task",
                     input={"task": "test"},
                 )
             ],
         )
         result = transformer.translate(msg, SESSION_ID)
-        assert result.tool_name == "mcp__task__create_agent_task"
+        assert result.tool_name == "mcp__agent_task__create_task"

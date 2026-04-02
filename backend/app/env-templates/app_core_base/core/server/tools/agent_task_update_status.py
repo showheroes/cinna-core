@@ -28,12 +28,20 @@ ALLOWED_STATUSES = frozenset(["blocked", "completed", "cancelled"])
 
 
 @tool(
-    "agent_task_update_status",
+    "update_status",
     "Update a task's status. Use ONLY for edge cases: 'blocked' (waiting for external input), "
     "'completed' (explicit early completion), or 'cancelled' (task not actionable). "
     "Standard transitions (in_progress, auto-complete on session end) are handled automatically. "
     "Defaults to the current task if 'task' is not specified.",
-    {"status": str, "reason": str, "task": str},
+    {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "description": "New status — blocked/completed/cancelled (required)"},
+            "reason": {"type": "string", "description": "Explanation for the change (optional)"},
+            "task": {"type": "string", "description": "Short code of target task (optional, defaults to current task)"},
+        },
+        "required": ["status"],
+    },
 )
 async def agent_task_update_status(args: dict[str, Any]) -> dict[str, Any]:
     """

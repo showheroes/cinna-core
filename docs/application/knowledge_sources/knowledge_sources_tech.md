@@ -131,7 +131,7 @@ Injected into the agent container's `.env` file by `backend/app/services/environ
 
 ## Pre-Allowed Tools
 
-`backend/app/services/message_service.py` - `mcp__knowledge__query_integration_knowledge` is in the pre-allowed tools list, meaning agents can invoke it without per-call user approval. Other pre-allowed tools: `mcp__task__create_agent_task`, `mcp__task__update_session_state`, `mcp__task__respond_to_task`.
+`backend/app/services/message_service.py` - `mcp__knowledge__query_integration_knowledge` is in the pre-allowed tools list, meaning agents can invoke it without per-call user approval. Other pre-allowed tools: `mcp__agent_task__add_comment`, `mcp__agent_task__update_status`, `mcp__agent_task__create_task`, `mcp__agent_task__create_subtask`, `mcp__agent_task__get_details`, `mcp__agent_task__list_tasks`.
 
 ## API Endpoints
 

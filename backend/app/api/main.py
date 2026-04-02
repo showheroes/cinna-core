@@ -8,7 +8,6 @@ from app.api.routes import (
     agent_shares,
     agentic_teams,
     ai_credentials,
-    collaborations,
     credentials,
     credential_shares,
     email_integration,
@@ -59,7 +58,6 @@ api_router.include_router(utils.router)
 api_router.include_router(items.router)
 api_router.include_router(agents.router)
 api_router.include_router(agentic_teams.router)
-api_router.include_router(collaborations.router)
 api_router.include_router(agent_shares.router)
 api_router.include_router(access_tokens.router)
 api_router.include_router(guest_shares.router)

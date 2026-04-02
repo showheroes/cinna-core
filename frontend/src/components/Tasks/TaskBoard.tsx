@@ -1,24 +1,14 @@
-import { useState, useCallback } from "react"
+import { useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { Plus, Bot, Search, X, ClipboardList } from "lucide-react"
+import { Bot, ClipboardList } from "lucide-react"
 
 import { TasksService } from "@/client"
 import type { InputTaskPublicExtended } from "@/client"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { TaskShortCodeBadge } from "@/components/Tasks/TaskShortCodeBadge"
 import { TaskPriorityBadge } from "@/components/Tasks/TaskPriorityBadge"
 import { SubtaskProgressChip } from "@/components/Tasks/SubtaskProgressChip"
-import { CreateTaskDialog } from "@/components/Tasks/CreateTaskDialog"
 import { cn } from "@/lib/utils"
 import useWorkspace from "@/hooks/useWorkspace"
 import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
@@ -27,23 +17,19 @@ interface TaskBoardProps {
   teamId?: string
 }
 
-const INBOX_STATUSES = ["new", "refining"]
+const OPEN_STATUSES = ["new", "refining", "open"]
 const BOARD_COLUMNS = [
-  { key: "open", label: "Open" },
-  { key: "in_progress", label: "In Progress" },
-  { key: "blocked", label: "Blocked" },
-  { key: "completed", label: "Completed" },
+  { key: "open", label: "Open", statuses: OPEN_STATUSES },
+  { key: "in_progress", label: "In Progress", statuses: ["in_progress"] },
+  { key: "blocked", label: "Blocked", statuses: ["blocked"] },
+  { key: "completed", label: "Completed", statuses: ["completed"] },
 ] as const
 
 function TaskCard({ task }: { task: InputTaskPublicExtended }) {
   const navigate = useNavigate()
 
   const handleClick = () => {
-    if (task.short_code) {
-      navigate({ to: "/tasks/$shortCode", params: { shortCode: task.short_code } })
-    } else {
-      navigate({ to: "/task/$taskId", params: { taskId: task.id } })
-    }
+    navigate({ to: "/task/$taskId", params: { taskId: task.short_code || task.id } })
   }
 
   const displayTitle = task.title || task.current_description
@@ -164,11 +150,7 @@ function BoardColumn({
 
 export function TaskBoard({ teamId }: TaskBoardProps) {
   const { activeWorkspaceId } = useWorkspace()
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [priorityFilter, setPriorityFilter] = useState<string>("all")
 
   const { data, isLoading } = useQuery({
     queryKey: ["tasks", "board", activeWorkspaceId, teamId],
@@ -197,78 +179,17 @@ export function TaskBoard({ teamId }: TaskBoardProps) {
     handleTaskBoardEvent,
   )
 
-  const handleCreated = (taskId: string) => {
-    navigate({ to: "/task/$taskId", params: { taskId } })
-  }
-
   const allTasks = data?.data ?? []
 
-  // Apply filters
-  const filteredTasks = allTasks.filter((task) => {
-    if (priorityFilter !== "all" && task.priority !== priorityFilter) return false
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      const titleMatch = (task.title || task.current_description || "").toLowerCase().includes(query)
-      const codeMatch = (task.short_code || "").toLowerCase().includes(query)
-      if (!titleMatch && !codeMatch) return false
-    }
-    return true
-  })
-
-  const inboxTasks = filteredTasks.filter((t) => INBOX_STATUSES.includes(t.status))
-  const tasksByStatus = Object.fromEntries(
+  const tasksByColumn = Object.fromEntries(
     BOARD_COLUMNS.map((col) => [
       col.key,
-      filteredTasks.filter((t) => t.status === col.key),
+      allTasks.filter((t) => col.statuses.includes(t.status)),
     ])
   )
 
-  const clearFilters = () => {
-    setSearchQuery("")
-    setPriorityFilter("all")
-  }
-
   return (
     <div className="flex flex-col gap-4 h-full">
-      {/* Filter bar */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[160px] max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            placeholder="Search tasks..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-8 text-sm"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-          <SelectTrigger className="h-8 w-[120px] text-sm">
-            <SelectValue placeholder="Priority" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All priorities</SelectItem>
-            <SelectItem value="urgent">Urgent</SelectItem>
-            <SelectItem value="high">High</SelectItem>
-            <SelectItem value="normal">Normal</SelectItem>
-            <SelectItem value="low">Low</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="ml-auto">
-          <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
-            New Task
-          </Button>
-        </div>
-      </div>
-
       {/* Loading skeleton */}
       {isLoading ? (
         <div className={cn("grid gap-4 flex-1", "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4")}>
@@ -288,59 +209,19 @@ export function TaskBoard({ teamId }: TaskBoardProps) {
               Create your first task to get started
             </p>
           </div>
-          <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
-            Create Task
-          </Button>
-        </div>
-      ) : filteredTasks.length === 0 ? (
-        /* Filtered empty state */
-        <div className="flex flex-col items-center justify-center py-16 gap-3 text-center flex-1">
-          <p className="text-sm font-medium">No tasks match your filters</p>
-          <Button variant="outline" size="sm" onClick={clearFilters}>
-            Clear filters
-          </Button>
         </div>
       ) : (
-        <>
-          {/* Inbox section (new + refining tasks) */}
-          {inboxTasks.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Inbox
-                </span>
-                <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full tabular-nums">
-                  {inboxTasks.length}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                {inboxTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Kanban board */}
-          <div className={cn("grid gap-4 flex-1", "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4")}>
-            {BOARD_COLUMNS.map((col) => (
-              <BoardColumn
-                key={col.key}
-                label={col.label}
-                tasks={tasksByStatus[col.key] ?? []}
-              />
-            ))}
-          </div>
-        </>
+        <div className={cn("grid gap-4 flex-1", "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4")}>
+          {BOARD_COLUMNS.map((col) => (
+            <BoardColumn
+              key={col.key}
+              label={col.label}
+              tasks={tasksByColumn[col.key] ?? []}
+            />
+          ))}
+        </div>
       )}
 
-      <CreateTaskDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-        onCreated={handleCreated}
-        defaultTeamId={teamId}
-      />
     </div>
   )
 }

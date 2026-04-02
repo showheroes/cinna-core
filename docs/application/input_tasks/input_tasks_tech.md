@@ -10,11 +10,10 @@
 - `backend/app/models/task_attachment.py` — TaskAttachment table, `TaskAttachmentPublic`
 - `backend/app/models/task_status_history.py` — TaskStatusHistory table, `TaskStatusHistoryPublic`
 - `backend/app/models/session.py` — `source_task_id`, `todo_progress`, `result_state`, `result_summary` additions
-- `backend/app/models/agent_handover.py` — `auto_feedback` field on handover config
 - `backend/app/models/__init__.py` — exports
 
 **Routes:**
-- `backend/app/api/routes/input_tasks.py` — CRUD, refinement, execution, collaboration endpoints (comments, attachments, subtasks, short-code access)
+- `backend/app/api/routes/input_tasks.py` — CRUD, refinement, execution, collaboration endpoints (comments, attachments, subtasks, short-code access); note: `archive_task` is `async def` (requires event loop for real-time event emission)
 - `backend/app/api/routes/task_agent_api.py` — internal agent API endpoints (called by MCP tools)
 - `backend/app/api/main.py` — router registration
 
@@ -31,8 +30,14 @@
 - `backend/app/agents/prompts/task_refiner_prompt.md` — refinement system prompt
 - `backend/app/agents/__init__.py` — exports `refine_task`
 
-**Agent-Env Tools (new):**
-- `backend/app/env-templates/app_core_base/core/server/tools/mcp_bridge/task_server.py` — MCP bridge server for new `mcp__agent_task__*` tools
+**Agent-Env Tools:**
+- `backend/app/env-templates/app_core_base/core/server/tools/agent_task_add_comment.py` — SDK tool for Claude Code adapter
+- `backend/app/env-templates/app_core_base/core/server/tools/agent_task_update_status.py` — SDK tool for Claude Code adapter
+- `backend/app/env-templates/app_core_base/core/server/tools/agent_task_create_task.py` — SDK tool for Claude Code adapter
+- `backend/app/env-templates/app_core_base/core/server/tools/agent_task_create_subtask.py` — SDK tool for Claude Code adapter
+- `backend/app/env-templates/app_core_base/core/server/tools/agent_task_get_details.py` — SDK tool for Claude Code adapter
+- `backend/app/env-templates/app_core_base/core/server/tools/agent_task_list_tasks.py` — SDK tool for Claude Code adapter
+- `backend/app/env-templates/app_core_base/core/server/tools/mcp_bridge/task_server.py` — MCP bridge server (OpenCode adapter)
 
 **Migrations:**
 - `backend/app/alembic/versions/l2g3h4i5j6k7_add_input_task_table.py` — initial `input_task` table
@@ -47,23 +52,25 @@
 ### Frontend
 
 **Routes:**
-- `frontend/src/routes/_layout/tasks.tsx` — TaskBoard page (status filter, task cards list, CreateTaskDialog)
-- `frontend/src/routes/_layout/tasks.$shortCode.tsx` — task detail page by short code
+- `frontend/src/routes/_layout/tasks.index.tsx` — Tasks page with view mode toggle (Board / List); header has "New Task" button and view switcher; Board view renders `TaskBoard` component; List view renders a compact table with left sidebar status filters (Active, Completed, All, Archived), rows grouped by date (Today, Yesterday, Last week, Older), sorted by `updated_at` desc; each row shows status dot, short code, title, team/agent badge with color preset, and relative time
+- `frontend/src/routes/_layout/task/$taskId.tsx` — unified task detail page; `taskId` param accepts either a UUID or a short code; detects format with `isUUID()` regex and calls `TasksService.getTaskDetail()` (UUID) or `TasksService.getTaskDetailByCode()` (short code) accordingly; full-width layout (no max-width constraints); sessions displayed as a tab alongside Comments/Sub-tasks/Activity (not as a standalone block)
+- `frontend/src/routes/_layout/tasks.$shortCode.tsx` — redirect-only route; performs `beforeLoad` redirect from `/tasks/$shortCode` to `/task/$taskId` preserving the short code value
 
 **Components:**
-- `frontend/src/components/Tasks/TaskBoard.tsx` — kanban/list view: Inbox vs In-Progress vs Completed columns, team filter, priority filter, search; subscribes to `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`
-- `frontend/src/components/Tasks/TaskDetail.tsx` — full task view: header (short code, title, status, priority), comment thread, attachment list, subtask progress, refinement chat tab; real-time comment subscriptions
-- `frontend/src/components/Tasks/TaskShortCodeBadge.tsx` — clickable or static short code badge with status-aware color; navigates to `tasks.$shortCode` on click
+- `frontend/src/components/Tasks/TaskBoard.tsx` — kanban board with 4 columns: Open (includes `new`, `refining`, `open` statuses), In Progress, Blocked, Completed; subscribes to `TASK_STATUS_CHANGED`, `TASK_SUBTASK_CREATED`, `SUBTASK_COMPLETED` for real-time updates; no inline filters or create button (handled by parent page header)
+- `frontend/src/components/Tasks/TaskShortCodeBadge.tsx` — clickable or static short code badge with status-aware color; navigates to `/task/$taskId` on click
 - `frontend/src/components/Tasks/TaskStatusBadge.tsx` — color-coded status badge with icon
-- `frontend/src/components/Tasks/TaskStatusPill.tsx` — compact status indicator used in TaskDetail header
+- `frontend/src/components/Tasks/TaskStatusPill.tsx` — compact status indicator used in task detail header and subtask rows
 - `frontend/src/components/Tasks/TaskPriorityBadge.tsx` — colored priority label (Low, Normal, High, Urgent)
 - `frontend/src/components/Tasks/SubtaskProgressChip.tsx` — `{completed}/{total}` subtask counter with percentage color coding; hidden when `total <= 0`
 - `frontend/src/components/Tasks/CreateTaskDialog.tsx` — modal with message textarea, title, priority, optional agent selector, optional team selector; generates task and navigates to detail
 - `frontend/src/components/Tasks/RefinementChat.tsx` — refinement history display + comment input; calls `TasksService.refineTask()`
 - `frontend/src/components/Tasks/TaskTodoProgress.tsx` — horizontal progress indicator for TodoWrite tool usage; subscribes to `TASK_TODO_UPDATED`
-- `frontend/src/components/Tasks/TaskSessionsModal.tsx` — modal listing all sessions linked to a task
+- `frontend/src/components/Tasks/TaskSessionsModal.tsx` — modal listing all sessions linked to a task; opened from the sessions block "View all" link
 - `frontend/src/components/Chat/SubTasksPanel.tsx` — slide-out showing sub-tasks for current session; real-time via `SESSION_STATE_UPDATED`
 - `frontend/src/components/Chat/ChatHeader.tsx` — badge showing subtask count; toggles SubTasksPanel
+
+Note: `TaskDetail.tsx` has been deleted. Its functionality is now handled entirely within `frontend/src/routes/_layout/task/$taskId.tsx` as an inline page component.
 
 **Generated Client:**
 - `frontend/src/client/sdk.gen.ts` — `TasksService`
@@ -172,7 +179,7 @@ Index: `ix_task_status_history_task_id`
 
 ### Related Table Modifications
 
-**`agentic_team`** — new column `task_prefix` (VARCHAR(10), nullable). When non-null, tasks created under this team use this string as the short-code prefix instead of `"TASK"`.
+**`agentic_team`** — new column `task_prefix` (VARCHAR(10), nullable). `AgenticTeamCreate` now includes `task_prefix` so it can be set at creation time, not only via update. When non-null, tasks created under this team use this string as the short-code prefix instead of `"TASK"`.
 
 **`user`** — new column `task_sequence_counter` (INTEGER, default=0). Per-user monotonic counter incremented atomically on each task creation.
 
@@ -182,14 +189,14 @@ Index: `ix_task_status_history_task_id`
 - `InputTaskBase` — `original_message`, `current_description`
 - `InputTask` — DB table (all columns above)
 - `InputTaskCreate` — includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?`, `parent_task_id?`
-- `InputTaskUpdate` — includes new: `title?`, `priority?`, `assigned_node_id?`
+- `InputTaskUpdate` — includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?` (team can be changed after creation)
 - `InputTaskPublic` — includes new: `short_code`, `title`, `priority`, `parent_task_id`, `team_id`, `assigned_node_id`, `created_by_node_id`, `subtask_count`, `subtask_completed_count`
 - `InputTaskPublicExtended` — extends Public with: `agent_name`, `refinement_history`, `todo_progress`, `sessions_count`, `latest_session_id`, `attached_files`, `assigned_node_name`, `team_name`
 - `InputTaskDetailPublic` — extends Extended with: `comments: list[TaskCommentPublic]`, `attachments: list[TaskAttachmentPublic]`, `subtasks: list[InputTaskPublic]`, `status_history: list[TaskStatusHistoryPublic]`
 - `AgentTaskStatusUpdate` — agent edge-case status update (`status`, `reason?`, `task?` short code)
-- `AgentSubtaskCreate` — agent subtask creation (`title`, `description?`, `assigned_to?`, `priority?`, `task?` short code)
-- `AgentTaskCreate` — agent standalone task creation (`title`, `description?`, `assigned_to?`, `priority?`)
-- `AgentTaskOperationResponse` — generic agent op response (`success`, `task` short code, `message?`, `error?`)
+- `AgentSubtaskCreate` — agent subtask creation (`title`, `description?`, `assigned_to?`, `priority?`, `task?` short code, `source_session_id?`)
+- `AgentTaskCreate` — agent standalone task creation (`title`, `description?`, `assigned_to?`, `priority?`, `source_session_id?`)
+- `AgentTaskOperationResponse` — generic agent op response (`success`, `task` short code, `parent_task?` short code, `assigned_to?` resolved name, `message?`, `error?`)
 
 ## API Endpoints
 
@@ -237,11 +244,21 @@ Index: `ix_task_status_history_task_id`
 
 Called by MCP tools inside agent environments. Authentication via JWT (same CurrentUser dep). Agent identity resolved from `task.selected_agent_id`.
 
-- `POST /agent/tasks/{task_id}/comment` — agent posts comment with optional workspace file paths
-- `POST /agent/tasks/{task_id}/status` — agent explicitly updates status (edge cases: blocked, cancelled, completed)
-- `POST /agent/tasks/{task_id}/subtask` — agent creates subtask (validates team membership and connection topology)
+**Helper (module-level):**
+- `_resolve_task_from_session(db_session, session_id) -> InputTask` — queries `InputTask WHERE session_id = session_id`; raises `ValidationError("No task linked to this session")` if not found; used by all `current/*` endpoints
+
+**Endpoints:**
+- `POST /agent/tasks/create` — agent creates standalone task; resolves `assigned_to` by name, inherits team context from session, auto-executes if assigned
+- `GET /agent/tasks/by-code/{short_code}` — resolves short code (e.g. `HR-17`) to `{task_id, short_code}`; used by tools that accept a `task` param to obtain the UUID before making subsequent calls
+- `POST /agent/tasks/current/comment` — agent posts comment on its current task; requires `source_session_id` in body; calls `_resolve_task_from_session` to find task
+- `POST /agent/tasks/current/status` — agent updates status of its current task; requires `source_session_id` in body; calls `_resolve_task_from_session`
+- `GET /agent/tasks/current/details` — agent gets details of its current task; `source_session_id` passed as query param; calls `_resolve_task_from_session`
+- `POST /agent/tasks/current/subtask` — agent creates subtask under its current task (resolved from `source_session_id`); delegates to `create_subtask` with team topology validation
+- `POST /agent/tasks/{task_id}/comment` — agent posts comment with optional workspace file paths (explicit task_id variant)
+- `POST /agent/tasks/{task_id}/status` — agent explicitly updates status (edge cases: blocked, cancelled, completed; explicit task_id variant)
+- `POST /agent/tasks/{task_id}/subtask` — agent creates subtask with explicit parent task ID (validates team membership and connection topology)
 - `GET /agent/tasks/my-tasks` — agent lists tasks (`scope`: `assigned` / `created` / `team`)
-- `GET /agent/tasks/{task_id}/details` — agent gets simplified task detail (recent comments, subtask progress)
+- `GET /agent/tasks/{task_id}/details` — agent gets simplified task detail (recent comments, subtask progress; explicit task_id variant)
 
 ## Services & Key Methods
 
@@ -256,7 +273,7 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 - `get_task_extended()`, `list_tasks_extended()` — with agent name, team/node names, and session data joined
 
 **CRUD:**
-- `create_task()` — **extended**: generates `short_code` via `_generate_short_code()`, sets `title` from first line of `original_message`
+- `create_task()` — generates `short_code` via `_generate_short_code()`, sets `title` from first line of `original_message`; **new**: if `team_id` is set but neither `selected_agent_id` nor `assigned_node_id` is provided, queries `AgenticTeamNode` for the lead node (`is_lead=True`) and auto-assigns both `selected_agent_id` and `assigned_node_id`
 - `_generate_short_code(session, owner_id, team_id=None) -> tuple[str, int]` — atomic counter increment; prefix from team or default "TASK"
 - `get_task_by_short_code(session, short_code, user_id)` — lookup by `(short_code, owner_id)`
 - `get_task_detail(session, task_id, user_id) -> InputTaskDetailPublic` — full detail with comments (inline attachments), standalone attachments, subtasks, status history
@@ -269,6 +286,7 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 **Status and collaboration:**
 - `update_task_status(session, task_id, new_status, changed_by_agent_id=None, changed_by_user_id=None, changed_by_system=False, reason=None)` — validates transition, creates `TaskStatusHistory`, creates system comment, emits `TASK_STATUS_CHANGED`
 - `update_task_status_from_agent(session, task_id, agent_id, data: AgentTaskStatusUpdate)` — verifies agent is assigned; delegates to `update_task_status()`
+- `create_task_from_agent(session, user_id, data: AgentTaskCreate) -> (InputTask, resolved_name)` — resolves session context, agent name (team node or agent fallback), team inheritance; creates and optionally auto-executes task; posts system message to source session
 - `create_subtask(session, parent_task_id, creating_agent_id, data: AgentSubtaskCreate)` — validates team membership, connection topology, creates child task, auto-executes if assigned, posts system comment on parent
 - `list_agent_tasks(session, user_id, status=None, scope="assigned")` — scope: assigned / created / team
 - `get_agent_task_details(session, task_id, user_id)` — simplified view for agent consumption
@@ -277,7 +295,7 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 
 **Session event handlers (static async, registered in `backend/app/main.py`):**
 - `handle_session_started()` — task → `in_progress` (system comment)
-- `handle_session_completed()` — task → `completed` (system comment; triggers `_notify_parent_task`)
+- `handle_session_completed()` — task → `completed` only if all subtasks are also completed (via `compute_status_from_sessions` which checks `get_subtask_progress`); stays `in_progress` if incomplete subtasks remain (system comment; triggers `_notify_parent_task`)
 - `handle_session_error()` — task → `error` (system comment with error message)
 - `handle_todo_list_updated()` — propagate session todos to task, emit `TASK_TODO_UPDATED`
 
@@ -289,6 +307,31 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 **Email task methods:**
 - `send_email_answer()` — generates AI email reply, queues for SMTP delivery; deletes `email_task_reply_pending` activity
 - `update_status()` — emits `TASK_STATUS_UPDATED` for email-originated tasks
+
+### `MessageService` — task context enrichment (`backend/app/services/message_service.py`)
+
+The module-level function `_build_session_context(db, session_db, env, agent)` now queries `InputTask` by `session_id` and — when a matching task is found — populates the following keys into the session context dict. These are consumed by `PromptGenerator.build_task_context_section()` inside the agent environment:
+
+| Key | Source |
+|-----|--------|
+| `task_short_code` | `InputTask.short_code` |
+| `task_title` | `InputTask.title` |
+| `task_description` | `InputTask.current_description` |
+| `task_priority` | `InputTask.priority` |
+| `task_status` | `InputTask.status` |
+| `task_created_by_name` | Creator agent name (if `agent_initiated`) or user full name / email |
+| `task_created_by_type` | `"agent"` or `"user"` |
+| `parent_task_short_code` | `InputTask.short_code` of parent (subtasks only) |
+| `parent_task_title` | Parent task title |
+| `parent_task_description` | Parent task `current_description` |
+| `parent_assigned_agent_name` | Name of agent assigned to parent task |
+| `parent_node_name` | Name of team node assigned to parent task |
+| `team_name` | `AgenticTeam.name` (team-scoped tasks) |
+| `node_name` | `AgenticTeamNode.name` of assigned node |
+| `downstream_team_members` | List of `{node_name, agent_name, agent_description, connection_prompt}` dicts for enabled outbound connections from the assigned node |
+| `delegation_connection_prompt` | `AgenticTeamConnection.connection_prompt` on the connection from parent node → current node (subtasks with team context) |
+
+The enrichment runs inside a `try/except` block — failures are logged as warnings and do not break message delivery.
 
 ### `TaskCommentService` (`backend/app/services/task_comment_service.py`)
 
@@ -334,21 +377,32 @@ New events emitted from the task collaboration system (file: `backend/app/models
 
 All events are scoped to the task owner (`user_id`).
 
+The task detail page also subscribes to session-domain events to update the Sessions tab in real time:
+
+| Event | Source | Used For |
+|-------|--------|---------|
+| `SESSION_UPDATED` | Session service | Refresh sessions list |
+| `SESSION_INTERACTION_STATUS_CHANGED` | Session service | Update streaming indicator and tab icon pulse |
+| `SESSION_STATE_UPDATED` | Session service | Update session status |
+| `STREAM_COMPLETED` | Stream handler | Mark session as complete |
+
+These events are matched by `meta.source_task_id` or by `meta.session_id` / `event.model_id` against a ref-tracked set of known session IDs (`sessionIdsRef`). The ref pattern avoids stale closures — `useMultiEventSubscription` does not re-subscribe when the handler changes, so session IDs are tracked via a `useRef` updated by `useEffect`.
+
 ## Frontend Components
 
-- `frontend/src/routes/_layout/tasks.tsx` — TaskBoard page: Inbox (new/refining), In-Progress, Completed/Archived columns; team filter; priority filter; real-time updates via `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`
-- `frontend/src/routes/_layout/tasks.$shortCode.tsx` — task detail page; loads `InputTaskDetailPublic` via `by-code/{short_code}/detail`
-- `frontend/src/components/Tasks/TaskBoard.tsx` — card list per column; `TaskShortCodeBadge`, `TaskPriorityBadge`, `SubtaskProgressChip` per card; `CreateTaskDialog` action; workspace-aware via `useWorkspace`
-- `frontend/src/components/Tasks/TaskDetail.tsx` — full task view: header, comment thread, attachment list (download links), subtask list, refinement chat tab; posts comments via `TasksService`; subscribes to `TASK_COMMENT_ADDED`, `TASK_ATTACHMENT_ADDED` for live updates
-- `frontend/src/components/Tasks/TaskShortCodeBadge.tsx` — status-color-coded short code badge; `clickable` prop controls navigation to `tasks.$shortCode`
+- `frontend/src/routes/_layout/tasks.index.tsx` — Tasks page: Board/List view toggle in header; Board view delegates to `TaskBoard` component; List view shows compact table with status sidebar filters, date-grouped rows (Today/Yesterday/Last week/Older), status dots, agent/team badges with color presets, relative timestamps
+- `frontend/src/routes/_layout/task/$taskId.tsx` — unified task detail page (Linear-style layout): accepts UUID or short code in `$taskId` param; full-width layout with left body and right sidebar panel; four tabs: Comments, Sessions, Sub-tasks, Activity; session and subtask tab icons pulse blue when active sessions or in-progress subtasks exist; tab counters rendered as round pill badges; session rows are clickable (navigate to session page) with agent color-preset badges and relative timestamps; WebSocket session event handler uses a `sessionIdsRef` to avoid stale closure issues — matches events by `meta.session_id` or `event.model_id` against known task session IDs; subscribes to `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`, `SUBTASK_COMPLETED`, `TASK_SUBTASK_CREATED` (task events) and `SESSION_UPDATED`, `SESSION_INTERACTION_STATUS_CHANGED`, `SESSION_STATE_UPDATED`, `STREAM_COMPLETED` (session events)
+- `frontend/src/routes/_layout/tasks.$shortCode.tsx` — redirect-only: `beforeLoad` redirects `/tasks/$shortCode` to `/task/$taskId`
+- `frontend/src/components/Tasks/TaskBoard.tsx` — kanban board: 4 columns (Open merges `new`/`refining`/`open`, In Progress, Blocked, Completed); `TaskShortCodeBadge`, `TaskPriorityBadge`, `SubtaskProgressChip` per card; workspace-aware via `useWorkspace`; no inline filters or create dialog (managed by parent page)
+- `frontend/src/components/Tasks/TaskShortCodeBadge.tsx` — status-color-coded short code badge; `clickable` prop controls navigation to `/task/$taskId`
 - `frontend/src/components/Tasks/TaskPriorityBadge.tsx` — colored label for `low`, `normal`, `high`, `urgent`; hides for `"normal"` (default)
 - `frontend/src/components/Tasks/SubtaskProgressChip.tsx` — `{completed}/{total}` chip; hidden when `total <= 0`
 - `frontend/src/components/Tasks/TaskStatusBadge.tsx` — icon + color per status
-- `frontend/src/components/Tasks/TaskStatusPill.tsx` — compact inline status indicator
+- `frontend/src/components/Tasks/TaskStatusPill.tsx` — compact inline status indicator used in header and subtask rows
 - `frontend/src/components/Tasks/CreateTaskDialog.tsx` — form with message, title, priority, agent, team; calls `TasksService.createTask()`
 - `frontend/src/components/Tasks/RefinementChat.tsx` — shows `refinement_history`; submits via `TasksService.refineTask()`
 - `frontend/src/components/Tasks/TaskTodoProgress.tsx` — TodoWrite progress indicator; subscribes to `TASK_TODO_UPDATED`
-- `frontend/src/components/Tasks/TaskSessionsModal.tsx` — lists all sessions for a task
+- `frontend/src/components/Tasks/TaskSessionsModal.tsx` — lists all sessions for a task; opened from the Sessions tab "View all" link
 - `frontend/src/components/Chat/SubTasksPanel.tsx` — slide-out subtask list for current chat session; subscribes to `SESSION_STATE_UPDATED`
 
 ## Security

@@ -20,11 +20,20 @@ from ..sdk_manager import get_backend_session_id
 
 
 @tool(
-    "agent_task_create_task",
+    "create_task",
     "Create a new task. Optionally assign it to an agent by name. "
     "For team agents, the task inherits the team context. "
     "Returns the task's short code (e.g. TASK-5 or HR-42).",
-    {"title": str, "description": str, "assigned_to": str, "priority": str},
+    {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "What needs to be done (required)"},
+            "description": {"type": "string", "description": "Detailed context (optional)"},
+            "assigned_to": {"type": "string", "description": "Agent or team member name to assign to (optional)"},
+            "priority": {"type": "string", "description": "low/normal/high/urgent (optional, defaults to normal)"},
+        },
+        "required": ["title"],
+    },
 )
 async def agent_task_create_task(args: dict[str, Any]) -> dict[str, Any]:
     """

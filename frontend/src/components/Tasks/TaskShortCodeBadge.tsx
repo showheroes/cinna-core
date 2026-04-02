@@ -57,7 +57,7 @@ export function TaskShortCodeBadge({
     if (onClick) {
       onClick()
     } else {
-      navigate({ to: "/tasks/$shortCode", params: { shortCode } })
+      navigate({ to: "/task/$taskId", params: { taskId: shortCode } })
     }
   }
 

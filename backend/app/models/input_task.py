@@ -39,10 +39,10 @@ class InputTaskStatus:
     # Valid transitions: {from_status: {allowed_to_statuses}}
     VALID_TRANSITIONS: dict[str, set[str]] = {
         "new": {"refining", "open", "in_progress", "cancelled", "archived"},
-        "refining": {"new", "open", "in_progress"},
-        "open": {"in_progress", "cancelled"},
-        "in_progress": {"completed", "blocked", "cancelled", "error"},
-        "blocked": {"in_progress", "cancelled"},
+        "refining": {"new", "open", "in_progress", "archived"},
+        "open": {"in_progress", "cancelled", "archived"},
+        "in_progress": {"completed", "blocked", "cancelled", "error", "archived"},
+        "blocked": {"in_progress", "cancelled", "archived"},
         "completed": {"archived"},
         "error": {"new", "in_progress", "archived"},
         "cancelled": {"archived"},
@@ -168,6 +168,7 @@ class InputTaskUpdate(SQLModel):
     # Collaboration fields
     title: str | None = Field(default=None, max_length=500)
     priority: str | None = None
+    team_id: uuid.UUID | None = None
     assigned_node_id: uuid.UUID | None = None
 
 
@@ -288,6 +289,7 @@ class AgentTaskStatusUpdate(SQLModel):
     status: str  # blocked / completed / cancelled
     reason: str | None = None
     task: str | None = None  # short_code; defaults to agent's current task
+    source_session_id: uuid.UUID | None = None  # Calling session UUID (set by MCP tool)
 
 
 class AgentSubtaskCreate(SQLModel):
@@ -297,6 +299,7 @@ class AgentSubtaskCreate(SQLModel):
     assigned_to: str | None = None  # Agent name or team node name to assign to
     priority: str = "normal"
     task: str | None = None  # parent short_code; defaults to agent's current task
+    source_session_id: uuid.UUID | None = None  # Calling session UUID (set by MCP tool)
 
 
 class AgentTaskCreate(SQLModel):
@@ -305,11 +308,14 @@ class AgentTaskCreate(SQLModel):
     description: str | None = Field(default=None, max_length=10000)
     assigned_to: str | None = None  # Agent name to assign to
     priority: str = "normal"
+    source_session_id: uuid.UUID | None = None  # Calling session UUID (set by MCP tool)
 
 
 class AgentTaskOperationResponse(SQLModel):
     """Generic response for agent task operations"""
     success: bool
     task: str | None = None          # short_code of the task
+    parent_task: str | None = None   # parent short_code (for subtasks)
+    assigned_to: str | None = None   # resolved agent/node name
     message: str | None = None
     error: str | None = None

@@ -111,21 +111,23 @@ export function ToolCallBlock({ toolName, toolInput, conversationModeUi = "detai
   }
 
   // Special rendering for Create Agent Task tool (handles both direct handover and inbox task)
-  const taskMessage = getInput("task_message")
-  if (toolNameLower === "mcp__task__create_agent_task" && taskMessage) {
+  const taskTitle = getInput("title")
+  if (toolNameLower === "mcp__agent_task__create_task" && taskTitle) {
+    const description = getInput("description")
+    const fullMessage = description ? `${taskTitle}\n\n${description}` : taskTitle
     return (
       <AgentHandoverToolBlock
-        targetAgentId={getInput("target_agent_id")}
-        targetAgentName={getInput("target_agent_name")}
-        taskMessage={taskMessage}
+        targetAgentId={undefined}
+        targetAgentName={getInput("assigned_to")}
+        taskMessage={fullMessage}
       />
     )
   }
 
-  // Special rendering for Update Session State tool
-  const sessionState = getInput("state")
-  if (toolNameLower === "mcp__task__update_session_state" && sessionState) {
-    return <UpdateSessionStateToolBlock state={sessionState} summary={getInput("summary")} />
+  // Special rendering for Update Status tool
+  const sessionState = getInput("status")
+  if (toolNameLower === "mcp__agent_task__update_status" && sessionState) {
+    return <UpdateSessionStateToolBlock state={sessionState} summary={getInput("reason")} />
   }
 
   // Default rendering for other tools

@@ -296,10 +296,9 @@ Located in `tools/mcp_bridge/`. Each is a standalone Python MCP stdio server reg
 All bridge servers read `session_context.json` from their cwd (the mode runtime dir, where `opencode serve` is run) to get `backend_session_id` at call time.
 
 - `knowledge_server.py` — exposes `query_integration_knowledge` tool; calls backend knowledge API
-- `task_server.py` — exposes `create_agent_task`, `update_session_state`, `respond_to_task` tools
-- `collaboration_server.py` — exposes `create_collaboration`, `post_finding`, `get_collaboration_status` tools
+- `task_server.py` — exposes `add_comment`, `update_status`, `create_task`, `create_subtask`, `get_details`, `list_tasks` tools
 
-MCP tool names visible to the agent follow the pattern `mcp__{server}__{tool}` (e.g., `mcp__task__create_agent_task`).
+MCP tool names visible to the agent follow the pattern `mcp__{server}__{tool}` (e.g., `mcp__agent_task__create_task`).
 
 ## Configuration
 

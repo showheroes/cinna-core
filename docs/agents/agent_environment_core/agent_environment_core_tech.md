@@ -30,30 +30,34 @@
 | `tool_name_registry.py` | Unified lowercase tool name convention: `CLAUDE_CODE_TOOL_NAME_MAP`, `OPENCODE_MCP_TOOL_NAME_MAP`, `PRE_APPROVED_TOOLS`, `normalize_tool_name()`, `normalize_tool_input()` |
 | `sqlite_session_service.py` | SQLite-based session persistence for adapters |
 
-### Custom Tools
+### Custom Tools (SDK — Claude Code adapter)
 
 **Base path**: `backend/app/env-templates/app_core_base/core/server/tools/`
 
-| File | Purpose |
-|------|---------|
-| `knowledge_query.py` | RAG-based knowledge source query tool |
-| `create_agent_task.py` | Agent-to-agent task creation (handover) tool |
-| `respond_to_task.py` | Task response tool for incoming delegations — see [Session State Tools](session_state_tools.md) |
-| `update_session_state.py` | Session state modification tool — see [Session State Tools](session_state_tools.md) |
+| File | Tool Name | Purpose |
+|------|-----------|---------|
+| `knowledge_query.py` | `query_integration_knowledge` | RAG-based knowledge source query tool |
+| `agent_task_add_comment.py` | `add_comment` | Post comment on task — see [Session State Tools](session_state_tools.md) |
+| `agent_task_update_status.py` | `update_status` | Edge-case status update — see [Session State Tools](session_state_tools.md) |
+| `agent_task_create_task.py` | `create_task` | Standalone task creation — see [Create Agent Task Tool](create_agent_task_tool.md) |
+| `agent_task_create_subtask.py` | `create_subtask` | Team subtask delegation — see [Create Agent Task Tool](create_agent_task_tool.md) |
+| `agent_task_get_details.py` | `get_details` | Full task detail with comments (capped at 3000 chars each) and subtask progress |
+| `agent_task_list_tasks.py` | `list_tasks` | List tasks by scope (assigned/created/team) |
 
-### MCP Bridge Servers (OpenCode custom tools)
+**Schema convention**: All SDK tools use explicit JSON Schema dicts (`{"type": "object", "properties": {...}, "required": [...]}`) rather than simple `{name: type}` dicts. This ensures the `claude_agent_sdk`'s `create_sdk_mcp_server()` correctly marks optional parameters as non-required in the generated MCP tool schema.
+
+### MCP Bridge Servers (OpenCode adapter)
 
 **Base path**: `backend/app/env-templates/app_core_base/core/server/tools/mcp_bridge/`
 
-These are lightweight stdio MCP servers that wrap the platform's custom tool functions so OpenCode can invoke them. They are referenced in the generated `opencode.json` under the `mcp` key.
+Lightweight stdio MCP servers that expose the same tools for OpenCode agents. Referenced in the generated `opencode.json` under the `mcp` key.
 
 | File | Exposes |
 |------|---------|
-| `knowledge_server.py` | `knowledge_query` tool |
-| `task_server.py` | `create_agent_task`, `respond_to_task`, `update_session_state` tools |
-| `collaboration_server.py` | `create_collaboration`, `post_finding`, `get_collaboration_status` tools |
+| `knowledge_server.py` | `query_integration_knowledge` tool |
+| `task_server.py` | `add_comment`, `update_status`, `create_task`, `create_subtask`, `get_details`, `list_tasks` tools |
 
-The same tool implementations used by Claude Code (via `create_sdk_mcp_server()`) are re-used here — the bridge servers are thin wrappers that expose them over stdio MCP protocol.
+The MCP bridge tools use Python type annotations with defaults for optional params (e.g., `files: list[str] | None = None`). FastMCP generates correct JSON Schema from these signatures automatically.
 
 ### Scripts
 

@@ -24,8 +24,8 @@ Tool call rendering provides specialized visual feedback for each type of tool t
 | `todowrite` | TodoWriteToolBlock | Todo items with completion status | Same |
 | `askuserquestion` | AskUserQuestionToolBlock | Count of questions received | Same |
 | `mcp__knowledge__query_integration_knowledge` | KnowledgeQueryToolBlock | Query + article IDs | Same |
-| `mcp__task__create_agent_task` | AgentHandoverToolBlock | Target agent + task message, or inbox task | Same |
-| `mcp__task__update_session_state` | UpdateSessionStateToolBlock | Result state + summary | Same |
+| `mcp__agent_task__create_task` | AgentHandoverToolBlock | Target agent + task title/description, or inbox task | Same |
+| `mcp__agent_task__update_status` | UpdateSessionStateToolBlock | Status + reason | Same |
 | `webapp_action` | WebappActionBlock | Action name + data payload | Simplified |
 | (unknown) | Default renderer | Generic "Using tool: name" + JSON params | Same |
 

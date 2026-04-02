@@ -103,7 +103,14 @@ def normalize_article_ids(article_ids: Any) -> list[str] | None:
 @tool(
     "query_integration_knowledge",
     "Query the knowledge base for integration guidance. Use in two steps: 1) Discovery: query='search terms' returns article list, 2) Retrieval: query='search terms' + article_ids='id1,id2' (CSV format) returns full content",
-    {"query": str, "article_ids": str}
+    {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search terms for knowledge base query (required)"},
+            "article_ids": {"type": "string", "description": "Comma-separated article IDs to retrieve full content (optional)"},
+        },
+        "required": ["query"],
+    }
 )
 async def query_integration_knowledge(args: dict[str, Any]) -> dict[str, Any]:
     """

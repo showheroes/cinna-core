@@ -780,22 +780,6 @@ class AgentService:
                     data=task_data,
                 )
 
-                # Copy auto_feedback from handover config if available
-                if source_session:
-                    source_env = session.get(AgentEnvironment, source_session.environment_id)
-                    if source_env:
-                        handover_config = session.exec(
-                            select(AgentHandoverConfig).where(
-                                AgentHandoverConfig.source_agent_id == source_env.agent_id,
-                                AgentHandoverConfig.target_agent_id == target_agent_id,
-                                AgentHandoverConfig.enabled == True,
-                            )
-                        ).first()
-                        if handover_config:
-                            task.auto_feedback = handover_config.auto_feedback
-                            session.add(task)
-                            session.commit()
-
                 logger.info(f"Created task {task.id} for handover to agent {target_agent_id}")
 
                 # Execute task (creates session, links it, sends message)

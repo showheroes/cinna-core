@@ -994,3 +994,438 @@ def test_list_teams_isolation(
     # Cleanup
     delete_team(client, normal_headers, normal_team["id"])
     delete_team(client, su_headers, su_team["id"])
+
+
+# ---------------------------------------------------------------------------
+# Test 17 — Connection↔HandoverConfig sync
+# ---------------------------------------------------------------------------
+
+def test_connection_creates_handover_config(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Creating a team connection automatically creates a matching AgentHandoverConfig.
+    Verified via GET /agents/{id}/handovers.
+    """
+    headers = superuser_token_headers
+    agents_base = f"{settings.API_V1_STR}/agents"
+
+    team = create_team(client, headers, name="Handover Sync Create Team")
+    team_id = team["id"]
+
+    agent1 = create_agent_via_api(client, headers, name="HS Create Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="HS Create Agent 2")
+
+    node1 = create_node(client, headers, team_id, agent1["id"])
+    node2 = create_node(client, headers, team_id, agent2["id"])
+
+    # Confirm no handover config exists yet
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["count"] == 0
+
+    # Create connection
+    create_connection(
+        client, headers, team_id, node1["id"], node2["id"],
+        connection_prompt="Delegate when complete.",
+        enabled=True,
+    )
+
+    # Handover config should now exist
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.status_code == 200
+    handovers = r.json()
+    assert handovers["count"] == 1
+    hc = handovers["data"][0]
+    assert hc["source_agent_id"] == agent1["id"]
+    assert hc["target_agent_id"] == agent2["id"]
+    assert hc["handover_prompt"] == "Delegate when complete."
+    assert hc["enabled"] is True
+
+    # Cleanup
+    delete_team(client, headers, team_id)
+
+
+def test_connection_update_syncs_handover_config(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Updating a team connection's prompt and enabled flag syncs the corresponding
+    AgentHandoverConfig record.
+    """
+    headers = superuser_token_headers
+    agents_base = f"{settings.API_V1_STR}/agents"
+
+    team = create_team(client, headers, name="Handover Sync Update Team")
+    team_id = team["id"]
+
+    agent1 = create_agent_via_api(client, headers, name="HS Update Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="HS Update Agent 2")
+
+    node1 = create_node(client, headers, team_id, agent1["id"])
+    node2 = create_node(client, headers, team_id, agent2["id"])
+    conn = create_connection(
+        client, headers, team_id, node1["id"], node2["id"],
+        connection_prompt="Initial prompt.",
+        enabled=True,
+    )
+    conn_id = conn["id"]
+
+    # Update connection prompt and enabled
+    r = client.put(
+        f"{_BASE}/{team_id}/connections/{conn_id}",
+        headers=headers,
+        json={"connection_prompt": "Updated prompt.", "enabled": False},
+    )
+    assert r.status_code == 200
+
+    # Handover config should reflect updated values
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.status_code == 200
+    hc = r.json()["data"][0]
+    assert hc["handover_prompt"] == "Updated prompt."
+    assert hc["enabled"] is False
+
+    # Partial update — only enabled changes, prompt stays
+    r = client.put(
+        f"{_BASE}/{team_id}/connections/{conn_id}",
+        headers=headers,
+        json={"enabled": True},
+    )
+    assert r.status_code == 200
+
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    hc = r.json()["data"][0]
+    assert hc["handover_prompt"] == "Updated prompt."  # unchanged
+    assert hc["enabled"] is True
+
+    # Cleanup
+    delete_team(client, headers, team_id)
+
+
+def test_connection_delete_removes_handover_config(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Deleting a team connection removes the corresponding AgentHandoverConfig when
+    no other connections exist between the same two agents.
+    """
+    headers = superuser_token_headers
+    agents_base = f"{settings.API_V1_STR}/agents"
+
+    team = create_team(client, headers, name="Handover Sync Delete Team")
+    team_id = team["id"]
+
+    agent1 = create_agent_via_api(client, headers, name="HS Delete Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="HS Delete Agent 2")
+
+    node1 = create_node(client, headers, team_id, agent1["id"])
+    node2 = create_node(client, headers, team_id, agent2["id"])
+    conn = create_connection(client, headers, team_id, node1["id"], node2["id"])
+    conn_id = conn["id"]
+
+    # Confirm handover config was created
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.json()["count"] == 1
+
+    # Delete the connection
+    delete_connection(client, headers, team_id, conn_id)
+
+    # Handover config should be gone
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["count"] == 0
+
+    # Cleanup
+    delete_team(client, headers, team_id)
+
+
+def test_connection_create_updates_existing_handover_config(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    When a handover config already exists, adding both agents as nodes
+    auto-creates the connection. Explicitly updating the connection then syncs
+    back to the handover config without duplicating it.
+    """
+    headers = superuser_token_headers
+    agents_base = f"{settings.API_V1_STR}/agents"
+
+    agent1 = create_agent_via_api(client, headers, name="HS Existing Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="HS Existing Agent 2")
+
+    # Create a handover config manually via the agents API
+    r = client.post(
+        f"{agents_base}/{agent1['id']}/handovers",
+        headers=headers,
+        json={"target_agent_id": agent2["id"], "handover_prompt": "Original prompt."},
+    )
+    assert r.status_code == 200
+
+    # Confirm exactly 1 handover config exists
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.json()["count"] == 1
+    assert r.json()["data"][0]["handover_prompt"] == "Original prompt."
+
+    # Add both agents to a team — the second node addition auto-creates the connection
+    team = create_team(client, headers, name="Handover Sync Existing Team")
+    team_id = team["id"]
+    create_node(client, headers, team_id, agent1["id"])
+    create_node(client, headers, team_id, agent2["id"])
+
+    # Connection was auto-created with the handover prompt
+    connections = list_connections(client, headers, team_id)
+    assert len(connections) == 1
+    conn = connections[0]
+    assert conn["connection_prompt"] == "Original prompt."
+    conn_id = conn["id"]
+
+    # Update the connection — should sync back to the handover config
+    r = client.put(
+        f"{_BASE}/{team_id}/connections/{conn_id}",
+        headers=headers,
+        json={"connection_prompt": "New connection prompt.", "enabled": False},
+    )
+    assert r.status_code == 200
+
+    # Still exactly 1 handover config — updated, not duplicated
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.json()["count"] == 1
+    hc = r.json()["data"][0]
+    assert hc["handover_prompt"] == "New connection prompt."
+    assert hc["enabled"] is False
+
+    # Cleanup
+    delete_team(client, headers, team_id)
+
+
+# ---------------------------------------------------------------------------
+# Bi-directional sync: handover → chart and node addition → connections
+# ---------------------------------------------------------------------------
+
+def test_handover_config_creates_team_connection(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Creating a handover config via the agents API auto-creates a connection in
+    every team where both agents are already nodes.
+    """
+    headers = superuser_token_headers
+    agents_base = f"{settings.API_V1_STR}/agents"
+
+    agent1 = create_agent_via_api(client, headers, name="BDS Create Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="BDS Create Agent 2")
+
+    team = create_team(client, headers, name="BDS Create Team")
+    team_id = team["id"]
+    create_node(client, headers, team_id, agent1["id"])
+    create_node(client, headers, team_id, agent2["id"])
+
+    # No connections yet
+    assert list_connections(client, headers, team_id) == []
+
+    # Create handover config — should trigger connection auto-creation
+    r = client.post(
+        f"{agents_base}/{agent1['id']}/handovers",
+        headers=headers,
+        json={"target_agent_id": agent2["id"], "handover_prompt": "Auto-sync prompt."},
+    )
+    assert r.status_code == 200
+
+    # Connection should now exist in the team
+    connections = list_connections(client, headers, team_id)
+    assert len(connections) == 1
+    conn = connections[0]
+    assert conn["connection_prompt"] == "Auto-sync prompt."
+    assert conn["enabled"] is True
+
+    # Cleanup
+    delete_team(client, headers, team_id)
+
+
+def test_handover_config_delete_removes_team_connection(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Deleting a handover config via the agents API removes the corresponding
+    team connection in every team where both agents are nodes.
+    """
+    headers = superuser_token_headers
+    agents_base = f"{settings.API_V1_STR}/agents"
+
+    agent1 = create_agent_via_api(client, headers, name="BDS Delete Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="BDS Delete Agent 2")
+
+    team = create_team(client, headers, name="BDS Delete Team")
+    team_id = team["id"]
+    node1 = create_node(client, headers, team_id, agent1["id"])
+    node2 = create_node(client, headers, team_id, agent2["id"])
+
+    # Create a connection (which also creates a handover config via chart→handover sync)
+    create_connection(
+        client, headers, team_id, node1["id"], node2["id"],
+        connection_prompt="To be removed.",
+    )
+
+    # Verify both exist
+    assert len(list_connections(client, headers, team_id)) == 1
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.json()["count"] == 1
+    handover_id = r.json()["data"][0]["id"]
+
+    # Delete the handover config
+    r = client.delete(
+        f"{agents_base}/{agent1['id']}/handovers/{handover_id}",
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+    # Team connection should be gone
+    assert list_connections(client, headers, team_id) == []
+
+    # Cleanup
+    delete_team(client, headers, team_id)
+
+
+def test_node_addition_auto_creates_connections_from_handovers(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    When a node is added to a team, existing handover configs between the new
+    agent and agents already in the team auto-create the corresponding connections.
+    Both directions (new→existing and existing→new) are covered.
+    """
+    headers = superuser_token_headers
+    agents_base = f"{settings.API_V1_STR}/agents"
+
+    agent1 = create_agent_via_api(client, headers, name="BDS Node Add Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="BDS Node Add Agent 2")
+    agent3 = create_agent_via_api(client, headers, name="BDS Node Add Agent 3")
+
+    # Create handover: agent1 → agent2
+    r = client.post(
+        f"{agents_base}/{agent1['id']}/handovers",
+        headers=headers,
+        json={
+            "target_agent_id": agent2["id"],
+            "handover_prompt": "Fwd handover prompt.",
+        },
+    )
+    assert r.status_code == 200
+
+    # Create handover: agent3 → agent1 (reverse direction for agent1)
+    r = client.post(
+        f"{agents_base}/{agent3['id']}/handovers",
+        headers=headers,
+        json={
+            "target_agent_id": agent1["id"],
+            "handover_prompt": "Rev handover prompt.",
+        },
+    )
+    assert r.status_code == 200
+
+    # Create team, add agent2 and agent3 first (no agent1 yet)
+    team = create_team(client, headers, name="BDS Node Add Team")
+    team_id = team["id"]
+    create_node(client, headers, team_id, agent2["id"])
+    create_node(client, headers, team_id, agent3["id"])
+
+    # No connections yet — agent1 not in team
+    assert list_connections(client, headers, team_id) == []
+
+    # Add agent1 — should trigger both directions
+    create_node(client, headers, team_id, agent1["id"])
+
+    connections = list_connections(client, headers, team_id)
+    assert len(connections) == 2
+
+    prompts = {c["connection_prompt"] for c in connections}
+    assert "Fwd handover prompt." in prompts
+    assert "Rev handover prompt." in prompts
+
+    # Cleanup
+    delete_team(client, headers, team_id)
+
+
+def test_node_addition_no_spurious_connections(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Adding nodes to a team creates no connections when no handover configs exist
+    between those agents.
+    """
+    headers = superuser_token_headers
+
+    agent1 = create_agent_via_api(client, headers, name="BDS No Handover Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="BDS No Handover Agent 2")
+
+    team = create_team(client, headers, name="BDS No Handover Team")
+    team_id = team["id"]
+    create_node(client, headers, team_id, agent1["id"])
+    create_node(client, headers, team_id, agent2["id"])
+
+    assert list_connections(client, headers, team_id) == []
+
+    # Cleanup
+    delete_team(client, headers, team_id)
+
+
+# ---------------------------------------------------------------------------
+# Test — Connection update creates handover config if missing (legacy data)
+# ---------------------------------------------------------------------------
+
+def test_connection_update_syncs_handover_prompt_end_to_end(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    Full round-trip: create a connection with empty prompt (like the chart UI does
+    on drag-connect), then update the prompt. Verify the handover config reflects
+    the updated prompt and enabled state at each step.
+    """
+    headers = superuser_token_headers
+    agents_base = f"{settings.API_V1_STR}/agents"
+
+    team = create_team(client, headers, name="Update E2E HC Team")
+    team_id = team["id"]
+
+    agent1 = create_agent_via_api(client, headers, name="UE2E Agent 1")
+    agent2 = create_agent_via_api(client, headers, name="UE2E Agent 2")
+
+    node1 = create_node(client, headers, team_id, agent1["id"])
+    node2 = create_node(client, headers, team_id, agent2["id"])
+
+    # Create connection with empty prompt (mimics chart drag-connect)
+    conn = create_connection(client, headers, team_id, node1["id"], node2["id"])
+    conn_id = conn["id"]
+
+    # Handover config should exist with empty prompt
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.json()["count"] == 1
+    assert r.json()["data"][0]["handover_prompt"] == ""
+
+    # User edits the connection text
+    r = client.put(
+        f"{_BASE}/{team_id}/connections/{conn_id}",
+        headers=headers,
+        json={"connection_prompt": "Delegate billing tasks.", "enabled": False},
+    )
+    assert r.status_code == 200
+
+    # Handover config should now reflect the edited prompt and enabled state
+    r = client.get(f"{agents_base}/{agent1['id']}/handovers", headers=headers)
+    assert r.json()["count"] == 1
+    hc = r.json()["data"][0]
+    assert hc["handover_prompt"] == "Delegate billing tasks."
+    assert hc["enabled"] is False
+
+    # Cleanup
+    delete_team(client, headers, team_id)

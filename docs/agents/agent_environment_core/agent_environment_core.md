@@ -173,7 +173,7 @@ All task tools are pre-approved (no per-call user confirmation required). They a
 
 **`mcp__agent_task__create_subtask`** — Team agents only. Create a child task under the current task and optionally assign it to a connected team member. The team connection topology is enforced — target agent must be reachable via a directed connection from the calling agent's node.
 
-**`mcp__agent_task__get_details`** — Read the current task's full detail: title, description, status, priority, recent comments (last 10), and subtask progress summary.
+**`mcp__agent_task__get_details`** — Read a task's full detail: title, description, status, priority, recent comments (last 10, content capped at 3000 chars each), and subtask progress summary. Accepts optional `task` short code; defaults to current task.
 
 **`mcp__agent_task__list_tasks`** — List tasks by scope: `assigned` (default — tasks assigned to this agent), `created` (tasks this agent created), or `team` (all tasks in the agent's team; team agents only).
 
