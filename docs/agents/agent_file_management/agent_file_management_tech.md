@@ -117,6 +117,12 @@
 - `sanitize_filename()` - Strip dangerous characters, normalize unicode
 - `resolve_filename_conflict()` - Append `_1`, `_2` if file exists
 
+### Agent-Env Upload Endpoint - `backend/app/env-templates/app_core_base/core/server/routes.py`
+
+`POST /files/upload` accepts an optional `subfolder` form field. When provided, the file is placed at `./uploads/{subfolder}/{filename}` instead of `./uploads/{filename}`. The subfolder name is sanitized with `sanitize_filename()` to prevent path traversal.
+
+This is used by the task file auto-upload feature: when an agent calls `mcp__agent_task__get_details`, the backend uploads all task-associated files with `subfolder=task_{SHORT_CODE}` (e.g., `task_HR-5`), placing them at `/app/workspace/uploads/task_HR-5/` in the agent's workspace.
+
 ## Frontend Components
 
 ### Upload Flow

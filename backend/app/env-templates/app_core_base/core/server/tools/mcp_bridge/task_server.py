@@ -129,6 +129,28 @@ def add_comment(
     if not content:
         return "Error: content is required"
 
+    # Validate file paths exist locally before sending to backend
+    if files:
+        workspace = Path("/app/workspace")
+        missing = []
+        resolved_files = []
+        for f in files:
+            fp = Path(f)
+            if not fp.is_absolute():
+                fp = workspace / fp
+            if not fp.exists():
+                missing.append(f)
+            else:
+                resolved_files.append(str(fp))
+        if missing:
+            missing_list = "\n".join(f"  - {m}" for m in missing)
+            return (
+                f"Error: The following files were not found in the workspace:\n"
+                f"{missing_list}\n\n"
+                f"Fix the file paths and try again. Comment was NOT posted."
+            )
+        files = resolved_files
+
     config_error = _check_backend_config()
     if config_error:
         return config_error
@@ -511,6 +533,14 @@ def get_details(task: str = "") -> str:
                         f"  - [{st.get('status', '?').upper()}] {st.get('task', '')} — "
                         f"{st.get('title', '')} (assigned: {st.get('assigned_to') or 'unassigned'})"
                     )
+
+            # Task files uploaded to workspace
+            uploaded_files = data.get("uploaded_files") or []
+            if uploaded_files:
+                lines.append(f"\n**Task Files** (uploaded to workspace):")
+                for uf in uploaded_files:
+                    size_str = f" ({uf['size']} bytes)" if uf.get("size") else ""
+                    lines.append(f"  - `{uf['path']}`{size_str}")
 
             comments = data.get("recent_comments") or []
             if comments:

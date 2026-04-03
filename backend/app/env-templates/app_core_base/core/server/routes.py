@@ -930,6 +930,7 @@ async def download_workspace_item(path: str):
 async def upload_file_to_workspace(
     file: UploadFile = File(...),
     filename: str = Form(...),
+    subfolder: str = Form(""),
 ) -> FileUploadResponse:
     """
     Receive file from backend and store to workspace/uploads/ directory.
@@ -937,6 +938,7 @@ async def upload_file_to_workspace(
     Request:
     - file: Binary file content (multipart/form-data)
     - filename: Suggested filename (will be sanitized)
+    - subfolder: Optional subfolder within uploads/ (e.g., "task_TASK-1")
     - auth_token: Bearer token for authentication
 
     Response:
@@ -955,8 +957,14 @@ async def upload_file_to_workspace(
     # Sanitize filename
     safe_filename = AgentEnvService.sanitize_filename(filename)
 
-    # Ensure uploads directory exists
+    # Determine uploads directory (with optional subfolder)
     uploads_dir = Path("/app/workspace/uploads")
+    safe_subfolder = ""
+    if subfolder:
+        # Sanitize subfolder to prevent directory traversal
+        safe_subfolder = AgentEnvService.sanitize_filename(subfolder)
+        if safe_subfolder:
+            uploads_dir = uploads_dir / safe_subfolder
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
     # Handle filename conflicts
@@ -970,8 +978,9 @@ async def upload_file_to_workspace(
     target_path.write_bytes(content)
 
     # Return relative path (what agent will see)
+    relative_prefix = f"./uploads/{safe_subfolder}" if safe_subfolder else "./uploads"
     return FileUploadResponse(
-        path=f"./uploads/{final_filename}",
+        path=f"{relative_prefix}/{final_filename}",
         filename=final_filename,
         size=len(content),
         message="File uploaded successfully"

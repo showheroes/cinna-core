@@ -1,6 +1,7 @@
 """
 Input Task Service - handles task creation, retrieval, updates, and status management.
 """
+from pathlib import Path
 from uuid import UUID
 from datetime import UTC, datetime
 import logging
@@ -2865,7 +2866,10 @@ class InputTaskService:
                 "assigned_to": sub_agent_name,
             })
 
-        return {
+        # Collect task file info (InputTaskFile uploads + TaskAttachment files)
+        task_files_info = InputTaskService._collect_task_files_info(db_session, task_id)
+
+        result = {
             "task": task.short_code,
             "title": task.title or task.original_message[:100],
             "description": task.current_description,
@@ -2876,3 +2880,167 @@ class InputTaskService:
             "subtasks": subtasks,
             "subtask_progress": progress,
         }
+        if task_files_info:
+            result["files"] = task_files_info
+        return result
+
+    @staticmethod
+    def _collect_task_files_info(
+        db_session: DBSession,
+        task_id: UUID,
+    ) -> list[dict]:
+        """
+        Collect metadata for all files associated with a task.
+
+        Gathers both InputTaskFile (user-uploaded files linked to the task)
+        and TaskAttachment (agent/user attachments on the task or its comments).
+
+        Returns:
+            List of dicts with file_name, file_size, content_type, source, storage_path.
+        """
+        files_info: list[dict] = []
+        seen_filenames: set[str] = set()
+
+        # 1. InputTaskFile → FileUpload (user uploads linked to task)
+        task_files = db_session.exec(
+            select(FileUpload)
+            .join(InputTaskFile, FileUpload.id == InputTaskFile.file_id)
+            .where(InputTaskFile.task_id == task_id)
+        ).all()
+        for f in task_files:
+            if f.filename not in seen_filenames:
+                files_info.append({
+                    "file_name": f.filename,
+                    "file_size": f.file_size,
+                    "content_type": f.mime_type or "application/octet-stream",
+                    "source": "task_upload",
+                    "storage_path": f.file_path,
+                })
+                seen_filenames.add(f.filename)
+
+        # 2. TaskAttachment (standalone + comment-linked)
+        attachments = db_session.exec(
+            select(TaskAttachment)
+            .where(TaskAttachment.task_id == task_id)
+            .order_by(TaskAttachment.created_at.asc())
+        ).all()
+        for att in attachments:
+            if att.file_name not in seen_filenames:
+                files_info.append({
+                    "file_name": att.file_name,
+                    "file_size": att.file_size,
+                    "content_type": att.content_type or "application/octet-stream",
+                    "source": "task_attachment",
+                    "storage_path": att.file_path,
+                })
+                seen_filenames.add(att.file_name)
+
+        return files_info
+
+    @staticmethod
+    async def upload_task_files_to_agent_env(
+        db_session: DBSession,
+        task_details: dict,
+        source_session_id: UUID,
+    ) -> dict:
+        """
+        Upload task files to the calling agent's environment workspace.
+
+        Resolves the agent environment from the source session, then uploads all
+        task files to /app/workspace/uploads/task_{SHORT_CODE}/ in the container.
+        Adds 'uploaded_files' list with local paths to the task_details dict.
+        Always strips the internal 'files' key before returning.
+
+        Args:
+            db_session: Database session
+            task_details: Dict returned by get_agent_task_details (modified in place)
+            source_session_id: The calling session UUID (to resolve environment)
+
+        Returns:
+            The task_details dict with 'uploaded_files' added if files were uploaded.
+        """
+        import httpx
+        from app.models.environment import AgentEnvironment
+
+        files_info = task_details.pop("files", None)
+        if not files_info:
+            return task_details
+
+        # Resolve environment from session
+        session = db_session.get(Session, source_session_id)
+        if not session:
+            logger.warning(f"Session {source_session_id} not found for task file upload")
+            return task_details
+
+        environment = db_session.get(AgentEnvironment, session.environment_id)
+        if not environment or environment.status != "running":
+            logger.warning(
+                f"Environment {session.environment_id} not available for task file upload"
+            )
+            return task_details
+
+        container_name = environment.config.get("container_name", f"agent-{environment.id}")
+        port = environment.config.get("port", 8000)
+        base_url = f"http://{container_name}:{port}"
+        auth_token = environment.config.get("auth_token")
+        headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+
+        short_code = task_details.get("task", "unknown")
+        subfolder = f"task_{short_code}"
+
+        uploaded_files: list[dict] = []
+        from app.core.config import settings
+        upload_base = Path(settings.UPLOAD_BASE_PATH)
+        allowed_base = upload_base.parent.resolve()
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for file_info in files_info:
+                try:
+                    storage_path = file_info["storage_path"]
+                    abs_path = (upload_base.parent / storage_path).resolve()
+
+                    # Security: ensure path is within the upload directory
+                    if not str(abs_path).startswith(str(allowed_base)):
+                        logger.warning(f"Path traversal blocked: {storage_path}")
+                        continue
+
+                    if not abs_path.exists():
+                        logger.warning(f"Task file not found on disk: {abs_path}")
+                        continue
+
+                    # Skip oversized files to avoid memory pressure
+                    file_size = abs_path.stat().st_size
+                    if file_size > settings.upload_max_file_size_bytes:
+                        logger.warning(
+                            f"Skipping oversized task file: {file_info['file_name']} "
+                            f"({file_size} bytes)"
+                        )
+                        continue
+
+                    content = abs_path.read_bytes()
+                    filename = file_info["file_name"]
+
+                    response = await client.post(
+                        f"{base_url}/files/upload",
+                        files={"file": (filename, content, "application/octet-stream")},
+                        data={"filename": filename, "subfolder": subfolder},
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+
+                    uploaded_files.append({
+                        "file_name": filename,
+                        "path": result.get("path", f"./uploads/{subfolder}/{filename}"),
+                        "size": file_info.get("file_size"),
+                    })
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to upload task file '{file_info.get('file_name')}' "
+                        f"to agent env: {e}"
+                    )
+
+        if uploaded_files:
+            task_details["uploaded_files"] = uploaded_files
+
+        return task_details

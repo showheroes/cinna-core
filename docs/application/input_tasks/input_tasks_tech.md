@@ -252,13 +252,13 @@ Called by MCP tools inside agent environments. Authentication via JWT (same Curr
 - `GET /agent/tasks/by-code/{short_code}` — resolves short code (e.g. `HR-17`) to `{task_id, short_code}`; used by tools that accept a `task` param to obtain the UUID before making subsequent calls
 - `POST /agent/tasks/current/comment` — agent posts comment on its current task; requires `source_session_id` in body; calls `_resolve_task_from_session` to find task
 - `POST /agent/tasks/current/status` — agent updates status of its current task; requires `source_session_id` in body; calls `_resolve_task_from_session`
-- `GET /agent/tasks/current/details` — agent gets details of its current task; `source_session_id` passed as query param; calls `_resolve_task_from_session`
+- `GET /agent/tasks/current/details` — agent gets details of its current task; `source_session_id` passed as query param; calls `_resolve_task_from_session`; automatically uploads task files to agent environment; `async def`
 - `POST /agent/tasks/current/subtask` — agent creates subtask under its current task (resolved from `source_session_id`); delegates to `create_subtask` with team topology validation
 - `POST /agent/tasks/{task_id}/comment` — agent posts comment with optional workspace file paths (explicit task_id variant)
 - `POST /agent/tasks/{task_id}/status` — agent explicitly updates status (edge cases: blocked, cancelled, completed; explicit task_id variant)
 - `POST /agent/tasks/{task_id}/subtask` — agent creates subtask with explicit parent task ID (validates team membership and connection topology)
 - `GET /agent/tasks/my-tasks` — agent lists tasks (`scope`: `assigned` / `created` / `team`)
-- `GET /agent/tasks/{task_id}/details` — agent gets simplified task detail (recent comments, subtask progress; explicit task_id variant)
+- `GET /agent/tasks/{task_id}/details` — agent gets simplified task detail (recent comments, subtask progress; explicit task_id variant); accepts optional `source_session_id` query param — when provided, uploads task files to agent environment; `async def`
 
 ## Services & Key Methods
 
@@ -292,6 +292,8 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 - `get_agent_task_details(session, task_id, user_id)` — simplified view for agent consumption
 - `get_subtask_progress(session, task_id)` — returns `{total, completed, in_progress, blocked}`
 - `_notify_parent_task(session, parent_task, completed_subtask)` — post system comment on parent; trigger parent agent if session is idle; emit `SUBTASK_COMPLETED`
+- `_collect_task_files_info(session, task_id) -> list[dict]` — queries `InputTaskFile` (user uploads linked to task) and `TaskAttachment` (agent/user attachments on task and its comments); deduplicates by filename; returns list of `{file_name, file_size, content_type, source, storage_path}` dicts
+- `upload_task_files_to_agent_env(session, task_details, source_session_id) -> dict` — async; resolves agent environment from `source_session_id`; reads each file from backend storage; POSTs to agent-env `POST /files/upload` with `subfolder=task_{SHORT_CODE}`; files land at `/app/workspace/uploads/task_{SHORT_CODE}/` in the container; injects `uploaded_files` list into returned `task_details`; strips internal `files` key before returning; skips files exceeding size limit; silently skips if environment is not running
 
 **Session event handlers (static async, registered in `backend/app/main.py`):**
 - `handle_session_started()` — task → `in_progress` (system comment)
@@ -345,7 +347,7 @@ The enrichment runs inside a `try/except` block — failures are logged as warni
 ### `TaskAttachmentService` (`backend/app/services/task_attachment_service.py`)
 
 - `upload_attachment(session, task_id, file: UploadFile, uploaded_by_user_id=None, comment_id=None)` — stores file, creates `TaskAttachment` record, emits `TASK_ATTACHMENT_ADDED`
-- `attach_from_workspace(session, task_id, agent_id, file_paths, comment_id=None)` — resolves agent's active environment; for each path: calls `GET /files/download?path=...` on agent-env HTTP API; stores file; creates `TaskAttachment` with origin tracking
+- `attach_from_workspace(session, task_id, agent_id, file_paths, comment_id=None)` — resolves agent's active environment; for each path: normalizes to a relative path (handles `./reports/file.json`, `/app/workspace/reports/file.json`, and `reports/file.json` formats), then calls `GET /workspace/download/{rel_path}` on agent-env HTTP API; stores file; creates `TaskAttachment` with origin tracking
 - `get_download_stream(session, task_id, attachment_id, user_id) -> tuple[Path, str, str]` — ownership check; returns (abs_path, filename, content_type)
 - `list_attachments(session, task_id)` — all attachments for a task (chronological)
 - `delete_attachment(session, task_id, attachment_id, user_id)` — deletes DB record and file on disk

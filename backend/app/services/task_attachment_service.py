@@ -207,11 +207,20 @@ class TaskAttachmentService:
 
         for workspace_path in file_paths:
             try:
-                # Fetch file from agent environment
+                # Normalize path to be relative to workspace root
+                # Agent may send: ./reports/file.json, /app/workspace/reports/file.json,
+                # or reports/file.json — all should resolve to "reports/file.json"
+                rel_path = workspace_path
+                if rel_path.startswith("/app/workspace/"):
+                    rel_path = rel_path[len("/app/workspace/"):]
+                if rel_path.startswith("./"):
+                    rel_path = rel_path[2:]
+                rel_path = rel_path.lstrip("/")
+
+                # Fetch file from agent environment via workspace download endpoint
                 with httpx.Client(timeout=30.0) as client:
                     response = client.get(
-                        f"{base_url}/files/download",
-                        params={"path": workspace_path},
+                        f"{base_url}/workspace/download/{rel_path}",
                         headers=headers,
                     )
                     response.raise_for_status()

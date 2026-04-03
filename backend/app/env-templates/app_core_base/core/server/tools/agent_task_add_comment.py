@@ -6,6 +6,7 @@ findings, results, and progress. Optionally attaches workspace files to the comm
 """
 import logging
 import os
+from pathlib import Path
 from typing import Any
 import httpx
 
@@ -76,6 +77,28 @@ async def agent_task_add_comment(args: dict[str, Any]) -> dict[str, Any]:
             "content": [{"type": "text", "text": "Error: Backend session ID not available"}],
             "is_error": True,
         }
+
+    # Validate file paths exist locally before sending to backend
+    if files:
+        workspace = Path("/app/workspace")
+        missing = []
+        resolved_files = []
+        for f in files:
+            fp = Path(f)
+            # Resolve relative paths against workspace
+            if not fp.is_absolute():
+                fp = workspace / fp
+            if not fp.exists():
+                missing.append(f)
+            else:
+                resolved_files.append(str(fp))
+        if missing:
+            missing_list = "\n".join(f"  - {m}" for m in missing)
+            return {
+                "content": [{"type": "text", "text": f"Error: The following files were not found in the workspace:\n{missing_list}\n\nFix the file paths and try again. Comment was NOT posted."}],
+                "is_error": True,
+            }
+        files = resolved_files
 
     headers = {
         "Authorization": f"Bearer {AGENT_AUTH_TOKEN}",

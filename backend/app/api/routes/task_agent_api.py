@@ -184,7 +184,7 @@ async def agent_update_status_current(
 
 
 @router.get("/agent/tasks/current/details")
-def agent_get_task_details_current(
+async def agent_get_task_details_current(
     db_session: SessionDep,
     current_user: CurrentUser,
     source_session_id: uuid.UUID,
@@ -193,13 +193,17 @@ def agent_get_task_details_current(
     Agent gets details of its current task (resolved from session).
 
     Called by the mcp__agent_task__get_details MCP tool when no task short code is specified.
+    Automatically uploads task files to the calling agent's workspace.
     """
     try:
         task = _resolve_task_from_session(db_session, source_session_id)
-        return InputTaskService.get_agent_task_details(
+        details = InputTaskService.get_agent_task_details(
             db_session=db_session,
             task_id=task.id,
             user_id=current_user.id,
+        )
+        return await InputTaskService.upload_task_files_to_agent_env(
+            db_session, details, source_session_id,
         )
     except InputTaskError as e:
         _handle_error(e)
@@ -383,22 +387,32 @@ def agent_list_tasks(
 
 
 @router.get("/agent/tasks/{task_id}/details")
-def agent_get_task_details(
+async def agent_get_task_details(
     db_session: SessionDep,
     current_user: CurrentUser,
     task_id: uuid.UUID,
+    source_session_id: uuid.UUID | None = None,
 ) -> Any:
     """
     Agent gets full task details including recent comments and subtask progress.
 
     Called by the mcp__agent_task__get_details MCP tool.
     Returns a simplified view optimized for agent consumption.
+    Automatically uploads task files to the calling agent's workspace when
+    source_session_id is provided.
     """
     try:
-        return InputTaskService.get_agent_task_details(
+        details = InputTaskService.get_agent_task_details(
             db_session=db_session,
             task_id=task_id,
             user_id=current_user.id,
         )
+        if source_session_id:
+            return await InputTaskService.upload_task_files_to_agent_env(
+                db_session, details, source_session_id,
+            )
+        # No session to upload to — strip internal storage paths
+        details.pop("files", None)
+        return details
     except InputTaskError as e:
         _handle_error(e)

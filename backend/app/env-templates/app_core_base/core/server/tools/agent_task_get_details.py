@@ -140,6 +140,14 @@ async def agent_task_get_details(args: dict[str, Any]) -> dict[str, Any]:
                 for st in subtasks:
                     lines.append(f"  - [{st.get('status', '?').upper()}] {st.get('task', '')} — {st.get('title', '')} (assigned: {st.get('assigned_to') or 'unassigned'})")
 
+            # Task files uploaded to workspace
+            uploaded_files = data.get("uploaded_files") or []
+            if uploaded_files:
+                lines.append(f"\n**Task Files** (uploaded to workspace):")
+                for uf in uploaded_files:
+                    size_str = f" ({uf['size']} bytes)" if uf.get("size") else ""
+                    lines.append(f"  - `{uf['path']}`{size_str}")
+
             # Recent comments
             comments = data.get("recent_comments") or []
             if comments:
