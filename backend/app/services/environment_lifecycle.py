@@ -1120,6 +1120,12 @@ class EnvironmentLifecycleManager:
             else:
                 logger.warning(f"Shared app_core_base not found at {app_core_base_dir}")
 
+            # 3. Create claude_sessions directory for persistent SDK session storage
+            # Mounted as /root/.claude inside the container to survive rebuilds
+            claude_sessions_dir = instance_dir / "claude_sessions"
+            claude_sessions_dir.mkdir(parents=True, exist_ok=True)
+            logger.debug(f"Created claude_sessions directory: {claude_sessions_dir}")
+
         # Run blocking I/O operation in thread pool executor
         await asyncio.to_thread(_copy_sync)
         logger.debug(f"Template copy completed")
@@ -1761,15 +1767,16 @@ SDK_ADAPTER_CONVERSATION={sdk_conversation}
         """
         Write the Claude Code PreToolUse hook configuration for credential access detection.
 
-        Creates or updates /app/core/.claude/settings.json inside the container
-        (host path: instance_dir/app/core/.claude/settings.json) to include the
-        credential_guard_hook.py PreToolUse hook.
+        Creates or updates /root/.claude/settings.json inside the container
+        (host path: instance_dir/claude_sessions/settings.json) to include the
+        credential_guard_hook.py PreToolUse hook. This path is where the Claude
+        CLI "user" setting source resolves settings from.
 
         The hook script is already present in the core directory (copied from
         app_core_base/core/hooks/credential_guard_hook.py). This method only
         writes the settings.json that activates it.
 
-        If settings.json already exists (e.g., from MiniMax configuration), the
+        If settings.json already exists (e.g., from a previous build), the
         hooks section is merged in without overwriting existing settings.
 
         Note: Claude Code hooks run on `Bash|Read|Write|Edit` tool calls. The hook
@@ -1781,7 +1788,9 @@ SDK_ADAPTER_CONVERSATION={sdk_conversation}
         """
         import json
 
-        claude_settings_dir = instance_dir / "app" / "core" / ".claude"
+        # Write to claude_sessions/ which is mounted as /root/.claude in the container.
+        # The Claude CLI "user" setting source looks at ~/.claude/settings.json.
+        claude_settings_dir = instance_dir / "claude_sessions"
         claude_settings_dir.mkdir(parents=True, exist_ok=True)
         settings_path = claude_settings_dir / "settings.json"
 

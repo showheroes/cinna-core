@@ -25,9 +25,11 @@ services:
       - SDK_ADAPTER_CONVERSATION=${SDK_ADAPTER_CONVERSATION:-claude-code/anthropic}
       - BACKEND_URL=http://backend:8000
 
+    # Claude sessions: SDK session data - persisted across rebuilds for session resumption
     volumes:
       - ${HOST_INSTANCE_DIR}/app/core:/app/core:ro
       - ${HOST_INSTANCE_DIR}/app/workspace:/app/workspace
+      - ${HOST_INSTANCE_DIR}/claude_sessions:/root/.claude
 
     networks:
       - agent-bridge

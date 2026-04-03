@@ -32,9 +32,11 @@ services:
     # Volume mounts (host:container) - using absolute host paths
     # Core: system files (server, API) - baked into image, can be updated on rebuild
     # Workspace: user files (scripts, docs, credentials) - persisted across rebuilds
+    # Claude sessions: SDK session data - persisted across rebuilds for session resumption
     volumes:
       - ${HOST_INSTANCE_DIR}/app/core:/app/core:ro
       - ${HOST_INSTANCE_DIR}/app/workspace:/app/workspace
+      - ${HOST_INSTANCE_DIR}/claude_sessions:/root/.claude
 
     # Networks: agent-bridge (shared with backend and other agents)
     networks:
