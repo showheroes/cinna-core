@@ -1,6 +1,7 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { useNavigationHistory } from "@/hooks/useNavigationHistory"
 import {
   ArrowLeft,
   User,
@@ -39,7 +40,7 @@ function Label({ children }: { children: React.ReactNode }) {
 
 function PluginDetailPage() {
   const { pluginId } = Route.useParams()
-  const navigate = useNavigate()
+
   const { setHeaderContent } = usePageHeader()
 
   const {
@@ -52,12 +53,10 @@ function PluginDetailPage() {
     enabled: !!pluginId,
   })
 
+  const { goBack } = useNavigationHistory()
+
   const handleBack = () => {
-    if (plugin?.marketplace_id) {
-      navigate({ to: "/admin/marketplace/$marketplaceId", params: { marketplaceId: plugin.marketplace_id }, hash: "plugins" })
-    } else {
-      navigate({ to: "/admin/marketplaces" })
-    }
+    goBack("/admin/marketplaces")
   }
 
   useEffect(() => {

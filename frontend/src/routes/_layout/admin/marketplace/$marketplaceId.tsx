@@ -4,6 +4,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { ArrowLeft, EllipsisVertical, Trash, RefreshCw } from "lucide-react"
 
 import { LlmPluginsService } from "@/client"
+import { useNavigationHistory } from "@/hooks/useNavigationHistory"
 import useCustomToast from "@/hooks/useCustomToast"
 import { Button } from "@/components/ui/button"
 import {
@@ -75,8 +76,10 @@ function MarketplaceDetailPage() {
     enabled: !!marketplaceId,
   })
 
+  const { goBack } = useNavigationHistory()
+
   const handleBack = () => {
-    navigate({ to: "/admin/marketplaces" })
+    goBack("/admin/marketplaces")
   }
 
   // Update header when marketplace loads

@@ -35,6 +35,7 @@ import {
 } from "lucide-react"
 
 import { TasksService, AgentsService, AgenticTeamsService } from "@/client"
+import { useNavigationHistory } from "@/hooks/useNavigationHistory"
 import type { InputTaskDetailPublic, TaskCommentPublic, TaskAttachmentPublic, SessionPublic, AgenticTeamNodePublic } from "@/client"
 import PendingItems from "@/components/Pending/PendingItems"
 import { usePageHeader } from "@/routes/_layout"
@@ -407,6 +408,7 @@ function TaskDetailPage() {
   const { setHeaderContent } = usePageHeader()
   const { activeWorkspaceId } = useWorkspace()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { goBack } = useNavigationHistory()
   const isByUUID = isUUID(taskId)
 
   const [isEditing, setIsEditing] = useState(false)
@@ -620,7 +622,7 @@ function TaskDetailPage() {
         displayTitle={displayTitle}
         triggersCount={triggersData?.count ?? 0}
         headerMenuOpen={headerMenuOpen}
-        onBack={() => navigate({ to: "/tasks" })}
+        onBack={() => goBack("/tasks")}
         onMenuOpenChange={setHeaderMenuOpen}
         onEditDescription={() => { setHeaderMenuOpen(false); setIsEditing((v) => !v) }}
         onOpenTriggers={() => { setHeaderMenuOpen(false); setTriggerModalOpen(true) }}
@@ -724,7 +726,7 @@ function TaskDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <p className="text-destructive">Error loading task</p>
-        <Button variant="outline" onClick={() => navigate({ to: "/tasks" })} className="mt-4">Back to Tasks</Button>
+        <Button variant="outline" onClick={() => goBack("/tasks")} className="mt-4">Back to Tasks</Button>
       </div>
     )
   }

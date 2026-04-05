@@ -7,6 +7,7 @@ import { useForm } from "react-hook-form"
 import { z } from "zod"
 
 import { CredentialsService } from "@/client"
+import { useNavigationHistory } from "@/hooks/useNavigationHistory"
 import type { CredentialPublic, CredentialWithData } from "@/client"
 import PendingItems from "@/components/Pending/PendingItems"
 import { Button } from "@/components/ui/button"
@@ -372,8 +373,10 @@ function CredentialDetail() {
     navigate({ to: "/credentials" })
   }
 
+  const { goBack } = useNavigationHistory()
+
   const handleBack = () => {
-    navigate({ to: "/credentials" })
+    goBack("/credentials")
   }
 
   // Update header when credential loads

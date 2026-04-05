@@ -4,6 +4,7 @@ import { ArrowLeft, EllipsisVertical, Share2, Sparkles } from "lucide-react"
 import { useState, useEffect } from "react"
 
 import { AgentsService, AgentSharesService } from "@/client"
+import { useNavigationHistory } from "@/hooks/useNavigationHistory"
 import { AgentConfigTab } from "@/components/Agents/AgentConfigTab"
 import { AgentIntegrationsTab } from "@/components/Agents/AgentIntegrationsTab"
 import { AgentCredentialsTab } from "@/components/Agents/AgentCredentialsTab"
@@ -75,8 +76,10 @@ function AgentDetail() {
     navigate({ to: "/agents" })
   }
 
+  const { goBack } = useNavigationHistory()
+
   const handleBack = () => {
-    navigate({ to: "/agents" })
+    goBack("/agents")
   }
 
   // Update header when agent loads

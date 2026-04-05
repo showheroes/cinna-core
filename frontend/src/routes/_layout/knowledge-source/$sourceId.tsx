@@ -4,6 +4,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { ArrowLeft, EllipsisVertical, Edit, Trash } from "lucide-react"
 
 import { KnowledgeSourcesService } from "@/client"
+import { useNavigationHistory } from "@/hooks/useNavigationHistory"
 import useCustomToast from "@/hooks/useCustomToast"
 import { Button } from "@/components/ui/button"
 import {
@@ -60,8 +61,10 @@ function KnowledgeSourceDetailPage() {
     enabled: !!sourceId,
   })
 
+  const { goBack } = useNavigationHistory()
+
   const handleBack = () => {
-    navigate({ to: "/knowledge-sources" })
+    goBack("/knowledge-sources")
   }
 
   // Update header when source loads

@@ -263,3 +263,49 @@ const createMutation = useMutation({
   }),
 })
 ```
+
+## Navigation History & Back Button
+
+Detail pages use a tab-scoped navigation history stack for intuitive Back button behavior. Instead of hardcoding a destination (e.g., always going to `/agents`), the Back button returns to the actual previous page.
+
+### Architecture
+
+Two hooks in `src/hooks/useNavigationHistory.ts`:
+
+- **`useNavigationTracker()`** — called once in `_layout.tsx`. Records every route change into a `sessionStorage` stack (max 50 entries). Since `sessionStorage` is per browser tab, different tabs maintain independent histories.
+- **`useNavigationHistory()`** — returns `goBack(fallback)`. Pops the most recent URL from the stack. If the stack is empty (e.g., direct URL access), navigates to `fallback`.
+
+When `goBack` is called, the current page is **not** pushed back onto the stack, so repeated Back presses walk through the history linearly.
+
+### Usage in Detail Pages
+
+Every detail page with a Back button follows this pattern:
+
+```tsx
+import { useNavigationHistory } from "@/hooks/useNavigationHistory"
+
+function DetailPage() {
+  const { goBack } = useNavigationHistory()
+
+  const handleBack = () => {
+    goBack("/entities")  // fallback if history is empty
+  }
+
+  // Use handleBack in the header Back button
+}
+```
+
+### Adding a Back Button to a New Page
+
+1. Import `useNavigationHistory` and call `goBack(fallback)` in your back handler
+2. Choose a sensible `fallback` — typically the entity's index page (e.g., `/agents`, `/tasks`)
+3. No changes needed in `_layout.tsx` — the tracker is already running there
+
+### Behavior Examples
+
+| Navigation path | Back button goes to |
+|----------------|-------------------|
+| `/tasks` → `/task/123` | `/tasks` |
+| `/task/456` → `/task/456/subtask/789` → `/session/abc` | `/task/456/subtask/789`, then `/task/456` |
+| Direct URL to `/agent/xyz` (no history) | `/agents` (fallback) |
+| Tab A and Tab B open different pages | Each tab has independent history |

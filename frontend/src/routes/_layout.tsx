@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/sidebar"
 import { isLoggedIn } from "@/hooks/useAuth"
 import { useEventBusConnection } from "@/hooks/useEventBus"
+import { useNavigationTracker } from "@/hooks/useNavigationHistory"
 
 interface HeaderContextType {
   setHeaderContent: (content: ReactNode) => void
@@ -40,6 +41,9 @@ function Layout() {
 
   // Initialize WebSocket connection for real-time events
   useEventBusConnection()
+
+  // Track navigation history for Back button support
+  useNavigationTracker()
 
   return (
     <HeaderContext.Provider value={{ setHeaderContent }}>

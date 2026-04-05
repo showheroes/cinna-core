@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { ArrowLeft, EllipsisVertical, Mail, Package, Loader2, ListTodo, Plug } from "lucide-react"
 
 import { SessionsService, MessagesService, AgentsService, EnvironmentsService, OpenAPI } from "@/client"
+import { useNavigationHistory } from "@/hooks/useNavigationHistory"
 import { SubTasksPanel } from "@/components/Chat/SubTasksPanel"
 import { MessageList } from "@/components/Chat/MessageList"
 import { MessageInput } from "@/components/Chat/MessageInput"
@@ -238,9 +239,11 @@ function ChatInterface() {
     handleSendMessage,
   ])
 
+  const { goBack } = useNavigationHistory()
+
   const handleBack = useCallback(() => {
-    navigate({ to: "/sessions" })
-  }, [navigate])
+    goBack("/sessions")
+  }, [goBack])
 
   const handleDeleteSuccess = useCallback(() => {
     navigate({ to: "/sessions" })
