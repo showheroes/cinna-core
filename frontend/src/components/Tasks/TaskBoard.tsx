@@ -1,11 +1,12 @@
 import { useCallback } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { Bot, ClipboardList } from "lucide-react"
+import { Bot, ClipboardList, ArchiveIcon } from "lucide-react"
 
 import { TasksService } from "@/client"
 import type { InputTaskPublicExtended } from "@/client"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Badge } from "@/components/ui/badge"
 import { TaskShortCodeBadge } from "@/components/Tasks/TaskShortCodeBadge"
 import { TaskPriorityBadge } from "@/components/Tasks/TaskPriorityBadge"
 import { SubtaskProgressChip } from "@/components/Tasks/SubtaskProgressChip"
@@ -75,6 +76,7 @@ function TaskCard({ task }: { task: InputTaskPublicExtended }) {
             <SubtaskProgressChip
               total={task.subtask_count ?? 0}
               completed={task.subtask_completed_count ?? 0}
+              taskId={task.id}
             />
           )}
           {task.team_name && (
@@ -110,7 +112,7 @@ function BoardColumnSkeleton({ label }: { label: string }) {
     <div className="flex flex-col gap-2 min-w-0">
       <div className="flex items-center justify-between px-1">
         <span className="text-sm font-medium text-muted-foreground">{label}</span>
-        <Skeleton className="h-3 w-4" />
+        <Skeleton className="h-5 w-5 rounded-full" />
       </div>
       <div className="flex flex-col gap-2">
         <TaskCardSkeleton />
@@ -123,16 +125,39 @@ function BoardColumnSkeleton({ label }: { label: string }) {
 
 function BoardColumn({
   label,
+  columnKey,
   tasks,
+  onArchiveAll,
+  isArchiving,
 }: {
   label: string
+  columnKey: string
   tasks: InputTaskPublicExtended[]
+  onArchiveAll?: () => void
+  isArchiving?: boolean
 }) {
   return (
     <div className="flex flex-col gap-2 min-w-0">
       <div className="flex items-center justify-between px-1">
         <span className="text-sm font-medium text-muted-foreground">{label}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">{tasks.length}</span>
+        <div className="flex items-center gap-1.5">
+          {columnKey === "completed" && tasks.length > 0 && (
+            <button
+              onClick={onArchiveAll}
+              disabled={isArchiving}
+              title="Archive all completed tasks"
+              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            >
+              <ArchiveIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <Badge
+            variant="secondary"
+            className="h-5 min-w-5 px-1.5 text-[10px] tabular-nums"
+          >
+            {tasks.length}
+          </Badge>
+        </div>
       </div>
       <div className="flex flex-col gap-2 min-h-[120px]">
         {tasks.map((task) => (
@@ -184,9 +209,25 @@ export function TaskBoard({ teamId }: TaskBoardProps) {
   const tasksByColumn = Object.fromEntries(
     BOARD_COLUMNS.map((col) => [
       col.key,
-      allTasks.filter((t) => col.statuses.includes(t.status)),
+      allTasks.filter((t) => (col.statuses as readonly string[]).includes(t.status)),
     ])
   )
+
+  const archiveAllMutation = useMutation({
+    mutationFn: async () => {
+      const completedTasks = tasksByColumn["completed"] ?? []
+      await Promise.all(
+        completedTasks.map((t) => TasksService.archiveTask({ id: t.id }))
+      )
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+    },
+  })
+
+  const handleArchiveAll = useCallback(() => {
+    archiveAllMutation.mutate()
+  }, [archiveAllMutation])
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -215,8 +256,11 @@ export function TaskBoard({ teamId }: TaskBoardProps) {
           {BOARD_COLUMNS.map((col) => (
             <BoardColumn
               key={col.key}
+              columnKey={col.key}
               label={col.label}
               tasks={tasksByColumn[col.key] ?? []}
+              onArchiveAll={col.key === "completed" ? handleArchiveAll : undefined}
+              isArchiving={col.key === "completed" ? archiveAllMutation.isPending : undefined}
             />
           ))}
         </div>

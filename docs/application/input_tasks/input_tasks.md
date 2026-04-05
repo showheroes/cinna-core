@@ -34,7 +34,7 @@ The task system also serves as the primary **collaboration surface** for agent w
 2. System auto-generates `short_code` (e.g., `TASK-1`) and derives a title; if a team is selected with no agent specified, the team's lead agent is auto-assigned
 3. User opens the task detail page at `/task/$taskId` (accessible by UUID or short code)
 4. Left body: editable description, attachments section, tabbed section (Comments / Sessions / Sub-tasks / Activity) — all content areas use full available width
-5. Right sidebar: Status, Priority dropdown, Assignee (agent selector modal), Team (team selector modal), Triggers, Subtask progress, Dates, Execute button
+5. Right sidebar: Parent Task (shown only when task has a parent, clickable badge with parent short code; tree icon opens full task tree popover), Status, Priority dropdown, Assignee (agent selector modal), Team (team selector modal), Triggers, Subtask progress (clickable chip opens subtask list popover), Dates, Execute button
 6. User sends refinement comments or text-selection requests via the inline input bar — AI refines description and provides feedback
 7. User continues refining or clicks Execute; execution stays on the task page and shows live session progress in the Sessions tab
 8. System creates a session linked to the task via `source_task_id`

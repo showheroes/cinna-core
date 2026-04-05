@@ -1456,6 +1456,8 @@ export type InputTaskDetailPublic = {
     attached_files?: Array<FileUploadPublic>;
     assigned_node_name?: (string | null);
     team_name?: (string | null);
+    parent_short_code?: (string | null);
+    root_short_code?: (string | null);
     comments?: Array<unknown>;
     attachments?: Array<unknown>;
     subtasks?: Array<unknown>;
@@ -1537,6 +1539,8 @@ export type InputTaskPublicExtended = {
     attached_files?: Array<FileUploadPublic>;
     assigned_node_name?: (string | null);
     team_name?: (string | null);
+    parent_short_code?: (string | null);
+    root_short_code?: (string | null);
 };
 
 export type InputTasksPublicExtended = {
@@ -1551,28 +1555,6 @@ export type InputTaskUpdate = {
     priority?: (string | null);
     team_id?: (string | null);
     assigned_node_id?: (string | null);
-};
-
-export type ItemCreate = {
-    title: string;
-    description?: (string | null);
-};
-
-export type ItemPublic = {
-    title: string;
-    description?: (string | null);
-    id: string;
-    owner_id: string;
-};
-
-export type ItemsPublic = {
-    data: Array<ItemPublic>;
-    count: number;
-};
-
-export type ItemUpdate = {
-    title?: (string | null);
-    description?: (string | null);
 };
 
 /**
@@ -3756,38 +3738,6 @@ export type GuestSharesUpdateGuestShareData = {
 };
 
 export type GuestSharesUpdateGuestShareResponse = (AgentGuestSharePublic);
-
-export type ItemsReadItemsData = {
-    limit?: number;
-    skip?: number;
-};
-
-export type ItemsReadItemsResponse = (ItemsPublic);
-
-export type ItemsCreateItemData = {
-    requestBody: ItemCreate;
-};
-
-export type ItemsCreateItemResponse = (ItemPublic);
-
-export type ItemsReadItemData = {
-    id: string;
-};
-
-export type ItemsReadItemResponse = (ItemPublic);
-
-export type ItemsUpdateItemData = {
-    id: string;
-    requestBody: ItemUpdate;
-};
-
-export type ItemsUpdateItemResponse = (ItemPublic);
-
-export type ItemsDeleteItemData = {
-    id: string;
-};
-
-export type ItemsDeleteItemResponse = (Message);
 
 export type KnowledgeQueryKnowledgeData = {
     authorization?: (string | null);

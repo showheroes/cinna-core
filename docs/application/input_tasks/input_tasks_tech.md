@@ -52,12 +52,12 @@
 ### Frontend
 
 **Routes:**
-- `frontend/src/routes/_layout/tasks/index.tsx` — Tasks page with view mode toggle (Board / List); header has "New Task" button and view switcher; Board view renders `TaskBoard` component; List view renders a compact table with left sidebar status filters (Active, Completed, All, Archived), rows grouped by date (Today, Yesterday, Last week, Older), sorted by `updated_at` desc; each row shows status dot, short code, title, team/agent badge with color preset, and relative time
-- `frontend/src/routes/_layout/task/$taskId.tsx` — unified task detail page; `taskId` param accepts either a UUID or a short code; detects format with `isUUID()` regex and calls `TasksService.getTaskDetail()` (UUID) or `TasksService.getTaskDetailByCode()` (short code) accordingly; full-width layout (no max-width constraints); sessions displayed as a tab alongside Comments/Sub-tasks/Activity (not as a standalone block)
+- `frontend/src/routes/_layout/tasks/index.tsx` — Tasks page with view mode toggle (Board / List); header has "New Task" button and view switcher; Board view renders `TaskBoard` component; List view renders a compact table with left sidebar status filters (Open / In Progress / Blocked / Completed, then Archived below a separator — mirroring kanban columns), each filter shows a task count; data is fetched once for all non-archived statuses and filtered client-side for instant switching; archived tasks fetched lazily only when the Archived filter is selected; rows grouped by date (Today, Yesterday, Last week, Older), sorted by `updated_at` desc; each row shows status dot, short code (with `CornerDownRight` icon and parent short code for subtasks), title, team/agent badge with color preset, and relative time
+- `frontend/src/routes/_layout/task/$taskId.tsx` — unified task detail page; `taskId` param accepts either a UUID or a short code; detects format with `isUUID()` regex and calls `TasksService.getTaskDetail()` (UUID) or `TasksService.getTaskDetailByCode()` (short code) accordingly; full-width layout (no max-width constraints); sessions displayed as a tab alongside Comments/Sub-tasks/Activity (not as a standalone block); right sidebar shows a "Parent Task" row (above Status) when `task.parent_task_id` is set — the row has a tree icon (`GitBranchPlus`) that opens a `TaskTreePopover` and a clickable badge with `parent_short_code` that navigates to the parent; the "Subtasks" sidebar row shows the same tree icon for root tasks that have subtasks
 - `frontend/src/routes/_layout/tasks/$shortCode.tsx` — redirect-only route; performs `beforeLoad` redirect from `/tasks/$shortCode` to `/task/$taskId` preserving the short code value
 
 **Components:**
-- `frontend/src/components/Tasks/TaskBoard.tsx` — kanban board with 4 columns: Open (includes `new`, `refining`, `open` statuses), In Progress, Blocked, Completed; subscribes to `TASK_STATUS_CHANGED`, `TASK_SUBTASK_CREATED`, `SUBTASK_COMPLETED` for real-time updates; no inline filters or create button (handled by parent page header)
+- `frontend/src/components/Tasks/TaskBoard.tsx` — kanban board with 4 columns: Open (includes `new`, `refining`, `open` statuses), In Progress, Blocked, Completed; each column header shows the column label on the left and a rounded `Badge` (shadcn `secondary` variant, `h-5` pill) on the right with the task count; the Completed column also has an `ArchiveIcon` button next to the badge that archives all completed tasks in parallel via `archiveAllMutation` (`Promise.all`); skeleton loading state also uses a rounded pill skeleton in the header; subscribes to `TASK_STATUS_CHANGED`, `TASK_SUBTASK_CREATED`, `SUBTASK_COMPLETED` for real-time updates; no inline filters or create button (handled by parent page header)
 - `frontend/src/components/Tasks/TaskShortCodeBadge.tsx` — clickable or static short code badge with status-aware color; navigates to `/task/$taskId` on click
 - `frontend/src/components/Tasks/TaskStatusBadge.tsx` — color-coded status badge with icon
 - `frontend/src/components/Tasks/TaskStatusPill.tsx` — compact status indicator used in task detail header and subtask rows
@@ -191,7 +191,7 @@ Index: `ix_task_status_history_task_id`
 - `InputTaskCreate` — includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?`, `parent_task_id?`
 - `InputTaskUpdate` — includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?` (team can be changed after creation)
 - `InputTaskPublic` — includes new: `short_code`, `title`, `priority`, `parent_task_id`, `team_id`, `assigned_node_id`, `created_by_node_id`, `subtask_count`, `subtask_completed_count`
-- `InputTaskPublicExtended` — extends Public with: `agent_name`, `refinement_history`, `todo_progress`, `sessions_count`, `latest_session_id`, `attached_files`, `assigned_node_name`, `team_name`
+- `InputTaskPublicExtended` — extends Public with: `agent_name`, `refinement_history`, `todo_progress`, `sessions_count`, `latest_session_id`, `attached_files`, `assigned_node_name`, `team_name`, `parent_short_code` (resolved by service layer via DB lookup), `root_short_code` (walks up hierarchy to root; set only when task has a parent)
 - `InputTaskDetailPublic` — extends Extended with: `comments: list[TaskCommentPublic]`, `attachments: list[TaskAttachmentPublic]`, `subtasks: list[InputTaskPublic]`, `status_history: list[TaskStatusHistoryPublic]`
 - `AgentTaskStatusUpdate` — agent edge-case status update (`status`, `reason?`, `task?` short code)
 - `AgentSubtaskCreate` — agent subtask creation (`title`, `description?`, `assigned_to?`, `priority?`, `task?` short code, `source_session_id?`)
@@ -220,7 +220,7 @@ Index: `ix_task_status_history_task_id`
 **Short-Code Access (new):**
 - `GET /api/v1/tasks/by-code/{short_code}` — get task by short code (`InputTaskPublicExtended`)
 - `GET /api/v1/tasks/by-code/{short_code}/detail` — full detail: comments, attachments, subtasks, history
-- `GET /api/v1/tasks/by-code/{short_code}/tree` — recursive subtask tree
+- `GET /api/v1/tasks/by-code/{short_code}/tree` — recursive subtask tree (used by `TaskTreePopover` in the frontend)
 
 **Detail by UUID (new):**
 - `GET /api/v1/tasks/{id}/detail` — full detail by UUID (`InputTaskDetailPublic`)
@@ -235,6 +235,10 @@ Index: `ix_task_status_history_task_id`
 - `POST /api/v1/tasks/{id}/attachments/` — upload attachment (multipart)
 - `GET /api/v1/tasks/{id}/attachments/{attachment_id}/download` — download file (streaming)
 - `DELETE /api/v1/tasks/{id}/attachments/{attachment_id}` — delete attachment and file on disk
+
+**Subtasks:**
+- `GET /api/v1/tasks/{id}/subtasks/` — list direct subtasks (`InputTasksPublicExtended`); used by `SubtaskProgressChip` popover via `TasksService.listSubtasks`
+- `POST /api/v1/tasks/{id}/subtasks/` — create subtask (user-initiated; sets `parent_task_id` automatically)
 
 **Legacy file attachment (pre-collaboration):**
 - `POST /api/v1/tasks/{id}/files/{file_id}` — attach pre-uploaded FileUpload to task
@@ -270,7 +274,8 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 - `verify_agent_access()` — verify agent exists and user owns it, optionally require active environment
 - `get_task_with_ownership_check()` — get task and verify owner
 - `parse_status_filter()`, `parse_workspace_filter()` — filter parsing utilities
-- `get_task_extended()`, `list_tasks_extended()` — with agent name, team/node names, and session data joined
+- `get_task_extended()` — resolves agent name, team/node names, session data, and `parent_short_code` / `root_short_code` via DB lookup (walks parent chain to root)
+- `list_tasks_extended()` — same enrichment with `parent_short_code` batch-resolved in a single query for all tasks in the result set
 
 **CRUD:**
 - `create_task()` — generates `short_code` via `_generate_short_code()`, sets `title` from first line of `original_message`; **new**: if `team_id` is set but neither `selected_agent_id` nor `assigned_node_id` is provided, queries `AgenticTeamNode` for the lead node (`is_lead=True`) and auto-assigns both `selected_agent_id` and `assigned_node_id`
@@ -392,13 +397,14 @@ These events are matched by `meta.source_task_id` or by `meta.session_id` / `eve
 
 ## Frontend Components
 
-- `frontend/src/routes/_layout/tasks/index.tsx` — Tasks page: Board/List view toggle in header; Board view delegates to `TaskBoard` component; List view shows compact table with status sidebar filters, date-grouped rows (Today/Yesterday/Last week/Older), status dots, agent/team badges with color presets, relative timestamps
-- `frontend/src/routes/_layout/task/$taskId.tsx` — unified task detail page (Linear-style layout): accepts UUID or short code in `$taskId` param; full-width layout with left body and right sidebar panel; four tabs: Comments, Sessions, Sub-tasks, Activity; session and subtask tab icons pulse blue when active sessions or in-progress subtasks exist; tab counters rendered as round pill badges; session rows are clickable (navigate to session page) with agent color-preset badges and relative timestamps; WebSocket session event handler uses a `sessionIdsRef` to avoid stale closure issues — matches events by `meta.session_id` or `event.model_id` against known task session IDs; subscribes to `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`, `SUBTASK_COMPLETED`, `TASK_SUBTASK_CREATED` (task events) and `SESSION_UPDATED`, `SESSION_INTERACTION_STATUS_CHANGED`, `SESSION_STATE_UPDATED`, `STREAM_COMPLETED` (session events)
+- `frontend/src/routes/_layout/tasks/index.tsx` — Tasks page: Board/List view toggle in header; Board view delegates to `TaskBoard` component; List view shows compact table with left sidebar status filters (Open, In Progress, Blocked, Completed, Archived below a separator) each with a count, date-grouped rows (Today/Yesterday/Last week/Older), status dots, short codes (with `CornerDownRight` + parent short code for subtasks that have `parent_task_id`), agent/team badges with color presets, relative timestamps; non-archived tasks fetched once and filtered client-side; archived tasks lazy-fetched only when Archived filter is active
+- `frontend/src/routes/_layout/task/$taskId.tsx` — unified task detail page (Linear-style layout): accepts UUID or short code in `$taskId` param; full-width layout with left body and right sidebar panel; four tabs: Comments, Sessions, Sub-tasks, Activity; session and subtask tab icons pulse blue when active sessions or in-progress subtasks exist; tab counters rendered as round pill badges; session rows use `space-y-0.5` (no dividers), agent color-preset badge, relative timestamp; subtask rows use `space-y-0.5`, `treeStatusIcons` status icons, relative timestamp; sidebar shows "Parent Task" row (above Status, when `parent_task_id` set) with `GitBranchPlus` tree icon opening `TaskTreePopover` and clickable `parent_short_code` badge; sidebar "Subtasks" label shows `GitBranchPlus` tree icon for root tasks; WebSocket session event handler uses a `sessionIdsRef` to avoid stale closure issues — matches events by `meta.session_id` or `event.model_id` against known task session IDs; subscribes to `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`, `SUBTASK_COMPLETED`, `TASK_SUBTASK_CREATED` (task events) and `SESSION_UPDATED`, `SESSION_INTERACTION_STATUS_CHANGED`, `SESSION_STATE_UPDATED`, `STREAM_COMPLETED` (session events)
 - `frontend/src/routes/_layout/tasks/$shortCode.tsx` — redirect-only: `beforeLoad` redirects `/tasks/$shortCode` to `/task/$taskId`
-- `frontend/src/components/Tasks/TaskBoard.tsx` — kanban board: 4 columns (Open merges `new`/`refining`/`open`, In Progress, Blocked, Completed); `TaskShortCodeBadge`, `TaskPriorityBadge`, `SubtaskProgressChip` per card; workspace-aware via `useWorkspace`; no inline filters or create dialog (managed by parent page)
+- `frontend/src/components/Tasks/TaskBoard.tsx` — kanban board: 4 columns (Open merges `new`/`refining`/`open`, In Progress, Blocked, Completed); column headers show label left, shadcn `Badge` (secondary variant, `h-5` pill) with count right; Completed column has `ArchiveIcon` button to the left of the badge that archives all completed tasks in parallel (`Promise.all`); skeleton headers use matching rounded pill skeleton; `TaskShortCodeBadge`, `TaskPriorityBadge`, `SubtaskProgressChip` per card; workspace-aware via `useWorkspace`; no inline filters or create dialog (managed by parent page)
+- `TaskTreePopover` (inline component in `$taskId.tsx`) — fetches full task tree via `TasksService.getTaskTreeByCode({ shortCode: rootShortCode })`; renders recursive `renderNode` function with depth-based `paddingLeft` indentation; current task node highlighted with `bg-primary/10 font-medium`; all nodes are clickable navigation links showing status icon, short code, title
 - `frontend/src/components/Tasks/TaskShortCodeBadge.tsx` — status-color-coded short code badge; `clickable` prop controls navigation to `/task/$taskId`
 - `frontend/src/components/Tasks/TaskPriorityBadge.tsx` — colored label for `low`, `normal`, `high`, `urgent`; hides for `"normal"` (default)
-- `frontend/src/components/Tasks/SubtaskProgressChip.tsx` — `{completed}/{total}` chip; hidden when `total <= 0`
+- `frontend/src/components/Tasks/SubtaskProgressChip.tsx` — `{completed}/{total}` chip with inline progress bar; hidden when `total <= 0`; requires a `taskId: string` prop; the chip is a `PopoverTrigger` — clicking it (with `e.stopPropagation()`) opens a `PopoverContent` containing a `SubtaskList` subcomponent; `SubtaskList` fetches subtasks via `TasksService.listSubtasks({ id: taskId })` (query key `["subtasks", taskId]`); each subtask row shows a status icon (matching the `treeStatusIcons` palette), short code in monospace, title, and relative time (with exact datetime on hover via `title` attribute); each row is a button that navigates to `/task/$taskId` using `short_code || id`
 - `frontend/src/components/Tasks/TaskStatusBadge.tsx` — icon + color per status
 - `frontend/src/components/Tasks/TaskStatusPill.tsx` — compact inline status indicator used in header and subtask rows
 - `frontend/src/components/Tasks/CreateTaskDialog.tsx` — form with message, title, priority, agent, team; calls `TasksService.createTask()`

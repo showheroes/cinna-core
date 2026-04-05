@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState, useCallback } from "react"
-import { Plus, Circle, CheckCircle2, List, Archive, Loader2, LayoutDashboard, Bot, Users } from "lucide-react"
+import { Plus, Circle, CheckCircle2, List, Archive, Loader2, LayoutDashboard, Bot, Users, Play, Clock, CornerDownRight } from "lucide-react"
 
 import { TasksService, AgentsService } from "@/client"
 import type { InputTaskPublicExtended } from "@/client"
@@ -21,7 +21,22 @@ export const Route = createFileRoute("/_layout/tasks/")({
 
 type ViewMode = "list" | "board"
 
-type StatusFilter = "active" | "completed" | "archived" | "all"
+type StatusFilter = "open" | "in_progress" | "blocked" | "completed" | "archived"
+
+const FILTER_STATUSES: Record<StatusFilter, string[]> = {
+  open: ["new", "refining", "open"],
+  in_progress: ["in_progress"],
+  blocked: ["blocked"],
+  completed: ["completed"],
+  archived: ["archived"],
+}
+
+const FILTER_CONFIG: { key: StatusFilter; label: string; icon: typeof Circle }[] = [
+  { key: "open", label: "Open", icon: Circle },
+  { key: "in_progress", label: "In Progress", icon: Play },
+  { key: "blocked", label: "Blocked", icon: Clock },
+  { key: "completed", label: "Completed", icon: CheckCircle2 },
+]
 
 // Status indicator dot colors matching TaskStatusBadge
 const STATUS_COLORS: Record<string, string> = {
@@ -74,7 +89,7 @@ function TasksList() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { activeWorkspaceId } = useWorkspace()
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("open")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>("board")
 
@@ -93,42 +108,58 @@ function TasksList() {
     handleTaskEvent,
   )
 
+  // Fetch all non-archived tasks for filtering and counts
   const {
-    data: tasksData,
-    isLoading,
-    isFetching,
-    error,
+    data: allTasksData,
+    isLoading: isLoadingAll,
+    isFetching: isFetchingAll,
+    error: errorAll,
   } = useQuery({
-    queryKey: ["tasks", statusFilter, activeWorkspaceId],
-    queryFn: ({ queryKey }) => {
-      const [, status, workspaceId] = queryKey
-      return TasksService.listTasks({
-        status: status as string,
-        userWorkspaceId: workspaceId ?? "",
-      })
-    },
-  })
-
-  // Fetch counts for filters
-  const { data: activeCount } = useQuery({
-    queryKey: ["tasks", "active", activeWorkspaceId, "count"],
+    queryKey: ["tasks", "all", activeWorkspaceId],
     queryFn: () =>
       TasksService.listTasks({
-        status: "active",
+        status: "all",
         userWorkspaceId: activeWorkspaceId ?? "",
       }),
-    select: (data) => data.count,
   })
 
-  const { data: completedCount } = useQuery({
-    queryKey: ["tasks", "completed", activeWorkspaceId, "count"],
+  // Fetch archived tasks separately (only when that filter is active)
+  const {
+    data: archivedData,
+    isLoading: isLoadingArchived,
+    isFetching: isFetchingArchived,
+    error: errorArchived,
+  } = useQuery({
+    queryKey: ["tasks", "archived", activeWorkspaceId],
     queryFn: () =>
       TasksService.listTasks({
-        status: "completed",
+        status: "archived",
         userWorkspaceId: activeWorkspaceId ?? "",
       }),
-    select: (data) => data.count,
+    enabled: statusFilter === "archived",
   })
+
+  const allNonArchived = allTasksData?.data ?? []
+
+  // Compute counts per filter group
+  const filterCounts: Record<StatusFilter, number> = {
+    open: 0,
+    in_progress: 0,
+    blocked: 0,
+    completed: 0,
+    archived: archivedData?.count ?? 0,
+  }
+  for (const t of allNonArchived) {
+    for (const [key, statuses] of Object.entries(FILTER_STATUSES)) {
+      if (key !== "archived" && statuses.includes(t.status)) {
+        filterCounts[key as StatusFilter]++
+      }
+    }
+  }
+
+  const isLoading = statusFilter === "archived" ? isLoadingArchived : isLoadingAll
+  const isFetching = statusFilter === "archived" ? isFetchingArchived : isFetchingAll
+  const error = errorAll || errorArchived
 
   const { data: agentsData } = useQuery({
     queryKey: ["agents", activeWorkspaceId],
@@ -214,7 +245,9 @@ function TasksList() {
     )
   }
 
-  const tasks = tasksData?.data || []
+  const tasks = statusFilter === "archived"
+    ? (archivedData?.data ?? [])
+    : allNonArchived.filter((t) => FILTER_STATUSES[statusFilter].includes(t.status))
 
   if (viewMode === "board") {
     return (
@@ -242,11 +275,7 @@ function TasksList() {
           {/* Status filter sidebar */}
           <div className="w-48 flex-shrink-0">
             <div className="space-y-1">
-              {([
-                { key: "active" as StatusFilter, label: "Active", icon: Circle, count: activeCount },
-                { key: "completed" as StatusFilter, label: "Completed", icon: CheckCircle2, count: completedCount },
-                { key: "all" as StatusFilter, label: "All", icon: List, count: (activeCount ?? 0) + (completedCount ?? 0) },
-              ]).map((filter) => (
+              {FILTER_CONFIG.map((filter) => (
                 <button
                   key={filter.key}
                   onClick={() => setStatusFilter(filter.key)}
@@ -262,7 +291,7 @@ function TasksList() {
                     {filter.label}
                   </span>
                   <span className="text-xs text-muted-foreground tabular-nums">
-                    {filter.count ?? 0}
+                    {filterCounts[filter.key]}
                   </span>
                 </button>
               ))}
@@ -272,14 +301,19 @@ function TasksList() {
               <button
                 onClick={() => setStatusFilter("archived")}
                 className={cn(
-                  "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-all",
+                  "w-full flex items-center justify-between px-3 py-2 text-sm rounded-md transition-all",
                   statusFilter === "archived"
                     ? "bg-primary/10 text-primary font-medium"
                     : "hover:bg-muted"
                 )}
               >
-                <Archive className="h-4 w-4" />
-                Archived
+                <span className="flex items-center gap-2">
+                  <Archive className="h-4 w-4" />
+                  Archived
+                </span>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {filterCounts.archived}
+                </span>
               </button>
             </div>
           </div>
@@ -321,9 +355,22 @@ function TasksList() {
                             title={task.status}
                           />
 
-                          {/* Short code */}
-                          <span className="text-xs text-muted-foreground font-mono shrink-0 w-16 truncate">
-                            {task.short_code || "—"}
+                          {/* Short code + subtask indicator */}
+                          <span className="flex items-center gap-1 shrink-0">
+                            <span className="text-xs text-muted-foreground font-mono w-16 truncate">
+                              {task.short_code || "—"}
+                            </span>
+                            {task.parent_task_id && (
+                              <span
+                                className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground"
+                                title={`Subtask of ${task.parent_short_code ?? "parent"}`}
+                              >
+                                <CornerDownRight className="h-3 w-3" />
+                                {task.parent_short_code && (
+                                  <span className="font-mono">{task.parent_short_code}</span>
+                                )}
+                              </span>
+                            )}
                           </span>
 
                           {/* Title */}

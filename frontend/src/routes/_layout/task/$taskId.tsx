@@ -26,6 +26,12 @@ import {
   MessageSquare,
   ListTree,
   Activity,
+  GitBranchPlus,
+  CheckCircle2,
+  Circle,
+  Clock,
+  AlertCircle,
+  Ban,
 } from "lucide-react"
 
 import { TasksService, AgentsService, AgenticTeamsService } from "@/client"
@@ -70,6 +76,11 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 import { getColorPreset } from "@/utils/colorPresets"
 import { getWorkspaceIcon } from "@/config/workspaceIcons"
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/_layout/task/$taskId")({
@@ -92,6 +103,89 @@ function formatFileSize(bytes: number | null | undefined): string {
 }
 
 type BodyTab = "comments" | "sessions" | "subtasks" | "activity"
+
+// Status icons for tree nodes
+const treeStatusIcons: Record<string, React.ReactNode> = {
+  new: <Sparkles className="h-3 w-3 text-gray-500" />,
+  refining: <Edit className="h-3 w-3 text-purple-500" />,
+  open: <Circle className="h-3 w-3 text-gray-500" />,
+  in_progress: <Play className="h-3 w-3 text-blue-500" />,
+  running: <Play className="h-3 w-3 text-blue-500" />,
+  blocked: <Clock className="h-3 w-3 text-amber-500" />,
+  pending_input: <Clock className="h-3 w-3 text-amber-500" />,
+  completed: <CheckCircle2 className="h-3 w-3 text-green-500" />,
+  error: <AlertCircle className="h-3 w-3 text-red-500" />,
+  cancelled: <Ban className="h-3 w-3 text-red-500" />,
+  archived: <Archive className="h-3 w-3 text-gray-400" />,
+}
+
+interface TaskTreeNode {
+  id: string
+  short_code: string | null
+  title: string
+  status: string
+  subtasks: TaskTreeNode[]
+}
+
+function TaskTreePopover({ rootShortCode, currentTaskId }: { rootShortCode: string; currentTaskId: string }) {
+  const navigate = useNavigate()
+  const { data, isLoading } = useQuery({
+    queryKey: ["task-tree", rootShortCode],
+    queryFn: () => TasksService.getTaskTreeByCode({ shortCode: rootShortCode }),
+  })
+
+  const renderNode = (node: TaskTreeNode, depth: number) => {
+    const isCurrent = node.id === currentTaskId
+    return (
+      <div key={node.id}>
+        <button
+          type="button"
+          onClick={() => navigate({ to: "/task/$taskId", params: { taskId: node.short_code || node.id } })}
+          className={cn(
+            "w-full flex items-center gap-1.5 py-1 px-2 rounded text-left hover:bg-muted/50 transition-colors text-xs",
+            isCurrent && "bg-primary/10 font-medium"
+          )}
+          style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        >
+          {treeStatusIcons[node.status] ?? <Circle className="h-3 w-3 text-gray-500" />}
+          {node.short_code && (
+            <span className="font-mono text-muted-foreground shrink-0">{node.short_code}</span>
+          )}
+          <span className="truncate">{node.title}</span>
+        </button>
+        {node.subtasks?.map((child) => renderNode(child, depth + 1))}
+      </div>
+    )
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          title="View task tree"
+        >
+          <GitBranchPlus className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-2" align="start">
+        <p className="text-xs font-medium text-muted-foreground mb-1.5 px-2">Task Tree</p>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-3">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : data ? (
+          <div className="max-h-64 overflow-y-auto">
+            {renderNode(data as TaskTreeNode, 0)}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground text-center py-2">No tree data</p>
+        )}
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -180,7 +274,9 @@ function SubtaskRow({ subtask }: { subtask: InputTaskDetailPublic }) {
       onClick={() => navigate({ to: "/task/$taskId", params: { taskId: subtask.id } })}
       className="w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-muted/60 transition-colors text-left"
     >
-      <TaskStatusPill status={subtask.status} className="shrink-0" />
+      <span className="shrink-0" title={subtask.status}>
+        {treeStatusIcons[subtask.status] ?? <Circle className="h-3 w-3 text-gray-500" />}
+      </span>
       {subtask.short_code && <span className="font-mono text-xs text-muted-foreground shrink-0">{subtask.short_code}</span>}
       <span className="text-sm truncate flex-1">{subtask.title || subtask.current_description}</span>
       {subtask.agent_name && (
@@ -188,7 +284,7 @@ function SubtaskRow({ subtask }: { subtask: InputTaskDetailPublic }) {
           <Bot className="h-3 w-3" />{subtask.agent_name}
         </span>
       )}
-      <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0" />
+      <RelativeTime timestamp={subtask.updated_at} className="text-xs text-muted-foreground shrink-0" showTooltip />
     </button>
   )
 }
@@ -220,7 +316,6 @@ function SessionRunItem({ session, agentName, agentColorPreset }: { session: Ses
         <span className="text-xs text-blue-500 shrink-0">Running</span>
       )}
       <RelativeTime timestamp={session.updated_at} className="text-xs text-muted-foreground shrink-0" />
-      <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0" />
     </button>
   )
 }
@@ -762,7 +857,7 @@ function TaskDetailPage() {
                   {sessions.length === 0 ? (
                     <p className="text-sm text-muted-foreground py-4 text-center">No sessions yet</p>
                   ) : (
-                    <div className="divide-y">
+                    <div className="space-y-0.5">
                       {sessions.map((s) => (
                         <SessionRunItem key={s.id} session={s} agentName={task.agent_name} agentColorPreset={agentColorPreset} />
                       ))}
@@ -862,6 +957,27 @@ function TaskDetailPage() {
         {/* ---- Right: Properties panel ---- */}
         <div className="w-72 border-l bg-card/30 flex-shrink-0 overflow-y-auto hidden lg:flex lg:flex-col">
           <div className="px-5 py-4 space-y-4 flex-1">
+            {/* Parent Task */}
+            {task.parent_task_id && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground font-medium flex items-center gap-1">
+                  Parent Task
+                  {(task.root_short_code || task.parent_short_code) && (
+                    <TaskTreePopover
+                      rootShortCode={task.root_short_code || task.parent_short_code!}
+                      currentTaskId={task.id}
+                    />
+                  )}
+                </span>
+                <button
+                  onClick={() => navigate({ to: "/task/$taskId", params: { taskId: task.parent_short_code || task.parent_task_id! } })}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-muted hover:bg-muted/80 text-foreground transition-colors"
+                >
+                  {task.parent_short_code || "Parent"}
+                </button>
+              </div>
+            )}
+
             {/* Status */}
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground font-medium w-20">Status</span>
@@ -942,8 +1058,16 @@ function TaskDetailPage() {
             {/* Subtask progress */}
             {(task.subtask_count ?? 0) > 0 && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground font-medium w-20">Subtasks</span>
-                <SubtaskProgressChip total={task.subtask_count ?? 0} completed={task.subtask_completed_count ?? 0} />
+                <span className="text-xs text-muted-foreground font-medium w-20 flex items-center gap-1">
+                  Subtasks
+                  {!task.parent_task_id && task.short_code && (
+                    <TaskTreePopover
+                      rootShortCode={task.short_code}
+                      currentTaskId={task.id}
+                    />
+                  )}
+                </span>
+                <SubtaskProgressChip total={task.subtask_count ?? 0} completed={task.subtask_completed_count ?? 0} taskId={task.id} />
               </div>
             )}
 

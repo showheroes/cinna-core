@@ -243,12 +243,32 @@ class InputTaskService:
         attached_files = InputTaskService.get_task_files(db_session=db_session, task_id=task_id)
         attached_files_public = [FileUploadPublic.model_validate(f) for f in attached_files]
 
+        # Resolve parent and root short codes
+        parent_short_code = None
+        root_short_code = None
+        if task.parent_task_id:
+            parent = db_session.get(InputTask, task.parent_task_id)
+            if parent:
+                parent_short_code = parent.short_code
+            # Walk up to root (max 20 levels to avoid infinite loops)
+            current = task
+            for _ in range(20):
+                if not current.parent_task_id:
+                    break
+                current = db_session.get(InputTask, current.parent_task_id)
+                if not current:
+                    break
+            if current and current.id != task.id:
+                root_short_code = current.short_code
+
         return InputTaskPublicExtended(
             **task.model_dump(),
             agent_name=agent_name,
             sessions_count=sessions_count,
             latest_session_id=latest_session_id,
             attached_files=attached_files_public,
+            parent_short_code=parent_short_code,
+            root_short_code=root_short_code,
         )
 
     @staticmethod
@@ -298,6 +318,17 @@ class InputTaskService:
             priority=priority,
         )
 
+        # Batch-resolve parent short codes
+        parent_ids = {task.parent_task_id for task, _ in results if task.parent_task_id}
+        parent_short_codes: dict[UUID, str] = {}
+        if parent_ids:
+            parent_rows = db_session.exec(
+                select(InputTask.id, InputTask.short_code).where(
+                    InputTask.id.in_(parent_ids)  # type: ignore[union-attr]
+                )
+            ).all()
+            parent_short_codes = {pid: sc for pid, sc in parent_rows if sc}
+
         data = []
         for task, agent_name in results:
             sessions_count, latest_session_id = SessionService.get_task_sessions_info(
@@ -312,6 +343,7 @@ class InputTaskService:
                     latest_session_id=latest_session_id,
                     subtask_count=subtask_progress["total"],
                     subtask_completed_count=subtask_progress["completed"],
+                    parent_short_code=parent_short_codes.get(task.parent_task_id) if task.parent_task_id else None,
                 )
             )
 
@@ -2422,6 +2454,24 @@ class InputTaskService:
         attached_files = InputTaskService.get_task_files(db_session=db_session, task_id=task_id)
         attached_files_public = [FileUploadPublic.model_validate(f) for f in attached_files]
 
+        # Resolve parent and root short codes
+        parent_short_code = None
+        root_short_code = None
+        if task.parent_task_id:
+            parent = db_session.get(InputTask, task.parent_task_id)
+            if parent:
+                parent_short_code = parent.short_code
+            # Walk up to root (max 20 levels)
+            current = task
+            for _ in range(20):
+                if not current.parent_task_id:
+                    break
+                current = db_session.get(InputTask, current.parent_task_id)
+                if not current:
+                    break
+            if current and current.id != task.id:
+                root_short_code = current.short_code
+
         return InputTaskDetailPublic(
             **task.model_dump(),
             agent_name=agent_name,
@@ -2436,6 +2486,8 @@ class InputTaskService:
             attachments=attachments,
             subtasks=subtasks,
             status_history=status_history,
+            parent_short_code=parent_short_code,
+            root_short_code=root_short_code,
         )
 
     @staticmethod

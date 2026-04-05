@@ -221,6 +221,10 @@ class InputTaskPublicExtended(InputTaskPublic):
     # Team/node display names (resolved by service layer)
     assigned_node_name: str | None = None
     team_name: str | None = None
+    # Parent task short code (resolved by service layer)
+    parent_short_code: str | None = None
+    # Root task short code for tree navigation (resolved by service layer; set only when task has a parent)
+    root_short_code: str | None = None
 
 
 class InputTaskDetailPublic(InputTaskPublicExtended):
