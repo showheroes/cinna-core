@@ -226,7 +226,7 @@ Parent Task ──create_subtask──> Subtask ──auto_execute──> Target
 ## Integration Points
 
 - **Agent Handover**: Source agent uses `mcp__agent_task__create_task` to create tasks for direct handover or inbox — see [Agent Handover](../../agents/agent_handover/agent_handover.md)
-- **Agentic Teams**: Team-scoped tasks use the team's `task_prefix`; subtask delegation follows team topology — see [Agentic Teams](../../agentic_teams/agentic_teams/agentic_teams.md)
+- **Agentic Teams**: Team-scoped tasks use the team's `task_prefix`; subtask delegation follows team topology — see [Agentic Teams](../../agents/agentic_teams/agentic_teams.md)
 - **Sessions**: Task execution creates sessions with `source_task_id` backlink; session lifecycle events drive automatic status updates — see [Agent Sessions](../agent_sessions/agent_sessions.md)
 - **Agent Environment Core**: Six MCP tools (`mcp__agent_task__*`) let agents interact with tasks from inside environments. `get_details` automatically uploads task files to the agent workspace. `add_comment` validates attached file paths locally before sending — see [Agent Environment Core](../../agents/agent_environment_core/agent_environment_core.md) and [Agent Task Tools](../../agents/agent_environment_core/create_agent_task_tool.md)
 - **Task Triggers**: Automated rules (CRON, webhook, date) that fire task execution; gains short-codes automatically — see [Task Triggers](task_triggers.md)
