@@ -23,6 +23,7 @@ def create_task(
     team_id: str | None = None,
     assigned_node_id: str | None = None,
     parent_task_id: str | None = None,
+    auto_execute: bool | None = None,
 ) -> dict:
     """POST /tasks/ — asserts 200 and returns body."""
     payload: dict = {"original_message": original_message, "priority": priority}
@@ -36,6 +37,8 @@ def create_task(
         payload["assigned_node_id"] = assigned_node_id
     if parent_task_id is not None:
         payload["parent_task_id"] = parent_task_id
+    if auto_execute is not None:
+        payload["auto_execute"] = auto_execute
     r = client.post(_BASE + "/", headers=headers, json=payload)
     assert r.status_code == 200, f"Task creation failed: {r.text}"
     return r.json()

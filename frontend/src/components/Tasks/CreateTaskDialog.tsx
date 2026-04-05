@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Loader2 } from "lucide-react"
+import { Loader2, Bot, X, Crown } from "lucide-react"
 
 import { TasksService, AgentsService, AgenticTeamsService } from "@/client"
 import type { InputTaskCreate } from "@/client"
@@ -17,13 +17,10 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import { cn } from "@/lib/utils"
+import { getWorkspaceIcon } from "@/config/workspaceIcons"
+import { getColorPreset } from "@/utils/colorPresets"
 import useWorkspace from "@/hooks/useWorkspace"
 
 interface CreateTaskDialogProps {
@@ -32,13 +29,6 @@ interface CreateTaskDialogProps {
   onCreated?: (taskId: string) => void
   defaultTeamId?: string
 }
-
-const PRIORITY_OPTIONS = [
-  { value: "low", label: "Low" },
-  { value: "normal", label: "Normal" },
-  { value: "high", label: "High" },
-  { value: "urgent", label: "Urgent" },
-]
 
 export function CreateTaskDialog({
   open,
@@ -53,7 +43,7 @@ export function CreateTaskDialog({
   const [selectedAgentId, setSelectedAgentId] = useState<string>("")
   const [selectedTeamId, setSelectedTeamId] = useState<string>(defaultTeamId ?? "")
   const [selectedNodeId, setSelectedNodeId] = useState<string>("")
-  const [priority, setPriority] = useState<string>("normal")
+  const [autoExecute, setAutoExecute] = useState(true)
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -63,15 +53,9 @@ export function CreateTaskDialog({
       setSelectedAgentId("")
       setSelectedTeamId(defaultTeamId ?? "")
       setSelectedNodeId("")
-      setPriority("normal")
+      setAutoExecute(true)
     }
   }, [open, defaultTeamId])
-
-  // When team changes, reset node assignment
-  useEffect(() => {
-    setSelectedNodeId("")
-    setSelectedAgentId("")
-  }, [selectedTeamId])
 
   const { data: agentsData } = useQuery({
     queryKey: ["agents", activeWorkspaceId],
@@ -100,6 +84,47 @@ export function CreateTaskDialog({
 
   const teamNodes = chartData?.nodes ?? []
 
+  // When team changes, auto-select the team lead
+  useEffect(() => {
+    if (!selectedTeamId) {
+      setSelectedNodeId("")
+      setSelectedAgentId("")
+      return
+    }
+    const leadNode = teamNodes.find((n) => n.is_lead)
+    if (leadNode) {
+      setSelectedNodeId(leadNode.id)
+      setSelectedAgentId(leadNode.agent_id)
+    } else {
+      setSelectedNodeId("")
+      setSelectedAgentId("")
+    }
+  }, [selectedTeamId, teamNodes])
+
+  const teams = teamsData?.data ?? []
+  const agents = agentsData?.data ?? []
+  const hasTeams = teams.length > 0
+
+  // When a team is selected, show only agents in that team (via nodes)
+  // When no team, show all agents
+  const displayAgents = selectedTeamId
+    ? teamNodes
+        .map((node) => ({
+          id: node.agent_id,
+          nodeId: node.id,
+          name: node.name,
+          colorPreset: node.agent_ui_color_preset,
+          isLead: node.is_lead,
+        }))
+        .sort((a, b) => (a.isLead === b.isLead ? 0 : a.isLead ? -1 : 1))
+    : agents.map((agent) => ({
+        id: agent.id,
+        nodeId: null as string | null,
+        name: agent.name,
+        colorPreset: agent.ui_color_preset,
+        isLead: false,
+      }))
+
   const createMutation = useMutation({
     mutationFn: (data: InputTaskCreate) => TasksService.createTask({ requestBody: data }),
     onSuccess: (task) => {
@@ -116,7 +141,7 @@ export function CreateTaskDialog({
     const payload: InputTaskCreate = {
       original_message: description.trim() || title.trim(),
       title: title.trim(),
-      priority: priority !== "normal" ? priority : undefined,
+      auto_execute: autoExecute,
       user_workspace_id: activeWorkspaceId || undefined,
     }
 
@@ -124,7 +149,6 @@ export function CreateTaskDialog({
       payload.team_id = selectedTeamId
       if (selectedNodeId) {
         payload.assigned_node_id = selectedNodeId
-        // Derive agent from node
         const node = teamNodes.find((n) => n.id === selectedNodeId)
         if (node) payload.selected_agent_id = node.agent_id
       }
@@ -133,6 +157,16 @@ export function CreateTaskDialog({
     }
 
     createMutation.mutate(payload)
+  }
+
+  const handleAgentSelect = (agentId: string, nodeId: string | null) => {
+    if (selectedTeamId && nodeId) {
+      const isSame = selectedNodeId === nodeId
+      setSelectedNodeId(isSame ? "" : nodeId)
+      setSelectedAgentId(isSame ? "" : agentId)
+    } else {
+      setSelectedAgentId((prev) => (prev === agentId ? "" : agentId))
+    }
   }
 
   return (
@@ -172,88 +206,83 @@ export function CreateTaskDialog({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            {/* Team selection */}
+          {/* Team badges */}
+          {hasTeams && (
             <div className="space-y-2">
               <Label>Team</Label>
-              <Select
-                value={selectedTeamId || "none"}
-                onValueChange={(v) => setSelectedTeamId(v === "none" ? "" : v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="No team" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No team</SelectItem>
-                  {teamsData?.data.map((team) => (
-                    <SelectItem key={team.id} value={team.id}>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={cn(
+                    "cursor-pointer px-3 py-1.5 text-sm rounded-md transition-all flex items-center gap-1.5 bg-muted text-muted-foreground hover:bg-muted/80",
+                    !selectedTeamId && "ring-2 ring-foreground/30"
+                  )}
+                  onClick={() => setSelectedTeamId("")}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  None
+                </button>
+                {teams.map((team) => {
+                  const isSelected = selectedTeamId === team.id
+                  const Icon = getWorkspaceIcon(team.icon)
+                  return (
+                    <button
+                      type="button"
+                      key={team.id}
+                      className={cn(
+                        "cursor-pointer px-3 py-1.5 text-sm rounded-md transition-all flex items-center gap-1.5 bg-muted text-foreground hover:bg-muted/80",
+                        isSelected && "ring-2 ring-foreground/30"
+                      )}
+                      onClick={() => setSelectedTeamId(isSelected ? "" : team.id)}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
                       {team.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Priority */}
-            <div className="space-y-2">
-              <Label>Priority</Label>
-              <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRIORITY_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Assignee: team node or standalone agent */}
-          {selectedTeamId ? (
-            <div className="space-y-2">
-              <Label>Assign to team member</Label>
-              <Select
-                value={selectedNodeId || "none"}
-                onValueChange={(v) => setSelectedNodeId(v === "none" ? "" : v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Unassigned" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Unassigned</SelectItem>
-                  {teamNodes.map((node) => (
-                    <SelectItem key={node.id} value={node.id}>
-                      {node.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label>Assign to agent</Label>
-              <Select
-                value={selectedAgentId || "none"}
-                onValueChange={(v) => setSelectedAgentId(v === "none" ? "" : v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Unassigned" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Unassigned</SelectItem>
-                  {agentsData?.data.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           )}
+
+          {/* Agent badges */}
+          <div className="space-y-2">
+            <Label>{selectedTeamId ? "Assign to team member" : "Assign to agent"}</Label>
+            <div className="flex flex-wrap gap-2">
+              {displayAgents.length > 0 ? (
+                displayAgents.map((agent) => {
+                  const preset = getColorPreset(agent.colorPreset)
+                  const isSelected = selectedTeamId
+                    ? selectedNodeId === agent.nodeId
+                    : selectedAgentId === agent.id
+                  return (
+                    <button
+                      type="button"
+                      key={agent.nodeId ?? agent.id}
+                      className={cn(
+                        "cursor-pointer px-3 py-1.5 text-sm rounded-md transition-all flex items-center gap-1.5",
+                        preset.badgeBg,
+                        preset.badgeText,
+                        preset.badgeHover,
+                        isSelected && preset.badgeOutline
+                      )}
+                      onClick={() => handleAgentSelect(agent.id, agent.nodeId)}
+                    >
+                      {agent.isLead ? (
+                        <Crown className="h-3.5 w-3.5" />
+                      ) : (
+                        <Bot className="h-3.5 w-3.5" />
+                      )}
+                      {agent.name}
+                    </button>
+                  )
+                })
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {selectedTeamId ? "No agents in this team" : "No agents available"}
+                </p>
+              )}
+            </div>
+          </div>
 
           {createMutation.error && (
             <Alert variant="destructive">
@@ -263,20 +292,37 @@ export function CreateTaskDialog({
             </Alert>
           )}
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!title.trim() || createMutation.isPending}>
-              {createMutation.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                "Create Task"
-              )}
-            </Button>
+          <DialogFooter className="flex items-center !justify-between">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="auto-execute"
+                checked={autoExecute}
+                onCheckedChange={setAutoExecute}
+                disabled={!selectedAgentId}
+              />
+              <Label
+                htmlFor="auto-execute"
+                className={cn("text-sm font-normal cursor-pointer", !selectedAgentId && "text-muted-foreground")}
+                title={!selectedAgentId ? "Select an agent to enable auto-execution" : undefined}
+              >
+                Execute
+              </Label>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!title.trim() || createMutation.isPending}>
+                {createMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Task"
+                )}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -22,7 +22,7 @@ The task system also serves as the primary **collaboration surface** for agent w
 - **Subtask**: A child task created within a parent task's hierarchy. Inherits `team_id` and `owner_id` from the parent. Agents in teams create subtasks via the `mcp__agent_task__create_subtask` tool.
 - **Team-Scoped Task**: Task with `team_id` set. Enables delegation tools and uses the team's short-code prefix.
 - **Agent-Initiated Task**: Task created by an agent via the `mcp__agent_task__create_task` tool, either for direct handover or user inbox.
-- **Auto-Execute**: Flag on agent-created tasks that triggers immediate execution without user review.
+- **Auto-Execute**: Flag that triggers immediate task execution after creation without requiring the user to manually press Execute. Can be set by users from the Create Task dialog (Execute switch) or by agents via `mcp__agent_task__create_task`.
 - **Source Session**: The agent session that created a task via handover; used for delegation tracking.
 - **Todo Progress**: Real-time task completion progress from agent's TodoWrite tool calls.
 
@@ -30,19 +30,24 @@ The task system also serves as the primary **collaboration surface** for agent w
 
 ### Flow 1: User-Initiated Task
 
-1. User creates a task with an initial message description (title and priority are optional)
-2. System auto-generates `short_code` (e.g., `TASK-1`) and derives a title; if a team is selected with no agent specified, the team's lead agent is auto-assigned
-3. User opens the task detail page at `/task/$taskId` (accessible by UUID or short code)
-4. Left body: editable description, attachments section, tabbed section (Comments / Sessions / Sub-tasks / Activity) — all content areas use full available width
-5. Right sidebar: Parent Task (shown only when task has a parent, clickable badge with parent short code; tree icon opens full task tree popover), Status, Priority dropdown, Assignee (agent selector modal), Team (team selector modal), Triggers, Subtask progress (clickable chip opens subtask list popover), Dates, Execute button
-6. User sends refinement comments or text-selection requests via the inline input bar — AI refines description and provides feedback
-7. User continues refining or clicks Execute; execution stays on the task page and shows live session progress in the Sessions tab
-8. System creates a session linked to the task via `source_task_id`
-9. Session start automatically transitions task status to `in_progress`; real-time session events update the Sessions tab without leaving the page
-10. Agent works and posts comments with findings; files are attached to comments
-11. Session completion automatically transitions task to `completed` only if all subtasks are also completed; if incomplete subtasks remain, task stays `in_progress`; task can be re-executed (Execute button becomes "Run Again")
-12. User sees the full comment thread and any deliverable files
-13. User archives completed tasks
+1. User opens the Create Task dialog; enters a title (required) and optional description
+2. If the user has teams, team badges with icons are displayed below the description — clicking selects a team; clicking again or "None" deselects
+3. Agent badges with color presets are displayed below the teams row; when a team is selected, only that team's agents are shown, with the lead agent sorted first (Crown icon) and auto-selected; when no team is selected, all workspace agents are shown
+4. Clicking an agent badge selects or deselects it; in team mode, selecting an agent sets both `selected_agent_id` and `assigned_node_id`
+5. The Execute switch in the dialog footer is enabled by default; it is disabled when no agent is selected; when on, `auto_execute: true` is included in the task payload
+6. User submits the form; if `auto_execute=true` and `selected_agent_id` is set, the task is immediately executed after creation — a session is created and the task description sent as the initial message; otherwise the task is created with status `new` for manual review
+7. System auto-generates `short_code` (e.g., `TASK-1`) and derives a title; if a team is selected with no agent specified, the team's lead agent is auto-assigned by the service layer
+8. User is navigated to the task detail page at `/task/$taskId` (accessible by UUID or short code)
+9. Left body: editable description, attachments section, tabbed section (Comments / Sessions / Sub-tasks / Activity) — all content areas use full available width
+10. Right sidebar: Parent Task (shown only when task has a parent, clickable badge with parent short code; tree icon opens full task tree popover), Status, Priority dropdown, Assignee (agent selector modal), Team (team selector modal), Triggers, Subtask progress (clickable chip opens subtask list popover), Dates, Execute button
+11. User sends refinement comments or text-selection requests via the inline input bar — AI refines description and provides feedback
+12. User continues refining or clicks Execute; execution stays on the task page and shows live session progress in the Sessions tab
+13. System creates a session linked to the task via `source_task_id`
+14. Session start automatically transitions task status to `in_progress`; real-time session events update the Sessions tab without leaving the page
+15. Agent works and posts comments with findings; files are attached to comments
+16. Session completion automatically transitions task to `completed` only if all subtasks are also completed; if incomplete subtasks remain, task stays `in_progress`; task can be re-executed (Execute button becomes "Run Again")
+17. User sees the full comment thread and any deliverable files
+18. User archives completed tasks
 
 ### Flow 2: Agent-Initiated Direct Handover
 

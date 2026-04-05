@@ -53,6 +53,8 @@ BACKGROUND_TASK_TARGETS_FULL = BACKGROUND_TASK_TARGETS_BASE + [
     "app.services.tasks.task_comment_service.create_task_with_error_logging",
     "app.services.tasks.task_attachment_service.create_task_with_error_logging",
     "app.utils.create_task_with_error_logging",
+    # Route-level import of create_task_with_error_logging (used by auto-execute on task create)
+    "app.api.routes.input_tasks.create_task_with_error_logging",
 ]
 
 

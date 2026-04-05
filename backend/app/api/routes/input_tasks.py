@@ -43,6 +43,7 @@ from app.services.tasks.input_task_service import (
     PermissionDeniedError,
     ValidationError,
 )
+from app.utils import create_task_with_error_logging
 from app.services.sessions.session_service import SessionService
 from app.services.tasks.task_comment_service import TaskCommentService
 from app.services.tasks.task_attachment_service import TaskAttachmentService
@@ -78,7 +79,7 @@ def list_tasks_by_source_session(
 
 
 @router.post("/", response_model=InputTaskPublic)
-def create_task(
+async def create_task(
     *, session: SessionDep, current_user: CurrentUser, task_in: InputTaskCreate
 ) -> Any:
     """
@@ -96,6 +97,14 @@ def create_task(
         task = InputTaskService.create_task(
             db_session=session, user_id=current_user.id, data=task_in
         )
+
+        # Auto-execute if requested and agent is assigned
+        if task.auto_execute and task.selected_agent_id:
+            create_task_with_error_logging(
+                InputTaskService._auto_execute_task(task),
+                task_name=f"auto_execute_task_{task.id}"
+            )
+
         return task
     except InputTaskError as e:
         _handle_service_error(e)

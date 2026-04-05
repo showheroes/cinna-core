@@ -2658,7 +2658,7 @@ class InputTaskService:
         # If assigned and auto_execute: create session for target agent
         if assigned_agent_id and subtask.auto_execute:
             create_task_with_error_logging(
-                InputTaskService._auto_execute_subtask(db_session, subtask),
+                InputTaskService._auto_execute_task(subtask),
                 task_name=f"auto_execute_subtask_{subtask.id}"
             )
 
@@ -2666,17 +2666,21 @@ class InputTaskService:
         return subtask
 
     @staticmethod
-    async def _auto_execute_subtask(
-        db_session: DBSession,
-        subtask: InputTask,
+    async def _auto_execute_task(
+        task_ref: InputTask,
     ) -> None:
-        """Auto-execute a newly created subtask by creating a session."""
+        """Auto-execute a newly created task by creating a session.
+
+        Works for both user-created tasks with auto_execute=True and
+        agent-created subtasks with an assigned agent.
+        Opens its own DB session to run independently of the request lifecycle.
+        """
         try:
-            if not subtask.selected_agent_id:
+            if not task_ref.selected_agent_id:
                 return
             from app.core.db import create_session as make_db
             with make_db() as db:
-                task = db.get(InputTask, subtask.id)
+                task = db.get(InputTask, task_ref.id)
                 if not task:
                     return
                 user_id = task.owner_id
@@ -2687,9 +2691,9 @@ class InputTaskService:
                     message_to_send=task.current_description,
                 )
                 if not success:
-                    logger.warning(f"Auto-execute subtask {subtask.id} failed: {error}")
+                    logger.warning(f"Auto-execute task {task_ref.id} failed: {error}")
         except Exception as e:
-            logger.error(f"Error auto-executing subtask {subtask.id}: {e}", exc_info=True)
+            logger.error(f"Error auto-executing task {task_ref.id}: {e}", exc_info=True)
 
     @staticmethod
     def get_task_tree(

@@ -63,7 +63,7 @@
 - `frontend/src/components/Tasks/TaskStatusPill.tsx` — compact status indicator used in task detail header and subtask rows
 - `frontend/src/components/Tasks/TaskPriorityBadge.tsx` — colored priority label (Low, Normal, High, Urgent)
 - `frontend/src/components/Tasks/SubtaskProgressChip.tsx` — `{completed}/{total}` subtask counter with percentage color coding; hidden when `total <= 0`
-- `frontend/src/components/Tasks/CreateTaskDialog.tsx` — modal with message textarea, title, priority, optional agent selector, optional team selector; generates task and navigates to detail
+- `frontend/src/components/Tasks/CreateTaskDialog.tsx` — modal with title input, description textarea, team badge row (visible when at least one team exists; clicking a badge selects the team; "None" badge deselects), agent badge row (shows all workspace agents when no team selected; shows only team member agents sorted lead-first when a team is selected; lead agent has Crown icon and is auto-selected on team selection); agent selection in team mode sets both `assigned_node_id` and `selected_agent_id`; Execute switch in the footer (enabled by default, disabled when no agent is selected) controls whether `auto_execute: true` is sent on the payload; priority selector removed from create flow; generates task and navigates to detail
 - `frontend/src/components/Tasks/RefinementChat.tsx` — refinement history display + comment input; calls `TasksService.refineTask()`
 - `frontend/src/components/Tasks/TaskTodoProgress.tsx` — horizontal progress indicator for TodoWrite tool usage; subscribes to `TASK_TODO_UPDATED`
 - `frontend/src/components/Tasks/TaskSessionsModal.tsx` — modal listing all sessions linked to a task; opened from the sessions block "View all" link
@@ -188,7 +188,7 @@ Index: `ix_task_status_history_task_id`
 **`backend/app/models/tasks/input_task.py`:**
 - `InputTaskBase` — `original_message`, `current_description`
 - `InputTask` — DB table (all columns above)
-- `InputTaskCreate` — includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?`, `parent_task_id?`
+- `InputTaskCreate` — includes: `title?`, `priority?`, `team_id?`, `assigned_node_id?`, `parent_task_id?`, `auto_execute?` (bool, default `False`; set to `True` by `CreateTaskDialog` when Execute switch is on)
 - `InputTaskUpdate` — includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?` (team can be changed after creation)
 - `InputTaskPublic` — includes new: `short_code`, `title`, `priority`, `parent_task_id`, `team_id`, `assigned_node_id`, `created_by_node_id`, `subtask_count`, `subtask_completed_count`
 - `InputTaskPublicExtended` — extends Public with: `agent_name`, `refinement_history`, `todo_progress`, `sessions_count`, `latest_session_id`, `attached_files`, `assigned_node_name`, `team_name`, `parent_short_code` (resolved by service layer via DB lookup), `root_short_code` (walks up hierarchy to root; set only when task has a parent)
@@ -203,7 +203,7 @@ Index: `ix_task_status_history_task_id`
 ### File: `backend/app/api/routes/input_tasks.py`
 
 **Task CRUD:**
-- `POST /api/v1/tasks/` — create task; auto-generates `short_code` and `title`
+- `POST /api/v1/tasks/` — create task; auto-generates `short_code` and `title`; if `auto_execute=True` and `selected_agent_id` is set, schedules `_auto_execute_task` as a background asyncio task immediately after creation (creates a session and sends the task description as the initial message)
 - `GET /api/v1/tasks/` — list tasks; new query params: `root_only` (exclude subtasks), `team_id`, `priority`
 - `GET /api/v1/tasks/{id}` — get task (`InputTaskPublicExtended`)
 - `PATCH /api/v1/tasks/{id}` — update task
@@ -278,7 +278,8 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 - `list_tasks_extended()` — same enrichment with `parent_short_code` batch-resolved in a single query for all tasks in the result set
 
 **CRUD:**
-- `create_task()` — generates `short_code` via `_generate_short_code()`, sets `title` from first line of `original_message`; **new**: if `team_id` is set but neither `selected_agent_id` nor `assigned_node_id` is provided, queries `AgenticTeamNode` for the lead node (`is_lead=True`) and auto-assigns both `selected_agent_id` and `assigned_node_id`
+- `create_task()` — generates `short_code` via `_generate_short_code()`, sets `title` from first line of `original_message`; if `team_id` is set but neither `selected_agent_id` nor `assigned_node_id` is provided, queries `AgenticTeamNode` for the lead node (`is_lead=True`) and auto-assigns both `selected_agent_id` and `assigned_node_id`
+- `_auto_execute_task(task_ref: InputTask) -> None` — static async method; opens its own DB session (independent of the request lifecycle); calls `execute_task()` to create a session and send the task description as the initial message; used for both user-created tasks with `auto_execute=True` and agent-created subtasks; no-ops silently if `selected_agent_id` is not set or the task record is missing; previously named `_auto_execute_subtask` (dropped the unused `db_session` parameter in the same rename)
 - `_generate_short_code(session, owner_id, team_id=None) -> tuple[str, int]` — atomic counter increment; prefix from team or default "TASK"
 - `get_task_by_short_code(session, short_code, user_id)` — lookup by `(short_code, owner_id)`
 - `get_task_detail(session, task_id, user_id) -> InputTaskDetailPublic` — full detail with comments (inline attachments), standalone attachments, subtasks, status history
@@ -407,7 +408,7 @@ These events are matched by `meta.source_task_id` or by `meta.session_id` / `eve
 - `frontend/src/components/Tasks/SubtaskProgressChip.tsx` — `{completed}/{total}` chip with inline progress bar; hidden when `total <= 0`; requires a `taskId: string` prop; the chip is a `PopoverTrigger` — clicking it (with `e.stopPropagation()`) opens a `PopoverContent` containing a `SubtaskList` subcomponent; `SubtaskList` fetches subtasks via `TasksService.listSubtasks({ id: taskId })` (query key `["subtasks", taskId]`); each subtask row shows a status icon (matching the `treeStatusIcons` palette), short code in monospace, title, and relative time (with exact datetime on hover via `title` attribute); each row is a button that navigates to `/task/$taskId` using `short_code || id`
 - `frontend/src/components/Tasks/TaskStatusBadge.tsx` — icon + color per status
 - `frontend/src/components/Tasks/TaskStatusPill.tsx` — compact inline status indicator used in header and subtask rows
-- `frontend/src/components/Tasks/CreateTaskDialog.tsx` — form with message, title, priority, agent, team; calls `TasksService.createTask()`
+- `frontend/src/components/Tasks/CreateTaskDialog.tsx` — form with title, description, team badge row, agent badge row, Execute switch; calls `TasksService.createTask()`
 - `frontend/src/components/Tasks/RefinementChat.tsx` — shows `refinement_history`; submits via `TasksService.refineTask()`
 - `frontend/src/components/Tasks/TaskTodoProgress.tsx` — TodoWrite progress indicator; subscribes to `TASK_TODO_UPDATED`
 - `frontend/src/components/Tasks/TaskSessionsModal.tsx` — lists all sessions for a task; opened from the Sessions tab "View all" link
