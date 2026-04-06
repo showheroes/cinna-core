@@ -29,6 +29,8 @@ Scenarios:
   11. My-tasks — returns owner's tasks
   12. Task details — returns task with recent_comments, subtask_progress
   13. Ownership enforcement on agent API endpoints
+  14. Session-resolved subtask — POST /agent/tasks/current/subtask resolves parent via Session.source_task_id
+  15. Session-resolved subtask after re-execution — old session still resolves after task.session_id is overwritten
 """
 import uuid
 
@@ -40,13 +42,19 @@ from tests.utils.agentic_team import (
     create_node,
     create_connection,
 )
+from unittest.mock import patch
+
+from tests.stubs.agent_env_stub import StubAgentEnvConnector
 from tests.utils.agent import create_agent_via_api
+from tests.utils.background_tasks import drain_tasks
 from tests.utils.input_task import (
     create_task,
     get_task,
+    get_task_by_code,
     get_task_detail,
     add_comment,
     list_comments,
+    execute_task,
 )
 from tests.utils.user import create_random_user, user_authentication_headers
 
@@ -579,3 +587,164 @@ def test_agent_api_unauthenticated_rejected(
     assert client.get(
         f"{_BASE}/agent/tasks/{ghost_id}/details"
     ).status_code in (401, 403)
+
+
+_AGENT_ENV_PATCH = "app.services.sessions.message_service.agent_env_connector"
+
+
+def test_session_resolved_subtask_creation(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """
+    POST /agent/tasks/current/subtask resolves the parent task via
+    Session.source_task_id (not InputTask.session_id).
+
+      1. Create team with lead + worker agents and a connection
+      2. Create team-scoped task assigned to lead agent
+      3. Execute task → creates session with source_task_id pointing to task
+      4. POST /agent/tasks/current/subtask with source_session_id = session ID
+      5. Subtask created with correct parent_task_id
+    """
+    headers = superuser_token_headers
+
+    # ── Phase 1: Create agents, team, and connection ────────────────────────
+    lead_agent = create_agent_via_api(client, headers, name="SessionResolve Lead")
+    worker_agent = create_agent_via_api(client, headers, name="SessionResolve Worker")
+    drain_tasks()
+
+    team = create_team(client, headers, name="SessionResolve Team")
+    team_id = team["id"]
+
+    lead_node = create_node(client, headers, team_id, lead_agent["id"], is_lead=True)
+    worker_node = create_node(client, headers, team_id, worker_agent["id"])
+
+    create_connection(
+        client, headers, team_id,
+        source_node_id=lead_node["id"],
+        target_node_id=worker_node["id"],
+        enabled=True,
+    )
+
+    # ── Phase 2: Create team-scoped task ────────────────────────────────────
+    parent = create_task(
+        client, headers,
+        original_message="Session-resolved subtask parent",
+        team_id=team_id,
+        selected_agent_id=lead_agent["id"],
+    )
+    parent_id = parent["id"]
+
+    # ── Phase 3: Execute → creates session linked to task ───────────────────
+    with patch(_AGENT_ENV_PATCH, StubAgentEnvConnector(response_text="Working")):
+        exec_result = execute_task(client, headers, parent_id)
+        drain_tasks()
+
+    session_id = str(exec_result["session_id"])
+
+    # ── Phase 4: POST /agent/tasks/current/subtask ──────────────────────────
+    r = client.post(
+        f"{_BASE}/agent/tasks/current/subtask",
+        headers=headers,
+        json={
+            "title": "Delegated via current route",
+            "assigned_to": worker_node["name"],
+            "source_session_id": session_id,
+        },
+    )
+    assert r.status_code == 200, f"Session-resolved subtask failed: {r.text}"
+    result = r.json()
+    assert result["success"] is True
+    assert result["parent_task"] == parent["short_code"]
+
+    # ── Phase 5: Verify subtask has correct parent_task_id ──────────────────
+    subtask = get_task_by_code(client, headers, result["task"])
+    assert subtask["parent_task_id"] == parent_id
+    assert subtask["team_id"] == team_id
+
+
+def test_session_resolved_subtask_survives_reexecution(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: "Session",
+) -> None:
+    """
+    After task.session_id is overwritten (simulating re-execution), the OLD
+    session can still create subtasks because resolution uses
+    Session.source_task_id (immutable) instead of InputTask.session_id.
+
+      1. Create team with lead + worker agents and connection
+      2. Create team-scoped task, execute → session S1
+      3. Overwrite task.session_id to a different UUID (simulating re-execution)
+      4. POST /agent/tasks/current/subtask with source_session_id = S1
+      5. Subtask still created with correct parent_task_id
+    """
+    headers = superuser_token_headers
+
+    # ── Phase 1: Create agents, team, connection ────────────────────────────
+    lead_agent = create_agent_via_api(client, headers, name="Reexec Lead")
+    worker_agent = create_agent_via_api(client, headers, name="Reexec Worker")
+    drain_tasks()
+
+    team = create_team(client, headers, name="Reexec Team")
+    team_id = team["id"]
+
+    lead_node = create_node(client, headers, team_id, lead_agent["id"], is_lead=True)
+    worker_node = create_node(client, headers, team_id, worker_agent["id"])
+
+    create_connection(
+        client, headers, team_id,
+        source_node_id=lead_node["id"],
+        target_node_id=worker_node["id"],
+        enabled=True,
+    )
+
+    # ── Phase 2: Create and execute task → session S1 ───────────────────────
+    parent = create_task(
+        client, headers,
+        original_message="Reexec subtask parent",
+        team_id=team_id,
+        selected_agent_id=lead_agent["id"],
+    )
+    parent_id = parent["id"]
+
+    with patch(_AGENT_ENV_PATCH, StubAgentEnvConnector(response_text="First run")):
+        exec_result = execute_task(client, headers, parent_id)
+        drain_tasks()
+
+    session_s1 = str(exec_result["session_id"])
+
+    # ── Phase 3: Overwrite task.session_id directly (simulate re-execution) ─
+    from app.models import InputTask as InputTaskModel
+    task_obj = db.get(InputTaskModel, uuid.UUID(parent_id))
+    assert task_obj is not None
+    task_obj.session_id = None  # clear — simulates session_id being overwritten to a different session
+    task_obj.status = "in_progress"  # keep it in a valid state
+    db.add(task_obj)
+    db.commit()
+    db.refresh(task_obj)
+
+    # Verify task.session_id is no longer S1
+    parent_after = get_task(client, headers, parent_id)
+    assert parent_after["session_id"] != session_s1
+
+    # ── Phase 4: Old session S1 still resolves for subtask creation ─────────
+    r = client.post(
+        f"{_BASE}/agent/tasks/current/subtask",
+        headers=headers,
+        json={
+            "title": "Subtask from old session",
+            "assigned_to": worker_node["name"],
+            "source_session_id": session_s1,
+        },
+    )
+    assert r.status_code == 200, (
+        f"Subtask creation via old session should succeed after session_id overwrite: {r.text}"
+    )
+    result = r.json()
+    assert result["success"] is True
+    assert result["parent_task"] == parent["short_code"]
+
+    # ── Phase 5: Subtask has correct parent link ────────────────────────────
+    subtask = get_task_by_code(client, headers, result["task"])
+    assert subtask["parent_task_id"] == parent_id

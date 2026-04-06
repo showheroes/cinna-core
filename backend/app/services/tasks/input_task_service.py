@@ -645,14 +645,13 @@ class InputTaskService:
                 raise ValidationError("Source session not found")
             user_workspace_id = source_session.user_workspace_id
 
-            # Inherit team context from the calling session's task
-            current_task = db_session.exec(
-                select(InputTask).where(
-                    InputTask.session_id == source_session_id,
-                )
-            ).first()
-            if current_task and current_task.team_id:
-                team_id = current_task.team_id
+            # Inherit team context from the calling session's task.
+            # Use Session.source_task_id (immutable) instead of
+            # InputTask.session_id which is overwritten on re-execution.
+            if source_session.source_task_id:
+                current_task = db_session.get(InputTask, source_session.source_task_id)
+                if current_task and current_task.team_id:
+                    team_id = current_task.team_id
 
         # Resolve assigned_to (name → agent_id)
         selected_agent_id = None

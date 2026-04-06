@@ -38,6 +38,7 @@ from app.models import (
     AgentTaskOperationResponse,
     AgentTaskCommentCreate,
     TaskCommentPublic,
+    Session,
 )
 from app.services.tasks.input_task_service import (
     InputTaskService,
@@ -59,10 +60,18 @@ def _handle_error(e: InputTaskError) -> None:
 def _resolve_task_from_session(
     db_session, session_id: uuid.UUID,
 ) -> InputTask:
-    """Resolve the current task linked to a session. Raises ValidationError if not found."""
-    task = db_session.exec(
-        select(InputTask).where(InputTask.session_id == session_id)
-    ).first()
+    """Resolve the current task linked to a session.
+
+    Uses Session.source_task_id (immutable FK set at session creation) rather
+    than InputTask.session_id which is overwritten on task re-execution and
+    would break resolution for agents still running in older sessions.
+    """
+    session_obj = db_session.get(Session, session_id)
+    if not session_obj:
+        raise ValidationError("Session not found")
+    if not session_obj.source_task_id:
+        raise ValidationError("No task linked to this session")
+    task = db_session.get(InputTask, session_obj.source_task_id)
     if not task:
         raise ValidationError("No task linked to this session")
     return task

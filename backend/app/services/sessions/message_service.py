@@ -271,12 +271,16 @@ def _build_session_context(
         if mcp_meta:
             context["mcp_user_email"] = mcp_meta.authenticated_user_email
 
-    # Enrich with task context if this session is linked to an InputTask
+    # Enrich with task context if this session is linked to an InputTask.
+    # Use Session.source_task_id (immutable) rather than InputTask.session_id
+    # which is overwritten on task re-execution.
     try:
         from app.models.tasks.input_task import InputTask
-        task = db.exec(
-            select(InputTask).where(InputTask.session_id == session_db.id).limit(1)
-        ).first()
+        task = (
+            db.get(InputTask, session_db.source_task_id)
+            if session_db.source_task_id
+            else None
+        )
         if task:
             context["task_short_code"] = task.short_code
             context["task_title"] = task.title or ""
