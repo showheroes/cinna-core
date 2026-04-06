@@ -38,6 +38,9 @@ class Activity(SQLModel, table=True):
     # Read status
     is_read: bool = Field(default=False)
 
+    # Archived — hidden from the main activities page, visible in "All Logs"
+    is_archived: bool = Field(default=False)
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -67,14 +70,17 @@ class ActivityPublic(SQLModel):
     text: str
     action_required: str
     is_read: bool
+    is_archived: bool
     created_at: datetime
 
 
 class ActivityPublicExtended(ActivityPublic):
-    """Activity with extended data (agent name, session title, etc.)"""
+    """Activity with extended data (agent name, session title, task info, etc.)"""
     agent_name: str | None = None
     agent_ui_color_preset: str | None = None
     session_title: str | None = None
+    task_short_code: str | None = None
+    task_title: str | None = None
 
 
 class ActivitiesPublic(SQLModel):

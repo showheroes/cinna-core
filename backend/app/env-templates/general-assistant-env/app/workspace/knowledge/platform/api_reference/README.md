@@ -8,7 +8,7 @@ Each file below documents one API domain.
 | Dashboards | [Dashboards.md](./Dashboards.md) | 17 |
 | A2A | [a2a.md](./a2a.md) | 3 |
 | Access Tokens | [access_tokens.md](./access_tokens.md) | 5 |
-| Activities | [activities.md](./activities.md) | 7 |
+| Activities | [activities.md](./activities.md) | 8 |
 | Agent Shares | [agent_shares.md](./agent_shares.md) | 14 |
 | Agent Tasks | [agent_tasks.md](./agent_tasks.md) | 11 |
 | Agentic Teams | [agentic_teams.md](./agentic_teams.md) | 18 |

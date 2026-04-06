@@ -26,6 +26,7 @@ import { Route as LayoutKnowledgeSourcesRouteImport } from './routes/_layout/kno
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutCredentialsRouteImport } from './routes/_layout/credentials'
 import { Route as LayoutAgentsRouteImport } from './routes/_layout/agents'
+import { Route as LayoutActivitiesAllRouteImport } from './routes/_layout/activities-all'
 import { Route as LayoutActivitiesRouteImport } from './routes/_layout/activities'
 import { Route as LayoutTasksIndexRouteImport } from './routes/_layout/tasks/index'
 import { Route as LayoutSessionsIndexRouteImport } from './routes/_layout/sessions/index'
@@ -133,6 +134,11 @@ const LayoutCredentialsRoute = LayoutCredentialsRouteImport.update({
 const LayoutAgentsRoute = LayoutAgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutActivitiesAllRoute = LayoutActivitiesAllRouteImport.update({
+  id: '/activities-all',
+  path: '/activities-all',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutActivitiesRoute = LayoutActivitiesRouteImport.update({
@@ -268,6 +274,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/activities': typeof LayoutActivitiesRoute
+  '/activities-all': typeof LayoutActivitiesAllRoute
   '/agents': typeof LayoutAgentsRoute
   '/credentials': typeof LayoutCredentialsRoute
   '/items': typeof LayoutItemsRoute
@@ -309,6 +316,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/activities': typeof LayoutActivitiesRoute
+  '/activities-all': typeof LayoutActivitiesAllRoute
   '/agents': typeof LayoutAgentsRoute
   '/credentials': typeof LayoutCredentialsRoute
   '/items': typeof LayoutItemsRoute
@@ -351,6 +359,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/_layout/activities': typeof LayoutActivitiesRoute
+  '/_layout/activities-all': typeof LayoutActivitiesAllRoute
   '/_layout/agents': typeof LayoutAgentsRoute
   '/_layout/credentials': typeof LayoutCredentialsRoute
   '/_layout/items': typeof LayoutItemsRoute
@@ -394,6 +403,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/activities'
+    | '/activities-all'
     | '/agents'
     | '/credentials'
     | '/items'
@@ -435,6 +445,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/activities'
+    | '/activities-all'
     | '/agents'
     | '/credentials'
     | '/items'
@@ -476,6 +487,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/_layout/activities'
+    | '/_layout/activities-all'
     | '/_layout/agents'
     | '/_layout/credentials'
     | '/_layout/items'
@@ -645,6 +657,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents'
       preLoaderRoute: typeof LayoutAgentsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/activities-all': {
+      id: '/_layout/activities-all'
+      path: '/activities-all'
+      fullPath: '/activities-all'
+      preLoaderRoute: typeof LayoutActivitiesAllRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/activities': {
@@ -838,6 +857,7 @@ const LayoutAgentAgentIdRouteWithChildren =
 
 interface LayoutRouteChildren {
   LayoutActivitiesRoute: typeof LayoutActivitiesRoute
+  LayoutActivitiesAllRoute: typeof LayoutActivitiesAllRoute
   LayoutAgentsRoute: typeof LayoutAgentsRoute
   LayoutCredentialsRoute: typeof LayoutCredentialsRoute
   LayoutItemsRoute: typeof LayoutItemsRoute
@@ -867,6 +887,7 @@ interface LayoutRouteChildren {
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutActivitiesRoute: LayoutActivitiesRoute,
+  LayoutActivitiesAllRoute: LayoutActivitiesAllRoute,
   LayoutAgentsRoute: LayoutAgentsRoute,
   LayoutCredentialsRoute: LayoutCredentialsRoute,
   LayoutItemsRoute: LayoutItemsRoute,

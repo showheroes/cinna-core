@@ -362,13 +362,14 @@ def test_email_task_mode_full_flow(
         f"email_task_reply_pending should be deleted after send-answer, got {len(reply_pending_after_send)}"
     )
 
-    # No task-related activities should remain
-    all_task_activities = [
+    # No email-specific task activities should remain (task_completed is expected in Logs)
+    email_task_activities = [
         a for a in _get_activities(client, superuser_token_headers)
         if a.get("input_task_id") == task_id
+        and a.get("activity_type") in ("email_task_incoming", "email_task_reply_pending")
     ]
-    assert len(all_task_activities) == 0, (
-        f"No task activities should remain after send-answer, got {len(all_task_activities)}"
+    assert len(email_task_activities) == 0, (
+        f"No email task activities should remain after send-answer, got {len(email_task_activities)}"
     )
 
     # Verify outgoing email was queued

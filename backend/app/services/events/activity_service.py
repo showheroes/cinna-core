@@ -3,11 +3,27 @@ from typing import Any
 import logging
 import asyncio
 from sqlmodel import Session as DBSession, select, and_, func, desc
-from app.models import Activity, ActivityCreate, ActivityUpdate, Agent, Session, AgentEnvironment, SessionMessage
+from app.models import Activity, ActivityCreate, ActivityUpdate, ActivityPublicExtended, ActivitiesPublicExtended, Agent, Session, AgentEnvironment, SessionMessage
 from app.models.tasks.input_task import InputTask
 from app.models.events.event import EventType
+from app.core.db import create_session
 
 logger = logging.getLogger(__name__)
+
+
+class ActivityNotFoundError(Exception):
+    """Activity does not exist."""
+
+class ActivityPermissionError(Exception):
+    """User does not own this activity."""
+
+# Maps task status values to (activity_type, text, action_required) for lifecycle activities
+_TASK_LIFECYCLE_MAP: dict[str, tuple[str, str, str]] = {
+    "completed": ("task_completed", "Task completed",                           ""),
+    "error":     ("task_failed",    "Task failed",                              ""),
+    "blocked":   ("task_blocked",   "Task is blocked and requires attention",   "task_action_required"),
+    "cancelled": ("task_cancelled", "Task was cancelled",                       ""),
+}
 
 
 class ActivityService:
@@ -47,127 +63,287 @@ class ActivityService:
         db_session.refresh(activity)
         return activity
 
+    # ── Ownership helper ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def get_activity_with_ownership_check(
+        db_session: DBSession, activity_id: UUID, user_id: UUID,
+    ) -> Activity:
+        """Get activity and verify the requesting user owns it.
+
+        Raises:
+            ActivityNotFoundError: activity does not exist
+            ActivityPermissionError: user does not own the activity
+        """
+        activity = db_session.get(Activity, activity_id)
+        if not activity:
+            raise ActivityNotFoundError()
+        if activity.user_id != user_id:
+            raise ActivityPermissionError()
+        return activity
+
+    # ── CRUD ──────────────────────────────────────────────────────────────
+
     @staticmethod
     def get_activity(db_session: DBSession, activity_id: UUID) -> Activity | None:
         """Get activity by ID"""
         return db_session.get(Activity, activity_id)
 
     @staticmethod
-    def update_activity(
-        db_session: DBSession, activity_id: UUID, data: ActivityUpdate
-    ) -> Activity | None:
-        """Update activity (e.g., mark as read)"""
-        activity = db_session.get(Activity, activity_id)
-        if not activity:
-            return None
+    async def update_activity(
+        db_session: DBSession, activity_id: UUID, user_id: UUID, data: ActivityUpdate,
+    ) -> Activity:
+        """Update activity (e.g., mark as read). Emits WebSocket event.
 
+        Raises:
+            ActivityNotFoundError, ActivityPermissionError
+        """
+        activity = ActivityService.get_activity_with_ownership_check(
+            db_session, activity_id, user_id,
+        )
         update_dict = data.model_dump(exclude_unset=True)
         activity.sqlmodel_update(update_dict)
-
         db_session.add(activity)
         db_session.commit()
         db_session.refresh(activity)
-        return activity
 
-    @staticmethod
-    def mark_as_read(
-        db_session: DBSession, activity_id: UUID
-    ) -> Activity | None:
-        """Mark activity as read"""
-        activity = db_session.get(Activity, activity_id)
-        if not activity:
-            return None
-
-        activity.is_read = True
-        db_session.add(activity)
-        db_session.commit()
-        db_session.refresh(activity)
-        return activity
-
-    @staticmethod
-    def mark_multiple_as_read(
-        db_session: DBSession, activity_ids: list[UUID]
-    ) -> int:
-        """Mark multiple activities as read, returns count of updated activities"""
-        statement = (
-            select(Activity)
-            .where(Activity.id.in_(activity_ids))
+        from app.services.events.event_service import event_service
+        await event_service.emit_event(
+            event_type=EventType.ACTIVITY_UPDATED,
+            model_id=activity.id,
+            user_id=user_id,
+            meta={"activity_type": activity.activity_type, "is_read": activity.is_read},
         )
-        activities = db_session.exec(statement).all()
+        return activity
 
-        count = 0
+    @staticmethod
+    async def mark_multiple_as_read(
+        db_session: DBSession, user_id: UUID, activity_ids: list[UUID],
+    ) -> int:
+        """Mark multiple activities as read. Only touches activities owned by user_id.
+        Emits a single ACTIVITY_UPDATED event (batch). Returns count updated."""
+        statement = select(Activity).where(
+            and_(Activity.id.in_(activity_ids), Activity.user_id == user_id)
+        )
+        activities = list(db_session.exec(statement).all())
+
         for activity in activities:
             activity.is_read = True
             db_session.add(activity)
-            count += 1
-
         db_session.commit()
-        return count
+
+        from app.services.events.event_service import event_service
+        for activity in activities:
+            await event_service.emit_event(
+                event_type=EventType.ACTIVITY_UPDATED,
+                model_id=activity.id,
+                user_id=user_id,
+                meta={"activity_type": activity.activity_type, "is_read": True},
+            )
+        return len(activities)
+
+    # ── Extended listing ──────────────────────────────────────────────────
 
     @staticmethod
-    def list_user_activities(
+    def _parse_workspace_filter(
+        raw: str | None,
+    ) -> tuple[bool, UUID | None]:
+        """Parse the workspace query parameter.
+
+        Returns (apply_filter, workspace_uuid):
+          - raw is None  → (False, None)       – return all
+          - raw == ""    → (True, None)         – default workspace (NULL in DB)
+          - raw == UUID  → (True, <uuid>)       – specific workspace
+
+        Raises ValueError for unparseable UUIDs.
+        """
+        if raw is None:
+            return False, None
+        if raw == "":
+            return True, None
+        return True, UUID(raw)
+
+    @staticmethod
+    def list_user_activities_extended(
         db_session: DBSession,
         user_id: UUID,
+        *,
         agent_id: UUID | None = None,
+        user_workspace_id: str | None = None,
+        include_archived: bool = False,
         skip: int = 0,
         limit: int = 100,
-        order_desc: bool = True
-    ) -> list[Activity]:
-        """List activities for user with optional filtering"""
-        statement = select(Activity).where(Activity.user_id == user_id)
+        order_desc: bool = True,
+    ) -> ActivitiesPublicExtended:
+        """List activities with joined agent/session/task context.
 
-        # Filter by agent if specified
+        Handles workspace filter parsing, pagination, ordering, and count.
+        By default excludes archived activities (include_archived=False).
+        """
+        apply_ws, ws_uuid = ActivityService._parse_workspace_filter(user_workspace_id)
+
+        # Data query — join agent, session, task for extended fields
+        query = (
+            select(
+                Activity,
+                Agent.name,
+                Agent.ui_color_preset,
+                Session.title,
+                InputTask.short_code,
+                InputTask.title,
+            )
+            .outerjoin(Agent, Activity.agent_id == Agent.id)
+            .outerjoin(Session, Activity.session_id == Session.id)
+            .outerjoin(InputTask, Activity.input_task_id == InputTask.id)
+            .where(Activity.user_id == user_id)
+        )
+
+        if not include_archived:
+            query = query.where(Activity.is_archived == False)
         if agent_id:
-            statement = statement.where(Activity.agent_id == agent_id)
+            query = query.where(Activity.agent_id == agent_id)
+        if apply_ws:
+            query = query.where(Activity.user_workspace_id == ws_uuid)
 
-        # Add ordering
         if order_desc:
-            statement = statement.order_by(Activity.created_at.desc())
+            query = query.order_by(Activity.created_at.desc())
         else:
-            statement = statement.order_by(Activity.created_at.asc())
+            query = query.order_by(Activity.created_at.asc())
 
-        # Add pagination
-        statement = statement.offset(skip).limit(limit)
+        query = query.offset(skip).limit(limit)
+        results = db_session.exec(query).all()
 
-        return list(db_session.exec(statement).all())
+        data = [
+            ActivityPublicExtended(
+                **activity.model_dump(),
+                agent_name=agent_name,
+                agent_ui_color_preset=agent_ui_color_preset,
+                session_title=session_title,
+                task_short_code=task_short_code,
+                task_title=task_title,
+            )
+            for activity, agent_name, agent_ui_color_preset, session_title, task_short_code, task_title in results
+        ]
+
+        # Count query
+        count_q = (
+            select(func.count())
+            .select_from(Activity)
+            .where(Activity.user_id == user_id)
+        )
+        if not include_archived:
+            count_q = count_q.where(Activity.is_archived == False)
+        if agent_id:
+            count_q = count_q.where(Activity.agent_id == agent_id)
+        if apply_ws:
+            count_q = count_q.where(Activity.user_workspace_id == ws_uuid)
+        count = db_session.exec(count_q).one()
+
+        return ActivitiesPublicExtended(data=data, count=count)
+
+    @staticmethod
+    def archive_logs(db_session: DBSession, user_id: UUID) -> int:
+        """Archive non-active log activities.
+
+        Marks activities as archived where action_required is empty and
+        activity_type is not 'session_running'. Returns count archived.
+        """
+        statement = select(Activity).where(
+            and_(
+                Activity.user_id == user_id,
+                Activity.is_archived == False,
+                Activity.action_required == "",
+                Activity.activity_type != "session_running",
+            )
+        )
+        activities = list(db_session.exec(statement).all())
+        for a in activities:
+            a.is_archived = True
+            a.is_read = True
+            db_session.add(a)
+        db_session.commit()
+        return len(activities)
 
     @staticmethod
     def get_activity_stats(
         db_session: DBSession,
-        user_id: UUID
+        user_id: UUID,
     ) -> dict[str, int]:
-        """Get activity statistics (unread count, action required count)"""
-        # Count unread activities
+        """Get activity statistics (unread count, action required count).
+        Excludes archived activities."""
         unread_statement = select(func.count()).select_from(Activity).where(
-            and_(
-                Activity.user_id == user_id,
-                Activity.is_read == False
-            )
+            and_(Activity.user_id == user_id, Activity.is_read == False, Activity.is_archived == False)
         )
         unread_count = db_session.exec(unread_statement).one()
 
-        # Count activities requiring action (and unread)
         action_required_statement = select(func.count()).select_from(Activity).where(
             and_(
                 Activity.user_id == user_id,
                 Activity.is_read == False,
-                Activity.action_required != ""
+                Activity.is_archived == False,
+                Activity.action_required != "",
             )
         )
         action_required_count = db_session.exec(action_required_statement).one()
 
-        return {
-            "unread_count": unread_count,
-            "action_required_count": action_required_count,
-        }
+        return {"unread_count": unread_count, "action_required_count": action_required_count}
+
+    # ── Delete ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def delete_activity_for_user(
+        db_session: DBSession, activity_id: UUID, user_id: UUID,
+    ) -> None:
+        """Delete a single activity with ownership check. Emits WebSocket event.
+
+        Raises:
+            ActivityNotFoundError, ActivityPermissionError
+        """
+        activity = ActivityService.get_activity_with_ownership_check(
+            db_session, activity_id, user_id,
+        )
+        activity_type = activity.activity_type
+        db_session.delete(activity)
+        db_session.commit()
+
+        from app.services.events.event_service import event_service
+        await event_service.emit_event(
+            event_type=EventType.ACTIVITY_DELETED,
+            model_id=activity_id,
+            user_id=user_id,
+            meta={"activity_type": activity_type},
+        )
+
+    @staticmethod
+    async def delete_all_for_user(
+        db_session: DBSession, user_id: UUID,
+    ) -> int:
+        """Delete all activities for a user in bulk. Returns count deleted."""
+        statement = select(Activity).where(Activity.user_id == user_id)
+        activities = list(db_session.exec(statement).all())
+
+        # Collect metadata before deleting
+        activity_metas = [(a.id, a.activity_type) for a in activities]
+        for activity in activities:
+            db_session.delete(activity)
+        db_session.commit()
+
+        from app.services.events.event_service import event_service
+        for aid, atype in activity_metas:
+            await event_service.emit_event(
+                event_type=EventType.ACTIVITY_DELETED,
+                model_id=aid,
+                user_id=user_id,
+                meta={"activity_type": atype},
+            )
+        return len(activity_metas)
 
     @staticmethod
     def delete_activity(db_session: DBSession, activity_id: UUID) -> bool:
-        """Delete activity by ID"""
+        """Delete activity by ID (internal use — no ownership check, no event)."""
         activity = db_session.get(Activity, activity_id)
         if not activity:
             return False
-
         db_session.delete(activity)
         db_session.commit()
         return True
@@ -289,6 +465,7 @@ class ActivityService:
 
             agent_id = environment.agent_id
             user_id = chat_session.user_id
+            task_id = chat_session.source_task_id
 
             # Create "session_running" activity (unread by default)
             running_activity = ActivityService.create_activity(
@@ -297,6 +474,7 @@ class ActivityService:
                 data=ActivityCreate(
                     session_id=session_id,
                     agent_id=agent_id,
+                    input_task_id=task_id,
                     activity_type="session_running",
                     text="Session is running",
                     action_required="",
@@ -395,6 +573,7 @@ class ActivityService:
 
             agent_id = environment.agent_id
             user_id = chat_session.user_id
+            task_id = chat_session.source_task_id
 
             # Create descriptive text for the error activity
             activity_text = "Session encountered an error"
@@ -412,6 +591,7 @@ class ActivityService:
                 data=ActivityCreate(
                     session_id=session_id,
                     agent_id=agent_id,
+                    input_task_id=task_id,
                     activity_type="error_occurred",
                     text=activity_text,
                     action_required="",
@@ -442,11 +622,18 @@ class ActivityService:
     @staticmethod
     async def create_completion_activities(
         db_session: DBSession,
-        session_id: UUID
+        session_id: UUID,
+        is_read: bool = False,
     ) -> tuple[Activity | None, Activity | None]:
         """
-        Create activities for unread session completion.
-        Called when stream completes while user was disconnected.
+        Create activities for session completion.
+        Called when a stream completes.
+
+        Args:
+            db_session: Database session
+            session_id: Session ID to create activities for
+            is_read: Whether to mark activities as already read. Set True when the user
+                     was connected (activities appear in Logs without triggering the bell).
 
         Returns:
             tuple: (completed_activity, questions_activity)
@@ -466,10 +653,11 @@ class ActivityService:
 
             agent_id = environment.agent_id
             user_id = chat_session.user_id
+            task_id = chat_session.source_task_id  # link activity to originating task
 
-            # Only create activities if session was actually completed (not interrupted)
-            if chat_session.status != "completed":
-                logger.info(f"Skipping activities for session {session_id} with status '{chat_session.status}' (not completed)")
+            # Skip if session errored (errors have their own activity path)
+            if chat_session.status == "error":
+                logger.info(f"Skipping completion activities for session {session_id} with error status")
                 return None, None
 
             # Skip generic completion activity if agent already declared a result_state
@@ -495,10 +683,11 @@ class ActivityService:
                 data=ActivityCreate(
                     session_id=session_id,
                     agent_id=agent_id,
+                    input_task_id=task_id,
                     activity_type="session_completed",
                     text="Session completed",
                     action_required="",
-                    is_read=False
+                    is_read=is_read,
                 )
             )
             logger.info(f"Created 'session_completed' activity for session {session_id}")
@@ -525,10 +714,11 @@ class ActivityService:
                     data=ActivityCreate(
                         session_id=session_id,
                         agent_id=agent_id,
+                        input_task_id=task_id,
                         activity_type="questions_asked",
                         text="Agent asked questions that need answers",
                         action_required="answers_required",
-                        is_read=False
+                        is_read=is_read,
                     )
                 )
                 logger.info(f"Created 'questions_asked' activity for session {session_id}")
@@ -554,11 +744,18 @@ class ActivityService:
     @staticmethod
     async def transition_running_to_completion(
         db_session: DBSession,
-        session_id: UUID
+        session_id: UUID,
+        is_read: bool = False,
     ) -> bool:
         """
-        Update 'session_running' activity to completion status.
-        Called when stream completes while user was disconnected.
+        Delete 'session_running' activity and create completion activities.
+
+        Args:
+            db_session: Database session
+            session_id: Session ID to transition
+            is_read: Whether to mark completion activities as already read. Set True
+                     when the user was connected so activities appear in Logs without
+                     triggering the notification bell.
         """
         try:
             # Find the session_running activity
@@ -589,8 +786,8 @@ class ActivityService:
                     }
                 )
 
-            # Create completion activities
-            await ActivityService.create_completion_activities(db_session, session_id)
+            # Create completion activities with the given read state
+            await ActivityService.create_completion_activities(db_session, session_id, is_read=is_read)
             return True
 
         except Exception as e:
@@ -658,16 +855,12 @@ class ActivityService:
             event_data: Event dict with type, model_id, meta, user_id, timestamp
         """
         try:
-            from app.core.db import engine as db_engine
-            from sqlmodel import Session as DBSession
-
             session_id = event_data.get("model_id")
             if not session_id:
                 logger.warning("STREAM_STARTED event missing model_id")
                 return
 
-            # Use fresh DB session
-            with DBSession(db_engine) as db:
+            with create_session() as db:
                 await ActivityService.create_session_running_activity(
                     db_session=db,
                     session_id=UUID(session_id)
@@ -683,16 +876,15 @@ class ActivityService:
         """
         Event handler for STREAM_COMPLETED events.
 
-        Manages activity lifecycle based on whether user was connected:
-        - If connected: Deletes session_running activity
-        - If disconnected: Replaces with session_completed + questions_asked (if applicable)
+        Always creates completion activities regardless of connection status.
+        When user was connected, activities are marked as read (is_read=True) so they
+        appear in Logs without triggering the unread notification bell.
+        When user was disconnected, activities are unread (is_read=False).
 
         Args:
             event_data: Event dict with type, model_id, meta, user_id, timestamp
         """
         try:
-            from app.core.db import engine as db_engine
-            from sqlmodel import Session as DBSession
             from app.services.events.event_service import event_service
 
             session_id = event_data.get("model_id")
@@ -705,24 +897,18 @@ class ActivityService:
             # Check if user was connected during stream completion
             user_connected = event_service.is_user_connected(UUID(user_id))
 
-            # Use fresh DB session
-            with DBSession(db_engine) as db:
-                if user_connected:
-                    # User was watching - just delete the running activity
-                    deleted = await ActivityService.delete_session_running_activity(
-                        db_session=db,
-                        session_id=UUID(session_id)
-                    )
-                    if deleted:
-                        logger.info(f"[Event Handler] Deleted session_running activity (user was watching) for session {session_id}")
-                else:
-                    # User was disconnected - replace with completion activities
-                    success = await ActivityService.transition_running_to_completion(
-                        db_session=db,
-                        session_id=UUID(session_id)
-                    )
-                    if success:
-                        logger.info(f"[Event Handler] Created completion activities (user was disconnected) for session {session_id}")
+            # Activities are pre-marked as read when the user was watching so they
+            # appear in the Logs section without triggering the unread notification bell.
+            # When the user was away, activities are unread to surface the notification.
+            with create_session() as db:
+                success = await ActivityService.transition_running_to_completion(
+                    db_session=db,
+                    session_id=UUID(session_id),
+                    is_read=user_connected,
+                )
+                if success:
+                    read_state = "is_read=True" if user_connected else "is_read=False"
+                    logger.info(f"[Event Handler] Created completion activities ({read_state}) for session {session_id}")
 
         except Exception as e:
             logger.error(f"Error in handle_stream_completed: {e}", exc_info=True)
@@ -739,9 +925,6 @@ class ActivityService:
             event_data: Event dict with type, model_id, meta, user_id, timestamp
         """
         try:
-            from app.core.db import engine as db_engine
-            from sqlmodel import Session as DBSession
-
             session_id = event_data.get("model_id")
             if not session_id:
                 logger.warning("STREAM_ERROR event missing model_id")
@@ -750,8 +933,7 @@ class ActivityService:
             meta = event_data.get("meta", {})
             error_message = meta.get("error_message", "Unknown error occurred")
 
-            # Use fresh DB session
-            with DBSession(db_engine) as db:
+            with create_session() as db:
                 # Delete session_running activity if exists
                 await ActivityService.delete_session_running_activity(
                     db_session=db,
@@ -782,16 +964,12 @@ class ActivityService:
             event_data: Event dict with type, model_id, meta, user_id, timestamp
         """
         try:
-            from app.core.db import engine as db_engine
-            from sqlmodel import Session as DBSession
-
             session_id = event_data.get("model_id")
             if not session_id:
                 logger.warning("STREAM_INTERRUPTED event missing model_id")
                 return
 
-            # Use fresh DB session
-            with DBSession(db_engine) as db:
+            with create_session() as db:
                 deleted = await ActivityService.delete_session_running_activity(
                     db_session=db,
                     session_id=UUID(session_id)
@@ -814,7 +992,6 @@ class ActivityService:
         - error → error_occurred activity
         """
         try:
-            from app.core.db import create_session
             from app.services.events.event_service import event_service
 
             meta = event_data.get("meta", {})
@@ -849,6 +1026,7 @@ class ActivityService:
 
                 environment = db.get(AgentEnvironment, chat_session.environment_id)
                 agent_id = environment.agent_id if environment else None
+                task_id = chat_session.source_task_id
 
                 # Delete any existing session_running activity
                 await ActivityService.delete_session_running_activity(
@@ -863,6 +1041,7 @@ class ActivityService:
                     data=ActivityCreate(
                         session_id=UUID(session_id),
                         agent_id=agent_id,
+                        input_task_id=task_id,
                         activity_type=activity_type,
                         text=summary,
                         action_required=action_required,
@@ -899,7 +1078,6 @@ class ActivityService:
         Only triggers for tasks with source_email_message_id.
         """
         try:
-            from app.core.db import create_session
             from app.services.events.event_service import event_service
 
             meta = event_data.get("meta", {})
@@ -950,26 +1128,97 @@ class ActivityService:
         """
         Event handler for TASK_STATUS_UPDATED events.
 
-        Manages email task activity lifecycle:
-        - When status != "new": deletes email_task_incoming activity
-        - When status == "completed": creates email_task_reply_pending activity
-        - When status != "completed": deletes email_task_reply_pending if exists
+        Handles two concerns:
+        1. Task lifecycle activities (ALL tasks): creates activities for significant
+           status transitions (completed, error, blocked, cancelled) and dismisses
+           the task_blocked activity when a task unblocks.
+        2. Email task activity lifecycle (email tasks only): manages the
+           email_task_incoming and email_task_reply_pending activity lifecycle.
         """
         try:
-            from app.core.db import create_session
             from app.services.events.event_service import event_service
 
             meta = event_data.get("meta", {})
-            if not meta.get("is_email_task"):
-                return  # Not an email task
-
             task_id = event_data.get("model_id")
             user_id = event_data.get("user_id")
-            new_status = meta.get("new_status")
-            source_agent_id = meta.get("source_agent_id")
+            # Support both event meta formats:
+            #   update_status() emits "new_status" + "source_agent_id"
+            #   update_task_status() emits "to_status" + "changed_by_agent_id"
+            new_status = meta.get("new_status") or meta.get("to_status")
+            source_agent_id = meta.get("source_agent_id") or meta.get("changed_by_agent_id")
 
             if not task_id or not user_id or not new_status:
                 logger.warning("TASK_STATUS_UPDATED event missing required fields")
+                return
+
+            # ── Task lifecycle activities (runs for ALL tasks) ─────────────────────
+            with create_session() as db:
+                # Resolve agent_id: prefer the agent that triggered the change,
+                # fall back to the task's assigned agent
+                agent_id: UUID | None = UUID(source_agent_id) if source_agent_id else None
+                if not agent_id:
+                    task = db.get(InputTask, UUID(task_id))
+                    if task and task.selected_agent_id:
+                        agent_id = task.selected_agent_id
+
+                # Dismiss task_blocked activity when task transitions away from blocked
+                if new_status != "blocked":
+                    deleted = ActivityService.delete_activity_by_task_and_type(
+                        db_session=db,
+                        input_task_id=UUID(task_id),
+                        activity_type="task_blocked"
+                    )
+                    if deleted:
+                        await event_service.emit_event(
+                            event_type=EventType.ACTIVITY_DELETED,
+                            model_id=deleted.id,
+                            user_id=UUID(user_id),
+                            meta={
+                                "activity_type": "task_blocked",
+                                "input_task_id": str(task_id),
+                            }
+                        )
+                        logger.info(f"[Event Handler] Dismissed 'task_blocked' activity for task {task_id}")
+
+                # Create lifecycle activity for significant status transitions
+                if new_status in _TASK_LIFECYCLE_MAP:
+                    activity_type, text, action_required = _TASK_LIFECYCLE_MAP[new_status]
+
+                    # Guard against duplicate task_blocked activities: a task may be set to
+                    # blocked multiple times before unblocking, but we only want one activity
+                    if activity_type == "task_blocked" and ActivityService.find_activity_by_task_and_type(
+                        db_session=db,
+                        input_task_id=UUID(task_id),
+                        activity_type="task_blocked"
+                    ):
+                        logger.info(f"[Event Handler] Skipping duplicate 'task_blocked' activity for task {task_id}")
+                    else:
+                        activity = ActivityService.create_activity(
+                            db_session=db,
+                            user_id=UUID(user_id),
+                            data=ActivityCreate(
+                                input_task_id=UUID(task_id),
+                                agent_id=agent_id,
+                                activity_type=activity_type,
+                                text=text,
+                                action_required=action_required,
+                                is_read=False,
+                            )
+                        )
+                        await event_service.emit_event(
+                            event_type=EventType.ACTIVITY_CREATED,
+                            model_id=activity.id,
+                            user_id=UUID(user_id),
+                            meta={
+                                "activity_type": activity_type,
+                                "input_task_id": str(task_id),
+                                "agent_id": source_agent_id,
+                            }
+                        )
+                        logger.info(f"[Event Handler] Created '{activity_type}' activity for task {task_id}")
+
+            # ── Email task activity lifecycle (email tasks only) ───────────────────
+            if not meta.get("is_email_task"):
                 return
 
             with create_session() as db:

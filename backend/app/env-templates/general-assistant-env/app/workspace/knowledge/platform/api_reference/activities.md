@@ -24,6 +24,7 @@ Auto-generated from OpenAPI spec. Tag: `activities`
 **Query parameters:**
 - `agent_id`: string | null
 - `user_workspace_id`: string | null
+- `include_archived`: boolean, default: `False`
 - `skip`: integer, default: `0`
 - `limit`: integer, default: `100`
 - `order_desc`: boolean, default: `True`
@@ -34,6 +35,13 @@ Auto-generated from OpenAPI spec. Tag: `activities`
 
 ## DELETE `/api/v1/activities/`
 **Delete All Activities**
+
+---
+
+## POST `/api/v1/activities/archive-logs`
+**Archive Logs**
+
+**Response:** `object`
 
 ---
 

@@ -46,11 +46,12 @@ export type ActivityPublic = {
     text: string;
     action_required: string;
     is_read: boolean;
+    is_archived: boolean;
     created_at: string;
 };
 
 /**
- * Activity with extended data (agent name, session title, etc.)
+ * Activity with extended data (agent name, session title, task info, etc.)
  */
 export type ActivityPublicExtended = {
     id: string;
@@ -63,10 +64,13 @@ export type ActivityPublicExtended = {
     text: string;
     action_required: string;
     is_read: boolean;
+    is_archived: boolean;
     created_at: string;
     agent_name?: (string | null);
     agent_ui_color_preset?: (string | null);
     session_title?: (string | null);
+    task_short_code?: (string | null);
+    task_title?: (string | null);
 };
 
 /**
@@ -2759,6 +2763,7 @@ export type ActivitiesCreateActivityResponse = (ActivityPublic);
 
 export type ActivitiesListActivitiesData = {
     agentId?: (string | null);
+    includeArchived?: boolean;
     limit?: number;
     orderDesc?: boolean;
     skip?: number;
@@ -2768,6 +2773,10 @@ export type ActivitiesListActivitiesData = {
 export type ActivitiesListActivitiesResponse = (ActivitiesPublicExtended);
 
 export type ActivitiesDeleteAllActivitiesResponse = (unknown);
+
+export type ActivitiesArchiveLogsResponse = ({
+    [key: string]: unknown;
+});
 
 export type ActivitiesGetActivityStatsResponse = (ActivityStats);
 

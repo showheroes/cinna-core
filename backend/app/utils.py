@@ -24,15 +24,16 @@ def create_task_with_error_logging(coro, task_name: str = "background_task"):
     When using asyncio.create_task(), exceptions can be silently suppressed.
     This helper ensures exceptions are logged and tasks aren't prematurely cancelled.
 
+    If called from a sync worker thread (no running event loop), the coroutine
+    is scheduled on the main event loop via anyio.from_thread.
+
     Args:
         coro: Coroutine to run as a task
         task_name: Name for logging purposes
 
     Returns:
-        asyncio.Task: The created task with error logging callback
+        asyncio.Task or None: The created task, or None if scheduled cross-thread
     """
-    task = asyncio.create_task(coro)
-
     def _handle_task_result(task):
         try:
             task.result()
@@ -41,6 +42,25 @@ def create_task_with_error_logging(coro, task_name: str = "background_task"):
         except Exception as e:
             logger.error(f"Unhandled exception in {task_name}: {e}", exc_info=True)
 
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running event loop — called from a sync worker thread (e.g. anyio
+        # run_sync).  Schedule the coroutine back on the main event loop.
+        try:
+            from anyio.from_thread import run as _anyio_run
+
+            async def _schedule():
+                t = asyncio.create_task(coro)
+                t.add_done_callback(_handle_task_result)
+
+            _anyio_run(_schedule)
+        except Exception as e:
+            logger.warning(f"Failed to schedule {task_name} from sync context: {e}")
+            coro.close()
+        return None
+
+    task = asyncio.create_task(coro)
     task.add_done_callback(_handle_task_result)
     return task
 
