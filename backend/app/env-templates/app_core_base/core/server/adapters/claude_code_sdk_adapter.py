@@ -180,6 +180,10 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
         async with _sdk_session_lock:
             logger.info(f"Acquired SDK session lock for message: {message[:50]}...")
 
+            # Rotate log file for new sessions so each session gets its own file
+            if not session_id:
+                self.event_logger.rotate()
+
             self.event_logger.log_send("query", {
                 "session_id": session_id,
                 "message": message,

@@ -509,6 +509,7 @@ class OpenCodeAdapter(BaseSDKAdapter):
             # 2. Create or resume session
             is_new_session = not session_id
             if is_new_session:
+                self._event_transformer.event_logger.rotate()
                 session_id = await self._create_session()
                 self._current_session_id = session_id
                 yield SDKEvent(

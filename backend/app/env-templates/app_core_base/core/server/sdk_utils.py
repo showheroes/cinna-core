@@ -45,11 +45,22 @@ class SessionEventLogger:
         """
         self.enabled = enabled
         self._log_file: Optional[Path] = None
+        self._logs_dir = logs_dir
+        self._prefix = prefix
         if enabled:
-            logs_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-            self._log_file = logs_dir / f"{prefix}_{ts}.jsonl"
-            logger.info("Session logging enabled: %s", self._log_file)
+            self._rotate_log_file()
+
+    def _rotate_log_file(self) -> None:
+        """Create a new log file with a fresh timestamp."""
+        self._logs_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        self._log_file = self._logs_dir / f"{self._prefix}_{ts}.jsonl"
+        logger.info("Session logging enabled: %s", self._log_file)
+
+    def rotate(self) -> None:
+        """Start logging to a new file. Call at the beginning of each new session."""
+        if self.enabled:
+            self._rotate_log_file()
 
     def _write(self, direction: str, event_data: dict) -> None:
         if not self._log_file:
