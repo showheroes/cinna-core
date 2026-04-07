@@ -169,13 +169,10 @@ def upgrade():
         WHERE "user".id = task_counts.owner_id
     """)
 
-    # 5. Add UNIQUE constraint on short_code (now all populated)
-    op.create_index('ix_input_task_short_code', 'input_task', ['short_code'], unique=True)
+    # Note: unique index on short_code intentionally not created - not needed
 
 
 def downgrade():
-    op.drop_index('ix_input_task_short_code', table_name='input_task')
-
     op.drop_constraint('fk_input_task_team_id', 'input_task', type_='foreignkey')
     op.drop_constraint('fk_input_task_parent_task_id', 'input_task', type_='foreignkey')
     op.drop_constraint('fk_input_task_assigned_node_id', 'input_task', type_='foreignkey')
