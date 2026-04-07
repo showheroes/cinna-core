@@ -15,7 +15,6 @@ import {
   X,
   TextSelect,
   Sparkles,
-  ExternalLink,
   Zap,
   Mail,
   User,

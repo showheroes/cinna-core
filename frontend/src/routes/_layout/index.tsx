@@ -92,7 +92,6 @@ function Dashboard() {
 
   const hasAnthropicKey = credentialsStatus?.has_anthropic_api_key ?? false
   const hasMinimaxKey = credentialsStatus?.has_minimax_api_key ?? false
-  const hasOpenaiCompatibleKey = credentialsStatus?.has_openai_compatible_api_key ?? false
 
   // Check if user has required API key for a given SDK
   const getKeyStatus = (sdk: string) => {

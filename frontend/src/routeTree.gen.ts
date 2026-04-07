@@ -23,7 +23,6 @@ import { Route as DashboardFullscreenDashboardIdRouteImport } from './routes/das
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutSessionsRouteImport } from './routes/_layout/sessions'
 import { Route as LayoutKnowledgeSourcesRouteImport } from './routes/_layout/knowledge-sources'
-import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutCredentialsRouteImport } from './routes/_layout/credentials'
 import { Route as LayoutAgentsRouteImport } from './routes/_layout/agents'
 import { Route as LayoutActivitiesAllRouteImport } from './routes/_layout/activities-all'
@@ -119,11 +118,6 @@ const LayoutSessionsRoute = LayoutSessionsRouteImport.update({
 const LayoutKnowledgeSourcesRoute = LayoutKnowledgeSourcesRouteImport.update({
   id: '/knowledge-sources',
   path: '/knowledge-sources',
-  getParentRoute: () => LayoutRoute,
-} as any)
-const LayoutItemsRoute = LayoutItemsRouteImport.update({
-  id: '/items',
-  path: '/items',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutCredentialsRoute = LayoutCredentialsRouteImport.update({
@@ -277,7 +271,6 @@ export interface FileRoutesByFullPath {
   '/activities-all': typeof LayoutActivitiesAllRoute
   '/agents': typeof LayoutAgentsRoute
   '/credentials': typeof LayoutCredentialsRoute
-  '/items': typeof LayoutItemsRoute
   '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/sessions': typeof LayoutSessionsRouteWithChildren
   '/settings': typeof LayoutSettingsRoute
@@ -319,7 +312,6 @@ export interface FileRoutesByTo {
   '/activities-all': typeof LayoutActivitiesAllRoute
   '/agents': typeof LayoutAgentsRoute
   '/credentials': typeof LayoutCredentialsRoute
-  '/items': typeof LayoutItemsRoute
   '/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/settings': typeof LayoutSettingsRoute
   '/dashboard-fullscreen/$dashboardId': typeof DashboardFullscreenDashboardIdRoute
@@ -362,7 +354,6 @@ export interface FileRoutesById {
   '/_layout/activities-all': typeof LayoutActivitiesAllRoute
   '/_layout/agents': typeof LayoutAgentsRoute
   '/_layout/credentials': typeof LayoutCredentialsRoute
-  '/_layout/items': typeof LayoutItemsRoute
   '/_layout/knowledge-sources': typeof LayoutKnowledgeSourcesRoute
   '/_layout/sessions': typeof LayoutSessionsRouteWithChildren
   '/_layout/settings': typeof LayoutSettingsRoute
@@ -406,7 +397,6 @@ export interface FileRouteTypes {
     | '/activities-all'
     | '/agents'
     | '/credentials'
-    | '/items'
     | '/knowledge-sources'
     | '/sessions'
     | '/settings'
@@ -448,7 +438,6 @@ export interface FileRouteTypes {
     | '/activities-all'
     | '/agents'
     | '/credentials'
-    | '/items'
     | '/knowledge-sources'
     | '/settings'
     | '/dashboard-fullscreen/$dashboardId'
@@ -490,7 +479,6 @@ export interface FileRouteTypes {
     | '/_layout/activities-all'
     | '/_layout/agents'
     | '/_layout/credentials'
-    | '/_layout/items'
     | '/_layout/knowledge-sources'
     | '/_layout/sessions'
     | '/_layout/settings'
@@ -636,13 +624,6 @@ declare module '@tanstack/react-router' {
       path: '/knowledge-sources'
       fullPath: '/knowledge-sources'
       preLoaderRoute: typeof LayoutKnowledgeSourcesRouteImport
-      parentRoute: typeof LayoutRoute
-    }
-    '/_layout/items': {
-      id: '/_layout/items'
-      path: '/items'
-      fullPath: '/items'
-      preLoaderRoute: typeof LayoutItemsRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/credentials': {
@@ -860,7 +841,6 @@ interface LayoutRouteChildren {
   LayoutActivitiesAllRoute: typeof LayoutActivitiesAllRoute
   LayoutAgentsRoute: typeof LayoutAgentsRoute
   LayoutCredentialsRoute: typeof LayoutCredentialsRoute
-  LayoutItemsRoute: typeof LayoutItemsRoute
   LayoutKnowledgeSourcesRoute: typeof LayoutKnowledgeSourcesRoute
   LayoutSessionsRoute: typeof LayoutSessionsRouteWithChildren
   LayoutSettingsRoute: typeof LayoutSettingsRoute
@@ -890,7 +870,6 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutActivitiesAllRoute: LayoutActivitiesAllRoute,
   LayoutAgentsRoute: LayoutAgentsRoute,
   LayoutCredentialsRoute: LayoutCredentialsRoute,
-  LayoutItemsRoute: LayoutItemsRoute,
   LayoutKnowledgeSourcesRoute: LayoutKnowledgeSourcesRoute,
   LayoutSessionsRoute: LayoutSessionsRouteWithChildren,
   LayoutSettingsRoute: LayoutSettingsRoute,
