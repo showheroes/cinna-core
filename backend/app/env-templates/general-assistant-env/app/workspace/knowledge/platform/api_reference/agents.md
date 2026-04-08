@@ -206,6 +206,8 @@ Auto-generated from OpenAPI spec. Tag: `agents`
   - `description`: string (required)
   - `prompt`: string | null
   - `enabled`: boolean
+  - `schedule_type`: string
+  - `command`: string | null
 
 **Response:** `AgentSchedulePublic`
 
@@ -235,6 +237,7 @@ Auto-generated from OpenAPI spec. Tag: `agents`
   - `description`: string | null
   - `prompt`: string | null
   - `enabled`: boolean | null
+  - `command`: string | null
 
 **Response:** `AgentSchedulePublic`
 
@@ -248,6 +251,17 @@ Auto-generated from OpenAPI spec. Tag: `agents`
 - `schedule_id`: uuid
 
 **Response:** `Message`
+
+---
+
+## GET `/api/v1/agents/{id}/schedules/{schedule_id}/logs`
+**List Schedule Logs**
+
+**Path parameters:**
+- `id`: uuid
+- `schedule_id`: uuid
+
+**Response:** `AgentScheduleLogsPublic`
 
 ---
 

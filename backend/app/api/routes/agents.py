@@ -33,6 +33,7 @@ from app.models import (
     UpdateScheduleRequest,
     AgentSchedulePublic,
     AgentSchedulesPublic,
+    AgentScheduleLogsPublic,
     HandoverConfigCreate,
     HandoverConfigUpdate,
     HandoverConfigPublic,
@@ -504,6 +505,25 @@ def create_schedule(
         AgentSchedulerService.verify_agent_access(
             session, id, current_user.id, is_superuser=current_user.is_superuser
         )
+    except ScheduleError as e:
+        _handle_schedule_error(e)
+
+    # Validate schedule_type + command combination
+    if data.schedule_type == "script_trigger":
+        if not data.command or not data.command.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="command is required for script_trigger schedules",
+            )
+    elif data.schedule_type == "static_prompt":
+        pass  # command is optional and ignored
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid schedule_type '{data.schedule_type}'. Must be 'static_prompt' or 'script_trigger'",
+        )
+
+    try:
         return AgentSchedulerService.create_schedule(
             session=session,
             agent_id=id,
@@ -513,6 +533,8 @@ def create_schedule(
             description=data.description,
             prompt=data.prompt,
             enabled=data.enabled,
+            schedule_type=data.schedule_type,
+            command=data.command,
         )
     except ScheduleError as e:
         _handle_schedule_error(e)
@@ -576,6 +598,27 @@ def delete_schedule(
     except ScheduleError as e:
         _handle_schedule_error(e)
     return Message(message="Schedule deleted successfully")
+
+
+@router.get("/{id}/schedules/{schedule_id}/logs", response_model=AgentScheduleLogsPublic)
+def list_schedule_logs(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    schedule_id: uuid.UUID,
+) -> Any:
+    """List execution logs for a schedule (last 50, ordered by executed_at DESC)."""
+    try:
+        AgentSchedulerService.verify_agent_access(
+            session, id, current_user.id, is_superuser=current_user.is_superuser
+        )
+        AgentSchedulerService.get_schedule_for_agent(session, id, schedule_id)
+    except ScheduleError as e:
+        _handle_schedule_error(e)
+
+    logs = AgentSchedulerService.get_schedule_logs(session, schedule_id)
+    return AgentScheduleLogsPublic(data=logs, count=len(logs))
 
 
 def _handle_handover_error(e: HandoverError) -> None:

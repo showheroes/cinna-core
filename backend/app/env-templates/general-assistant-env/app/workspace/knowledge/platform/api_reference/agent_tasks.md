@@ -33,7 +33,7 @@ Auto-generated from OpenAPI spec. Tag: `agent-tasks`
   - `file_paths`: array | null
   - `source_session_id`: string | null
 
-**Response:** `TaskCommentPublic`
+**Response:** `AgentCommentResponse`
 
 ---
 
@@ -85,7 +85,7 @@ Auto-generated from OpenAPI spec. Tag: `agent-tasks`
   - `file_paths`: array | null
   - `source_session_id`: string | null
 
-**Response:** `TaskCommentPublic`
+**Response:** `AgentCommentResponse`
 
 ---
 

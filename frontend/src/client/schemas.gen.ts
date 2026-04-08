@@ -1437,6 +1437,43 @@ export const AgentAccessTokensPublicSchema = {
     title: 'AgentAccessTokensPublic'
 } as const;
 
+export const AgentCommentResponseSchema = {
+    properties: {
+        comment_id: {
+            type: 'string',
+            title: 'Comment Id'
+        },
+        task: {
+            type: 'string',
+            title: 'Task'
+        },
+        attachments_count: {
+            type: 'integer',
+            title: 'Attachments Count',
+            default: 0
+        },
+        failed_attachments: {
+            type: 'integer',
+            title: 'Failed Attachments',
+            default: 0
+        },
+        message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message'
+        }
+    },
+    type: 'object',
+    required: ['comment_id', 'task'],
+    title: 'AgentCommentResponse'
+} as const;
+
 export const AgentCreateSchema = {
     properties: {
         name: {
@@ -2944,6 +2981,130 @@ export const AgentPublicSchema = {
     title: 'AgentPublic'
 } as const;
 
+export const AgentScheduleLogPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        schedule_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Schedule Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        schedule_type: {
+            type: 'string',
+            title: 'Schedule Type'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        prompt_used: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Used'
+        },
+        command_executed: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Command Executed'
+        },
+        command_output: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Command Output'
+        },
+        command_exit_code: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Command Exit Code'
+        },
+        session_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Id'
+        },
+        error_message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error Message'
+        },
+        executed_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Executed At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'schedule_id', 'agent_id', 'schedule_type', 'status', 'prompt_used', 'command_executed', 'command_output', 'command_exit_code', 'session_id', 'error_message', 'executed_at'],
+    title: 'AgentScheduleLogPublic',
+    description: 'Public response model for AgentScheduleLog.'
+} as const;
+
+export const AgentScheduleLogsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AgentScheduleLogPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AgentScheduleLogsPublic',
+    description: 'List response model for AgentScheduleLog.'
+} as const;
+
 export const AgentSchedulePublicSchema = {
     properties: {
         id: {
@@ -2983,6 +3144,21 @@ export const AgentSchedulePublicSchema = {
             ],
             title: 'Prompt'
         },
+        schedule_type: {
+            type: 'string',
+            title: 'Schedule Type'
+        },
+        command: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Command'
+        },
         last_execution: {
             anyOf: [
                 {
@@ -3012,7 +3188,7 @@ export const AgentSchedulePublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'agent_id', 'name', 'cron_string', 'description', 'enabled', 'prompt', 'last_execution', 'next_execution', 'created_at', 'updated_at'],
+    required: ['id', 'agent_id', 'name', 'cron_string', 'description', 'enabled', 'prompt', 'schedule_type', 'command', 'last_execution', 'next_execution', 'created_at', 'updated_at'],
     title: 'AgentSchedulePublic',
     description: 'Public response model for AgentSchedule.'
 } as const;
@@ -5210,6 +5386,22 @@ export const CreateScheduleRequestSchema = {
             type: 'boolean',
             title: 'Enabled',
             default: true
+        },
+        schedule_type: {
+            type: 'string',
+            title: 'Schedule Type',
+            default: 'static_prompt'
+        },
+        command: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Command'
         }
     },
     type: 'object',
@@ -12024,6 +12216,17 @@ export const UpdateScheduleRequestSchema = {
                 }
             ],
             title: 'Enabled'
+        },
+        command: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Command'
         }
     },
     type: 'object',

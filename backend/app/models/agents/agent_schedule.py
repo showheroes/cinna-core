@@ -27,6 +27,12 @@ class AgentSchedule(SQLModel, table=True):
     # Schedule-specific prompt (null = use agent's entrypoint_prompt at execution time)
     prompt: str | None = Field(default=None, sa_type=Text)
 
+    # Schedule type: "static_prompt" (default) or "script_trigger"
+    schedule_type: str = Field(default="static_prompt")
+
+    # Shell command to execute (only for script_trigger type)
+    command: str | None = Field(default=None, sa_type=Text)
+
     # Execution tracking
     last_execution: datetime | None = Field(default=None)  # Last run timestamp
     next_execution: datetime  # Calculated next run timestamp
@@ -62,6 +68,8 @@ class CreateScheduleRequest(SQLModel):
     description: str
     prompt: str | None = None
     enabled: bool = True
+    schedule_type: str = "static_prompt"
+    command: str | None = None
 
 
 class UpdateScheduleRequest(SQLModel):
@@ -72,6 +80,8 @@ class UpdateScheduleRequest(SQLModel):
     description: str | None = None
     prompt: str | None = None
     enabled: bool | None = None
+    command: str | None = None
+    # Note: schedule_type is intentionally excluded — immutable after creation
 
 
 class AgentSchedulePublic(SQLModel):
@@ -83,6 +93,8 @@ class AgentSchedulePublic(SQLModel):
     description: str
     enabled: bool
     prompt: str | None
+    schedule_type: str
+    command: str | None
     last_execution: datetime | None
     next_execution: datetime
     created_at: datetime

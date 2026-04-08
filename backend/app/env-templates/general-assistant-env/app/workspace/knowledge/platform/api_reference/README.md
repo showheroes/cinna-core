@@ -12,7 +12,7 @@ Each file below documents one API domain.
 | Agent Shares | [agent_shares.md](./agent_shares.md) | 14 |
 | Agent Tasks | [agent_tasks.md](./agent_tasks.md) | 11 |
 | Agentic Teams | [agentic_teams.md](./agentic_teams.md) | 18 |
-| Agents | [agents.md](./agents.md) | 30 |
+| Agents | [agents.md](./agents.md) | 31 |
 | Ai Credentials | [ai_credentials.md](./ai_credentials.md) | 8 |
 | Credentials | [credentials.md](./credentials.md) | 16 |
 | Email Integration | [email_integration.md](./email_integration.md) | 6 |

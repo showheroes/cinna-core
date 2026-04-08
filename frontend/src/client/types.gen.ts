@@ -157,6 +157,14 @@ export type AgentAccessTokenUpdate = {
     is_revoked?: (boolean | null);
 };
 
+export type AgentCommentResponse = {
+    comment_id: string;
+    task: string;
+    attachments_count?: number;
+    failed_attachments?: number;
+    message?: (string | null);
+};
+
 export type AgentCreate = {
     name: string;
     workflow_prompt?: (string | null);
@@ -536,6 +544,32 @@ export type AgentPublic = {
 };
 
 /**
+ * Public response model for AgentScheduleLog.
+ */
+export type AgentScheduleLogPublic = {
+    id: string;
+    schedule_id: string;
+    agent_id: string;
+    schedule_type: string;
+    status: string;
+    prompt_used: (string | null);
+    command_executed: (string | null);
+    command_output: (string | null);
+    command_exit_code: (number | null);
+    session_id: (string | null);
+    error_message: (string | null);
+    executed_at: string;
+};
+
+/**
+ * List response model for AgentScheduleLog.
+ */
+export type AgentScheduleLogsPublic = {
+    data: Array<AgentScheduleLogPublic>;
+    count: number;
+};
+
+/**
  * Public response model for AgentSchedule.
  */
 export type AgentSchedulePublic = {
@@ -546,6 +580,8 @@ export type AgentSchedulePublic = {
     description: string;
     enabled: boolean;
     prompt: (string | null);
+    schedule_type: string;
+    command: (string | null);
     last_execution: (string | null);
     next_execution: string;
     created_at: string;
@@ -1070,6 +1106,8 @@ export type CreateScheduleRequest = {
     description: string;
     prompt?: (string | null);
     enabled?: boolean;
+    schedule_type?: string;
+    command?: (string | null);
 };
 
 export type CredentialCreate = {
@@ -2439,6 +2477,7 @@ export type UpdateScheduleRequest = {
     description?: (string | null);
     prompt?: (string | null);
     enabled?: (boolean | null);
+    command?: (string | null);
 };
 
 /**
@@ -3043,6 +3082,13 @@ export type AgentsDeleteScheduleData = {
 
 export type AgentsDeleteScheduleResponse = (Message);
 
+export type AgentsListScheduleLogsData = {
+    id: string;
+    scheduleId: string;
+};
+
+export type AgentsListScheduleLogsResponse = (AgentScheduleLogsPublic);
+
 export type AgentsListHandoverConfigsData = {
     id: string;
 };
@@ -3226,7 +3272,7 @@ export type AgentTasksAgentAddCommentCurrentData = {
     requestBody: AgentTaskCommentCreate;
 };
 
-export type AgentTasksAgentAddCommentCurrentResponse = (TaskCommentPublic);
+export type AgentTasksAgentAddCommentCurrentResponse = (AgentCommentResponse);
 
 export type AgentTasksAgentUpdateStatusCurrentData = {
     requestBody: AgentTaskStatusUpdate;
@@ -3251,7 +3297,7 @@ export type AgentTasksAgentAddCommentData = {
     taskId: string;
 };
 
-export type AgentTasksAgentAddCommentResponse = (TaskCommentPublic);
+export type AgentTasksAgentAddCommentResponse = (AgentCommentResponse);
 
 export type AgentTasksAgentUpdateStatusData = {
     requestBody: AgentTaskStatusUpdate;

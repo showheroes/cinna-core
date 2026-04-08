@@ -1278,3 +1278,80 @@ async def serve_webapp_file(path: str, request: Request):
             "Cache-Control": "no-cache",
         },
     )
+
+
+# ── Shell command execution endpoint ─────────────────────────────────────────
+
+
+class _ExecRequest(_BaseModel):
+    """Request body for /exec endpoint."""
+    command: str
+    timeout: int = 120
+
+
+class _ExecResponse(_BaseModel):
+    """Response body for /exec endpoint."""
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+@router.post("/exec", dependencies=[Depends(verify_auth_token)])
+async def exec_command(request: _ExecRequest) -> _ExecResponse:
+    """
+    Execute a shell command inside the agent environment workspace.
+
+    Used by the backend scheduler for script_trigger schedule type.
+    The command runs in /app/workspace/ with the same permissions as the agent.
+
+    Returns exit_code, stdout, and stderr. Output is truncated to 10,000 chars each.
+    Timeout defaults to 120 seconds (max 300 seconds).
+    """
+    _MAX_OUTPUT = 10_000
+    timeout = min(request.timeout, 300)
+
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            request.command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd="/app/workspace",
+        )
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.communicate()
+            except Exception:
+                pass
+            return _ExecResponse(
+                exit_code=-1,
+                stdout="",
+                stderr=f"Command timed out after {timeout} seconds",
+            )
+
+        stdout_str = stdout_bytes.decode("utf-8", errors="replace")
+        stderr_str = stderr_bytes.decode("utf-8", errors="replace")
+
+        if len(stdout_str) > _MAX_OUTPUT:
+            stdout_str = stdout_str[:_MAX_OUTPUT] + "\n[output truncated]"
+        if len(stderr_str) > _MAX_OUTPUT:
+            stderr_str = stderr_str[:_MAX_OUTPUT] + "\n[output truncated]"
+
+        return _ExecResponse(
+            exit_code=proc.returncode if proc.returncode is not None else -1,
+            stdout=stdout_str,
+            stderr=stderr_str,
+        )
+
+    except Exception as e:
+        logger.error(f"exec_command error: {e}", exc_info=True)
+        return _ExecResponse(
+            exit_code=-1,
+            stdout="",
+            stderr=f"Execution error: {str(e)}",
+        )

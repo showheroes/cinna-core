@@ -144,6 +144,11 @@ from .agents.agent_schedule import (
     AgentSchedulePublic,
     AgentSchedulesPublic,
 )
+from .agents.agent_schedule_log import (
+    AgentScheduleLog,
+    AgentScheduleLogPublic,
+    AgentScheduleLogsPublic,
+)
 from .agents.agent_handover import (
     AgentHandoverConfig,
     HandoverConfigCreate,
@@ -542,6 +547,10 @@ __all__ = [
     "UpdateScheduleRequest",
     "AgentSchedulePublic",
     "AgentSchedulesPublic",
+    # Agent Schedule Logs
+    "AgentScheduleLog",
+    "AgentScheduleLogPublic",
+    "AgentScheduleLogsPublic",
     # Agent Handovers / Task Creation
     "AgentHandoverConfig",
     "HandoverConfigCreate",

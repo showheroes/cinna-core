@@ -100,6 +100,56 @@ class AgentEnvConnector:
                 "error_type": type(e).__name__,
             }
 
+    async def exec_command(
+        self,
+        base_url: str,
+        auth_token: str,
+        command: str,
+        timeout: int = 120,
+    ) -> dict:
+        """Execute a shell command in the agent environment.
+
+        Posts to {base_url}/exec and returns the result dict.
+
+        Returns:
+            {"exit_code": int, "stdout": str, "stderr": str}
+
+        Raises:
+            RuntimeError: On HTTP errors, timeouts, or connection failures.
+        """
+        headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+        }
+        # Add extra buffer for HTTP overhead beyond the command timeout
+        http_timeout = httpx.Timeout(
+            connect=30.0,
+            read=float(timeout + 30),
+            write=30.0,
+            pool=30.0,
+        )
+        try:
+            async with httpx.AsyncClient(timeout=http_timeout) as client:
+                response = await client.post(
+                    f"{base_url}/exec",
+                    json={"command": command, "timeout": timeout},
+                    headers=headers,
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"Environment exec failed: HTTP {e.response.status_code}"
+            ) from e
+        except httpx.TimeoutException as e:
+            raise RuntimeError(
+                f"Environment exec timed out after {timeout}s"
+            ) from e
+        except httpx.RequestError as e:
+            raise RuntimeError(
+                f"Failed to connect to environment for exec: {str(e)}"
+            ) from e
+
 
 # Module-level default instance (patched in tests)
 agent_env_connector = AgentEnvConnector()
