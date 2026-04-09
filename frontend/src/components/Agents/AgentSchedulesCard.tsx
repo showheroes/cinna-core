@@ -16,6 +16,7 @@ import {
   ChevronUp,
   History,
   ExternalLink,
+  Play,
 } from "lucide-react"
 import { useState } from "react"
 
@@ -447,6 +448,21 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
     },
   })
 
+  // Run now mutation
+  const runNowMutation = useMutation({
+    mutationFn: (scheduleId: string) =>
+      AgentsService.runScheduleNow({ id: agentId, scheduleId }),
+    onSuccess: () => {
+      showSuccessToast("Schedule triggered successfully")
+      queryClient.invalidateQueries({ queryKey })
+    },
+    onError: (error: unknown) => {
+      const msg =
+        error instanceof Error ? error.message : "Failed to trigger schedule"
+      showErrorToast(msg)
+    },
+  })
+
   // Create dialog handlers
   const handleCreateDialogClose = (open: boolean) => {
     setCreateDialogOpen(open)
@@ -847,6 +863,24 @@ export function AgentSchedulesCard({ agentId }: AgentSchedulesCardProps) {
                 </div>
                 {/* Right: action buttons */}
                 <div className="flex items-center gap-0.5 ml-2 shrink-0">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => runNowMutation.mutate(schedule.id)}
+                          disabled={runNowMutation.isPending}
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">
+                        Run now
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>

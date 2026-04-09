@@ -600,6 +600,27 @@ def delete_schedule(
     return Message(message="Schedule deleted successfully")
 
 
+@router.post("/{id}/schedules/{schedule_id}/run")
+async def run_schedule_now(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    schedule_id: uuid.UUID,
+) -> Message:
+    """Manually trigger a schedule to execute immediately, identical to cron execution."""
+    try:
+        AgentSchedulerService.verify_agent_access(
+            session, id, current_user.id, is_superuser=current_user.is_superuser
+        )
+        AgentSchedulerService.get_schedule_for_agent(session, id, schedule_id)
+        await AgentSchedulerService.execute_now(session, id, schedule_id)
+    except ScheduleError as e:
+        _handle_schedule_error(e)
+
+    return Message(message="Schedule triggered successfully")
+
+
 @router.get("/{id}/schedules/{schedule_id}/logs", response_model=AgentScheduleLogsPublic)
 def list_schedule_logs(
     *,

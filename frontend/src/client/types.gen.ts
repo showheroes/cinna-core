@@ -3082,6 +3082,13 @@ export type AgentsDeleteScheduleData = {
 
 export type AgentsDeleteScheduleResponse = (Message);
 
+export type AgentsRunScheduleNowData = {
+    id: string;
+    scheduleId: string;
+};
+
+export type AgentsRunScheduleNowResponse = (Message);
+
 export type AgentsListScheduleLogsData = {
     id: string;
     scheduleId: string;
