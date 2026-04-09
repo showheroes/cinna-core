@@ -4867,6 +4867,19 @@ export const BlockLayoutUpdateSchema = {
     title: 'BlockLayoutUpdate'
 } as const;
 
+export const Body_cli_upload_workspaceSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_cli-upload_workspace'
+} as const;
+
 export const Body_credentials_update_credential_sharingSchema = {
     properties: {
         allow_sharing: {
@@ -5075,6 +5088,160 @@ export const BulkDeleteResponseSchema = {
     type: 'object',
     required: ['deleted_count'],
     title: 'BulkDeleteResponse'
+} as const;
+
+export const CLISetupTokenCreateSchema = {
+    properties: {
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        }
+    },
+    type: 'object',
+    required: ['agent_id'],
+    title: 'CLISetupTokenCreate'
+} as const;
+
+export const CLISetupTokenCreatedSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        token: {
+            type: 'string',
+            title: 'Token'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        environment_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Environment Id'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        setup_command: {
+            type: 'string',
+            title: 'Setup Command'
+        },
+        setup_url: {
+            type: 'string',
+            title: 'Setup Url'
+        }
+    },
+    type: 'object',
+    required: ['id', 'token', 'agent_id', 'environment_id', 'expires_at', 'created_at', 'setup_command', 'setup_url'],
+    title: 'CLISetupTokenCreated',
+    description: 'Returned when a setup token is created — includes the setup command.'
+} as const;
+
+export const CLITokenPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 100,
+            title: 'Name'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        prefix: {
+            type: 'string',
+            title: 'Prefix'
+        },
+        is_revoked: {
+            type: 'boolean',
+            title: 'Is Revoked'
+        },
+        last_used_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Used At'
+        },
+        machine_info: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Machine Info'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'agent_id', 'owner_id', 'prefix', 'is_revoked', 'last_used_at', 'machine_info', 'expires_at', 'created_at'],
+    title: 'CLITokenPublic'
+} as const;
+
+export const CLITokensPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/CLITokenPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'CLITokensPublic'
 } as const;
 
 export const CheckAccessResponseSchema = {
@@ -6150,6 +6317,29 @@ export const EventBroadcastSchema = {
     required: ['type'],
     title: 'EventBroadcast',
     description: 'Event broadcast request model.'
+} as const;
+
+export const ExchangeSetupTokenBodySchema = {
+    properties: {
+        machine_name: {
+            type: 'string',
+            title: 'Machine Name',
+            default: 'My Machine'
+        },
+        machine_info: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Machine Info'
+        }
+    },
+    type: 'object',
+    title: 'ExchangeSetupTokenBody'
 } as const;
 
 export const ExecuteHandoverRequestSchema = {
@@ -8009,6 +8199,29 @@ export const KnowledgeQueryResponseRetrievalSchema = {
     required: ['articles'],
     title: 'KnowledgeQueryResponseRetrieval',
     description: 'Response for retrieval step (full articles).'
+} as const;
+
+export const KnowledgeSearchBodySchema = {
+    properties: {
+        query: {
+            type: 'string',
+            title: 'Query'
+        },
+        topic: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Topic'
+        }
+    },
+    type: 'object',
+    required: ['query'],
+    title: 'KnowledgeSearchBody'
 } as const;
 
 export const LLMPluginMarketplaceCreateSchema = {

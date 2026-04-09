@@ -389,6 +389,22 @@ from .users.user_dashboard import (
     UserDashboardBlockPromptActionUpdate,
     UserDashboardBlockPromptActionPublic,
 )
+from .cli.cli_setup_token import (
+    CLISetupToken,
+    CLISetupTokenBase,
+    CLISetupTokenCreate,
+    CLISetupTokenPublic,
+    CLISetupTokenCreated,
+)
+from .cli.cli_token import (
+    CLIToken,
+    CLITokenBase,
+    CLITokenCreate,
+    CLITokenPublic,
+    CLITokenCreated,
+    CLITokensPublic,
+    CLITokenPayload,
+)
 from .agentic_teams.agentic_team import (
     AgenticTeam,
     AgenticTeamCreate,

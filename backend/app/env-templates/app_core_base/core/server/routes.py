@@ -41,6 +41,7 @@ from .models import (
 from .sdk_manager import sdk_manager
 from .agent_env_service import AgentEnvService
 from .active_session_manager import active_session_manager
+from .prompt_generator import PromptGenerator
 
 router = APIRouter(tags=["agent"])
 logger = logging.getLogger(__name__)
@@ -606,6 +607,87 @@ async def get_agent_prompts() -> AgentPromptsResponse:
     )
 
 
+@router.get("/prompt/building", dependencies=[Depends(verify_auth_token)])
+async def get_building_prompt():
+    """
+    Assemble and return the building mode system prompt.
+
+    Returns the full assembled prompt that the building agent would receive,
+    along with the individual raw parts and environment settings. Used by the
+    CLI to display and diff the building context during local development.
+
+    Response:
+    {
+        "building_prompt": "...",
+        "building_prompt_parts": {
+            "building_agent_md": "...",
+            "scripts_readme": "...",
+            "workflow_prompt": "...",
+            "entrypoint_prompt": "...",
+            "refiner_prompt": "...",
+            "credentials_readme": "...",
+            "knowledge_topics": [...],
+            "handover_config": "...",
+            "plugin_instructions": null
+        },
+        "settings": {
+            "agent_name": "...",
+            "template": null,
+            "sdk_adapter_building": "...",
+            "model_override_building": null
+        }
+    }
+    """
+    try:
+        prompt_gen = PromptGenerator(WORKSPACE_DIR)
+
+        # Generate assembled building mode prompt
+        prompt_result = prompt_gen.generate_building_mode_prompt()
+        if prompt_result and isinstance(prompt_result, dict):
+            building_prompt = prompt_result.get("append", "")
+        else:
+            building_prompt = ""
+
+        # Collect individual raw parts
+        knowledge_topics_str = prompt_gen._get_knowledge_topics()
+        if knowledge_topics_str:
+            knowledge_topics = [t.strip() for t in knowledge_topics_str.split(",") if t.strip()]
+        else:
+            knowledge_topics = []
+
+        building_prompt_parts = {
+            "building_agent_md": prompt_gen.building_agent_prompt,
+            "scripts_readme": prompt_gen._load_scripts_readme(),
+            "workflow_prompt": prompt_gen._load_workflow_prompt(),
+            "entrypoint_prompt": prompt_gen._load_entrypoint_prompt(),
+            "refiner_prompt": prompt_gen._load_refiner_prompt(),
+            "credentials_readme": prompt_gen._load_credentials_readme(),
+            "knowledge_topics": knowledge_topics,
+            "handover_config": prompt_gen._load_handover_prompt(),
+            "plugin_instructions": None,
+        }
+
+        settings = {
+            "agent_name": ENV_NAME,
+            "template": None,
+            "sdk_adapter_building": os.getenv("SDK_ADAPTER_BUILDING"),
+            "model_override_building": os.getenv("MODEL_OVERRIDE_BUILDING"),
+        }
+
+        return {
+            "building_prompt": building_prompt,
+            "building_prompt_parts": building_prompt_parts,
+            "settings": settings,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to assemble building prompt: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to assemble building prompt: {str(e)}"
+        )
+
+
 @router.post("/config/agent-prompts", dependencies=[Depends(verify_auth_token)])
 async def update_agent_prompts(prompts: AgentPromptsUpdate):
     """
@@ -924,6 +1006,81 @@ async def download_workspace_item(path: str):
     except IOError as e:
         logger.error(f"Failed to download {path}: {e}")
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+
+@router.post("/workspace/upload", dependencies=[Depends(verify_auth_token)])
+async def upload_workspace_tarball(request: Request):
+    """
+    Accept a gzipped tar archive and extract it to the workspace directory.
+
+    This is the reverse of GET /workspace/download/. Used by the CLI to push
+    a local workspace snapshot into the running environment.
+
+    Request:
+    - Content-Type: application/tar+gzip
+    - Body: raw .tar.gz bytes
+
+    Response:
+    {
+        "status": "ok",
+        "message": "Workspace updated",
+        "files_extracted": 42
+    }
+
+    Security:
+    - Validates auth token
+    - Rejects archive entries with absolute paths or path traversal (..)
+    - Verifies all resolved paths remain within workspace directory
+
+    Error Handling:
+    - 400: Archive contains path traversal entries
+    - 500: Extraction failed
+    """
+    body = await request.body()
+    try:
+        files_extracted = agent_env_service.extract_workspace_tarball(body)
+        return {
+            "status": "ok",
+            "message": "Workspace updated",
+            "files_extracted": files_extracted,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid archive: {str(e)}")
+    except IOError as e:
+        logger.error(f"Failed to extract workspace tarball: {e}")
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+
+@router.get("/workspace/manifest", dependencies=[Depends(verify_auth_token)])
+async def get_workspace_manifest():
+    """
+    Return a SHA-256 manifest of all files in the workspace directory.
+
+    Used by the CLI to diff local and remote workspace state before deciding
+    what to push or pull.
+
+    Response:
+    {
+        "files": {
+            "scripts/main.py": {"sha256": "abc...", "size": 1234, "mtime": 1712567890.0},
+            "docs/WORKFLOW_PROMPT.md": {"sha256": "def...", "size": 567, "mtime": 1712567800.0}
+        }
+    }
+
+    Notes:
+    - Hidden files and directories (names starting with ".") are excluded
+    - Symlinks are excluded
+    - Directories are not included — only regular files
+
+    Error Handling:
+    - 500: Workspace not accessible or manifest generation failed
+    """
+    try:
+        manifest = agent_env_service.get_workspace_manifest()
+        return {"files": manifest}
+    except IOError as e:
+        logger.error(f"Failed to generate workspace manifest: {e}")
+        raise HTTPException(status_code=500, detail=f"Manifest generation failed: {str(e)}")
 
 
 @router.post("/files/upload", response_model=FileUploadResponse, dependencies=[Depends(verify_auth_token)])

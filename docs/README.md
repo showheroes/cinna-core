@@ -54,16 +54,16 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 
 ## Domain Map
 
-| Domain | Description | Features |
-|--------|-------------|----------|
-| [agents](#agents) | Core agent lifecycle - creation, configuration, environments, sessions, chat, file management | 11 features |
-| [tasks](#tasks) | Task submission, refinement, triggers, and scheduling | 3 features |
-| [credentials](#credentials) | Credential management, encryption, AI provider keys | 1 feature |
-| [application](#application) | User-facing platform features - authentication, integrations, real-time events, workspaces | 17 features |
-| [knowledge](#knowledge) | Git-based knowledge sources, vector search, RAG | 1 feature |
-| [sharing](#sharing) | Agent sharing, guest access, workspace collaboration | 3 features |
-| [agentic_teams](#agentic_teams) | Visual org-chart builder for agent orchestration topology — teams, nodes, connections with AI-generated handover prompts | 1 feature |
-| [development](#development) | Backend/frontend patterns, AI functions, debugging | 4 features |
+| Domain | Description |
+|--------|-------------|
+| [agents](#agents) | Core agent lifecycle - creation, configuration, environments, sessions, chat, file management |
+| [tasks](#tasks) | Task submission, refinement, triggers, and scheduling |
+| [credentials](#credentials) | Credential management, encryption, AI provider keys |
+| [application](#application) | User-facing platform features - authentication, integrations, real-time events, workspaces |
+| [knowledge](#knowledge) | Git-based knowledge sources, vector search, RAG |
+| [sharing](#sharing) | Agent sharing, guest access, workspace collaboration |
+| [agentic_teams](#agentic_teams) | Visual org-chart builder for agent orchestration topology — teams, nodes, connections with AI-generated handover prompts |
+| [development](#development) | Backend/frontend patterns, AI functions, debugging |
 
 ---
 
@@ -122,6 +122,7 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 | chat_windows | Chat window rendering across session pages, guest shares, webapp widgets, and dashboard prompt actions — markdown, tool blocks, streaming display, auto-scroll | [business logic](application/chat_interface/chat_windows.md) \| [tech](application/chat_interface/chat_windows_tech.md) \| [tool rendering](application/chat_interface/tool_rendering.md) \| [tool tech](application/chat_interface/tool_rendering_tech.md) \| [markdown](application/chat_interface/markdown_rendering.md) \| [auto-scroll](application/chat_interface/auto_scroll_and_streaming_display.md) \| [ask user question](application/chat_interface/tool_answer_questions_widget.md) \| [tool approval](application/chat_interface/tool_approval_widget.md) \| [webapp widget](application/chat_interface/webapp_chat_widget.md) \| [file sending](application/chat_interface/file_sending_and_ui.md) \| [dashboard prompt actions](application/chat_interface/dashboard_prompt_actions.md) \| [dashboard prompt actions tech](application/chat_interface/dashboard_prompt_actions_tech.md) |
 | user_dashboards | Customizable grid-based monitoring dashboards — per-user, workspace-independent, agent blocks with webapp/session/tasks views, and hover prompt actions that execute in-place with streaming display, session reuse, and webapp action forwarding | [business logic](application/user_dashboards/user_dashboards.md) \| [tech](application/user_dashboards/user_dashboards_tech.md) |
 | general_assistant | System-created building-mode agent that helps users set up, configure, and manage agentic workflows by calling the platform API via Python scripts; singleton per user, workspace-agnostic, pre-loaded with platform docs and API reference | [business logic](application/general_assistant/general_assistant.md) \| [tech](application/general_assistant/general_assistant_tech.md) |
+| cinna_cli_integration | Local development CLI — setup tokens, workspace sync, Docker build context, MCP knowledge proxy, credential pull for developing agents locally with AI coding tools | [business logic](application/cinna_cli_integration/cinna_cli_integration.md) \| [tech](application/cinna_cli_integration/cinna_cli_integration_tech.md) |
 
 ### knowledge
 

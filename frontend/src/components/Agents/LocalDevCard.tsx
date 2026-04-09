@@ -1,0 +1,268 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Copy, Check, MonitorDot, RefreshCw } from "lucide-react"
+import { useState, useEffect } from "react"
+
+import type { CLISetupTokenCreated, CLITokenPublic } from "@/client"
+import { CliService } from "@/client"
+import useCustomToast from "@/hooks/useCustomToast"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+
+function formatLastUsed(dateStr: string | null): string {
+  if (!dateStr) return "never"
+  const diffMs = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 1) return "just now"
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+
+function formatCountdown(seconds: number): string {
+  if (seconds >= 60) {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return s > 0 ? `${m}m ${s}s` : `${m}m`
+  }
+  return `${seconds}s`
+}
+
+interface LocalDevCardProps {
+  agentId: string
+}
+
+export function LocalDevCard({ agentId }: LocalDevCardProps) {
+  const [setupToken, setSetupToken] = useState<CLISetupTokenCreated | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [secondsLeft, setSecondsLeft] = useState(0)
+
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+
+  const { data: tokensData, isLoading } = useQuery({
+    queryKey: ["cli-tokens", agentId],
+    queryFn: () => CliService.listCliTokens({ agentId }),
+  })
+
+  const tokens: CLITokenPublic[] = tokensData?.data ?? []
+
+  const createSetupTokenMutation = useMutation({
+    mutationFn: () =>
+      CliService.createSetupToken({ requestBody: { agent_id: agentId } }),
+    onSuccess: (data) => {
+      setSetupToken(data)
+      const secs = Math.max(
+        0,
+        Math.floor((new Date(data.expires_at).getTime() - Date.now()) / 1000),
+      )
+      setSecondsLeft(secs)
+      showSuccessToast("Setup command generated")
+    },
+    onError: () => {
+      showErrorToast("Failed to generate setup command")
+    },
+  })
+
+  const revokeCliTokenMutation = useMutation({
+    mutationFn: (tokenId: string) =>
+      CliService.revokeCliToken({ tokenId }),
+    onSuccess: () => {
+      showSuccessToast("Session disconnected")
+      queryClient.invalidateQueries({ queryKey: ["cli-tokens", agentId] })
+    },
+    onError: () => {
+      showErrorToast("Failed to disconnect session")
+    },
+  })
+
+  // Countdown timer for setup token expiry
+  useEffect(() => {
+    if (!setupToken) return
+    const interval = setInterval(() => {
+      const secs = Math.max(
+        0,
+        Math.floor(
+          (new Date(setupToken.expires_at).getTime() - Date.now()) / 1000,
+        ),
+      )
+      setSecondsLeft(secs)
+      if (secs <= 0) {
+        clearInterval(interval)
+      }
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [setupToken])
+
+  const handleSetup = () => {
+    createSetupTokenMutation.mutate()
+  }
+
+  const handleCopy = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 2000)
+    } catch {
+      showErrorToast("Failed to copy")
+    }
+  }
+
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between">
+          <div className="space-y-1.5">
+            <CardTitle className="flex items-center gap-2">
+              <MonitorDot className="h-5 w-5" />
+              Local Development
+            </CardTitle>
+            <CardDescription>
+              Develop this agent locally with your own editor and AI tools
+            </CardDescription>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleSetup}
+            disabled={createSetupTokenMutation.isPending}
+          >
+            {createSetupTokenMutation.isPending ? "Generating..." : "Setup"}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {setupToken && (
+          <div className="space-y-2 mb-4">
+            <Label className="text-xs text-muted-foreground">
+              Setup Command
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                value={setupToken.setup_command}
+                readOnly
+                className="font-mono text-xs"
+              />
+              <div className="flex shrink-0">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="rounded-r-none border-r-0"
+                  onClick={handleSetup}
+                  disabled={createSetupTokenMutation.isPending}
+                  title="Regenerate"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${createSetupTokenMutation.isPending ? "animate-spin" : ""}`}
+                  />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="rounded-l-none"
+                  onClick={() => handleCopy(setupToken.setup_command, "cmd")}
+                  title="Copy command"
+                >
+                  {copiedId === "cmd" ? (
+                    <Check className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {secondsLeft > 0
+                ? `Expires in ${formatCountdown(secondsLeft)}`
+                : "Expired"}
+            </p>
+          </div>
+        )}
+
+        <div>
+          <p className="text-sm font-medium mb-2">Active Sessions</p>
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : tokens.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {setupToken
+                ? "No active sessions yet. Run the setup command above in your terminal to get started."
+                : "No active sessions. Click Setup to generate an install command."}
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {tokens.map((token) => (
+                <div
+                  key={token.id}
+                  className="flex items-center justify-between px-3 py-2 border rounded-lg"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm truncate">
+                      {token.name || token.prefix}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      last used {formatLastUsed(token.last_used_at)}
+                    </p>
+                  </div>
+                  <div className="shrink-0 ml-2">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs text-destructive hover:text-destructive"
+                        >
+                          Disconnect
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Disconnect Session</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will revoke the CLI token. The local files
+                            remain intact, but the CLI will need to be set up
+                            again.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() =>
+                              revokeCliTokenMutation.mutate(token.id)
+                            }
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Disconnect
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}

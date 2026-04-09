@@ -19,6 +19,7 @@ import { EmailIntegrationCard } from "./EmailIntegrationCard"
 import { GuestShareCard } from "./GuestShareCard"
 import { McpConnectorsCard } from "./McpConnectorsCard"
 import { WebappShareCard } from "./WebappShareCard"
+import { LocalDevCard } from "./LocalDevCard"
 
 interface AgentIntegrationsTabProps {
   agent: AgentPublic
@@ -153,6 +154,9 @@ export function AgentIntegrationsTab({ agent }: AgentIntegrationsTabProps) {
         {!agent.is_clone && (
           <EmailIntegrationCard agentId={agent.id} />
         )}
+
+        {/* Local Development Card */}
+        <LocalDevCard agentId={agent.id} />
       </div>
     </div>
   )

@@ -299,13 +299,16 @@ class AgentService:
         logger.info(f"Triggered background regeneration for agent {agent_id} (a2a_skills={a2a_enabled}, description={trigger_description_update})")
 
     @staticmethod
-    def update_agent(
+    async def update_agent(
         session: Session,
         agent_id: UUID,
         data: AgentUpdate,
         user_id: UUID | None = None,
     ) -> Agent | None:
-        """Update agent"""
+        """Update agent and sync prompts to active environment if changed."""
+        from app.models import AgentEnvironment
+        from app.services.environments.environment_service import EnvironmentService
+
         agent = session.get(Agent, agent_id)
         if not agent:
             return None
@@ -326,6 +329,22 @@ class AgentService:
         session.add(agent)
         session.commit()
         session.refresh(agent)
+
+        # Sync prompts to active environment if any prompt fields were updated
+        prompt_fields = {"workflow_prompt", "entrypoint_prompt", "refiner_prompt"}
+        if update_dict.keys() & prompt_fields and agent.active_environment_id:
+            environment = session.get(AgentEnvironment, agent.active_environment_id)
+            if environment and environment.status == "running":
+                try:
+                    await EnvironmentService.sync_agent_prompts_to_environment(
+                        environment=environment,
+                        workflow_prompt=agent.workflow_prompt,
+                        entrypoint_prompt=agent.entrypoint_prompt,
+                        refiner_prompt=agent.refiner_prompt,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to sync prompts to environment after agent update: {e}")
+
         return agent
 
     @staticmethod

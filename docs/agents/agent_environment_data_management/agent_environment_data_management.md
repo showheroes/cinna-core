@@ -71,6 +71,14 @@ Define how data flows between agents, environments, and clones, ensuring consist
    - Plugins sent to `workspace/plugins/`
 3. Environment ready for sessions
 
+### 1b. CLI Push (Prompt Resync)
+
+1. User runs `cinna push` to upload local workspace files to the remote environment
+2. Files extracted to `/app/workspace/`
+3. Agent prompts (workflow, entrypoint, refiner) resynced from environment back to DB — same as post-building-session resync
+4. If workflow prompt changed: A2A skills regeneration and background description update triggered
+5. See [Cinna CLI Integration](../../application/cinna_cli_integration/cinna_cli_integration.md)
+
 ### 2. Environment Switch (Same Agent)
 
 1. User activates a different environment for the same agent

@@ -178,7 +178,7 @@ async def create_agent_with_flow(
 
 
 @router.put("/{id}", response_model=AgentPublic)
-def update_agent(
+async def update_agent(
     *,
     session: SessionDep,
     current_user: CurrentUser,
@@ -218,7 +218,7 @@ def update_agent(
                     detail=f"User mode clones cannot modify '{field}'. Only interface settings allowed."
                 )
 
-    updated_agent = AgentService.update_agent(
+    updated_agent = await AgentService.update_agent(
         session=session, agent_id=id, data=agent_in, user_id=current_user.id
     )
     if not updated_agent:

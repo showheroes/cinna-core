@@ -6,6 +6,7 @@ from fastapi.routing import APIRoute
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.main import api_router
+from app.api.routes.cli import setup_router as cli_setup_router
 from app.mcp.oauth_routes import router as mcp_oauth_router, wellknown_router as mcp_wellknown_router
 from app.mcp.upload_routes import router as mcp_upload_router
 from app.mcp.server import mcp_registry
@@ -62,6 +63,10 @@ from app.services.environments.environment_status_scheduler import (
     start_scheduler as start_env_status_scheduler,
     shutdown_scheduler as shutdown_env_status_scheduler
 )
+from app.services.cli.cli_setup_token_scheduler import (
+    start_scheduler as start_cli_cleanup_scheduler,
+    shutdown_scheduler as shutdown_cli_cleanup_scheduler
+)
 
 
 @asynccontextmanager
@@ -75,6 +80,7 @@ async def lifespan(app: FastAPI):
     start_email_polling_scheduler()
     start_email_sending_scheduler()
     start_env_status_scheduler()
+    start_cli_cleanup_scheduler()
 
     # Register backend event handlers
     from app.models.events.event import EventType
@@ -195,6 +201,7 @@ async def lifespan(app: FastAPI):
     shutdown_email_polling_scheduler()
     shutdown_email_sending_scheduler()
     shutdown_env_status_scheduler()
+    shutdown_cli_cleanup_scheduler()
     event_service.shutdown()
     logger.info("Application shutdown complete")
 
@@ -222,6 +229,9 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# CLI setup bootstrap endpoint (top-level, short URL for curl oneliner)
+app.include_router(cli_setup_router)
 
 # RFC 9728 Protected Resource Metadata (must be at root level)
 app.include_router(mcp_wellknown_router)

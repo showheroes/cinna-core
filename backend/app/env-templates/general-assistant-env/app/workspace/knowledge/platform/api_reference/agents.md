@@ -254,6 +254,17 @@ Auto-generated from OpenAPI spec. Tag: `agents`
 
 ---
 
+## POST `/api/v1/agents/{id}/schedules/{schedule_id}/run`
+**Run Schedule Now**
+
+**Path parameters:**
+- `id`: uuid
+- `schedule_id`: uuid
+
+**Response:** `Message`
+
+---
+
 ## GET `/api/v1/agents/{id}/schedules/{schedule_id}/logs`
 **List Schedule Logs**
 

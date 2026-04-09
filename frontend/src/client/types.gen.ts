@@ -972,6 +972,10 @@ export type BlockLayoutUpdate = {
     grid_h: number;
 };
 
+export type Body_cli_upload_workspace = {
+    file: (Blob | File);
+};
+
 export type Body_credentials_update_credential_sharing = {
     allow_sharing: boolean;
 };
@@ -1029,6 +1033,42 @@ export type BulkDeleteResponse = {
 export type CheckAccessResponse = {
     accessible: boolean;
     message: string;
+};
+
+export type CLISetupTokenCreate = {
+    agent_id: string;
+};
+
+/**
+ * Returned when a setup token is created — includes the setup command.
+ */
+export type CLISetupTokenCreated = {
+    id: string;
+    token: string;
+    agent_id: string;
+    environment_id: (string | null);
+    expires_at: string;
+    created_at: string;
+    setup_command: string;
+    setup_url: string;
+};
+
+export type CLITokenPublic = {
+    name: string;
+    id: string;
+    agent_id: string;
+    owner_id: string;
+    prefix: string;
+    is_revoked: boolean;
+    last_used_at: (string | null);
+    machine_info: (string | null);
+    expires_at: string;
+    created_at: string;
+};
+
+export type CLITokensPublic = {
+    data: Array<CLITokenPublic>;
+    count: number;
 };
 
 /**
@@ -1299,6 +1339,11 @@ export type EventBroadcast = {
      * Room name for targeted broadcast (e.g., 'user_{user_id}')
      */
     room?: (string | null);
+};
+
+export type ExchangeSetupTokenBody = {
+    machine_name?: string;
+    machine_info?: (string | null);
 };
 
 /**
@@ -1637,6 +1682,11 @@ export type KnowledgeQueryResponseDiscovery = {
 export type KnowledgeQueryResponseRetrieval = {
     type?: string;
     articles: Array<ArticleContent>;
+};
+
+export type KnowledgeSearchBody = {
+    query: string;
+    topic?: (string | null);
 };
 
 /**
@@ -3378,6 +3428,75 @@ export type AiCredentialsGetAffectedEnvironmentsData = {
 };
 
 export type AiCredentialsGetAffectedEnvironmentsResponse = (AffectedEnvironmentsPublic);
+
+export type CliCreateSetupTokenData = {
+    requestBody: CLISetupTokenCreate;
+};
+
+export type CliCreateSetupTokenResponse = (CLISetupTokenCreated);
+
+export type CliListCliTokensData = {
+    agentId?: (string | null);
+};
+
+export type CliListCliTokensResponse = (CLITokensPublic);
+
+export type CliRevokeCliTokenData = {
+    tokenId: string;
+};
+
+export type CliRevokeCliTokenResponse = (Message);
+
+export type CliGetBuildContextData = {
+    agentId: string;
+};
+
+export type CliGetBuildContextResponse = (unknown);
+
+export type CliGetCredentialsData = {
+    agentId: string;
+};
+
+export type CliGetCredentialsResponse = (unknown);
+
+export type CliGetBuildingContextData = {
+    agentId: string;
+};
+
+export type CliGetBuildingContextResponse = (unknown);
+
+export type CliGetWorkspaceData = {
+    agentId: string;
+};
+
+export type CliGetWorkspaceResponse = (unknown);
+
+export type CliUploadWorkspaceData = {
+    agentId: string;
+    formData: Body_cli_upload_workspace;
+};
+
+export type CliUploadWorkspaceResponse = (Message);
+
+export type CliGetWorkspaceManifestData = {
+    agentId: string;
+};
+
+export type CliGetWorkspaceManifestResponse = (unknown);
+
+export type CliSearchKnowledgeData = {
+    agentId: string;
+    requestBody: KnowledgeSearchBody;
+};
+
+export type CliSearchKnowledgeResponse = (unknown);
+
+export type CliExchangeSetupTokenData = {
+    requestBody: ExchangeSetupTokenBody;
+    token: string;
+};
+
+export type CliExchangeSetupTokenResponse = (unknown);
 
 export type CredentialsShareCredentialData = {
     credentialId: string;

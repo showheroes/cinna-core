@@ -1,8 +1,11 @@
 """
 Agent Environment Service - Business logic for agent environment operations.
 """
+import hashlib
+import io
 import json
 import logging
+import tarfile
 import zipfile
 import uuid
 from pathlib import Path
@@ -1216,3 +1219,102 @@ class AgentEnvService:
         """
         settings = self.get_plugins_settings()
         return settings.get("allowed_tools", [])
+
+    # =========================================================================
+    # Workspace Tarball Upload & Manifest
+    # =========================================================================
+
+    def extract_workspace_tarball(self, tarball_bytes: bytes) -> int:
+        """
+        Extract a gzipped tar archive into the workspace directory.
+
+        Args:
+            tarball_bytes: Raw bytes of a .tar.gz archive
+
+        Returns:
+            Number of regular files extracted
+
+        Raises:
+            ValueError: If archive contains path traversal entries
+            IOError: If extraction fails
+        """
+        workspace_resolved = str(self.workspace_dir.resolve())
+
+        try:
+            with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz") as tf:
+                members = tf.getmembers()
+
+                # Security: validate all member paths before extracting anything
+                for member in members:
+                    name = member.name
+                    # Reject absolute paths
+                    if name.startswith("/"):
+                        raise ValueError(f"Archive contains absolute path: {name}")
+                    # Reject .. components
+                    if ".." in Path(name).parts:
+                        raise ValueError(f"Archive contains path traversal entry: {name}")
+                    # Resolve and verify within workspace
+                    resolved = str((self.workspace_dir / name).resolve())
+                    if not resolved.startswith(workspace_resolved):
+                        raise ValueError(f"Path traversal detected in archive: {name}")
+
+                tf.extractall(self.workspace_dir)
+                file_count = sum(1 for m in members if m.isfile())
+                logger.info(f"Extracted workspace tarball: {file_count} files to {self.workspace_dir}")
+                return file_count
+
+        except ValueError:
+            raise
+        except tarfile.TarError as e:
+            logger.error(f"Failed to extract tarball: {e}")
+            raise IOError(f"Failed to extract tarball: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error extracting tarball: {e}")
+            raise IOError(f"Failed to extract tarball: {str(e)}")
+
+    def get_workspace_manifest(self) -> dict:
+        """
+        Walk the workspace directory and compute SHA-256 for each file.
+
+        Returns:
+            Dict mapping relative path strings to {"sha256": str, "size": int, "mtime": float}
+
+        Raises:
+            IOError: If workspace directory is not accessible
+        """
+        try:
+            manifest = {}
+
+            for file_path in self.workspace_dir.rglob("*"):
+                # Skip directories and symlinks
+                if not file_path.is_file() or file_path.is_symlink():
+                    continue
+
+                # Skip hidden files and directories (any path component starting with ".")
+                relative = file_path.relative_to(self.workspace_dir)
+                if any(part.startswith(".") for part in relative.parts):
+                    continue
+
+                # Compute SHA-256
+                sha256 = hashlib.sha256()
+                try:
+                    with open(file_path, "rb") as f:
+                        while chunk := f.read(65536):
+                            sha256.update(chunk)
+                except OSError as e:
+                    logger.warning(f"Skipping unreadable file {file_path}: {e}")
+                    continue
+
+                stat = file_path.stat()
+                manifest[str(relative)] = {
+                    "sha256": sha256.hexdigest(),
+                    "size": stat.st_size,
+                    "mtime": stat.st_mtime,
+                }
+
+            logger.info(f"Generated workspace manifest: {len(manifest)} files")
+            return manifest
+
+        except Exception as e:
+            logger.error(f"Failed to generate workspace manifest: {e}")
+            raise IOError(f"Failed to generate workspace manifest: {str(e)}")

@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useState, useCallback } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 
 import type { AgentPublic } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -23,12 +24,22 @@ interface AgentConfigTabProps {
 }
 
 export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps) {
+  const queryClient = useQueryClient()
+
   // Modal state
   const [descriptionModalOpen, setDescriptionModalOpen] = useState(false)
   const [entrypointModalOpen, setEntrypointModalOpen] = useState(false)
   const [workflowModalOpen, setWorkflowModalOpen] = useState(false)
   const [refinerModalOpen, setRefinerModalOpen] = useState(false)
   const [examplePromptsModalOpen, setExamplePromptsModalOpen] = useState(false)
+
+  const openWithRefresh = useCallback(
+    (setter: (open: boolean) => void) => {
+      queryClient.invalidateQueries({ queryKey: ["agent", agent.id] })
+      setter(true)
+    },
+    [queryClient, agent.id],
+  )
 
   return (
     <div className="space-y-6">
@@ -46,13 +57,13 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
             <div className="flex gap-2 flex-wrap">
               <Button
                 variant="outline"
-                onClick={() => setDescriptionModalOpen(true)}
+                onClick={() => openWithRefresh(setDescriptionModalOpen)}
               >
                 Description
               </Button>
               <Button
                 variant="outline"
-                onClick={() => setExamplePromptsModalOpen(true)}
+                onClick={() => openWithRefresh(setExamplePromptsModalOpen)}
               >
                 Example Prompts
               </Button>
@@ -72,19 +83,19 @@ export function AgentConfigTab({ agent, readOnly = false }: AgentConfigTabProps)
             <div className="flex gap-2 flex-wrap">
               <Button
                 variant="outline"
-                onClick={() => setEntrypointModalOpen(true)}
+                onClick={() => openWithRefresh(setEntrypointModalOpen)}
               >
                 Entrypoint Prompt
               </Button>
               <Button
                 variant="outline"
-                onClick={() => setWorkflowModalOpen(true)}
+                onClick={() => openWithRefresh(setWorkflowModalOpen)}
               >
                 Workflow Prompt
               </Button>
               <Button
                 variant="outline"
-                onClick={() => setRefinerModalOpen(true)}
+                onClick={() => openWithRefresh(setRefinerModalOpen)}
               >
                 Refiner Prompt
               </Button>

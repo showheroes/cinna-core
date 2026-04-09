@@ -1,5 +1,6 @@
 from collections.abc import Generator
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Any
 import logging
 import uuid
 
@@ -207,3 +208,139 @@ def get_webapp_chat_user(
 
 
 CurrentWebappChatUser = Annotated[WebappChatContext, Depends(get_webapp_chat_user)]
+
+
+# ── CLI token context ──────────────────────────────────────────────────
+
+
+class CLIContext(SQLModel):
+    """
+    Context object for CLI-authenticated routes.
+
+    Returned by ``get_cli_context`` when the Bearer token is a valid CLI JWT.
+    The CLI token is scoped to one agent and one user.
+
+    Uses ``Any`` for agent/environment/cli_token to avoid circular imports
+    with models that depend on deps indirectly.
+    """
+    user: User
+    agent: Any  # Agent
+    environment: Any | None  # AgentEnvironment | None
+    cli_token: Any  # CLIToken
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Ensure a datetime is timezone-aware (UTC). Handles naive datetimes from DB."""
+    if dt.tzinfo is None:
+        from datetime import timezone
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def get_cli_context(
+    token: TokenDep,
+    db: SessionDep,
+) -> CLIContext:
+    """
+    Validate a CLI JWT token and return the CLI context.
+
+    Steps:
+    1. Decode JWT, verify token_type == "cli"
+    2. DB lookup CLIToken by id (sub claim)
+    3. Check is_revoked and expiry
+    4. Load agent, verify ownership
+    5. Load environment (nullable)
+    6. Update last_used_at and renew expires_at (rolling 7-day window)
+    7. Return CLIContext
+    """
+    from datetime import timedelta
+
+    from sqlmodel import select
+
+    from app.models import Agent, AgentEnvironment
+    from app.models.cli.cli_token import CLIToken
+    from app.services.cli.cli_auth import CLIAuthService
+
+    # 1. Decode JWT
+    try:
+        payload = CLIAuthService.decode_cli_jwt(token)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+
+    # 2. DB lookup by token id (sub claim)
+    try:
+        token_id = uuid.UUID(payload["sub"])
+    except (KeyError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid CLI token payload",
+        )
+
+    cli_token = db.get(CLIToken, token_id)
+    if not cli_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="CLI token not found",
+        )
+
+    # 3. Check revocation and expiry
+    if cli_token.is_revoked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="CLI token has been revoked",
+        )
+
+    now = datetime.now(UTC)
+    if _ensure_utc(cli_token.expires_at) < now:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="CLI token has expired",
+        )
+
+    # 4. Load agent and verify ownership
+    agent = db.get(Agent, cli_token.agent_id)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found",
+        )
+    if agent.owner_id != cli_token.owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token ownership mismatch",
+        )
+
+    # Load user
+    user = db.get(User, cli_token.owner_id)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+
+    # 5. Load environment (nullable — find active env for this agent)
+    env_stmt = select(AgentEnvironment).where(
+        AgentEnvironment.agent_id == agent.id,
+        AgentEnvironment.is_active == True,  # noqa: E712
+    )
+    environment = db.exec(env_stmt).first()
+
+    # 6. Update last_used_at and renew expires_at (rolling window)
+    cli_token.last_used_at = now
+    cli_token.expires_at = now + timedelta(days=7)
+    db.add(cli_token)
+    db.commit()
+    db.refresh(cli_token)
+
+    return CLIContext(
+        user=user,
+        agent=agent,
+        environment=environment,
+        cli_token=cli_token,
+    )
+
+
+CLIContextDep = Annotated[CLIContext, Depends(get_cli_context)]

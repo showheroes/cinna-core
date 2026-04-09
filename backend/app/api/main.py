@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     a2a,
     access_tokens,
+    cli,
     activities,
     agents,
     agent_shares,
@@ -94,6 +95,7 @@ api_router.include_router(shared_workspace.router)
 api_router.include_router(a2a.router)
 api_router.include_router(mcp_connectors.router)
 api_router.include_router(mcp_consent.router)
+api_router.include_router(cli.router)
 
 
 if settings.ENVIRONMENT == "local":
