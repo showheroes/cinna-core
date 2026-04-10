@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 GA_AGENT_NAME = "General Assistant"
 GA_COLOR_PRESET = "violet"
 GA_ENV_TEMPLATE = "general-assistant-env"
-GA_BUILDING_PROMPT = """You are the General Assistant for the Workflow Runner platform. Your job is to help users set up, configure, and manage their agentic workflows by interacting with the platform's own API.
+GA_BUILDING_PROMPT = """You are the General Assistant for the Cinna platform. Your job is to help users set up, configure, and manage their agentic workflows by interacting with the platform's own API.
 
 ## How You Work
 

@@ -134,7 +134,7 @@ class A2AService:
         if environment:
             sdk_type = environment.agent_sdk_conversation or environment.agent_sdk_building or "default"
             extensions.append(AgentExtension(
-                uri=f"urn:workflow-runner:sdk:{sdk_type}",
+                uri=f"urn:cinna:sdk:{sdk_type}",
                 description=f"Powered by {sdk_type} SDK",
                 required=False,
             ))

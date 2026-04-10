@@ -48,7 +48,7 @@ down-cleanup: # docker compose down with cleanup (volumes)
 
 .PHONY: stop-backend
 stop-backend: # docker compose stop backend
-	docker compose stop workflow-runner-backend
+	docker compose stop cinna-backend
 
 .PHONY: shell
 shell: # backend app shell
@@ -157,11 +157,11 @@ test-backend: # run backend pytest suite inside the backend container
 
 .PHONY: check-docs
 check-docs: # check documentation for broken file references
-	python3 .runnerkit/scripts/check_docs_references.py
+	python3 .cinna-core-kit/scripts/check_docs_references.py
 
 .PHONY: sync-ga-knowledge
 sync-ga-knowledge: # sync docs + auto-generate API reference into GA env template
-	python3 .runnerkit/scripts/sync_ga_knowledge.py
+	python3 .cinna-core-kit/scripts/sync_ga_knowledge.py
 
 .PHONY: mcp-inspector
 mcp-inspector: # run mcp inspector for local development and testing

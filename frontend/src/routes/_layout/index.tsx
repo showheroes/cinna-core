@@ -38,13 +38,14 @@ import { FileBadge } from "@/components/Chat/FileBadge"
 import { ApiKeyOnboarding } from "@/components/Onboarding/ApiKeyOnboarding"
 import { GettingStartedModal } from "@/components/Onboarding/GettingStartedModal"
 import { DashboardHeader } from "@/components/Dashboard/DashboardHeader"
+import { APP_NAME } from "@/utils"
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
   head: () => ({
     meta: [
       {
-        title: "Dashboard - Workflow Runner",
+        title: `Dashboard - ${APP_NAME}`,
       },
     ],
   }),

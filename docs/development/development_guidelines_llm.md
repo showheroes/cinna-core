@@ -1,11 +1,11 @@
-# LLM Development Guidelines for Workflow Runner Core
+# LLM Development Guidelines for Cinna Core
 
 This document contains project-specific patterns, commands, and pitfalls for LLM assistants working on this codebase.
 
 ## Project Structure
 
 ```
-workflow-runner-core/
+cinna-core/
 ├── backend/                      # FastAPI backend
 │   ├── app/
 │   │   ├── models/              # Domain-based model subfolders
@@ -59,7 +59,7 @@ workflow-runner-core/
         └── routes/
 ```
 
-**CRITICAL**: Current working directory is `/Users/evgenyl/dev/ml-llm/workflow-runner-core/backend`
+**CRITICAL**: Current working directory is `/Users/evgenyl/dev/ml-llm/cinna-core/backend`
 
 **Architecture Pattern**:
 - **Models** in `app/models/<domain>/` — Database entities and Pydantic schemas; re-exported via `models/__init__.py` for backward-compatible imports
@@ -86,7 +86,7 @@ alembic current  # check status
 ### Frontend Commands
 ```bash
 # From project root (NOT from backend/)
-cd /Users/evgenyl/dev/ml-llm/workflow-runner-core
+cd /Users/evgenyl/dev/ml-llm/cinna-core
 source backend/.venv/bin/activate
 bash scripts/generate-client.sh  # Regenerate OpenAPI client
 
@@ -95,7 +95,7 @@ npm run build  # Check TypeScript errors
 ```
 
 ### Common Pitfall: Directory Context
-- `pwd` shows `/Users/evgenyl/dev/ml-llm/workflow-runner-core/backend`
+- `pwd` shows `/Users/evgenyl/dev/ml-llm/cinna-core/backend`
 - To run frontend commands, use absolute paths or `cd` to project root first
 - Don't use `cd backend` from backend/ (already there)
 
@@ -390,7 +390,7 @@ alembic upgrade head
 ### 5. Regenerate Frontend Client
 
 ```bash
-cd /Users/evgenyl/dev/ml-llm/workflow-runner-core
+cd /Users/evgenyl/dev/ml-llm/cinna-core
 source backend/.venv/bin/activate
 bash scripts/generate-client.sh
 ```
@@ -610,7 +610,7 @@ def read_with_data(session: SessionDep, current_user: CurrentUser, id: uuid.UUID
 ### 4. Directory Navigation
 ❌ `cd backend` when already in backend/
 ✅ Use absolute paths or check `pwd` first
-✅ For frontend: `cd /Users/evgenyl/dev/ml-llm/workflow-runner-core`
+✅ For frontend: `cd /Users/evgenyl/dev/ml-llm/cinna-core`
 
 ### 5. Foreign Key Constraints
 ✅ Always use `ondelete="CASCADE"` in Field definition
@@ -654,7 +654,7 @@ alembic upgrade head
 python -c "from app.main import app"  # Verify
 
 # Frontend: Regenerate client
-cd /Users/evgenyl/dev/ml-llm/workflow-runner-core
+cd /Users/evgenyl/dev/ml-llm/cinna-core
 source backend/.venv/bin/activate
 bash scripts/generate-client.sh
 
@@ -684,7 +684,7 @@ Changes flow: Backend routes → OpenAPI spec → Frontend client
 
 After ANY backend API changes:
 ```bash
-cd /Users/evgenyl/dev/ml-llm/workflow-runner-core
+cd /Users/evgenyl/dev/ml-llm/cinna-core
 source backend/.venv/bin/activate
 bash scripts/generate-client.sh
 ```

@@ -36,7 +36,7 @@ This is a **Full Stack Web Application** with:
 ## Project Structure
 
 ```
-workflow-runner-core/
+cinna-core/
 ├── backend/                      # FastAPI backend
 │   ├── app/
 │   │   ├── main.py              # FastAPI app entry point

@@ -38,13 +38,14 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import useCustomToast from "@/hooks/useCustomToast"
+import { APP_NAME } from "@/utils"
 
 export const Route = createFileRoute("/_layout/agentic-teams/$teamId")({
   component: AgenticTeamChartPage,
   head: () => ({
     meta: [
       {
-        title: "Agentic Team Chart - Workflow Runner",
+        title: `Agentic Team Chart - ${APP_NAME}`,
       },
     ],
   }),

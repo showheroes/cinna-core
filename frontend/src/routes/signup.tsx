@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
+import { APP_NAME } from "@/utils"
 
 const formSchema = z
   .object({
@@ -52,7 +53,7 @@ export const Route = createFileRoute("/signup")({
   head: () => ({
     meta: [
       {
-        title: "Sign Up - Workflow Runner",
+        title: `Sign Up - ${APP_NAME}`,
       },
     ],
   }),

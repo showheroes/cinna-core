@@ -1,5 +1,5 @@
 ---
-name: runnerkit-backend-test-writer
+name: cinna-core-backend-test-writer
 description: "Use this agent when the user needs to write, create, or add backend tests for the project. This includes writing new test files, adding test cases to existing files, or creating test suites for new or existing API endpoints and features. The agent should be used proactively after implementing new backend API endpoints, modifying existing ones, or when the user explicitly asks for tests.\\n\\nExamples:\\n\\n- user: \"Write tests for the new MCP integration endpoints\"\\n  assistant: \"I'll use the backend-test-writer agent to create comprehensive tests for the MCP integration endpoints.\"\\n  (Use the Agent tool to launch the backend-test-writer agent)\\n\\n- user: \"Add a new endpoint for managing workflows in the backend\"\\n  assistant: \"Here is the new endpoint implementation: ...\"\\n  (After writing the endpoint code)\\n  assistant: \"Now let me use the backend-test-writer agent to write tests for the new workflow endpoint.\"\\n  (Use the Agent tool to launch the backend-test-writer agent)\\n\\n- user: \"We need to cover the agent email integration with tests\"\\n  assistant: \"I'll use the backend-test-writer agent to write tests for the agent email integration.\"\\n  (Use the Agent tool to launch the backend-test-writer agent)\\n\\n- user: \"I just added CRUD operations for the new 'projects' entity, can you test them?\"\\n  assistant: \"I'll launch the backend-test-writer agent to create a test suite for the projects CRUD operations.\"\\n  (Use the Agent tool to launch the backend-test-writer agent)"
 model: sonnet
 color: yellow
@@ -71,11 +71,11 @@ Before finalizing any test file, verify:
 - [ ] `ScriptedAgentEnvConnector` used when test involves MCP tool calls during agent stream
 - [ ] No source code workarounds needed — if they are, flag the source code issue
 
-## Running Tests — Delegate to `runnerkit-test-runner`
+## Running Tests — Delegate to `cinna-core-test-runner`
 
-**Do NOT run tests yourself.** After writing tests, delegate ALL test execution to the `runnerkit-test-runner` agent using the Agent tool. This keeps your context slim and focused on writing code.
+**Do NOT run tests yourself.** After writing tests, delegate ALL test execution to the `cinna-core-test-runner` agent using the Agent tool. This keeps your context slim and focused on writing code.
 
-**After writing tests, you MUST spawn the `runnerkit-test-runner` agent to execute the following chain:**
+**After writing tests, you MUST spawn the `cinna-core-test-runner` agent to execute the following chain:**
 
 1. **Run the exact test file(s) you wrote** — if green, continue
 2. **Run the entire business domain test directory** (e.g., `tests/api/agents/`) — if green, continue
@@ -88,7 +88,7 @@ Provide the test-runner agent with:
 
 **Example Agent call:**
 ```
-Use the Agent tool with subagent_type="runnerkit-test-runner" and prompt:
+Use the Agent tool with subagent_type="cinna-core-test-runner" and prompt:
 "Run the following test chain, stopping at the first failure:
 1. Run exact test: tests/api/agents/agents_new_feature_test.py
 2. If green, run domain tests: tests/api/agents/

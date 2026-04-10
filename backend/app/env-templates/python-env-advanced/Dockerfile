@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-LABEL maintainer="workflow-runner"
+LABEL maintainer="cinna"
 LABEL env.name="python-env-advanced"
 LABEL env.version="1.0.0"
 

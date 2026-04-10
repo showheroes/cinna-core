@@ -1,6 +1,8 @@
 import { AxiosError } from "axios"
 import type { ApiError } from "./client"
 
+export const APP_NAME = import.meta.env.VITE_APP_NAME || "Cinna"
+
 function extractErrorMessage(err: ApiError): string {
   if (err instanceof AxiosError) {
     return err.message

@@ -13,13 +13,14 @@ import { DashboardSettings } from "@/components/UserSettings/DashboardSettings"
 import { HashTabs, TabConfig } from "@/components/Common/HashTabs"
 import useAuth from "@/hooks/useAuth"
 import { usePageHeader } from "@/routes/_layout"
+import { APP_NAME } from "@/utils"
 
 export const Route = createFileRoute("/_layout/settings")({
   component: UserSettings,
   head: () => ({
     meta: [
       {
-        title: "Settings - Workflow Runner",
+        title: `Settings - ${APP_NAME}`,
       },
     ],
   }),

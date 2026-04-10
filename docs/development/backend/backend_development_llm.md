@@ -127,7 +127,7 @@ class AgentService:
 
 ### CRITICAL: Run after ANY backend model/route changes:
 ```bash
-cd /path/to/workflow-runner-core
+cd /path/to/cinna-core
 source backend/.venv/bin/activate
 bash scripts/generate-client.sh
 ```

@@ -1,5 +1,5 @@
 ---
-description: Create comprehensive architectural implementation plan for a new feature in the workflow-runner-core project.
+description: Create comprehensive architectural implementation plan for a new feature in the cinna-core project.
 ---
 
 ## User Input
@@ -12,7 +12,7 @@ You **MUST** consider the user input before proceeding (if not empty). This is t
 
 ## Context
 
-You are working with a **Full Stack FastAPI + React application** (workflow-runner-core). Feature implementation plans are comprehensive architectural documents that describe HOW to implement features.
+You are working with a **Full Stack FastAPI + React application** (cinna-core). Feature implementation plans are comprehensive architectural documents that describe HOW to implement features.
 
 ### Document Organization
 - **Location**: `docs/drafts/` for implementation plans

@@ -153,7 +153,7 @@ Not every feature needs the full 3-layer treatment. For simple features or stand
 6. **If refactoring**: After creating new files, note which old files were replaced (don't delete them automatically - report to user)
 7. **Verify references**: Run the docs reference checker on all created/updated files:
    ```
-   python3 .runnerkit/scripts/check_docs_references.py --files docs/{domain}/{feature}/{feature}.md docs/{domain}/{feature}/{feature}_tech.md
+   python3 .cinna-core/scripts/check_docs_references.py --files docs/{domain}/{feature}/{feature}.md docs/{domain}/{feature}/{feature}_tech.md
    ```
    If broken references are found, fix them before finishing. Common issues:
    - Typos in file paths (verify paths exist with glob/grep)
@@ -179,7 +179,7 @@ This script:
 After all documentation changes are complete and references are verified, **always** run the GA knowledge sync as the final step:
 
 ```
-python3 .runnerkit/scripts/sync_ga_knowledge.py
+python3 .cinna-core/scripts/sync_ga_knowledge.py
 ```
 
 This is mandatory — do not skip it or ask the user to run it manually.

@@ -7,7 +7,7 @@ Two data sources:
   2. frontend/openapi.json — auto-generated REST API reference grouped by tag
 
 Usage:
-    python3 .runnerkit/scripts/sync_ga_knowledge.py
+    python3 .cinna-core-kit/scripts/sync_ga_knowledge.py
 
 Run from the project root whenever you update documentation or API routes.
 Prerequisite: run `make gen-client` first so openapi.json is up to date.

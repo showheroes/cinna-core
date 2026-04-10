@@ -6,13 +6,14 @@ import { AgenticTeamsService } from "@/client"
 import { usePageHeader } from "@/routes/_layout"
 import PendingItems from "@/components/Pending/PendingItems"
 import { AgenticTeamSettings } from "@/components/AgenticTeams/AgenticTeamSettings"
+import { APP_NAME } from "@/utils"
 
 export const Route = createFileRoute("/_layout/agentic-teams/")({
   component: AgenticTeamsIndexPage,
   head: () => ({
     meta: [
       {
-        title: "Agentic Teams - Workflow Runner",
+        title: `Agentic Teams - ${APP_NAME}`,
       },
     ],
   }),

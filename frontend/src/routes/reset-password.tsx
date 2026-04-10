@@ -23,7 +23,7 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
-import { handleError } from "@/utils"
+import { APP_NAME, handleError } from "@/utils"
 
 const searchSchema = z.object({
   token: z.string().catch(""),
@@ -60,7 +60,7 @@ export const Route = createFileRoute("/reset-password")({
   head: () => ({
     meta: [
       {
-        title: "Reset Password - Workflow Runner",
+        title: `Reset Password - ${APP_NAME}`,
       },
     ],
   }),

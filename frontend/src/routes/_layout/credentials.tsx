@@ -10,13 +10,14 @@ import { SharedWithMeCredentials } from "@/components/Credentials/SharedWithMeCr
 import PendingItems from "@/components/Pending/PendingItems"
 import useWorkspace from "@/hooks/useWorkspace"
 import { usePageHeader } from "@/routes/_layout"
+import { APP_NAME } from "@/utils"
 
 export const Route = createFileRoute("/_layout/credentials")({
   component: Credentials,
   head: () => ({
     meta: [
       {
-        title: "Credentials - Workflow Runner",
+        title: `Credentials - ${APP_NAME}`,
       },
     ],
   }),

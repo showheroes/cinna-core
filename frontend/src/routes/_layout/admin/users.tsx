@@ -9,6 +9,7 @@ import { DataTable } from "@/components/Common/DataTable"
 import PendingUsers from "@/components/Pending/PendingUsers"
 import useAuth from "@/hooks/useAuth"
 import { usePageHeader } from "@/routes/_layout"
+import { APP_NAME } from "@/utils"
 
 function getUsersQueryOptions() {
   return {
@@ -22,7 +23,7 @@ export const Route = createFileRoute("/_layout/admin/users")({
   head: () => ({
     meta: [
       {
-        title: "Users - Admin - Workflow Runner",
+        title: `Users - Admin - ${APP_NAME}`,
       },
     ],
   }),

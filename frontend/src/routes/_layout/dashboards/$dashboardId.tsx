@@ -55,13 +55,14 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { APP_NAME } from "@/utils"
 
 export const Route = createFileRoute("/_layout/dashboards/$dashboardId")({
   component: DashboardViewPage,
   head: () => ({
     meta: [
       {
-        title: "Dashboard - Workflow Runner",
+        title: `Dashboard - ${APP_NAME}`,
       },
     ],
   }),

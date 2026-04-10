@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   CheckCircle2,
 } from "lucide-react"
+import { APP_NAME } from "@/utils"
 
 const searchSchema = z.object({
   nonce: z.string(),
@@ -40,7 +41,7 @@ export const Route = createFileRoute("/oauth/mcp-consent")({
     }
   },
   head: () => ({
-    meta: [{ title: "Authorize Access - Workflow Runner" }],
+    meta: [{ title: `Authorize Access - ${APP_NAME}` }],
   }),
 })
 

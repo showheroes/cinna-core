@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
-import { handleError } from "@/utils"
+import { APP_NAME, handleError } from "@/utils"
 
 const formSchema = z.object({
   email: z.email(),
@@ -42,7 +42,7 @@ export const Route = createFileRoute("/recover-password")({
   head: () => ({
     meta: [
       {
-        title: "Recover Password - Workflow Runner",
+        title: `Recover Password - ${APP_NAME}`,
       },
     ],
   }),

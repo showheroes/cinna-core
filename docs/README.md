@@ -1,4 +1,4 @@
-# Workflow Runner Core
+# Cinna Core
 
 A conversational AI agent platform where users create custom AI agents, run them in isolated Docker environments, and interact through persistent chat sessions. Agents can be shared, scheduled, triggered by email/webhooks, and exposed via A2A and MCP protocols.
 

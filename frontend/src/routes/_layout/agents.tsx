@@ -13,13 +13,14 @@ import PendingItems from "@/components/Pending/PendingItems"
 import useWorkspace from "@/hooks/useWorkspace"
 import { usePageHeader } from "@/routes/_layout"
 import useCustomToast from "@/hooks/useCustomToast"
+import { APP_NAME } from "@/utils"
 
 export const Route = createFileRoute("/_layout/agents")({
   component: Agents,
   head: () => ({
     meta: [
       {
-        title: "Agents - Workflow Runner",
+        title: `Agents - ${APP_NAME}`,
       },
     ],
   }),

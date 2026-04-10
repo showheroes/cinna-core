@@ -8,6 +8,7 @@ import { marketplaceColumns } from "@/components/Admin/marketplaceColumns"
 import { DataTable } from "@/components/Common/DataTable"
 import PendingItems from "@/components/Pending/PendingItems"
 import { usePageHeader } from "@/routes/_layout"
+import { APP_NAME } from "@/utils"
 
 function getMarketplacesQueryOptions() {
   return {
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/_layout/admin/marketplaces")({
   head: () => ({
     meta: [
       {
-        title: "Plugin Marketplaces - Admin - Workflow Runner",
+        title: `Plugin Marketplaces - Admin - ${APP_NAME}`,
       },
     ],
   }),

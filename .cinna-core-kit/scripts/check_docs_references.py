@@ -7,8 +7,8 @@ Scans all markdown files in docs/, CLAUDE.md, backend/tests/,
 references to backend/, frontend/, and docs/ actually exist in the project.
 
 Usage:
-    python3 .runnerkit/scripts/check_docs_references.py [--verbose]
-    python3 .runnerkit/scripts/check_docs_references.py --files docs/agents/foo.md docs/agents/bar.md
+    python3 .cinna-core-kit/scripts/check_docs_references.py [--verbose]
+    python3 .cinna-core-kit/scripts/check_docs_references.py --files docs/agents/foo.md docs/agents/bar.md
 
 Options:
     --verbose, -v        Show each broken reference as it's found
@@ -51,7 +51,7 @@ def find_project_root():
         path = parent
     # Fallback: script location based
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # .runnerkit/scripts/ -> project root
+    # .cinna-core-kit/scripts/ -> project root
     return os.path.abspath(os.path.join(script_dir, "..", ".."))
 
 

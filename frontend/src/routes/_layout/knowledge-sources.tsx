@@ -18,13 +18,14 @@ import {
 import PendingItems from "@/components/Pending/PendingItems"
 import { AddSourceModal } from "@/components/KnowledgeSources/AddSourceModal"
 import { usePageHeader } from "@/routes/_layout"
+import { APP_NAME } from "@/utils"
 
 export const Route = createFileRoute("/_layout/knowledge-sources")({
   component: KnowledgeSourcesPage,
   head: () => ({
     meta: [
       {
-        title: "Knowledge Sources - Workflow Runner",
+        title: `Knowledge Sources - ${APP_NAME}`,
       },
     ],
   }),

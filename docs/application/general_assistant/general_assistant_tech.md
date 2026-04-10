@@ -29,8 +29,8 @@
 
 **Sync Scripts**
 
-- `.runnerkit/scripts/sync_ga_knowledge.py` — copies docs from `docs/application/` and `docs/agents/` into the environment template's knowledge directory; run manually when platform docs change
-- `.runnerkit/scripts/check_docs_references.py` — validates internal doc links
+- `.cinna-core-kit/scripts/sync_ga_knowledge.py` — copies docs from `docs/application/` and `docs/agents/` into the environment template's knowledge directory; run manually when platform docs change
+- `.cinna-core-kit/scripts/check_docs_references.py` — validates internal doc links
 
 **Frontend**
 
@@ -160,14 +160,14 @@ Methods on `GeneralAssistantService`:
 The `general-assistant-env` template extends `python-env-advanced` with the following additions:
 
 - `app/.env.template` — `BACKEND_URL` and `AGENT_AUTH_TOKEN` are declared as pre-configured; they are injected by the platform at container start, not set by the user
-- `app/workspace/knowledge/platform/` — full copy of `docs/application/` and `docs/agents/` synced via `.runnerkit/scripts/sync_ga_knowledge.py`
+- `app/workspace/knowledge/platform/` — full copy of `docs/application/` and `docs/agents/` synced via `.cinna-core-kit/scripts/sync_ga_knowledge.py`
 - `app/workspace/knowledge/platform/api_reference/` — per-domain Markdown files auto-generated from `frontend/openapi.json`; `README.md` contains an index linking to each domain file
 - `app/workspace/scripts/examples/` — ready-to-run Python scripts covering common GA tasks (create agent, create workspace, create session, create scheduler, set up email integration, link credentials, etc.)
 
 Knowledge sync command (run from project root after updating platform docs):
 
 ```
-python3 .runnerkit/scripts/sync_ga_knowledge.py
+python3 .cinna-core-kit/scripts/sync_ga_knowledge.py
 ```
 
 ---

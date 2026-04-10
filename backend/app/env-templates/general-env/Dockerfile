@@ -1,6 +1,6 @@
 FROM python:3.11-bookworm
 
-LABEL maintainer="workflow-runner"
+LABEL maintainer="cinna"
 LABEL env.name="general-env"
 LABEL env.version="1.0.0"
 
