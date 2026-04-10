@@ -32,11 +32,7 @@ from app.models.users.user import (
     VALID_AI_FUNCTIONS_SDK_OPTIONS,
 )
 from app.services.environments.sdk_constants import is_valid_sdk
-from app.models.credentials.ai_credential import (
-    AICredentialType,
-    AICredentialCreate,
-    AICredentialUpdate,
-)
+from app.models.credentials.ai_credential import AICredentialType
 from app.services.credentials.ai_credentials_service import ai_credentials_service
 from app.utils import generate_new_account_email, send_email
 
@@ -395,86 +391,9 @@ def update_ai_credentials(
     Creates AICredential records and sets them as defaults.
     Also syncs to user profile for backward compatibility.
     """
-    # Handle Anthropic API key
-    if credentials_in.anthropic_api_key:
-        existing = ai_credentials_service.get_default_for_type(
-            session, current_user.id, AICredentialType.ANTHROPIC
-        )
-        if existing:
-            # Update existing credential
-            ai_credentials_service.update_credential(
-                session,
-                existing.id,
-                current_user.id,
-                AICredentialUpdate(api_key=credentials_in.anthropic_api_key),
-            )
-        else:
-            # Create new credential and set as default
-            new_cred = ai_credentials_service.create_credential(
-                session,
-                current_user.id,
-                AICredentialCreate(
-                    name="Anthropic API Key",
-                    type=AICredentialType.ANTHROPIC,
-                    api_key=credentials_in.anthropic_api_key,
-                ),
-            )
-            ai_credentials_service.set_default(session, new_cred.id, current_user.id)
-
-    # Handle MiniMax API key
-    if credentials_in.minimax_api_key:
-        existing = ai_credentials_service.get_default_for_type(
-            session, current_user.id, AICredentialType.MINIMAX
-        )
-        if existing:
-            ai_credentials_service.update_credential(
-                session,
-                existing.id,
-                current_user.id,
-                AICredentialUpdate(api_key=credentials_in.minimax_api_key),
-            )
-        else:
-            new_cred = ai_credentials_service.create_credential(
-                session,
-                current_user.id,
-                AICredentialCreate(
-                    name="MiniMax API Key",
-                    type=AICredentialType.MINIMAX,
-                    api_key=credentials_in.minimax_api_key,
-                ),
-            )
-            ai_credentials_service.set_default(session, new_cred.id, current_user.id)
-
-    # Handle OpenAI Compatible credentials
-    if credentials_in.openai_compatible_api_key:
-        existing = ai_credentials_service.get_default_for_type(
-            session, current_user.id, AICredentialType.OPENAI_COMPATIBLE
-        )
-        if existing:
-            ai_credentials_service.update_credential(
-                session,
-                existing.id,
-                current_user.id,
-                AICredentialUpdate(
-                    api_key=credentials_in.openai_compatible_api_key,
-                    base_url=credentials_in.openai_compatible_base_url,
-                    model=credentials_in.openai_compatible_model,
-                ),
-            )
-        else:
-            new_cred = ai_credentials_service.create_credential(
-                session,
-                current_user.id,
-                AICredentialCreate(
-                    name="OpenAI Compatible API",
-                    type=AICredentialType.OPENAI_COMPATIBLE,
-                    api_key=credentials_in.openai_compatible_api_key,
-                    base_url=credentials_in.openai_compatible_base_url,
-                    model=credentials_in.openai_compatible_model,
-                ),
-            )
-            ai_credentials_service.set_default(session, new_cred.id, current_user.id)
-
+    ai_credentials_service.upsert_onboarding_credentials(
+        session, current_user, credentials_in,
+    )
     return Message(message="AI credentials updated successfully")
 
 

@@ -47,8 +47,8 @@ down: # docker compose down
 	docker compose down
 
 .PHONY: down-cleanup
-down-cleanup: # docker compose down with cleanup (volumes)
-	docker compose down -v
+down-cleanup: # docker compose down with cleanup (volumes and orphans)
+	docker compose down --volumes --remove-orphans
 
 .PHONY: stop-backend
 stop-backend: # docker compose stop backend

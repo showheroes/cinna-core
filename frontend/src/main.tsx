@@ -47,15 +47,23 @@ declare module "@tanstack/react-router" {
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ""
 
+const AppTree = (
+  <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+      <Toaster richColors closeButton />
+    </QueryClientProvider>
+  </ThemeProvider>
+)
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-          <Toaster richColors closeButton />
-        </QueryClientProvider>
-      </ThemeProvider>
-    </GoogleOAuthProvider>
+    {GOOGLE_CLIENT_ID ? (
+      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+        {AppTree}
+      </GoogleOAuthProvider>
+    ) : (
+      AppTree
+    )}
   </StrictMode>,
 )

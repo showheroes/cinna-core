@@ -10,6 +10,9 @@ import useCustomToast from "@/hooks/useCustomToast"
 export function GoogleLoginButton() {
   const navigate = useNavigate()
   const { showErrorToast } = useCustomToast()
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+
+  if (!clientId) return null
 
   const googleLoginMutation = useMutation({
     mutationFn: async (code: string) => {

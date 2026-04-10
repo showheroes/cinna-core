@@ -18,7 +18,7 @@
 ## API Endpoints
 
 - `GET /api/v1/users/me/ai-credentials/status` — Returns `UserPublicWithAICredentials` with `has_anthropic_api_key: bool`. Used by Dashboard to decide whether to show the gate
-- `PATCH /api/v1/users/me/ai-credentials` — Accepts `AIServiceCredentialsUpdate`. Creates or updates the default `anthropic` credential. Called by `ApiKeyOnboarding` on submit
+- `PATCH /api/v1/users/me/ai-credentials` — Accepts `AIServiceCredentialsUpdate`. Creates or updates the default `anthropic` credential. Called by `ApiKeyOnboarding` on submit. When creating a new Anthropic credential (first-time), also auto-sets `user.default_ai_functions_sdk` to `"personal:anthropic"` so AI utility functions use the user's key immediately
 
 ## Frontend Components
 
@@ -77,7 +77,8 @@ Location: `frontend/src/components/Chat/MessageInput.tsx`
 - No server-side state tracks whether a user has seen onboarding — triggers are purely client-side
 - `RotatingHints` rotation interval defaults to 8000ms; configurable per usage site via props
 - Modal article content is hard-coded in the component; any content updates require a frontend deploy
+- **Google OAuth is optional** — When `VITE_GOOGLE_CLIENT_ID` is not set: `GoogleOAuthProvider` is not rendered in `frontend/src/main.tsx`, `GoogleLoginButton` returns `null`, login/signup pages hide the "Or continue with email" divider, and `OAuthAccounts` settings card is hidden. This prevents Google SDK errors on fresh installs without OAuth credentials
 
 ---
 
-*Last updated: 2026-03-03*
+*Last updated: 2026-04-10*

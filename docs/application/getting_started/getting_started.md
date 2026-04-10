@@ -20,9 +20,10 @@ Guide new instances and first-time users through initial platform setup — conf
 3. `ApiKeyOnboarding` screen is displayed instead of the normal dashboard
 4. User enters their LLM provider API key (e.g., Anthropic API key)
 5. Key is validated and saved via AI Credentials backend
-6. `GettingStartedModal` opens automatically to introduce core concepts
-7. User browses articles or dismisses the modal
-8. Normal Dashboard is now accessible
+6. Backend automatically sets `default_ai_functions_sdk` to `personal:anthropic` — all AI utility functions (title generation, prompt refinement, schedule generation, etc.) immediately use the user's key instead of the system cascade
+7. `GettingStartedModal` opens automatically to introduce core concepts
+8. User browses articles or dismisses the modal
+9. Normal Dashboard is now accessible
 
 ### Getting Started Modal — Article Navigation
 
@@ -54,9 +55,11 @@ Guide new instances and first-time users through initial platform setup — conf
 
 - **Mandatory gate** — The Dashboard only renders if the credentials status check returns `has_anthropic_api_key: true`; the gate cannot be bypassed
 - **One-time trigger** — `GettingStartedModal` opens automatically only once, immediately after successful API key submission (the `onComplete` callback)
+- **AI functions auto-routing** — When a user submits their first Anthropic API key during onboarding, the backend sets `default_ai_functions_sdk` to `personal:anthropic` if it was previously unset or `system`. This ensures all AI-powered platform features (title generation, prompt refinement, schedule generation, etc.) work immediately without additional configuration. Only triggers on first credential creation, not updates. See [AI Functions SDK Routing](../ai_credentials/ai_functions_sdk_routing.md)
 - **Persistent re-access** — The modal can be re-opened any number of times via `RotatingHints` click; this is intentional and has no session limit
 - **Non-persisted modal state** — Whether the user has seen the modal is not tracked server-side; the trigger is purely client-side (`showGettingStarted` boolean state)
 - **Credential type agnostic** — The gate currently checks for `has_anthropic_api_key`, but the underlying credential system supports multiple provider types; see [AI Credentials](../ai_credentials/ai_credentials.md)
+- **Google OAuth optional** — The login and signup pages gracefully hide the Google OAuth button and "Or continue with email" divider when `VITE_GOOGLE_CLIENT_ID` is not configured. The `GoogleOAuthProvider` wrapper is also conditionally rendered to prevent SDK errors. Fresh installs without Google OAuth credentials work with email/password login only
 - **Onboarding scope** — The gate and modal cover the minimum viable setup. Knowledge sources, plugin marketplaces, and workspaces are supplementary and introduced after initial setup
 
 ## Architecture Overview
@@ -70,6 +73,8 @@ Dashboard (aiCredentialsStatus query)
     → ApiKeyOnboarding (full-screen gate)
         → User submits key
         → PATCH /api/v1/users/me/ai-credentials
+            → Creates Anthropic credential + sets as default
+            → Auto-sets default_ai_functions_sdk = "personal:anthropic"
         → onComplete callback
             → GettingStartedModal (auto-open)
             → invalidateQueries(["aiCredentialsStatus"])
@@ -89,4 +94,4 @@ Dashboard (aiCredentialsStatus query)
 
 ---
 
-*Last updated: 2026-03-03*
+*Last updated: 2026-04-10*

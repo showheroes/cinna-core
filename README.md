@@ -1,5 +1,10 @@
 # Cinna Core
 
+> **Experimental** — This project is in an early experimental phase and under active development. APIs, data models, and features may change without notice. Use at your own risk. Not recommended for production workloads.
+
+> **Tip:** This project is designed to be explored with AI coding assistants. Try prompts like `read core and explain me how agent credentials are working` to navigate the codebase and understand any feature in depth.
+> If you're using an AI assistant other than Claude Code, make sure to include `CLAUDE.md` in the context — it contains the project conventions and navigation instructions.
+
 **Open-source platform for building, running, and orchestrating AI agents.**
 
 Create custom AI agents with their own prompts, credentials, and tools — each running in an isolated Docker environment. Chat with them, schedule them, connect them to email, expose them via APIs, or wire them into multi-agent teams.
@@ -10,7 +15,7 @@ Cinna gives you the full operational layer on top (not just SDK):
 
 - **Isolated runtime per agent** — each agent runs in its own Docker container with a persistent workspace, so agents can create files, install packages, and maintain state across sessions
 - **Two-mode architecture** — build your agent interactively (building mode with full context), then switch to a lightweight conversation mode for production use at lower cost
-- **Multi-SDK support** — use Claude (Anthropic), OpenAI, Google, or any OpenAI-compatible provider. Switch between them without changing your agent
+- **Multi-SDK support** — use Claude Code (with Anthropic) or OpenCode (with OpenAI, Google, and many other providers). Switch between them without changing your agent
 - **No vendor lock-in** — self-hosted, GPL-3.0 licensed, runs anywhere Docker runs
 
 ## Key Features

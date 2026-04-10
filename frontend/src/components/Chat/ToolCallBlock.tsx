@@ -12,6 +12,7 @@ import { KnowledgeQueryToolBlock } from "./KnowledgeQueryToolBlock"
 import { AgentHandoverToolBlock } from "./AgentHandoverToolBlock"
 import { UpdateSessionStateToolBlock } from "./UpdateSessionStateToolBlock"
 import { CompactBashBlock } from "./CompactBashBlock"
+import { WebFetchToolBlock } from "./WebFetchToolBlock"
 
 interface ToolCallBlockProps {
   toolName: string
@@ -92,6 +93,12 @@ export function ToolCallBlock({ toolName, toolInput, conversationModeUi = "detai
   const searchQuery = getInput("query")
   if (toolNameLower === "websearch" && searchQuery) {
     return <WebSearchToolBlock query={searchQuery} />
+  }
+
+  // Special rendering for WebFetch tool
+  const fetchUrl = getInput("url")
+  if (toolNameLower === "webfetch" && fetchUrl) {
+    return <WebFetchToolBlock url={fetchUrl} prompt={getInput("prompt")} />
   }
 
   // Special rendering for Bash tool

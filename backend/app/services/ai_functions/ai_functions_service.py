@@ -338,14 +338,27 @@ class AIFunctionsService:
             }
 
     @staticmethod
-    def is_available() -> bool:
+    def is_available(user: "User | None" = None) -> bool:
         """
-        Check if AI functions are available (at least one provider is configured).
+        Check if AI functions are available.
 
-        Returns:
-            bool: True if AI functions can be used, False otherwise
+        Returns True if either:
+        - The system provider cascade has at least one working provider, OR
+        - The user has configured personal Anthropic routing
+
+        Args:
+            user: Optional user to check for personal provider routing
         """
-        return get_provider_manager().is_available()
+        if get_provider_manager().is_available():
+            return True
+
+        # System providers unavailable — check if user has a personal key configured
+        if user:
+            pref = getattr(user, "default_ai_functions_sdk", None) or "system"
+            if pref.startswith("personal:"):
+                return True
+
+        return False
 
     @staticmethod
     def get_available_providers() -> list[str]:

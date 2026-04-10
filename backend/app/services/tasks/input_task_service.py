@@ -567,7 +567,9 @@ class InputTaskService:
         # Auto-refine if agent has refiner_prompt
         if data.selected_agent_id:
             agent = db_session.get(Agent, data.selected_agent_id)
-            if agent and agent.refiner_prompt and AIFunctionsService.is_available():
+            from app.models.users.user import User
+            user = db_session.get(User, user_id) if user_id else None
+            if agent and agent.refiner_prompt and AIFunctionsService.is_available(user):
                 try:
                     refine_result = AIFunctionsService.refine_task(
                         db=db_session,

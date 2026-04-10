@@ -123,19 +123,6 @@ if [ "${SKIP_ENV:-0}" -eq 0 ]; then
         break
     done
 
-    # ── Postgres ──────────────────────────────────────────────────────────────
-    echo ""
-    info "PostgreSQL (runs inside Docker):"
-    read -rp "$(echo -e "${BOLD}DB name${NC} [app]: ")" PG_DB
-    PG_DB="${PG_DB:-app}"
-
-    read -rp "$(echo -e "${BOLD}DB user${NC} [postgres]: ")" PG_USER
-    PG_USER="${PG_USER:-postgres}"
-
-    read -srp "$(echo -e "${BOLD}DB password${NC} [postgres]: ")" PG_PASS
-    echo ""
-    PG_PASS="${PG_PASS:-postgres}"
-
     # ── Generate secrets ──────────────────────────────────────────────────────
     SECRET_KEY="$(generate_secret)"
     ENCRYPTION_KEY="$(generate_secret)"
@@ -157,9 +144,6 @@ if [ "${SKIP_ENV:-0}" -eq 0 ]; then
     set_env "ENCRYPTION_KEY"            "$ENCRYPTION_KEY"
     set_env "FIRST_SUPERUSER"           "$ADMIN_EMAIL"
     set_env "FIRST_SUPERUSER_PASSWORD"  "$ADMIN_PASS"
-    set_env "POSTGRES_DB"               "$PG_DB"
-    set_env "POSTGRES_USER"             "$PG_USER"
-    set_env "POSTGRES_PASSWORD"         "$PG_PASS"
     set_env "GOOGLE_API_KEY"            ""
     set_env "DOCKER_IMAGE_BACKEND"      "cinna-core-backend"
     set_env "DOCKER_IMAGE_FRONTEND"     "cinna-core-frontend"

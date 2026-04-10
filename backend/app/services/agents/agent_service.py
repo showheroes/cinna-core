@@ -40,7 +40,12 @@ def _generate_description_background(
     from sqlmodel import Session as SQLSession
 
     try:
-        if not AIFunctionsService.is_available():
+        # Load user and check availability (system or personal key)
+        with SQLSession(engine) as db_session:
+            from app.models.users.user import User as UserModel
+            user = db_session.get(UserModel, user_id) if user_id else None
+
+        if not AIFunctionsService.is_available(user):
             logger.debug("AI functions not available, skipping description generation")
             return
 
@@ -457,7 +462,7 @@ class AgentService:
             }
 
             # Generate agent name, entrypoint_prompt, and workflow_prompt from description using LLM
-            if AIFunctionsService.is_available():
+            if AIFunctionsService.is_available(user):
                 try:
                     config = AIFunctionsService.generate_agent_configuration(
                         description, user=user, db=session

@@ -21,6 +21,7 @@ Tool call rendering provides specialized visual feedback for each type of tool t
 | `bash` | BashToolBlock | Shell command being executed | CompactBashBlock (shortened) |
 | `glob` | GlobToolBlock | Glob pattern for file matching | Same |
 | `websearch` | WebSearchToolBlock | Search query text | Same |
+| `webfetch` | WebFetchToolBlock | URL being fetched + optional prompt | Same |
 | `todowrite` | TodoWriteToolBlock | Todo items with completion status | Same |
 | `askuserquestion` | AskUserQuestionToolBlock | Count of questions received | Same |
 | `mcp__knowledge__query_integration_knowledge` | KnowledgeQueryToolBlock | Query + article IDs | Same |

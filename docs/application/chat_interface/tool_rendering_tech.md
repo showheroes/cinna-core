@@ -15,6 +15,7 @@
 - `frontend/src/components/Chat/CompactBashBlock.tsx` — Compact variant of BashToolBlock, used when `conversationModeUi === "compact"`
 - `frontend/src/components/Chat/GlobToolBlock.tsx` — Displays `pattern` for file matching
 - `frontend/src/components/Chat/WebSearchToolBlock.tsx` — Displays `query` text
+- `frontend/src/components/Chat/WebFetchToolBlock.tsx` — Displays `url` as clickable link with optional `prompt` subtitle
 - `frontend/src/components/Chat/TodoWriteToolBlock.tsx` — Renders `todos[]` array with status checkmarks (pending/in_progress/completed)
 - `frontend/src/components/Chat/AskUserQuestionToolBlock.tsx` — Shows count of `questions[]`, opens debug modal on click
 - `frontend/src/components/Chat/KnowledgeQueryToolBlock.tsx` — Shows `query` + optional `article_ids` list

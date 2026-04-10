@@ -15,6 +15,12 @@ import useAuth from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
 
 export default function OAuthAccounts() {
+  if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) return null
+
+  return <OAuthAccountsInner />
+}
+
+function OAuthAccountsInner() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()

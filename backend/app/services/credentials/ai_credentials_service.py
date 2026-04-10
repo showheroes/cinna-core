@@ -219,6 +219,93 @@ class AICredentialsService:
         logger.info(f"Set AI credential {credential_id} as default for type {credential.type}")
         return self._to_public(credential, session)
 
+    def upsert_onboarding_credentials(
+        self,
+        session: Session,
+        user: User,
+        credentials_in: AIServiceCredentialsUpdate,
+    ) -> None:
+        """
+        Create or update AI credentials from the onboarding flow.
+
+        For each provided key, finds the existing default credential of that type
+        and updates it, or creates a new one and sets it as default.
+
+        When an Anthropic key is provided and the user's AI functions preference
+        is unset or "system", auto-sets it to "personal:anthropic" so AI utility
+        functions work immediately.
+        """
+        type_configs = []
+
+        if credentials_in.anthropic_api_key:
+            type_configs.append((
+                AICredentialType.ANTHROPIC,
+                "Anthropic API Key",
+                credentials_in.anthropic_api_key,
+                None,  # base_url
+                None,  # model
+            ))
+
+        if credentials_in.minimax_api_key:
+            type_configs.append((
+                AICredentialType.MINIMAX,
+                "MiniMax API Key",
+                credentials_in.minimax_api_key,
+                None,
+                None,
+            ))
+
+        if credentials_in.openai_compatible_api_key:
+            type_configs.append((
+                AICredentialType.OPENAI_COMPATIBLE,
+                "OpenAI Compatible API",
+                credentials_in.openai_compatible_api_key,
+                credentials_in.openai_compatible_base_url,
+                credentials_in.openai_compatible_model,
+            ))
+
+        for cred_type, name, api_key, base_url, model in type_configs:
+            self._upsert_default_credential(
+                session, user.id, cred_type, name, api_key, base_url, model,
+            )
+
+        # Auto-set AI functions to use the personal Anthropic key
+        # so the user can start using platform features immediately
+        if credentials_in.anthropic_api_key:
+            if not user.default_ai_functions_sdk or user.default_ai_functions_sdk == "system":
+                user.default_ai_functions_sdk = "personal:anthropic"
+                session.add(user)
+                session.commit()
+                session.refresh(user)
+                logger.info(f"Auto-set AI functions to personal:anthropic for user {user.id}")
+
+    def _upsert_default_credential(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        cred_type: AICredentialType,
+        name: str,
+        api_key: str,
+        base_url: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        """Create or update the default credential for a given type."""
+        existing = self.get_default_for_type(session, user_id, cred_type)
+        if existing:
+            self.update_credential(
+                session, existing.id, user_id,
+                AICredentialUpdate(api_key=api_key, base_url=base_url, model=model),
+            )
+        else:
+            new_cred = self.create_credential(
+                session, user_id,
+                AICredentialCreate(
+                    name=name, type=cred_type,
+                    api_key=api_key, base_url=base_url, model=model,
+                ),
+            )
+            self.set_default(session, new_cred.id, user_id)
+
     def get_default_for_type(
         self, session: Session, user_id: uuid.UUID, cred_type: AICredentialType
     ) -> AICredential | None:

@@ -30,6 +30,14 @@ The `default_ai_functions_sdk` preference applies to all AI utility calls routed
 
 ## User Flow
 
+### Automatic (Onboarding)
+
+When a user creates their first Anthropic credential during the onboarding flow (`PATCH /api/v1/users/me/ai-credentials`), the backend automatically sets `default_ai_functions_sdk` to `"personal:anthropic"` if it was previously unset or `"system"`. This means AI functions work with the user's key immediately after onboarding — no additional settings configuration needed.
+
+This auto-set only triggers when a new Anthropic credential is created (not on updates), and only if the user hasn't already explicitly chosen a different routing preference.
+
+### Manual (Settings)
+
 1. User opens **Settings > AI Credentials**
 2. In the "Default SDK Preferences" card, the "AI Functions" section (below the separator, after Conversation/Building mode rows) shows a dropdown
 3. User selects "Personal Anthropic" — this calls `PATCH /api/v1/users/me` with `{"default_ai_functions_sdk": "personal:anthropic"}`
@@ -133,4 +141,4 @@ Migration `g2h3i4j5k6l7_add_ai_functions_credential_id_to_user.py` adds `default
 
 ---
 
-*Last updated: 2026-03-18*
+*Last updated: 2026-04-10*

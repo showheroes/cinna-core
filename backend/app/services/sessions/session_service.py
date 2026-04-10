@@ -1001,8 +1001,15 @@ class SessionService:
         try:
             from app.services.ai_functions.ai_functions_service import AIFunctionsService
 
-            # Check if AIFunctionsService is available
-            is_available = AIFunctionsService.is_available()
+            # Load user for availability check (personal key routing)
+            user_for_check = None
+            if user_id:
+                with get_fresh_db_session() as db:
+                    from app.models.users.user import User as UserModel
+                    user_for_check = db.get(UserModel, user_id)
+
+            # Check if AIFunctionsService is available (system or personal key)
+            is_available = AIFunctionsService.is_available(user_for_check)
             logger.info(f"[DEBUG] AIFunctionsService.is_available() = {is_available}")
 
             if is_available:
