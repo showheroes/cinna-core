@@ -1,6 +1,6 @@
 default: help
 
-include .env
+-include .env
 export
 
 .PHONY: help

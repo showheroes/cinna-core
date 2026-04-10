@@ -220,34 +220,6 @@ def get_build_context(
     )
 
 
-@router.get("/agents/{agent_id}/credentials")
-def get_credentials(
-    agent_id: uuid.UUID,
-    db: SessionDep,
-    cli_ctx: CLIContextDep,
-) -> Any:
-    """
-    Pull credentials for local development use.
-
-    Returns credentials with decrypted values. The user accepts that
-    credentials are exposed to their local machine.
-    """
-    _verify_cli_agent_scope(cli_ctx, agent_id)
-
-    try:
-        credentials = CLIService.get_credentials_for_cli(
-            db=db,
-            agent_id=agent_id,
-            user_id=cli_ctx.user.id,
-        )
-        return {"credentials": credentials}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve credentials: {str(e)}",
-        )
-
-
 @router.get("/agents/{agent_id}/building-context")
 async def get_building_context(
     agent_id: uuid.UUID,

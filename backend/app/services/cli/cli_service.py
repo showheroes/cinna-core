@@ -475,25 +475,6 @@ class CLIService:
         except httpx.RequestError as e:
             raise ValueError(f"Cannot connect to environment: {e}")
 
-    # ── Credentials ──────────────────────────────────────────────────────
-
-    @staticmethod
-    def get_credentials_for_cli(
-        db: Session,
-        agent_id: uuid.UUID,
-        user_id: uuid.UUID,
-    ) -> list[dict]:
-        """
-        Get agent credentials with decrypted values for local CLI use.
-
-        Uses the same CredentialsService as environment sync. Returns a list of
-        credential dicts including name, type, and full credential_data.
-        """
-        from app.services.credentials.credentials_service import CredentialsService
-
-        result = CredentialsService.prepare_credentials_for_environment(db, agent_id)
-        return result.get("credentials_json", [])
-
     # ── Building Context ─────────────────────────────────────────────────
 
     @staticmethod
