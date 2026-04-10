@@ -8,15 +8,16 @@ This aspect documents how the platform persists the Claude SDK session directory
 
 ## Volume Mount Strategy
 
-Each agent environment container has three volume mounts:
+Each agent environment container has four volume mounts:
 
 | Host Path | Container Path | Mode | What It Contains |
 |-----------|---------------|------|-----------------|
 | `${HOST_INSTANCE_DIR}/app/core` | `/app/core` | read-only | System server code — replaced on rebuild |
 | `${HOST_INSTANCE_DIR}/app/workspace` | `/app/workspace` | read-write | User workspace — scripts, files, credentials, databases |
 | `${HOST_INSTANCE_DIR}/claude_sessions` | `/root/.claude` | read-write | Claude SDK session files + `settings.json` |
+| `${HOST_INSTANCE_DIR}/opencode_sessions` | `/root/.local/share/opencode` | read-write | OpenCode SQLite DB, logs, and session diffs |
 
-The `claude_sessions/` directory is created on the host when the environment instance is first set up (in `_copy_template()`). Because it is mounted rather than baked into the container image, it survives `docker-compose down` → `docker-compose up` cycles that make up a rebuild.
+The `claude_sessions/` and `opencode_sessions/` directories are created on the host when the environment instance is first set up (in `_copy_template()`). Because they are mounted rather than baked into the container image, they survive `docker-compose down` → `docker-compose up` cycles that make up a rebuild.
 
 This mount is present in all three environment templates:
 - `backend/app/env-templates/general-env/docker-compose.template.yml`
@@ -28,7 +29,8 @@ This mount is present in all three environment templates:
 | Directory | Survives Rebuild | Explanation |
 |-----------|-----------------|-------------|
 | `app/workspace/` | Yes | Docker volume; user-generated content is never deleted |
-| `claude_sessions/` | Yes | Docker volume; SDK session files and `settings.json` persisted |
+| `claude_sessions/` | Yes | Docker volume; Claude Code SDK session files and `settings.json` persisted |
+| `opencode_sessions/` | Yes | Docker volume; OpenCode SQLite DB (sessions, messages, parts) and storage persisted |
 | `app/core/` | No | Replaced on every rebuild from the shared `app_core_base`; contains server code |
 | Container image layers | No | Rebuilt from the Dockerfile on every rebuild |
 
@@ -45,6 +47,15 @@ The Claude Code SDK identifies sessions by an opaque string ID. The flow across 
 5. **SDK resumes the session** — `ClaudeCodeAdapter` sets `options.resume = session_id` before calling the CLI. The CLI looks up `/root/.claude/<session_id>` (the mounted `claude_sessions/` directory) and resumes the conversation with its prior tool state and context.
 
 If the session files are present (directory was persisted), resumption is transparent. If they are absent (e.g., pre-fix behavior where the directory was inside the container image), the CLI raises an error and the session falls into the recovery path described in [Session Recovery](../agent_commands/session_recovery_command.md).
+
+### OpenCode Session Resumption
+
+OpenCode stores all session state in a SQLite database at `/root/.local/share/opencode/opencode.db` inside the container. The database contains sessions, messages, message parts, and session diffs. The `opencode serve` process reads and writes this database during its lifecycle.
+
+1. **First message** — Backend sends `session_id=None`. `OpenCodeAdapter._create_session()` calls `POST /session` on the OpenCode serve instance, which creates a new session record in the SQLite DB and returns a `ses_` ID.
+2. **Session ID captured** — Same as Claude Code: the ID is persisted in `session.session_metadata["external_session_id"]`.
+3. **Follow-up messages** — Backend passes the `ses_` ID. `OpenCodeAdapter` calls `POST /session/{id}/message` on the serve instance, which looks up the session in the SQLite DB.
+4. **After rebuild** — Because `opencode_sessions/` is mounted to `/root/.local/share/opencode`, the SQLite DB survives. When OpenCode serve starts in the new container, it opens the existing DB and can resume sessions by their `ses_` IDs.
 
 ## Hooks Settings File
 
@@ -91,9 +102,11 @@ The result: SDK session resumption works immediately after a rebuild without use
 
 ## Lifecycle: When the Directory Is Created
 
-`_copy_template()` creates `instance_dir/claude_sessions/` when a new environment instance is first set up. This happens once, before the Docker image is built. The directory is empty at that point; SDK session files are added by the Claude CLI during the first chat.
+`_copy_template()` creates both `instance_dir/claude_sessions/` and `instance_dir/opencode_sessions/` when a new environment instance is first set up. These directories start empty; SDK session files are added during the first chat.
 
-If the directory already exists (e.g., re-running setup on an existing instance), `mkdir(parents=True, exist_ok=True)` is a no-op and existing files are not disturbed.
+For existing environments created before `opencode_sessions/` was added, `_update_environment_config()` also ensures the directory exists (called on every rebuild and start), so the volume mount works retroactively.
+
+If a directory already exists (e.g., re-running setup on an existing instance), `mkdir(parents=True, exist_ok=True)` is a no-op and existing files are not disturbed.
 
 ## Integration Points
 

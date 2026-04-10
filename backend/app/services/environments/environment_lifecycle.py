@@ -1163,6 +1163,12 @@ class EnvironmentLifecycleManager:
             claude_sessions_dir.mkdir(parents=True, exist_ok=True)
             logger.debug(f"Created claude_sessions directory: {claude_sessions_dir}")
 
+            # 4. Create opencode_sessions directory for persistent OpenCode session storage
+            # Mounted as /root/.local/share/opencode inside the container to survive rebuilds
+            opencode_sessions_dir = instance_dir / "opencode_sessions"
+            opencode_sessions_dir.mkdir(parents=True, exist_ok=True)
+            logger.debug(f"Created opencode_sessions directory: {opencode_sessions_dir}")
+
         # Run blocking I/O operation in thread pool executor
         await asyncio.to_thread(_copy_sync)
         logger.debug(f"Template copy completed")
@@ -1323,7 +1329,12 @@ class EnvironmentLifecycleManager:
         # 6. Write Claude Code PreToolUse hook settings for credential access detection
         self._write_claude_code_hook_settings(instance_dir, environment)
 
-        # 7. Generate OpenCode config files if any mode uses the opencode SDK
+        # 7. Ensure opencode_sessions directory exists for persistent session storage
+        # (covers environments created before this volume mount was added)
+        opencode_sessions_dir = instance_dir / "opencode_sessions"
+        opencode_sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        # 8. Generate OpenCode config files if any mode uses the opencode SDK
         uses_opencode = sdk_conversation.startswith("opencode") or sdk_building.startswith("opencode")
         if uses_opencode:
             self._generate_opencode_config_files(
