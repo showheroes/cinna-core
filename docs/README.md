@@ -69,6 +69,14 @@ Sessions can be started manually, by automated triggers (CRON, email, webhook), 
 
 ---
 
+## Wiki
+
+| Article | Description |
+|---------|-------------|
+| [Why Cinna Agents?](wiki/skills_plugins_vs_cinna_agents.md) | Skills & plugins vs. Cinna agents — point-by-point comparison for SMBs evaluating AI automation approaches |
+
+---
+
 ## Feature Registry
 
 ### agents
