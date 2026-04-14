@@ -16,6 +16,8 @@
 ### Backend - Core Services (used by A2A)
 - `backend/app/services/sessions/session_service.py` - Session operations
 - `backend/app/services/sessions/message_service.py` - Message operations
+- `backend/app/services/sessions/stream_processor.py` - `SessionStreamProcessor` unified streaming pipeline
+- `backend/app/services/sessions/stream_event_handlers.py` - `A2AStreamEventHandler` for A2A SSE event mapping
 - `backend/app/services/agents/agent_service.py` - Skills generation integration
 
 ### Backend - AI Functions
@@ -84,13 +86,13 @@
 ### A2A Request Handler
 **File:** `backend/app/services/a2a/a2a_request_handler.py`
 
-- `A2ARequestHandler.handle_message_send()` - Non-streaming message handling
-- `A2ARequestHandler.handle_message_stream()` - SSE streaming handler
+- `A2ARequestHandler.handle_message_send()` - Non-streaming message handling (polls for completion)
+- `A2ARequestHandler.handle_message_stream()` - SSE streaming handler; delegates core streaming to `SessionStreamProcessor` with `A2AStreamEventHandler` for A2A event mapping
 - `A2ARequestHandler.handle_tasks_get()` - Task query
 - `A2ARequestHandler.handle_tasks_cancel()` - Task cancellation
 - `A2ARequestHandler.handle_tasks_list()` - List tasks (custom extension)
 - `A2ARequestHandler._parse_and_validate_session_id()` - Parse task_id and validate A2A scope
-- Uses `SessionService` and `MessageService` for all data access (no direct DB queries)
+- Uses `SessionService` for session operations (no direct DB queries); streaming delegated to unified `SessionStreamProcessor`
 
 ### A2A Event Mapper
 **File:** `backend/app/services/a2a/a2a_event_mapper.py`

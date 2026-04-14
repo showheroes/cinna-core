@@ -13,6 +13,8 @@
 ### Backend — Services
 - `backend/app/services/sessions/session_service.py` — All session lifecycle logic, streaming orchestration, environment activation
 - `backend/app/services/sessions/message_service.py` — Message creation, streaming from agent-env, incremental DB flush
+- `backend/app/services/sessions/stream_processor.py` — `SessionStreamProcessor`: unified streaming pipeline shared by UI, MCP, and A2A paths (collect pending → mark sent → stream → finalize). Also contains per-session locking (`get_session_lock`) and the `StreamEventHandler` protocol
+- `backend/app/services/sessions/stream_event_handlers.py` — Concrete `StreamEventHandler` implementations: `WebSocketEventHandler` (UI/Socket.IO), `MCPEventHandler` (MCP progress notifications), `A2AStreamEventHandler` (A2A SSE mapping)
 - `backend/app/services/sessions/active_streaming_manager.py` — In-memory streaming state tracker (singleton)
 - `backend/app/services/events/event_service.py` — WebSocket event emission to `session_{id}_stream` rooms and user rooms
 
@@ -237,8 +239,8 @@ After streaming completes, assistant events containing `<webapp_action>` tags ar
 - `mark_messages_as_sent(db, message_ids)` — Set `sent_to_agent_status="sent"`
 
 **Streaming:**
-- `process_pending_messages(session_id, environment_id, user_id)` — Core async streaming loop: collects pending messages, calls `stream_message_with_events()`, handles all events
-- `stream_message_with_events(session_id, environment_id, user_id, messages)` — Connects to agent-env via SSE, assigns `event_seq`, buffers in `ActiveStreamingManager`, flushes to DB every ~5s, emits each event to WebSocket room; handles `session_created`, `assistant`, `tool`, `thinking`, `done`, `error`, `interrupted` events
+- `process_pending_messages(session_id, get_fresh_db_session)` — Entry point for UI streaming; delegates to `SessionStreamProcessor` with `WebSocketEventHandler` for Socket.IO event emission and session state updates
+- `stream_message_with_events(session_id, environment_id, ...)` — Connects to agent-env via SSE, assigns `event_seq`, buffers in `ActiveStreamingManager`, flushes to DB every ~2s; handles `session_created`, `assistant`, `tool`, `thinking`, `done`, `error`, `interrupted` events. Called by `SessionStreamProcessor` for all paths (UI, MCP, A2A)
 - `send_message_to_environment_stream(env_url, auth_headers, payload)` — HTTP POST to agent-env `/chat/stream`, yields raw SSE events
 - `_get_session_context_and_reset_state(session_id)` — Reads session, resets `result_state`/`result_summary` if set, triggers task status sync if `source_task_id` exists; returns previous state for passthrough to agent-env
 

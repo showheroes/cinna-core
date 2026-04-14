@@ -174,6 +174,8 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
   const [editRouteSessionMode, setEditRouteSessionMode] = useState("conversation")
   const [editRouteTriggerPrompt, setEditRouteTriggerPrompt] = useState("")
   const [editRouteMessagePatterns, setEditRouteMessagePatterns] = useState("")
+  const [editRouteAutoEnable, setEditRouteAutoEnable] = useState(false)
+  const [editRouteUserSearchQuery, setEditRouteUserSearchQuery] = useState("")
 
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -210,7 +212,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
   const { data: usersData } = useQuery({
     queryKey: ["users-list"],
     queryFn: () => UsersService.readUsers({ limit: 200 }),
-    enabled: createDialogOpen && createStep === "form" && createType === "app_mcp",
+    enabled: (createDialogOpen && createStep === "form" && createType === "app_mcp") || editRouteDialogOpen,
     staleTime: 30000,
   })
 
@@ -221,6 +223,17 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       !appMcpAssignedUserIds.includes(u.id) &&
       (u.email.toLowerCase().includes(appMcpUserSearchQuery.toLowerCase()) ||
         (u.full_name ?? "").toLowerCase().includes(appMcpUserSearchQuery.toLowerCase()))
+  )
+
+  // Use live query data for assignments so add/remove updates immediately
+  const editRouteLive = editingRoute ? appMcpRoutes.find((r) => r.id === editingRoute.id) ?? editingRoute : null
+  const editRouteAssignments = editRouteLive?.assignments ?? []
+  const editRouteAssignedUserIds = editRouteAssignments.map((a) => a.user_id)
+  const editFilteredUsers = allUsers.filter(
+    (u) =>
+      !editRouteAssignedUserIds.includes(u.id) &&
+      (u.email.toLowerCase().includes(editRouteUserSearchQuery.toLowerCase()) ||
+        (u.full_name ?? "").toLowerCase().includes(editRouteUserSearchQuery.toLowerCase()))
   )
 
   const connectors = connectorData?.data ?? []
@@ -331,6 +344,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       message_patterns: string | null
       auto_enable_for_users: boolean
       assigned_user_ids: string[]
+      activate_for_myself: boolean
     }) => {
       const res = await fetch(`${API_BASE}/api/v1/agents/${agentId}/app-mcp-routes`, {
         method: "POST",
@@ -400,6 +414,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
         session_mode?: string
         trigger_prompt?: string
         message_patterns?: string | null
+        auto_enable_for_users?: boolean
       }
     }) => {
       const res = await fetch(
@@ -419,6 +434,45 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
     onSuccess: () => {
       showSuccessToast("App MCP route updated")
       setEditRouteDialogOpen(false)
+      queryClient.invalidateQueries({ queryKey: ["app-mcp-routes", agentId] })
+    },
+    onError: (error: Error) => showErrorToast(error.message),
+  })
+
+  const addRouteAssignmentMutation = useMutation({
+    mutationFn: async ({ routeId, userIds }: { routeId: string; userIds: string[] }) => {
+      const res = await fetch(
+        `${API_BASE}/api/v1/agents/${agentId}/app-mcp-routes/${routeId}/assignments`,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(userIds),
+        }
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail || "Failed to assign user")
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["app-mcp-routes", agentId] })
+    },
+    onError: (error: Error) => showErrorToast(error.message),
+  })
+
+  const removeRouteAssignmentMutation = useMutation({
+    mutationFn: async ({ routeId, userId }: { routeId: string; userId: string }) => {
+      const res = await fetch(
+        `${API_BASE}/api/v1/agents/${agentId}/app-mcp-routes/${routeId}/assignments/${userId}`,
+        { method: "DELETE", headers: getAuthHeaders() }
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail || "Failed to remove assignment")
+      }
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["app-mcp-routes", agentId] })
     },
     onError: (error: Error) => showErrorToast(error.message),
@@ -513,6 +567,8 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
     setEditRouteSessionMode(route.session_mode)
     setEditRouteTriggerPrompt(route.trigger_prompt)
     setEditRouteMessagePatterns(route.message_patterns ?? "")
+    setEditRouteAutoEnable(route.auto_enable_for_users)
+    setEditRouteUserSearchQuery("")
     setEditRouteDialogOpen(true)
   }
 
@@ -525,6 +581,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
         session_mode: editRouteSessionMode,
         trigger_prompt: editRouteTriggerPrompt,
         message_patterns: editRouteMessagePatterns || null,
+        auto_enable_for_users: editRouteAutoEnable,
       },
     })
   }
@@ -1213,7 +1270,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
             <DialogTitle>Edit App MCP Route</DialogTitle>
             <DialogDescription>Update the route configuration.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
             <div className="space-y-2">
               <Label>Name</Label>
               <Input
@@ -1242,6 +1299,9 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
                 rows={3}
                 placeholder="Describe when to route messages to this agent"
               />
+              <p className="text-xs text-muted-foreground">
+                Used by the AI router to match messages to this agent.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Message Patterns (optional)</Label>
@@ -1251,6 +1311,104 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
                 rows={2}
                 placeholder={"review this PR *\ncheck my code *"}
               />
+              <p className="text-xs text-muted-foreground">
+                One glob-style pattern per line. Pattern matching runs before AI routing.
+              </p>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Shared with Users
+              </Label>
+              {editRouteAssignments.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {editRouteAssignments.map((assignment) => {
+                    const u = allUsers.find((usr) => usr.id === assignment.user_id)
+                    return (
+                      <span
+                        key={assignment.id}
+                        className="flex items-center gap-1 bg-secondary text-secondary-foreground text-xs px-2 py-1 rounded-full"
+                      >
+                        {u?.full_name || u?.email || assignment.user_id}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            editingRoute &&
+                            removeRouteAssignmentMutation.mutate({
+                              routeId: editingRoute.id,
+                              userId: assignment.user_id,
+                            })
+                          }
+                          className="hover:text-destructive transition-colors"
+                          disabled={removeRouteAssignmentMutation.isPending}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+              <Input
+                placeholder="Search users to add..."
+                value={editRouteUserSearchQuery}
+                onChange={(e) => setEditRouteUserSearchQuery(e.target.value)}
+              />
+              {editRouteUserSearchQuery && editFilteredUsers.length > 0 && (
+                <div className="border rounded-md divide-y max-h-36 overflow-y-auto">
+                  {editFilteredUsers.slice(0, 8).map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent transition-colors"
+                      onClick={() => {
+                        if (editingRoute) {
+                          addRouteAssignmentMutation.mutate({
+                            routeId: editingRoute.id,
+                            userIds: [u.id],
+                          })
+                        }
+                        setEditRouteUserSearchQuery("")
+                      }}
+                    >
+                      <span className="font-medium">{u.full_name || u.email}</span>
+                      {u.full_name && (
+                        <span className="text-muted-foreground text-xs">{u.email}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between py-1">
+              <div className="space-y-0.5">
+                <Label className="text-sm">Make Active for Users</Label>
+                <p className="text-xs text-muted-foreground">
+                  When enabled, assigned users can use this agent immediately without manual activation.
+                </p>
+              </div>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Switch
+                        checked={editRouteAutoEnable}
+                        onCheckedChange={isAdmin ? setEditRouteAutoEnable : undefined}
+                        disabled={!isAdmin}
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  {!isAdmin && (
+                    <TooltipContent side="left" className="text-xs max-w-48">
+                      Only administrators can activate routes for users immediately.
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
             </div>
           </div>
           <DialogFooter>

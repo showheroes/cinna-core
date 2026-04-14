@@ -122,13 +122,16 @@ Orchestrates pending message processing and environment activation:
 
 This event-driven approach ensures sessions are processed regardless of how the environment became active.
 
-4. `process_pending_messages()` handles streaming:
-   - Emits `STREAM_STARTED` backend event (triggers `handle_stream_started` which sets `interaction_status="running"`, `streaming_started_at=now`, and emits `session_interaction_status_changed` WS event)
-   - Streams from agent-env via SSE
-   - Each event gets assigned `event_seq` and appended to `ActiveStreamingManager` buffer
+4. `process_pending_messages()` delegates to `SessionStreamProcessor` (from `stream_processor.py`) with a `WebSocketEventHandler`:
+   - The processor runs the unified pipeline: collect pending → inject context → mark sent → stream → finalize
+   - `WebSocketEventHandler.on_stream_starting()` emits `stream_started` to the WebSocket room
+   - `MessageService.stream_message_with_events()` streams from agent-env via SSE; each event gets `event_seq` and is appended to `ActiveStreamingManager` buffer
    - Events flushed to DB every ~2s (non-blocking background thread)
-   - Emits each streaming event (with `event_seq`) to WebSocket room
-   - On completion: final DB update sets `streaming_in_progress=False`, emits `STREAM_COMPLETED` which triggers `handle_stream_completed` (clears `interaction_status`, `streaming_started_at`, emits `session_interaction_status_changed` to user room)
+   - `WebSocketEventHandler.on_event()` emits each streaming event (with `event_seq`) to WebSocket room
+   - `WebSocketEventHandler.on_complete()` emits `stream_completed` and resets session state (`pending_messages_count=0`, `interaction_status=""`, `streaming_started_at=None`)
+   - On completion: final DB update sets `streaming_in_progress=False`, `STREAM_COMPLETED` triggers `handle_stream_completed` which emits `session_interaction_status_changed` to user room
+   
+   The same `SessionStreamProcessor` is used by MCP (with `MCPEventHandler` for progress notifications) and A2A (with `A2AStreamEventHandler` for SSE event mapping), ensuring a single streaming lifecycle across all integration paths
 
 **Event Service** (`event_service.py:emit_stream_event`):
 - Emits events to session-specific room: `session_{session_id}_stream`
@@ -779,10 +782,12 @@ await active_streaming_manager.update_last_flushed_seq(session_id, flush_seq)
 
 ### Backend
 - `api/routes/messages.py` - Message endpoints with in-memory event merge and DB-based streaming status
-- `services/session_service.py` - Stream lifecycle handlers, `session_interaction_status_changed` emission
-- `services/message_service.py` - `stream_message_with_events()` with event_seq, incremental flush, TodoWrite detection
-- `services/event_service.py` - EventService with emit_stream_event() and backend event handlers
-- `services/active_streaming_manager.py` - Stream tracking with in-memory event buffer
+- `services/sessions/session_service.py` - Stream lifecycle handlers, `session_interaction_status_changed` emission
+- `services/sessions/message_service.py` - `stream_message_with_events()` with event_seq, incremental flush, TodoWrite detection
+- `services/sessions/stream_processor.py` - `SessionStreamProcessor`: unified streaming pipeline (collect → mark sent → stream → finalize) with `StreamEventHandler` protocol and per-session locking
+- `services/sessions/stream_event_handlers.py` - `WebSocketEventHandler` (UI), `MCPEventHandler` (MCP progress), `A2AStreamEventHandler` (A2A SSE mapping)
+- `services/events/event_service.py` - EventService with emit_stream_event() and backend event handlers
+- `services/sessions/active_streaming_manager.py` - Stream tracking with in-memory event buffer
 - `services/activity_service.py` - Event handlers for streaming lifecycle
 - `services/input_task_service.py` - handle_todo_list_updated() for task todo propagation
 - `models/session.py` - Session model with `streaming_started_at`, `todo_progress` fields

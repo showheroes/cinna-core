@@ -1,17 +1,14 @@
 """
 Shared MCP message streaming utilities.
 
-Provides the common streaming pipeline used by both the per-connector
-MCPRequestHandler and the App MCP AppMCPRequestHandler:
-- Per-session locking (prevents concurrent message processing)
-- MCP progress / log notifications
-- Stream-collect-return loop (environment readiness → stream → JSON result)
+Provides the ``stream_and_collect_response`` entry point used by both the
+per-connector MCPRequestHandler and the App MCP AppMCPRequestHandler.
 
-Each handler is responsible for its own session resolution and message
-creation; this module picks up from "session + message exist, now stream."
+Internally delegates to ``SessionStreamProcessor`` with an ``MCPEventHandler``
+so that the streaming lifecycle (collect pending → mark sent → stream →
+finalize) is shared with the UI and A2A paths.
 """
 
-import asyncio
 import json
 import logging
 import time
@@ -20,40 +17,18 @@ from uuid import UUID
 
 from sqlmodel import Session as DbSession
 
-from app.models import Session
-from app.services.sessions.session_service import SessionService
-from app.services.sessions.message_service import MessageService
+from app.services.sessions.stream_processor import (
+    SessionStreamProcessor,
+    SessionLockBusyError,
+)
+from app.services.sessions.stream_event_handlers import MCPEventHandler
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Per-session locks — shared singleton across all MCP handler types
-# ---------------------------------------------------------------------------
-_session_locks: dict[str, asyncio.Lock] = {}
-_MAX_SESSION_LOCKS = 1000
 
+# Re-export for backward compatibility — callers that imported these from here
+from app.services.sessions.stream_processor import get_session_lock  # noqa: F401
 
-def get_session_lock(session_id: str) -> asyncio.Lock:
-    """Return (or create) a per-session asyncio.Lock.
-
-    Bounded: evicts unlocked entries when the dict exceeds
-    ``_MAX_SESSION_LOCKS`` to prevent unbounded memory growth.
-    """
-    if session_id not in _session_locks:
-        if len(_session_locks) >= _MAX_SESSION_LOCKS:
-            to_remove = [
-                sid for sid, lock in _session_locks.items()
-                if not lock.locked()
-            ]
-            for sid in to_remove:
-                del _session_locks[sid]
-        _session_locks[session_id] = asyncio.Lock()
-    return _session_locks[session_id]
-
-
-# ---------------------------------------------------------------------------
-# MCP progress / log notifications
-# ---------------------------------------------------------------------------
 
 async def send_mcp_progress(
     mcp_ctx,
@@ -62,6 +37,9 @@ async def send_mcp_progress(
     last_info_time: float,
 ) -> tuple[int, float]:
     """Send MCP progress and log notifications for a streaming event.
+
+    Standalone helper kept for backward compatibility and direct testing.
+    The ``MCPEventHandler`` uses equivalent logic internally.
 
     Returns updated ``(progress, last_info_time)`` tuple.
     Failures are silently caught — notifications must never crash the tool.
@@ -98,10 +76,6 @@ async def send_mcp_progress(
     return progress, last_info_time
 
 
-# ---------------------------------------------------------------------------
-# Core streaming pipeline
-# ---------------------------------------------------------------------------
-
 async def stream_and_collect_response(
     *,
     session_id: UUID,
@@ -110,10 +84,9 @@ async def stream_and_collect_response(
     timeout_seconds: int = 120,
     log_prefix: str = "[MCP]",
 ) -> str:
-    """Ensure environment is ready, stream response, and return JSON result.
+    """Ensure environment is ready, stream response, and return text or error JSON.
 
-    This encapsulates Phases 2–3 of the MCP message pipeline, following
-    the same message lifecycle as ``process_pending_messages``:
+    This encapsulates Phases 2–3 of the MCP message pipeline:
 
     - Phase 2: ensure environment is ready for streaming (wakes suspended envs)
     - Phase 3: collect pending messages, mark as sent, stream, collect response
@@ -134,102 +107,45 @@ async def stream_and_collect_response(
     """
     result_context_id = str(session_id)
 
-    # Phase 2: Ensure environment is ready
-    if mcp_ctx is not None:
-        try:
-            await mcp_ctx.report_progress(0, 100, "Preparing agent environment...")
-        except Exception:
-            logger.debug("%s Failed to send initial progress notification (non-fatal)", log_prefix, exc_info=True)
+    handler = MCPEventHandler(mcp_ctx=mcp_ctx, log_prefix=log_prefix)
+
+    processor = SessionStreamProcessor(
+        session_id=session_id,
+        get_fresh_db_session=get_fresh_db_session,
+        event_handler=handler,
+        use_session_lock=True,
+        ensure_env_ready=True,
+        env_timeout_seconds=timeout_seconds,
+        inject_recovery_context=False,
+        inject_webapp_context=False,
+        log_prefix=log_prefix,
+    )
 
     try:
-        environment, _agent = await SessionService.ensure_environment_ready_for_streaming(
-            session_id=session_id,
-            get_fresh_db_session=get_fresh_db_session,
-            timeout_seconds=timeout_seconds,
-        )
-    except (ValueError, RuntimeError) as e:
-        logger.error("%s Environment not ready for streaming: %s", log_prefix, e)
-        return json.dumps({"error": f"Environment not ready: {e}", "context_id": result_context_id})
-
-    # Phase 3: Stream response with per-session locking
-    session_id_str = str(session_id)
-    lock = get_session_lock(session_id_str)
-    if lock.locked():
+        response_text = await processor.process()
+    except SessionLockBusyError:
         return json.dumps({
             "error": "Another message is being processed. Please wait.",
             "context_id": result_context_id,
         })
+    except (ValueError, RuntimeError) as e:
+        logger.error("%s Environment not ready for streaming: %s", log_prefix, e)
+        return json.dumps({
+            "error": f"Environment not ready: {e}",
+            "context_id": result_context_id,
+        })
+    except Exception as e:
+        logger.error("%s Error streaming from agent environment: %s", log_prefix, e)
+        return json.dumps({
+            "error": f"Failed to communicate with agent environment: {e}",
+            "context_id": result_context_id,
+        })
 
-    async with lock:
-        # Collect all pending messages and mark as sent — same lifecycle as
-        # process_pending_messages.  This correctly handles the case where
-        # multiple messages queued up while the environment was waking.
-        with get_fresh_db_session() as db:
-            concatenated_content, pending_messages = MessageService.collect_pending_messages(db, session_id)
-            if not concatenated_content or not pending_messages:
-                logger.info("%s No pending messages for session %s", log_prefix, session_id)
-                return ""
+    # If the handler captured an error event from the agent, return it
+    if handler.error_content:
+        return json.dumps({
+            "error": f"Error from agent: {handler.error_content}",
+            "context_id": result_context_id,
+        })
 
-            session_obj = db.get(Session, session_id)
-            session_mode = (session_obj.mode or "conversation") if session_obj else "conversation"
-            external_session_id = (
-                (session_obj.session_metadata or {}).get("external_session_id")
-                if session_obj else None
-            )
-
-            message_ids = [msg.id for msg in pending_messages]
-
-        # Mark messages as sent — they are about to be delivered to the agent.
-        # Done outside the read transaction, same pattern as process_pending_messages.
-        with get_fresh_db_session() as db:
-            MessageService.mark_messages_as_sent(db, message_ids)
-
-        logger.info(
-            "%s Streaming %d pending message(s) for session %s",
-            log_prefix, len(pending_messages), session_id,
-        )
-
-        response_parts: list[str] = []
-        mcp_progress = 0
-        mcp_last_info_time = 0.0
-
-        try:
-            async for event in MessageService.stream_message_with_events(
-                session_id=session_id,
-                environment_id=environment.id,
-                user_message_content=concatenated_content,
-                session_mode=session_mode,
-                external_session_id=external_session_id,
-                get_fresh_db_session=get_fresh_db_session,
-            ):
-                event_type = event.get("type", "")
-
-                mcp_progress, mcp_last_info_time = await send_mcp_progress(
-                    mcp_ctx, event, mcp_progress, mcp_last_info_time,
-                )
-
-                if event_type == "assistant":
-                    content = event.get("content", "")
-                    if content:
-                        response_parts.append(content)
-                elif event_type == "error":
-                    error_content = event.get("content", "Unknown error")
-                    logger.error("%s Error event from agent: %s", log_prefix, error_content)
-                    return json.dumps({
-                        "error": f"Error from agent: {error_content}",
-                        "context_id": result_context_id,
-                    })
-
-        except Exception as e:
-            logger.error("%s Error streaming from agent environment: %s", log_prefix, e)
-            return json.dumps({
-                "error": f"Failed to communicate with agent environment: {e}",
-                "context_id": result_context_id,
-            })
-
-    full_response = "\n\n".join(response_parts)
-    logger.info(
-        "%s Response complete | session=%s | response_parts=%d | length=%d",
-        log_prefix, session_id, len(response_parts), len(full_response),
-    )
-    return full_response if full_response else ""
+    return response_text if response_text else ""

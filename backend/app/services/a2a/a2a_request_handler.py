@@ -33,7 +33,6 @@ from a2a.types import (
 from app.models import Agent, Session as ChatSession, A2ATokenPayload
 from app.models.environments.environment import AgentEnvironment
 from app.services.sessions.session_service import SessionService
-from app.services.sessions.message_service import MessageService
 from app.services.a2a.a2a_event_mapper import A2AEventMapper
 from app.services.a2a.a2a_task_store import DatabaseTaskStore
 from app.services.sessions.active_streaming_manager import active_streaming_manager
@@ -217,7 +216,8 @@ class A2ARequestHandler:
         Handle message/stream request (SSE streaming).
 
         Creates session if needed, sends message, and yields A2A-formatted
-        SSE events.
+        SSE events.  Delegates the core streaming pipeline to
+        ``SessionStreamProcessor`` with an ``A2AStreamEventHandler``.
 
         Args:
             params: MessageSendParams dict with 'message' and optional 'configuration'
@@ -226,6 +226,9 @@ class A2ARequestHandler:
         Yields:
             SSE event strings (data: {...}\n\n)
         """
+        from app.services.sessions.stream_processor import SessionStreamProcessor
+        from app.services.sessions.stream_event_handlers import A2AStreamEventHandler
+
         message_data = params.get("message", {})
 
         # Extract message content from parts
@@ -236,8 +239,6 @@ class A2ARequestHandler:
         session_id = self._parse_and_validate_session_id(task_id)
 
         # Use SessionService to create message (without initiating background streaming)
-        # This validates session, creates the message, and returns session info
-        # If session_id is None, a new session will be created
         result = await SessionService.send_session_message(
             session_id=session_id,
             user_id=self.user_id,
@@ -245,7 +246,7 @@ class A2ARequestHandler:
             file_ids=None,
             answers_to_message_id=None,
             get_fresh_db_session=self.get_db_session,
-            initiate_streaming=False,  # Don't start background streaming, we'll stream via SSE
+            initiate_streaming=False,
             agent_id=self.agent.id if session_id is None else None,
             access_token_id=self.access_token_id,
             backend_base_url=self.backend_base_url,
@@ -272,10 +273,6 @@ class A2ARequestHandler:
         # Get the session_id from result (may be newly created)
         session_id = result.get("session_id", session_id)
 
-        # Get session info for streaming
-        external_session_id = result.get("external_session_id")
-
-        # Stream events
         task_id_str = str(session_id)
         context_id_str = str(session_id)
 
@@ -288,57 +285,50 @@ class A2ARequestHandler:
         )
         yield self._format_sse_event(request_id, initial_event)
 
+        # Notify client if environment needs activation
+        env_status = self.environment.status
+        if env_status in ["suspended", "activating", "starting"]:
+            logger.info(f"Environment {self.environment.id} status is '{env_status}', notifying client...")
+            activation_event = A2AEventMapper._create_status_update(
+                task_id=task_id_str,
+                context_id=context_id_str,
+                state=TaskState.working,
+                final=False,
+                message="Starting up the agent environment, this may take a moment...",
+            )
+            yield self._format_sse_event(request_id, activation_event)
+
+        # Delegate streaming to the unified processor
+        handler = A2AStreamEventHandler(
+            task_id=task_id_str,
+            context_id=context_id_str,
+            request_id=request_id,
+            format_sse_event=self._format_sse_event,
+        )
+
+        processor = SessionStreamProcessor(
+            session_id=session_id,
+            get_fresh_db_session=self.get_db_session,
+            event_handler=handler,
+            use_session_lock=False,
+            ensure_env_ready=True,
+            env_timeout_seconds=120,
+            log_prefix="[A2A]",
+        )
+
         try:
-            # Check if environment needs activation before streaming
-            # If so, notify the client that we're starting up the environment
-            env_status = self.environment.status
-            if env_status in ["suspended", "activating", "starting"]:
-                logger.info(f"Environment {self.environment.id} status is '{env_status}', notifying client...")
-                activation_event = A2AEventMapper._create_status_update(
-                    task_id=task_id_str,
-                    context_id=context_id_str,
-                    state=TaskState.working,
-                    final=False,
-                    message="Starting up the agent environment, this may take a moment...",
-                )
-                yield self._format_sse_event(request_id, activation_event)
-
-            # Ensure environment is ready for streaming (activates if suspended)
-            # This is critical for A2A flow since we stream directly to agent-env
-            # Unlike UI flow which uses WebSocket events for async notification
-            try:
-                environment, agent = await SessionService.ensure_environment_ready_for_streaming(
-                    session_id=session_id,
-                    get_fresh_db_session=self.get_db_session,
-                    timeout_seconds=120
-                )
-                logger.info(f"Environment {environment.id} is ready for A2A streaming")
-            except (ValueError, RuntimeError) as e:
-                logger.error(f"Environment not ready for streaming: {e}")
-                error_event = A2AEventMapper._create_status_update(
-                    task_id=task_id_str,
-                    context_id=context_id_str,
-                    state=TaskState.failed,
-                    final=True,
-                    message=f"Environment error: {str(e)}",
-                )
-                yield self._format_sse_event(request_id, error_event)
-                return
-
-            # Stream from environment via SSE (instead of background WebSocket)
-            async for event in MessageService.stream_message_with_events(
-                session_id=session_id,
-                environment_id=environment.id,
-                user_message_content=content,
-                session_mode="conversation",
-                external_session_id=external_session_id,
-                get_fresh_db_session=self.get_db_session,
-            ):
-                # Map internal event to A2A event
-                a2a_event = A2AEventMapper.map_stream_event(event, task_id_str, context_id_str)
-                if a2a_event:
-                    yield self._format_sse_event(request_id, a2a_event)
-
+            await processor.process()
+        except (ValueError, RuntimeError) as e:
+            logger.error(f"Environment not ready for streaming: {e}")
+            error_event = A2AEventMapper._create_status_update(
+                task_id=task_id_str,
+                context_id=context_id_str,
+                state=TaskState.failed,
+                final=True,
+                message=f"Environment error: {str(e)}",
+            )
+            yield self._format_sse_event(request_id, error_event)
+            return
         except Exception as e:
             logger.error(f"Error streaming message: {e}")
             error_event = A2AEventMapper._create_status_update(
@@ -349,6 +339,11 @@ class A2ARequestHandler:
                 message=f"Error: {str(e)}",
             )
             yield self._format_sse_event(request_id, error_event)
+            return
+
+        # Yield all collected A2A events
+        for sse_event in handler.events:
+            yield sse_event
 
     async def handle_tasks_get(self, params: dict[str, Any]) -> Task | None:
         """

@@ -412,15 +412,15 @@ Starlette routing precedence ensures `/mcp/oauth/...` routes match before the `/
    - When creating a new session: creates `MCPSessionMeta` record linking the session to the OAuth-authenticated user (email, user_id, connector_id)
 2. Create user message via `MessageService.create_message()`
 3. Trigger title generation for new sessions via `SessionService.auto_generate_session_title()`
-4. Send initial progress notification: `mcp_ctx.report_progress(0, 100, "Preparing agent environment...")`
-5. Ensure environment is ready via `SessionService.ensure_environment_ready_for_streaming()`
-6. Acquire per-session `asyncio.Lock` for sequential processing
-7. Stream response via `MessageService.stream_message_with_events()` (resolves environment URL/auth internally from `environment_id`)
-   - For each streaming event, `_send_mcp_progress()` sends progress and content notifications (see below)
-8. Collect response parts and return JSON: `{"response": "...", "context_id": "<session_uuid>"}`
+4. Delegate to `stream_and_collect_response()` (from `backend/app/mcp/message_streaming.py`), which uses the unified `SessionStreamProcessor` with `MCPEventHandler`:
+   - Ensures environment is ready via `SessionService.ensure_environment_ready_for_streaming()`
+   - Acquires per-session `asyncio.Lock` for sequential processing (from `stream_processor.py`)
+   - Collects pending messages, marks as sent, streams via `MessageService.stream_message_with_events()`
+   - `MCPEventHandler` sends progress and content notifications for each streaming event (see below)
+5. Collect response parts and return JSON: `{"response": "...", "context_id": "<session_uuid>"}`
    - Error responses also JSON: `{"error": "...", "context_id": "..."}`
 
-**Progress & Content Streaming (`_send_mcp_progress` static method):**
+**Progress & Content Streaming (`MCPEventHandler` in `stream_event_handlers.py`):**
 
 During the streaming loop, the handler sends MCP notifications to keep the client informed:
 

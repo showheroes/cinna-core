@@ -64,8 +64,10 @@
 
 ### Backend — Services
 
-- `backend/app/services/sessions/session_service.py` — `initiate_stream()`, `process_pending_messages()`, `handle_stream_started/completed/error/interrupted()`, `handle_environment_activated()`
-- `backend/app/services/sessions/message_service.py` — `stream_message_with_events()`: event_seq assignment, incremental DB flush (every ~2s via background thread), streaming event accumulation, TodoWrite detection, session state reset
+- `backend/app/services/sessions/session_service.py` — `initiate_stream()`, `handle_stream_started/completed/error/interrupted()`, `handle_environment_activated()`
+- `backend/app/services/sessions/message_service.py` — `process_pending_messages()` (delegates to `SessionStreamProcessor`), `stream_message_with_events()`: event_seq assignment, incremental DB flush (every ~2s via background thread), streaming event accumulation, TodoWrite detection, session state reset
+- `backend/app/services/sessions/stream_processor.py` — `SessionStreamProcessor`: unified streaming pipeline (collect → mark sent → stream → finalize) shared by UI, MCP, and A2A paths; `StreamEventHandler` protocol for path-specific event delivery
+- `backend/app/services/sessions/stream_event_handlers.py` — `WebSocketEventHandler` (UI), `MCPEventHandler` (MCP progress), `A2AStreamEventHandler` (A2A SSE)
 - `backend/app/services/sessions/active_streaming_manager.py` — In-memory stream tracking: `ActiveStream` dataclass with event buffer, interrupt management, `get_stream_events()` for API merge
 - `backend/app/services/events/event_service.py` — `EventService` singleton: Socket.IO server, room-based broadcasting, `emit_stream_event()`, backend event handler registration
 
@@ -87,7 +89,7 @@
 2. Frontend sends `POST /api/v1/sessions/{sessionId}/messages/stream` — returns immediately with `{status: "ok", stream_room}`
 3. Backend creates user message, delegates to `SessionService.initiate_stream()`
 4. If environment not running: marks session `pending_stream`, activates environment in background
-5. When environment ready: `process_pending_messages()` streams from agent-env via SSE
+5. When environment ready: `process_pending_messages()` delegates to `SessionStreamProcessor` with `WebSocketEventHandler`, which streams from agent-env via SSE
 6. Each SSE event gets sequential `event_seq`, buffered in `ActiveStreamingManager`, emitted to WebSocket room
 7. DB flushed every ~2s in background thread (`asyncio.to_thread`)
 8. On completion: `interaction_status` cleared, `session_interaction_status_changed` event emitted to user room

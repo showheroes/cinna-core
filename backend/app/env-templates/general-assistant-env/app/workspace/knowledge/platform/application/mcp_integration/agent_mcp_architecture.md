@@ -246,10 +246,11 @@ tools.py (thin MCP entry point — tool handlers)
     └─ MCPRequestHandler.handle_send_message(message, mcp_session_id, context_id, mcp_ctx)
             ├─ SessionService.get_or_create_mcp_session(context_id=...)
             ├─ MessageService.create_message()
-            ├─ mcp_ctx.report_progress(0, 100, "Preparing agent environment...")
-            ├─ SessionService.ensure_environment_ready_for_streaming()
-            ├─ MessageService.stream_message_with_events()
-            │   └─ _send_mcp_progress() per event → report_progress + ctx.info
+            ├─ stream_and_collect_response() → delegates to SessionStreamProcessor
+            │   ├─ SessionStreamProcessor (unified pipeline from stream_processor.py)
+            │   │   ├─ ensure_environment_ready → mark sent → stream_message_with_events()
+            │   │   └─ MCPEventHandler: report_progress + ctx.info per event
+            │   └─ Per-session lock prevents concurrent processing
             └─ Return JSON: {"response": "...", "context_id": "<session_uuid>"}
 
 oauth_routes.py (thin OAuth route handlers)

@@ -797,13 +797,15 @@ class MessageService:
         """
         Process all pending messages for a session by streaming them to the agent.
 
-        This is the core method that:
-        1. Collects pending messages
-        2. Gets environment and agent details
-        3. Emits stream_started event
-        4. Calls streaming logic
-        5. Marks messages as sent after successful stream
-        6. Updates session state
+        Delegates to ``SessionStreamProcessor`` with a ``WebSocketEventHandler``
+        that emits events to the frontend via Socket.IO.
+
+        The processor handles:
+        1. Collecting pending messages (with page-context diffing)
+        2. Injecting recovery context and one-time webapp context
+        3. Marking messages as sent
+        4. Streaming from the agent environment
+        5. Updating session state on completion
 
         Args:
             session_id: Session UUID
@@ -811,163 +813,42 @@ class MessageService:
         """
         logger.info(f"process_pending_messages called for session {session_id}")
 
+        from app.services.sessions.stream_processor import SessionStreamProcessor
+        from app.services.sessions.stream_event_handlers import WebSocketEventHandler
+
+        # Quick check: reset session state if no pending messages exist
+        with get_fresh_db_session() as db:
+            chat_session = db.get(ChatSession, session_id)
+            if not chat_session:
+                logger.error(f"Session {session_id} not found")
+                return
+            pending_check, _ = MessageService.collect_pending_messages(db, session_id)
+            if not pending_check:
+                logger.info(f"No pending messages found for session {session_id}")
+                chat_session.pending_messages_count = 0
+                chat_session.interaction_status = ""
+                db.add(chat_session)
+                db.commit()
+                return
+
+        handler = WebSocketEventHandler(session_id, get_fresh_db_session)
+
+        processor = SessionStreamProcessor(
+            session_id=session_id,
+            get_fresh_db_session=get_fresh_db_session,
+            event_handler=handler,
+            use_session_lock=False,
+            ensure_env_ready=False,  # UI path handles env readiness in initiate_stream
+            inject_recovery_context=True,
+            inject_webapp_context=True,
+            log_prefix="[UI]",
+        )
+
         try:
-            from app.services.events.event_service import event_service
-
-            # Get session info, pending messages, and prepare for streaming
-            with get_fresh_db_session() as db:
-                # Get session
-                chat_session = db.get(ChatSession, session_id)
-                if not chat_session:
-                    logger.error(f"Session {session_id} not found")
-                    return
-
-                # Collect pending messages
-                concatenated_content, pending_messages = MessageService.collect_pending_messages(db, session_id)
-
-                if not concatenated_content or not pending_messages:
-                    logger.info(f"No pending messages found for session {session_id}")
-                    # Still reset session state
-                    chat_session.pending_messages_count = 0
-                    chat_session.interaction_status = ""
-                    db.add(chat_session)
-                    db.commit()
-                    return
-
-                # Check for session recovery
-                if chat_session.session_metadata.get("recovery_pending"):
-                    recovery_context = MessageService.build_recovery_context(db, session_id)
-                    if recovery_context:
-                        concatenated_content = f"{recovery_context}\n\n{concatenated_content}"
-                    # Clear recovery_pending flag
-                    chat_session.session_metadata.pop("recovery_pending", None)
-                    from sqlalchemy.orm.attributes import flag_modified
-                    flag_modified(chat_session, "session_metadata")
-                    db.add(chat_session)
-                    db.commit()
-                    db.refresh(chat_session)
-
-                # Get agent and environment
-                agent = db.get(Agent, chat_session.agent_id)
-                if not agent:
-                    logger.error(f"Agent {chat_session.agent_id} not found")
-                    return
-
-                environment = db.get(AgentEnvironment, chat_session.environment_id)
-                if not environment:
-                    logger.error(f"Environment {chat_session.environment_id} not found")
-                    return
-
-                # Prepare streaming parameters
-                external_session_id = chat_session.session_metadata.get("external_session_id")
-                session_mode = chat_session.mode or "conversation"
-                environment_id = environment.id
-
-                # Store message IDs for marking as sent later
-                message_ids = [msg.id for msg in pending_messages]
-
-                # ── One-time webapp context injection ─────────────────────────
-                # If any pending message carries page_context, this session is webapp-connected.
-                # On the first such message per session, activate the webapp_actions_context_sent
-                # flag and include a one-time extra instructions block so the agent learns about
-                # available webapp actions without burdening the system prompt of every session.
-                include_extra_instructions: str | None = None
-                extra_instructions_prepend: str | None = None
-                has_page_context = any(
-                    (msg.message_metadata or {}).get("page_context")
-                    for msg in pending_messages
-                )
-                if has_page_context:
-                    from app.services.sessions.session_service import SessionService
-                    should_inject = SessionService.activate_webapp_context(db, session_id)
-                    if should_inject:
-                        extra_instructions_prepend = (
-                            "This session is connected to a webapp that the user is viewing.\n"
-                            "- The user's current page state is included as <page_context> or "
-                            "<context_update> blocks in their messages.\n"
-                            "- You can interact with the webapp UI by embedding <webapp_action> "
-                            "tags in your responses (see webapp actions documentation for syntax and available actions)."
-                        )
-                        if session_mode == "conversation":
-                            include_extra_instructions = "/app/workspace/webapp/WEB_APP_ACTIONS.md"
-                        logger.info(
-                            "[webapp_context] Including one-time extra instructions for session %s",
-                            session_id,
-                        )
-
-            # Emit stream_started event to frontend
-            await event_service.emit_stream_event(
-                session_id=session_id,
-                event_type="stream_started",
-                event_data={
-                    "message": f"Processing {len(pending_messages)} pending message(s)...",
-                    "pending_count": len(pending_messages)
-                }
-            )
-
-            logger.info(f"Starting stream for session {session_id} with {len(pending_messages)} pending message(s)")
-
-            # Mark messages as sent now — they have been delivered to the agent.
-            # This prevents the "pending" indicator from showing while the agent
-            # is already streaming its response.
-            with get_fresh_db_session() as db:
-                MessageService.mark_messages_as_sent(db, message_ids)
-
-            # Stream the concatenated messages and emit each event via WebSocket
-            async for event in MessageService.stream_message_with_events(
-                session_id=session_id,
-                environment_id=environment_id,
-                user_message_content=concatenated_content,
-                session_mode=session_mode,
-                external_session_id=external_session_id,
-                get_fresh_db_session=get_fresh_db_session,
-                include_extra_instructions=include_extra_instructions,
-                extra_instructions_prepend=extra_instructions_prepend,
-            ):
-                # Emit each streaming event via WebSocket to frontend
-                await event_service.emit_stream_event(
-                    session_id=session_id,
-                    event_type=event.get("type"),
-                    event_data=event
-                )
-
-            # Emit stream completed event
-            await event_service.emit_stream_event(
-                session_id=session_id,
-                event_type="stream_completed",
-                event_data={
-                    "status": "completed",
-                    "session_id": str(session_id)
-                }
-            )
-
-            # Update session state after stream completes
-            with get_fresh_db_session() as db:
-                chat_session = db.get(ChatSession, session_id)
-                if chat_session:
-                    chat_session.pending_messages_count = 0
-                    chat_session.interaction_status = ""
-                    chat_session.streaming_started_at = None
-                    db.add(chat_session)
-                    db.commit()
-
-            logger.info(f"Successfully processed {len(message_ids)} pending messages for session {session_id}")
-
+            await processor.process()
         except Exception as e:
             logger.error(f"Error in process_pending_messages for session {session_id}: {e}", exc_info=True)
-            # Emit error event
-            try:
-                await event_service.emit_stream_event(
-                    session_id=session_id,
-                    event_type="error",
-                    event_data={
-                        "type": "error",
-                        "content": str(e),
-                        "error_type": type(e).__name__
-                    }
-                )
-            except Exception as emit_error:
-                logger.error(f"Failed to emit error event: {emit_error}", exc_info=True)
+            await handler.on_error(e)
             raise
 
     @staticmethod
