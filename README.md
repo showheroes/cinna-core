@@ -17,6 +17,12 @@ AI "skills" require LLM inference on every run — each execution costs tokens, 
 
 For a detailed point-by-point comparison (credentials, isolation, persistence, scheduling, and more), see [Skills & Plugins vs. Cinna Agents](docs/wiki/skills_plugins_vs_cinna_agents.md).
 
+### Managed Agent APIs vs Self-Hosted Platform
+
+Cloud providers now offer managed agent APIs (like Anthropic's Claude Managed Agents) — you call an endpoint, they run the agent in a hosted container, you get results back. Cinna is the opposite: a self-hosted platform where you own the infrastructure, the data, and the full agent lifecycle. Managed APIs are great for embedding agent capabilities into your product; Cinna is for teams that need persistent automation, multi-provider flexibility, bidirectional protocol support (A2A, MCP), and a complete web UI — without handing control to a third party.
+
+For a detailed comparison (architecture, persistence, credentials, multi-agent, protocols, and more), see [Claude Managed Agents vs. Cinna Agents](docs/wiki/claude_managed_agents_vs_cinna_agents.md).
+
 Cinna gives you the full operational layer on top (not just SDK):
 
 - **Isolated runtime per agent** — each agent runs in its own Docker container with a persistent workspace, so agents can create files, install packages, and maintain state across sessions
