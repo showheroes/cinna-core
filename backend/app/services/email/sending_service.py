@@ -59,17 +59,15 @@ class EmailSendingService:
         if not message or message.role != "agent":
             return None
 
-        # Get environment -> agent (clone or owner agent)
-        from app.models.environments.environment import AgentEnvironment
+        # Get agent from session
         from app.models.email.agent_email_integration import AgentSessionMode
-        env = db_session.get(AgentEnvironment, chat_session.environment_id)
-        if not env:
-            logger.warning(f"Environment {chat_session.environment_id} not found")
+        if not chat_session.agent_id:
+            logger.warning(f"Session {chat_session.id} has no agent_id")
             return None
 
-        session_agent = db_session.get(Agent, env.agent_id)
+        session_agent = db_session.get(Agent, chat_session.agent_id)
         if not session_agent:
-            logger.warning(f"Session agent {env.agent_id} not found")
+            logger.warning(f"Session agent {chat_session.agent_id} not found")
             return None
 
         # Determine if this is owner mode or clone mode

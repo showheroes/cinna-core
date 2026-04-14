@@ -8,7 +8,7 @@ from sqlmodel import select
 from app.api.deps import CurrentUser, CurrentUserOrGuest, GuestShareContext, SessionDep
 from app.models import (
     Session,
-    AgentEnvironment,
+    Agent,
     MessageCreate,
     MessagesPublic,
     SessionCommandPublic,
@@ -77,8 +77,6 @@ async def get_messages(
     For sessions with active streams, merges in-memory streaming events into the
     response so the API always returns the most current data (DB + in-memory buffer).
     """
-    from app.models import Agent
-
     # Verify session exists and caller has access
     chat_session = session.get(Session, session_id)
     if not chat_session:
@@ -92,11 +90,9 @@ async def get_messages(
 
     # Get agent's allowed_tools to filter out already-approved tools from messages
     allowed_tools: set[str] = set()
-    if chat_session.environment_id:
-        environment = session.get(AgentEnvironment, chat_session.environment_id)
-        if environment and environment.agent_id:
-            agent = session.get(Agent, environment.agent_id)
-            if agent and agent.agent_sdk_config:
+    if chat_session.agent_id:
+        agent = session.get(Agent, chat_session.agent_id)
+        if agent and agent.agent_sdk_config:
                 allowed_tools = set(agent.agent_sdk_config.get("allowed_tools", []))
 
     # Filter tools_needing_approval for each message

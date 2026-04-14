@@ -3,11 +3,17 @@ from pydantic import BaseModel
 from pydantic.networks import EmailStr
 
 from app.api.deps import get_current_active_superuser, CurrentUser, SessionDep
+from app.core.config import settings
 from app.models import Message
 from app.utils import generate_test_email, send_email
 from app.services.ai_functions.ai_functions_service import AIFunctionsService
 
 router = APIRouter(prefix="/utils", tags=["utils"])
+
+
+class McpInfoResponse(BaseModel):
+    """App MCP Server connection info."""
+    mcp_server_url: str
 
 
 class RefinePromptRequest(BaseModel):
@@ -47,6 +53,13 @@ def test_email(email_to: EmailStr) -> Message:
 @router.get("/health-check/")
 async def health_check() -> bool:
     return True
+
+
+@router.get("/mcp-info/", response_model=McpInfoResponse)
+def get_mcp_info() -> McpInfoResponse:
+    """Public endpoint — returns the App MCP Server URL for client configuration."""
+    base = (settings.MCP_SERVER_BASE_URL or "").rstrip("/")
+    return McpInfoResponse(mcp_server_url=f"{base}/app/mcp" if base else "")
 
 
 @router.post("/refine-prompt/")

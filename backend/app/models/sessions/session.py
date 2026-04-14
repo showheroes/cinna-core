@@ -11,6 +11,9 @@ class Session(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     environment_id: uuid.UUID = Field(foreign_key="agent_environment.id", ondelete="CASCADE")
+    agent_id: uuid.UUID | None = Field(
+        default=None, foreign_key="agent.id", ondelete="SET NULL", index=True
+    )
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")
     user_workspace_id: uuid.UUID | None = Field(
         default=None, foreign_key="user_workspace.id", ondelete="CASCADE"
@@ -102,6 +105,7 @@ class SessionUpdate(SQLModel):
 class SessionPublic(SQLModel):
     id: uuid.UUID
     environment_id: uuid.UUID
+    agent_id: uuid.UUID | None = None
     user_id: uuid.UUID
     user_workspace_id: uuid.UUID | None
     access_token_id: uuid.UUID | None
@@ -132,7 +136,6 @@ class SessionPublicExtended(SessionPublic):
     """Session with external session metadata"""
     external_session_id: str | None = None
     sdk_type: str | None = None
-    agent_id: uuid.UUID | None = None
     agent_name: str | None = None
     agent_ui_color_preset: str | None = None
     message_count: int | None = None

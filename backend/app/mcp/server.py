@@ -133,6 +133,9 @@ class MCPServerRegistry:
         self._mcp_instances: dict[str, FastMCP] = {}
         self._task_group: anyio.abc.TaskGroup | None = None
         self._base_url_validated: bool = False
+        # Singleton App MCP Server (handles /mcp/app/... requests)
+        self._app_server: ASGIApp | None = None
+        self._app_mcp_instance: FastMCP | None = None
         # Track active MCP ServerSessions for sending notifications
         # Maps connector_id -> {mcp_session_id -> ServerSession}
         self._active_sessions: dict[str, dict[str, object]] = {}
@@ -237,6 +240,37 @@ class MCPServerRegistry:
         else:
             logger.info("[MCP] MCP_SERVER_BASE_URL validated against incoming request (host=%s, root_path=%s)", request_host, root_path)
 
+    async def get_or_create_app_server(self) -> ASGIApp | None:
+        """Get or lazily create the singleton App MCP Server.
+
+        The App MCP Server is a single shared server instance for all users,
+        routed via /mcp/app/... paths.
+        """
+        if self._app_server is not None:
+            return self._app_server
+
+        from app.mcp.app_server import create_app_mcp_server
+        mcp_server = create_app_mcp_server()
+        asgi_app = mcp_server.streamable_http_app()
+
+        session_manager = mcp_server.session_manager
+
+        async def _run_app_session_manager(*, task_status=anyio.TASK_STATUS_IGNORED):
+            async with session_manager.run():
+                task_status.started()
+                await anyio.sleep_forever()
+
+        if self._task_group is None:
+            logger.error("[AppMCP] MCPServerRegistry.run() is not active — cannot start app session manager")
+            return None
+
+        await self._task_group.start(_run_app_session_manager)
+
+        self._app_server = asgi_app
+        self._app_mcp_instance = mcp_server
+        logger.info("[AppMCP] App MCP Server created and started")
+        return asgi_app
+
     async def get_or_create(self, connector_id: str) -> ASGIApp | None:
         """Get or lazily create an ASGI app for the given connector.
 
@@ -326,7 +360,47 @@ class MCPServerRegistry:
 
         connector_id_str = parts[0]
 
-        # Validate UUID format
+        # Handle App MCP Server (special "app" path — before UUID validation)
+        if connector_id_str == "app":
+            app = await self.get_or_create_app_server()
+            if app is None:
+                response = JSONResponse({"detail": "App MCP Server not available"}, status_code=503)
+                await response(scope, receive, send)
+                return
+
+            mcp_session_id_from_header = None
+            for name, value in scope.get("headers", []):
+                if name == b"mcp-session-id":
+                    mcp_session_id_from_header = value.decode("ascii", errors="replace")
+                    break
+
+            method = scope.get("method", "?")
+            logger.debug(
+                "[AppMCP] %s %s | mcp_session_id=%s",
+                method, path, mcp_session_id_from_header or "(none)",
+            )
+
+            token_conn = mcp_connector_id_var.set("app")
+            token_sess = mcp_session_id_var.set(mcp_session_id_from_header)
+            token_auth_user = mcp_authenticated_user_id_var.set(None)
+            try:
+                remaining_path = f"/{parts[1]}" if len(parts) > 1 else "/"
+                scope = dict(scope)
+                scope["path"] = remaining_path
+                original_root_path = scope.get("root_path", "")
+                scope["root_path"] = f"{original_root_path}/mcp/app"
+                scope["headers"] = [
+                    (name, value) for name, value in scope["headers"]
+                    if name != b"origin"
+                ]
+                await app(scope, receive, send)
+            finally:
+                mcp_connector_id_var.reset(token_conn)
+                mcp_session_id_var.reset(token_sess)
+                mcp_authenticated_user_id_var.reset(token_auth_user)
+            return
+
+        # Validate UUID format for per-connector servers
         try:
             uuid.UUID(connector_id_str)
         except ValueError:

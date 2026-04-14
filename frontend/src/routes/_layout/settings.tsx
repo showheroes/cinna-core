@@ -3,7 +3,7 @@ import { useEffect } from "react"
 
 import { AICredentialsSettings } from "@/components/UserSettings/AICredentials"
 import DeleteAccount from "@/components/UserSettings/DeleteAccount"
-import { GeneralAssistantSettings } from "@/components/UserSettings/GeneralAssistantSettings"
+import { AppAgentRoutesCard } from "@/components/UserSettings/AppAgentRoutesCard"
 import { MailServerSettings } from "@/components/UserSettings/MailServerSettings"
 import { SSHKeys } from "@/components/UserSettings/SSHKeys"
 import UserInformation from "@/components/UserSettings/UserInformation"
@@ -58,8 +58,16 @@ function UserSettings() {
       ),
     },
     { value: "ai-credentials", title: "AI Credentials", content: <AICredentialsSettings /> },
-    { value: "general-assistant", title: "General Assistant", content: <GeneralAssistantSettings /> },
-    { value: "mail-servers", title: "Mail Servers", content: <MailServerSettings /> },
+    {
+      value: "channels",
+      title: "Channels",
+      content: (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <MailServerSettings />
+          <AppAgentRoutesCard />
+        </div>
+      ),
+    },
     { value: "keys", title: "SSH Keys", content: <SSHKeys /> },
     { value: "danger-zone", title: "Danger zone", content: <DeleteAccount /> },
   ]

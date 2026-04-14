@@ -17,7 +17,6 @@ from app.models import (
     SessionMessage,
     Message,
     Agent,
-    AgentEnvironment,
     User,
 )
 from app.services.sessions.session_service import SessionService
@@ -260,7 +259,7 @@ def list_sessions(
         .subquery()
     )
 
-    # Join Session with AgentEnvironment and Agent to get agent name and color
+    # Join Session with Agent to get agent name and color
     statement = (
         select(
             Session,
@@ -270,8 +269,7 @@ def list_sessions(
             msg_count_subq.c.message_count,
             last_msg_subq.c.last_content,
         )
-        .join(AgentEnvironment, Session.environment_id == AgentEnvironment.id)
-        .join(Agent, AgentEnvironment.agent_id == Agent.id)
+        .join(Agent, Session.agent_id == Agent.id)
         .outerjoin(msg_count_subq, Session.id == msg_count_subq.c.session_id)
         .outerjoin(last_msg_subq, Session.id == last_msg_subq.c.session_id)
         .where(Session.user_id == owner_user_id)
@@ -293,8 +291,7 @@ def list_sessions(
     count_statement = (
         select(func.count())
         .select_from(Session)
-        .join(AgentEnvironment, Session.environment_id == AgentEnvironment.id)
-        .join(Agent, AgentEnvironment.agent_id == Agent.id)
+        .join(Agent, Session.agent_id == Agent.id)
         .where(Session.user_id == owner_user_id)
     )
     if guest_share_filter:
@@ -322,7 +319,6 @@ def list_sessions(
             **s.model_dump(),
             external_session_id=SessionService.get_external_session_id(s),
             sdk_type=SessionService.get_sdk_type(s),
-            agent_id=a_id,
             agent_name=a_name,
             agent_ui_color_preset=a_color,
             message_count=msg_count or 0,
@@ -341,11 +337,10 @@ def get_session(session: SessionDep, caller: CurrentUserOrGuest, id: uuid.UUID) 
 
     Supports both authenticated users and guest share callers.
     """
-    # Join with AgentEnvironment and Agent to get agent name and color
+    # Join with Agent to get agent name and color
     statement = (
         select(Session, Agent.id, Agent.name, Agent.ui_color_preset)
-        .join(AgentEnvironment, Session.environment_id == AgentEnvironment.id)
-        .join(Agent, AgentEnvironment.agent_id == Agent.id)
+        .join(Agent, Session.agent_id == Agent.id)
         .where(Session.id == id)
     )
 
@@ -362,7 +357,6 @@ def get_session(session: SessionDep, caller: CurrentUserOrGuest, id: uuid.UUID) 
         **chat_session.model_dump(),
         external_session_id=SessionService.get_external_session_id(chat_session),
         sdk_type=SessionService.get_sdk_type(chat_session),
-        agent_id=agent_id,
         agent_name=agent_name,
         agent_ui_color_preset=agent_ui_color_preset,
     )
@@ -429,12 +423,10 @@ def switch_session_mode(
     )
 
     # Get agent name
-    agent_statement = (
-        select(Agent.name)
-        .join(AgentEnvironment, AgentEnvironment.agent_id == Agent.id)
-        .where(AgentEnvironment.id == updated_session.environment_id)
-    )
-    agent_name = session.exec(agent_statement).first()
+    agent_name = None
+    if updated_session.agent_id:
+        agent = session.get(Agent, updated_session.agent_id)
+        agent_name = agent.name if agent else None
 
     return SessionPublicExtended(
         **updated_session.model_dump(),

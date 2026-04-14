@@ -33,6 +33,7 @@ Guide new instances and first-time users through initial platform setup — conf
    - **How to Build An Agent** — building mode prompt patterns, script creation, tips
    - **How to Share Credentials** — OAuth setup guide, credential types overview
    - **Conversation vs Building** — mode comparison, typical workflow steps
+   - **Connect via MCP** — step-by-step guide for connecting an MCP client (Claude Desktop, Cursor, etc.) using the App MCP Server URL
 4. Articles contain cross-links enabling jump navigation between related topics
 5. Modal dismissed via "Start Building" button or backdrop close
 
@@ -42,6 +43,13 @@ Guide new instances and first-time users through initial platform setup — conf
 2. Tips rotate every 8 seconds with a fade transition
 3. User clicks the widget to re-open `GettingStartedModal` at any time
 4. Modal state is ephemeral — not persisted, accessible multiple times per session
+
+### Contextual Help — MCP Setup
+
+1. User opens Settings > Channels tab > "MCP Server" card
+2. Clicks the `?` (help) button next to the MCP Server URL
+3. `GettingStartedModal` opens directly to the "Connect via MCP" article (via `initialArticle="app-mcp-setup"`)
+4. Article guides user through copying the URL, adding it as an MCP connector in their client, and authorizing
 
 ### New Instance — Admin Preparation
 

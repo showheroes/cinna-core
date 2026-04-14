@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.mcp.request_handler import MCPRequestHandler
+from app.mcp.message_streaming import send_mcp_progress
 from tests.stubs.agent_env_stub import StubAgentEnvConnector
 from tests.utils.agent import create_agent_via_api, get_agent
 from tests.utils.background_tasks import drain_tasks
@@ -229,13 +229,13 @@ def test_progress_caps_at_100_and_content_is_throttled(db) -> None:
     last_info_time = 0.0
     base_time = 1000.0
 
-    with patch("app.mcp.request_handler.time") as mock_time:
+    with patch("app.mcp.message_streaming.time") as mock_time:
         mock_time.monotonic.return_value = base_time
 
         for i in range(12):
             event = {"type": "assistant", "content": f"chunk {i}", "metadata": {}}
             progress, last_info_time = asyncio.run(
-                MCPRequestHandler._send_mcp_progress(mock_ctx, event, progress, last_info_time)
+                send_mcp_progress(mock_ctx, event, progress, last_info_time)
             )
 
     assert progress == 100, f"Progress should cap at 100, got {progress}"
@@ -257,11 +257,11 @@ def test_progress_caps_at_100_and_content_is_throttled(db) -> None:
     progress2 = 0
     last_info_time2 = 0.0
 
-    with patch("app.mcp.request_handler.time") as mock_time:
+    with patch("app.mcp.message_streaming.time") as mock_time:
         # t=1000.0: first event (gap from 0.0 = 1000.0 ≥ 0.5 → info fires)
         mock_time.monotonic.return_value = 1000.0
         progress2, last_info_time2 = asyncio.run(
-            MCPRequestHandler._send_mcp_progress(
+            send_mcp_progress(
                 mock_ctx2,
                 {"type": "assistant", "content": "chunk A", "metadata": {}},
                 progress2, last_info_time2,
@@ -271,7 +271,7 @@ def test_progress_caps_at_100_and_content_is_throttled(db) -> None:
         # t=1000.1: gap = 0.1 < 0.5 → throttled
         mock_time.monotonic.return_value = 1000.1
         progress2, last_info_time2 = asyncio.run(
-            MCPRequestHandler._send_mcp_progress(
+            send_mcp_progress(
                 mock_ctx2,
                 {"type": "assistant", "content": "chunk B", "metadata": {}},
                 progress2, last_info_time2,
@@ -281,7 +281,7 @@ def test_progress_caps_at_100_and_content_is_throttled(db) -> None:
         # t=1000.3: gap = 0.3 < 0.5 → still throttled
         mock_time.monotonic.return_value = 1000.3
         progress2, last_info_time2 = asyncio.run(
-            MCPRequestHandler._send_mcp_progress(
+            send_mcp_progress(
                 mock_ctx2,
                 {"type": "assistant", "content": "chunk C", "metadata": {}},
                 progress2, last_info_time2,
@@ -291,7 +291,7 @@ def test_progress_caps_at_100_and_content_is_throttled(db) -> None:
         # t=1000.6: gap from last info (1000.0) = 0.6 ≥ 0.5 → info fires
         mock_time.monotonic.return_value = 1000.6
         progress2, last_info_time2 = asyncio.run(
-            MCPRequestHandler._send_mcp_progress(
+            send_mcp_progress(
                 mock_ctx2,
                 {"type": "assistant", "content": "chunk D", "metadata": {}},
                 progress2, last_info_time2,

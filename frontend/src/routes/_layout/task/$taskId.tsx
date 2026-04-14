@@ -44,6 +44,7 @@ import { TaskTriggersApi } from "@/components/Tasks/Triggers/triggerApi"
 import { TaskStatusPill } from "@/components/Tasks/TaskStatusPill"
 import { TaskShortCodeBadge } from "@/components/Tasks/TaskShortCodeBadge"
 import { SubtaskProgressChip } from "@/components/Tasks/SubtaskProgressChip"
+import { AgentSelectorDialog } from "@/components/Common/AgentSelectorDialog"
 import { RelativeTime } from "@/components/Common/RelativeTime"
 import { MarkdownRenderer } from "@/components/Chat/MarkdownRenderer"
 import { Button } from "@/components/ui/button"
@@ -1114,24 +1115,13 @@ function TaskDetailPage() {
       </div>
 
       {/* ---- Modals ---- */}
-      <Dialog open={agentSelectorOpen} onOpenChange={setAgentSelectorOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Select Agent</DialogTitle></DialogHeader>
-          <div className="flex flex-wrap gap-2 pt-4">
-            {agents.map((agent) => {
-              const colorPreset = getColorPreset(agent.ui_color_preset)
-              const isSelected = task.selected_agent_id === agent.id
-              return (
-                <button key={agent.id} className={cn("cursor-pointer px-4 py-2 text-sm rounded-md transition-all flex items-center gap-2", colorPreset.badgeBg, colorPreset.badgeText, colorPreset.badgeHover, isSelected && colorPreset.badgeOutline)} onClick={() => handleAgentSelect(agent.id)}>
-                  <Bot className="h-4 w-4" />
-                  {agent.name}{isSelected && <Check className="h-4 w-4" />}
-                </button>
-              )
-            })}
-            {agents.length === 0 && <p className="text-sm text-muted-foreground">No agents available</p>}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <AgentSelectorDialog
+        open={agentSelectorOpen}
+        onOpenChange={setAgentSelectorOpen}
+        onSelect={handleAgentSelect}
+        selectedAgentId={task.selected_agent_id}
+        workspaceId={activeWorkspaceId}
+      />
 
       <Dialog open={teamSelectorOpen} onOpenChange={setTeamSelectorOpen}>
         <DialogContent className="sm:max-w-md">

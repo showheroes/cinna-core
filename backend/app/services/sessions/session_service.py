@@ -63,6 +63,7 @@ class SessionService:
 
         session = Session(
             environment_id=agent.active_environment_id,
+            agent_id=agent.id,
             user_id=user_id,
             user_workspace_id=agent.user_workspace_id,
             access_token_id=access_token_id,
@@ -113,15 +114,11 @@ class SessionService:
         email_thread_id: str,
     ) -> Session | None:
         """Find an existing session by email thread ID on a specific clone agent."""
-        stmt = select(Session, AgentEnvironment).where(
-            Session.environment_id == AgentEnvironment.id,
-            AgentEnvironment.agent_id == clone_agent_id,
+        stmt = select(Session).where(
+            Session.agent_id == clone_agent_id,
             Session.email_thread_id == email_thread_id,
         )
-        result = db_session.exec(stmt).first()
-        if result:
-            return result[0]
-        return None
+        return db_session.exec(stmt).first()
 
     @staticmethod
     def get_session_by_context_id(
@@ -1183,7 +1180,7 @@ class SessionService:
 
             environment_id = environment.id
             environment_status = environment.status
-            agent_id_for_command = environment.agent_id
+            agent_id_for_command = chat_session.agent_id
 
         # Phase 1.5: Check for slash commands (e.g., /files)
         # Commands are handled locally without an LLM call.
@@ -1423,15 +1420,15 @@ class SessionService:
             if not session:
                 return {"action": "error", "message": "Session not found"}
 
+            # Get agent
+            agent = db.get(Agent, session.agent_id)
+            if not agent:
+                return {"action": "error", "message": "Agent not found"}
+
             # Get environment
             environment = db.get(AgentEnvironment, session.environment_id)
             if not environment:
                 return {"action": "error", "message": "Environment not found"}
-
-            # Get agent
-            agent = db.get(Agent, environment.agent_id)
-            if not agent:
-                return {"action": "error", "message": "Agent not found"}
 
             # If session points to a non-active environment, resolve to the agent's active one
             if agent.active_environment_id and agent.active_environment_id != environment.id:
@@ -1849,13 +1846,13 @@ class SessionService:
             if not session:
                 raise ValueError("Session not found")
 
+            agent = db.get(Agent, session.agent_id)
+            if not agent:
+                raise ValueError("Agent not found")
+
             environment = db.get(AgentEnvironment, session.environment_id)
             if not environment:
                 raise ValueError("Environment not found")
-
-            agent = db.get(Agent, environment.agent_id)
-            if not agent:
-                raise ValueError("Agent not found")
 
             initial_status = environment.status
             environment_id = environment.id

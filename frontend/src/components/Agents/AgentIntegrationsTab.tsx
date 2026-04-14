@@ -145,7 +145,7 @@ export function AgentIntegrationsTab({ agent }: AgentIntegrationsTabProps) {
         <GuestShareCard agentId={agent.id} />
 
         {/* MCP Connectors Card */}
-        <McpConnectorsCard agentId={agent.id} />
+        <McpConnectorsCard agentId={agent.id} agentName={agent.name} />
 
         {/* Webapp Share Links Card */}
         <WebappShareCard agentId={agent.id} webappEnabled={agent.webapp_enabled ?? false} />

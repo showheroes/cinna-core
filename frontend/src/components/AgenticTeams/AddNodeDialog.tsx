@@ -9,15 +9,13 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Bot } from "lucide-react"
 import { AgentsService } from "@/client"
+import { AgentSelectorDialog } from "@/components/Common/AgentSelectorDialog"
+import type { AgentOption } from "@/components/Common/AgentSelectorDialog"
+import { getColorPreset } from "@/utils/colorPresets"
+import { cn } from "@/lib/utils"
 
 interface AddNodeDialogProps {
   open: boolean
@@ -36,6 +34,7 @@ export function AddNodeDialog({
 }: AddNodeDialogProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("")
   const [isLead, setIsLead] = useState(false)
+  const [agentSelectorOpen, setAgentSelectorOpen] = useState(false)
 
   const { data: agentsData } = useQuery({
     queryKey: ["allAgents"],
@@ -43,11 +42,13 @@ export function AddNodeDialog({
     enabled: open,
   })
 
-  const availableAgents = (agentsData?.data ?? []).filter(
-    (a) => !existingAgentIds.includes(a.id),
-  )
+  const allAgents = agentsData?.data ?? []
+  const selectedAgent = allAgents.find((a) => a.id === selectedAgentId)
+  const selectedPreset = selectedAgent ? getColorPreset(selectedAgent.ui_color_preset) : null
 
-  const selectedAgent = availableAgents.find((a) => a.id === selectedAgentId)
+  const agentOptions: AgentOption[] = allAgents
+    .filter((a) => !existingAgentIds.includes(a.id))
+    .map((a) => ({ id: a.id, name: a.name, colorPreset: a.ui_color_preset }))
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -72,28 +73,20 @@ export function AddNodeDialog({
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="agent-select">Agent</Label>
-              <Select
-                value={selectedAgentId}
-                onValueChange={setSelectedAgentId}
+              <Label>Agent</Label>
+              <button
+                type="button"
+                onClick={() => setAgentSelectorOpen(true)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 rounded-md text-sm transition-all text-left",
+                  selectedPreset
+                    ? `${selectedPreset.badgeBg} ${selectedPreset.badgeText} ${selectedPreset.badgeHover}`
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
               >
-                <SelectTrigger id="agent-select">
-                  <SelectValue placeholder="Select an agent..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableAgents.length === 0 ? (
-                    <SelectItem value="__empty__" disabled>
-                      All your agents are already in this team
-                    </SelectItem>
-                  ) : (
-                    availableAgents.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        {agent.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+                <Bot className="h-4 w-4 shrink-0" />
+                <span className="truncate">{selectedAgent?.name || "Select an agent..."}</span>
+              </button>
               {selectedAgent && (
                 <div className="text-xs text-muted-foreground">
                   Node name: <span className="font-medium">{selectedAgent.name}</span>
@@ -115,12 +108,21 @@ export function AddNodeDialog({
             </Button>
             <Button
               type="submit"
-              disabled={!selectedAgentId || selectedAgentId === "__empty__" || isPending}
+              disabled={!selectedAgentId || isPending}
             >
               {isPending ? "Adding..." : "Add Node"}
             </Button>
           </DialogFooter>
         </form>
+
+        <AgentSelectorDialog
+          open={agentSelectorOpen}
+          onOpenChange={setAgentSelectorOpen}
+          onSelect={setSelectedAgentId}
+          selectedAgentId={selectedAgentId}
+          agents={agentOptions}
+          title="Select Agent for Node"
+        />
       </DialogContent>
     </Dialog>
   )

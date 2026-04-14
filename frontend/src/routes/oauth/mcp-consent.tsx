@@ -24,6 +24,7 @@ import { APP_NAME } from "@/utils"
 
 const searchSchema = z.object({
   nonce: z.string(),
+  app_mcp: z.boolean().optional(),
 })
 
 export const Route = createFileRoute("/oauth/mcp-consent")({
@@ -47,8 +48,11 @@ export const Route = createFileRoute("/oauth/mcp-consent")({
 
 const API_BASE = import.meta.env.VITE_API_URL || ""
 
-async function fetchConsentInfo(nonce: string) {
-  const res = await fetch(`${API_BASE}/api/v1/mcp/consent/${nonce}`)
+async function fetchConsentInfo(nonce: string, appMcp: boolean) {
+  const params = new URLSearchParams({ app_mcp: String(appMcp) })
+  const res = await fetch(
+    `${API_BASE}/api/v1/mcp/consent/${nonce}?${params}`,
+  )
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.detail || `Error ${res.status}`)
@@ -73,7 +77,7 @@ async function approveConsent(nonce: string) {
 }
 
 function McpConsentPage() {
-  const { nonce } = Route.useSearch()
+  const { nonce, app_mcp } = Route.useSearch()
   const [authorized, setAuthorized] = useState(false)
   const [denied, setDenied] = useState(false)
 
@@ -83,7 +87,7 @@ function McpConsentPage() {
     error,
   } = useQuery({
     queryKey: ["mcp-consent", nonce],
-    queryFn: () => fetchConsentInfo(nonce),
+    queryFn: () => fetchConsentInfo(nonce, app_mcp ?? false),
   })
 
   const approveMutation = useMutation({
@@ -175,6 +179,10 @@ function McpConsentPage() {
     }
   }
 
+  // App-level MCP consent: connector_mode === "routing" means this is the
+  // App MCP Server (no specific agent/connector — routes dynamically).
+  const isAppMcp = consentInfo?.connector_mode === "routing"
+
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-md">
@@ -182,27 +190,42 @@ function McpConsentPage() {
           <ShieldCheck className="mx-auto h-12 w-12 text-primary" />
           <CardTitle className="mt-2">Authorize Access</CardTitle>
           <CardDescription>
-            An application wants to connect to your agent
+            {isAppMcp
+              ? "An application wants to connect to the Application MCP Server"
+              : "An application wants to connect to your agent"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-lg border p-4 space-y-3">
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Agent</span>
-              <span className="text-sm font-medium">
-                {consentInfo.agent_name}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Connector</span>
-              <span className="text-sm font-medium">
-                {consentInfo.connector_name}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Mode</span>
-              <Badge variant="secondary">{consentInfo.connector_mode}</Badge>
-            </div>
+            {isAppMcp ? (
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Server</span>
+                <span className="text-sm font-medium">
+                  {consentInfo.agent_name}
+                </span>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Agent</span>
+                  <span className="text-sm font-medium">
+                    {consentInfo.agent_name}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">
+                    Connector
+                  </span>
+                  <span className="text-sm font-medium">
+                    {consentInfo.connector_name}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Mode</span>
+                  <Badge variant="secondary">{consentInfo.connector_mode}</Badge>
+                </div>
+              </>
+            )}
             <div className="flex justify-between">
               <span className="text-sm text-muted-foreground">Application</span>
               <span className="text-sm font-medium">

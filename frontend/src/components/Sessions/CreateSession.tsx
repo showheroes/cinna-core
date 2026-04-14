@@ -13,18 +13,15 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { AgentsService, SessionsService } from "@/client"
 import type { SessionCreate } from "@/client"
+import { AgentSelectorDialog } from "@/components/Common/AgentSelectorDialog"
+import type { AgentOption } from "@/components/Common/AgentSelectorDialog"
 import useCustomToast from "@/hooks/useCustomToast"
 import useWorkspace from "@/hooks/useWorkspace"
-import { MessageSquarePlus } from "lucide-react"
+import { getColorPreset } from "@/utils/colorPresets"
+import { cn } from "@/lib/utils"
+import { MessageSquarePlus, Bot } from "lucide-react"
 
 interface CreateSessionProps {
   variant?: "default" | "outline" | "secondary"
@@ -37,6 +34,7 @@ export function CreateSession({ variant = "default", size = "default", className
   const [agentId, setAgentId] = useState("")
   const [mode, setMode] = useState<"conversation" | "building">("conversation")
   const [title, setTitle] = useState("")
+  const [agentSelectorOpen, setAgentSelectorOpen] = useState(false)
 
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -122,24 +120,41 @@ export function CreateSession({ variant = "default", size = "default", className
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="agent">Agent*</Label>
-              <Select value={agentId} onValueChange={setAgentId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select an agent" />
-                </SelectTrigger>
-                <SelectContent>
-                  {agentsWithActiveEnv.length === 0 && (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                      No agents with active environments
-                    </div>
-                  )}
-                  {agentsWithActiveEnv.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Agent*</Label>
+              {(() => {
+                const selectedAgent = agentsWithActiveEnv.find((a) => a.id === agentId)
+                const preset = selectedAgent ? getColorPreset(selectedAgent.ui_color_preset) : null
+                const agentOptions: AgentOption[] = agentsWithActiveEnv.map((a) => ({
+                  id: a.id,
+                  name: a.name,
+                  colorPreset: a.ui_color_preset,
+                }))
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setAgentSelectorOpen(true)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-2 rounded-md text-sm transition-all w-full text-left",
+                        preset
+                          ? `${preset.badgeBg} ${preset.badgeText} ${preset.badgeHover}`
+                          : "bg-muted text-muted-foreground hover:bg-muted/80"
+                      )}
+                    >
+                      <Bot className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{selectedAgent?.name || "Select an agent"}</span>
+                    </button>
+                    <AgentSelectorDialog
+                      open={agentSelectorOpen}
+                      onOpenChange={setAgentSelectorOpen}
+                      onSelect={setAgentId}
+                      selectedAgentId={agentId}
+                      agents={agentOptions}
+                      title="Select Agent"
+                    />
+                  </>
+                )
+              })()}
               {agents.length > 0 && agentsWithActiveEnv.length === 0 && (
                 <p className="text-sm text-muted-foreground text-amber-600">
                   Please start an environment for your agent first

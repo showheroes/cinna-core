@@ -3,6 +3,8 @@ from fastapi import APIRouter
 from app.api.routes import (
     a2a,
     access_tokens,
+    agent_app_mcp_routes,
+    app_agent_routes,
     cli,
     activities,
     agents,
@@ -34,6 +36,7 @@ from app.api.routes import (
     ssh_keys,
     task_agent_api,
     task_triggers,
+    user_app_agent_routes,
     users,
     user_dashboards,
     user_workspaces,
@@ -95,6 +98,9 @@ api_router.include_router(shared_workspace.router)
 api_router.include_router(a2a.router)
 api_router.include_router(mcp_connectors.router)
 api_router.include_router(mcp_consent.router)
+api_router.include_router(agent_app_mcp_routes.router)
+api_router.include_router(app_agent_routes.router)
+api_router.include_router(user_app_agent_routes.router)
 api_router.include_router(cli.router)
 
 

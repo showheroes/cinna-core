@@ -847,15 +847,15 @@ class MessageService:
                     db.commit()
                     db.refresh(chat_session)
 
-                # Get environment and agent
+                # Get agent and environment
+                agent = db.get(Agent, chat_session.agent_id)
+                if not agent:
+                    logger.error(f"Agent {chat_session.agent_id} not found")
+                    return
+
                 environment = db.get(AgentEnvironment, chat_session.environment_id)
                 if not environment:
                     logger.error(f"Environment {chat_session.environment_id} not found")
-                    return
-
-                agent = db.get(Agent, environment.agent_id)
-                if not agent:
-                    logger.error(f"Agent {environment.agent_id} not found")
                     return
 
                 # Prepare streaming parameters

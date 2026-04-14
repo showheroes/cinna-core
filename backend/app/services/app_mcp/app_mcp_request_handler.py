@@ -1,0 +1,201 @@
+"""
+App MCP Request Handler — handles send_message tool calls for the App MCP Server.
+
+Bridges App MCP protocol requests to internal services:
+1. If context_id: resume existing session (agent already selected)
+2. If no context_id: route to agent via AppMCPRoutingService
+3. Create/reuse session, delegate to shared streaming pipeline, return result
+"""
+import json
+import logging
+import uuid
+
+from sqlmodel import Session as DBSession, select
+
+from app.core.db import create_session
+from app.models import Agent, Session, SessionCreate
+from app.services.sessions.session_service import SessionService
+from app.services.sessions.message_service import MessageService
+from app.services.app_mcp.app_mcp_routing_service import AppMCPRoutingService
+from app.mcp.message_streaming import stream_and_collect_response
+from app.utils import create_task_with_error_logging
+
+logger = logging.getLogger(__name__)
+
+
+class AppMCPRequestHandler:
+    """Handles App MCP send_message tool calls."""
+
+    @staticmethod
+    async def handle_send_message(
+        user_id: uuid.UUID,
+        message: str,
+        context_id: str | None,
+        mcp_ctx=None,
+    ) -> str:
+        """Handle send_message tool call for App MCP.
+
+        Returns JSON string with keys: response, context_id, agent_name.
+        On error: returns JSON with keys: error, context_id.
+        """
+        try:
+            return await AppMCPRequestHandler._handle_inner(
+                user_id=user_id,
+                message=message,
+                context_id=context_id,
+                mcp_ctx=mcp_ctx,
+            )
+        except Exception as e:
+            logger.exception("[AppMCP] Unhandled error in send_message: %s", e)
+            return json.dumps({"error": str(e), "context_id": context_id or ""})
+
+    @staticmethod
+    async def _handle_inner(
+        user_id: uuid.UUID,
+        message: str,
+        context_id: str | None,
+        mcp_ctx=None,
+    ) -> str:
+        """Inner handler — performs routing, session creation, and streaming."""
+        # Phase 1: Resolve session (resume or create)
+        with create_session() as db:
+            platform_session, agent, is_new_session = await AppMCPRequestHandler._resolve_session(
+                db=db,
+                user_id=user_id,
+                message=message,
+                context_id=context_id,
+            )
+            if platform_session is None:
+                return json.dumps({
+                    "error": (
+                        agent if isinstance(agent, str)
+                        else "No agents are configured for your account. Contact your admin."
+                    ),
+                    "context_id": "",
+                })
+
+            session_id = platform_session.id
+            result_context_id = str(session_id)
+            agent_name = agent.name if hasattr(agent, "name") else ""
+
+            # Create user message as "pending" — the shared streaming pipeline
+            # will collect it, mark as sent, and stream (same as process_pending_messages)
+            MessageService.create_message(
+                session=db,
+                session_id=session_id,
+                role="user",
+                content=message,
+            )
+
+        # Background title generation for new sessions
+        if is_new_session:
+            create_task_with_error_logging(
+                SessionService.auto_generate_session_title(
+                    session_id=session_id,
+                    first_message_content=message,
+                    get_fresh_db_session=create_session,
+                ),
+                task_name=f"app_mcp_title_{session_id}",
+            )
+
+        # Phases 2–3: Environment readiness + streaming (shared pipeline)
+        response_text = await stream_and_collect_response(
+            session_id=session_id,
+            get_fresh_db_session=create_session,
+            mcp_ctx=mcp_ctx,
+            log_prefix="[AppMCP]",
+        )
+
+        # If the shared pipeline returned an error JSON, pass it through
+        if response_text.startswith("{"):
+            try:
+                parsed = json.loads(response_text)
+                if "error" in parsed:
+                    return response_text
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        return json.dumps({
+            "response": response_text if response_text else "No response from agent",
+            "context_id": result_context_id,
+            "agent_name": agent_name,
+        })
+
+    @staticmethod
+    async def _resolve_session(
+        db: DBSession,
+        user_id: uuid.UUID,
+        message: str,
+        context_id: str | None,
+    ) -> tuple[Session | None, Agent | str | None, bool]:
+        """Resolve or create a session.
+
+        Returns: (session, agent, is_new_session)
+        If routing fails, returns (None, error_message_str, False).
+        """
+        # Case 1: Resume existing session by context_id
+        if context_id:
+            try:
+                existing_session_id = uuid.UUID(context_id)
+            except ValueError:
+                existing_session_id = None
+
+            if existing_session_id:
+                stmt = (
+                    select(Session, Agent)
+                    .join(Agent, Session.agent_id == Agent.id)
+                    .where(
+                        Session.id == existing_session_id,
+                        Session.user_id == user_id,
+                        Session.integration_type == "app_mcp",
+                    )
+                )
+                result = db.exec(stmt).first()
+                if result:
+                    session, agent = result
+                    logger.debug("[AppMCP] Resuming session %s for user %s", context_id, user_id)
+                    return session, agent, False
+
+            logger.debug("[AppMCP] context_id %s not found or invalid, creating new session", context_id)
+
+        # Case 2: Route message to an agent
+        routing_result = AppMCPRoutingService.route_message(
+            db_session=db,
+            user_id=user_id,
+            message=message,
+        )
+        if not routing_result:
+            return None, "Could not determine which agent to use. Please be more specific, or ask your admin to configure agents for your account.", False
+
+        agent = db.get(Agent, routing_result.agent_id)
+        if not agent or not agent.active_environment_id:
+            return None, f"Agent '{routing_result.agent_name}' does not have an active environment.", False
+
+        # Create a new session
+        session_data = SessionCreate(
+            agent_id=routing_result.agent_id,
+            mode=routing_result.session_mode,
+        )
+        session = SessionService.create_session(
+            db_session=db,
+            user_id=user_id,
+            data=session_data,
+            integration_type="app_mcp",
+        )
+        if not session:
+            return None, "Failed to create session.", False
+
+        # Store routing metadata in session_metadata
+        session.session_metadata = {
+            **(session.session_metadata or {}),
+            "app_mcp_route_type": routing_result.route_source,
+            "app_mcp_route_id": str(routing_result.route_id),
+            "app_mcp_agent_name": routing_result.agent_name,
+            "app_mcp_session_mode": routing_result.session_mode,
+            "app_mcp_match_method": routing_result.match_method,
+        }
+        db.add(session)
+        db.flush()
+        db.refresh(session)
+
+        return session, agent, True

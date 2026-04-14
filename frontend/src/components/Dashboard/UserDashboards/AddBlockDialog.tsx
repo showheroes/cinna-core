@@ -1,8 +1,9 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Globe, MessageSquare, ClipboardList, FileText } from "lucide-react"
+import { Globe, MessageSquare, ClipboardList, FileText, Bot } from "lucide-react"
 
 import { AgentsService, DashboardsService } from "@/client"
+import { AgentSelectorDialog } from "@/components/Common/AgentSelectorDialog"
 import {
   Dialog,
   DialogContent,
@@ -43,6 +44,7 @@ export function AddBlockDialog({ dashboardId, open, onOpenChange }: AddBlockDial
   const [selectedAgentId, setSelectedAgentId] = useState<string>("")
   const [viewType, setViewType] = useState<ViewType>("latest_session")
   const [filePath, setFilePath] = useState<string>("")
+  const [agentSelectorOpen, setAgentSelectorOpen] = useState(false)
 
   // Fetch all agents without workspace filter
   const { data: agentsData, isLoading: agentsLoading } = useQuery({
@@ -126,24 +128,33 @@ export function AddBlockDialog({ dashboardId, open, onOpenChange }: AddBlockDial
           {/* Agent picker */}
           <div className="flex items-center gap-4">
             <Label className="w-24 shrink-0 text-right text-sm">Agent</Label>
-            <Select value={selectedAgentId} onValueChange={handleAgentChange} disabled={agentsLoading}>
-              <SelectTrigger className="ml-auto w-56">
-                <SelectValue placeholder={agentsLoading ? "Loading agents..." : "Select an agent"} />
-              </SelectTrigger>
-              <SelectContent>
-                {agents.map((agent) => {
-                  const colorPreset = getColorPreset(agent.ui_color_preset)
-                  return (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full shrink-0 ${colorPreset.badgeBg} bg-current`} />
-                        {agent.name}
-                      </div>
-                    </SelectItem>
-                  )
-                })}
-              </SelectContent>
-            </Select>
+            {(() => {
+              const preset = selectedAgent ? getColorPreset(selectedAgent.ui_color_preset) : null
+              return (
+                <button
+                  type="button"
+                  onClick={() => setAgentSelectorOpen(true)}
+                  disabled={agentsLoading}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm transition-all ml-auto w-56 text-left ${
+                    preset
+                      ? `${preset.badgeBg} ${preset.badgeText} ${preset.badgeHover}`
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                >
+                  <Bot className="h-4 w-4 shrink-0" />
+                  <span className="truncate">
+                    {agentsLoading ? "Loading agents..." : selectedAgent?.name || "Select an agent"}
+                  </span>
+                </button>
+              )
+            })()}
+            <AgentSelectorDialog
+              open={agentSelectorOpen}
+              onOpenChange={setAgentSelectorOpen}
+              onSelect={handleAgentChange}
+              selectedAgentId={selectedAgentId}
+              title="Select Agent"
+            />
           </div>
 
           {/* View type */}

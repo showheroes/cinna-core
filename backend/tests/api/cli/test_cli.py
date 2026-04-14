@@ -4,7 +4,7 @@ Backend tests for the Local Development CLI feature.
 Covers:
 - Setup token creation, exchange (full lifecycle), and error cases
 - CLI token listing, filtering by agent, and revocation
-- CLI-authenticated endpoints: build-context, credentials, building-context,
+- CLI-authenticated endpoints: build-context, building-context,
   workspace (404 without env), workspace/manifest (404 without env),
   knowledge/search
 - Auth guards: unauthenticated, wrong user, revoked token, wrong agent scope
@@ -176,14 +176,13 @@ def test_cli_authenticated_endpoints(
     CLI-authenticated endpoint access:
       1. Create agent, setup token, exchange → obtain CLI JWT
       2. GET build-context → 200, tar+gzip bytes returned
-      3. GET credentials → 200, response has "credentials" key
-      4. GET building-context → 200, has "building_prompt" (minimal fallback)
-      5. GET workspace → 404 (no active environment in test)
-      6. GET workspace/manifest → 404 (no active environment in test)
-      7. POST knowledge/search → 200, has "results" key
-      8. Scoping guard: access different agent's endpoints with the token → 403
-      9. Auth guard: plain user JWT rejected by CLI endpoints → 401
-     10. Revoke token, then use it → 401
+      3. GET building-context → 200, has "building_prompt" (minimal fallback)
+      4. GET workspace → 404 (no active environment in test)
+      5. GET workspace/manifest → 404 (no active environment in test)
+      6. POST knowledge/search → 200, has "results" key
+      7. Scoping guard: access different agent's endpoints with the token → 403
+      8. Auth guard: plain user JWT rejected by CLI endpoints → 401
+      9. Revoke token, then use it → 401
     """
     # ── Phase 1: Bootstrap CLI token ─────────────────────────────────────
     agent = create_agent_via_api(client, superuser_token_headers)
@@ -194,7 +193,7 @@ def test_cli_authenticated_endpoints(
     cli_jwt = exchange["cli_token"]
     cli_headers = cli_auth_headers(cli_jwt)
 
-    # Fetch token id for later revocation (phase 10)
+    # Fetch token id for later revocation (phase 9)
     tokens = list_cli_tokens(client, superuser_token_headers)
     assert len(tokens) == 1
     cli_token_id = tokens[0]["id"]
@@ -208,14 +207,7 @@ def test_cli_authenticated_endpoints(
     content_disposition = r.headers.get("content-disposition", "")
     assert "build-context.tar.gz" in content_disposition
 
-    # ── Phase 3: GET credentials → 200 ───────────────────────────────────
-    r = client.get(f"{_BASE}/agents/{agent_id}/credentials", headers=cli_headers)
-    assert r.status_code == 200
-    body = r.json()
-    assert "credentials" in body
-    assert isinstance(body["credentials"], list)
-
-    # ── Phase 4: GET building-context → 200 (minimal fallback) ───────────
+    # ── Phase 3: GET building-context → 200 (minimal fallback) ───────────
     r = client.get(f"{_BASE}/agents/{agent_id}/building-context", headers=cli_headers)
     assert r.status_code == 200
     body = r.json()
@@ -223,15 +215,15 @@ def test_cli_authenticated_endpoints(
     assert "building_prompt" in body
     assert "settings" in body
 
-    # ── Phase 5: GET workspace → 404 (no active environment) ─────────────
+    # ── Phase 4: GET workspace → 404 (no active environment) ─────────────
     r = client.get(f"{_BASE}/agents/{agent_id}/workspace", headers=cli_headers)
     assert r.status_code == 404
 
-    # ── Phase 6: GET workspace/manifest → 404 (no active environment) ─────
+    # ── Phase 5: GET workspace/manifest → 404 (no active environment) ─────
     r = client.get(f"{_BASE}/agents/{agent_id}/workspace/manifest", headers=cli_headers)
     assert r.status_code == 404
 
-    # ── Phase 7: POST knowledge/search → 200 ─────────────────────────────
+    # ── Phase 6: POST knowledge/search → 200 ─────────────────────────────
     r = client.post(
         f"{_BASE}/agents/{agent_id}/knowledge/search",
         headers=cli_headers,
@@ -244,7 +236,7 @@ def test_cli_authenticated_endpoints(
     # No knowledge sources configured in test → empty results expected
     assert body["results"] == []
 
-    # ── Phase 8: Scoping guard — wrong agent_id → 403 ────────────────────
+    # ── Phase 7: Scoping guard — wrong agent_id → 403 ────────────────────
     other_agent = create_agent_via_api(client, superuser_token_headers)
     other_agent_id = other_agent["id"]
 
@@ -256,18 +248,12 @@ def test_cli_authenticated_endpoints(
     assert r.status_code == 403
 
     r = client.get(
-        f"{_BASE}/agents/{other_agent_id}/credentials",
-        headers=cli_headers,
-    )
-    assert r.status_code == 403
-
-    r = client.get(
         f"{_BASE}/agents/{other_agent_id}/building-context",
         headers=cli_headers,
     )
     assert r.status_code == 403
 
-    # ── Phase 9: Plain user JWT rejected by CLI dep → 401 ────────────────
+    # ── Phase 8: Plain user JWT rejected by CLI dep → 401 ────────────────
     # The CLIContextDep decodes the token and checks token_type == "cli"
     # A regular user JWT has no token_type claim → 401
     r = client.get(
@@ -276,13 +262,7 @@ def test_cli_authenticated_endpoints(
     )
     assert r.status_code == 401
 
-    r = client.get(
-        f"{_BASE}/agents/{agent_id}/credentials",
-        headers=superuser_token_headers,
-    )
-    assert r.status_code == 401
-
-    # ── Phase 10: Revoke token, then use it → 401 ─────────────────────────
+    # ── Phase 9: Revoke token, then use it → 401 ─────────────────────────
     revoke_cli_token(client, superuser_token_headers, cli_token_id)
 
     r = client.get(
@@ -291,9 +271,3 @@ def test_cli_authenticated_endpoints(
     )
     assert r.status_code == 401
     assert "revoked" in r.json()["detail"].lower()
-
-    r = client.get(
-        f"{_BASE}/agents/{agent_id}/credentials",
-        headers=cli_headers,
-    )
-    assert r.status_code == 401

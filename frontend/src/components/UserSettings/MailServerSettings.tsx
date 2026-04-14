@@ -39,14 +39,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -225,100 +217,95 @@ export function MailServerSettings() {
   return (
     <>
       <Card>
-        <CardHeader>
+        <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Mail Servers</CardTitle>
-              <CardDescription>
-                &nbsp;
-              </CardDescription>
-            </div>
+            <CardTitle className="flex items-center gap-2">
+              <Server className="h-4 w-4 text-blue-500" />
+              Mail Servers
+            </CardTitle>
             <Button onClick={handleAdd} size="sm">
               <Plus className="h-4 w-4 mr-2" />
-              Add Server
+              Add
             </Button>
           </div>
+          <CardDescription>
+            IMAP and SMTP servers for email integrations
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="text-sm text-muted-foreground">Loading mail servers...</div>
-          ) : servers.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Host</TableHead>
-                  <TableHead>Encryption</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {servers.map((server) => (
-                  <TableRow key={server.id}>
-                    <TableCell className="font-medium">{server.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="uppercase text-xs">
-                        {server.server_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {server.host}:{server.port}
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground uppercase">
-                        {server.encryption_type || "ssl"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex gap-1 justify-end">
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => handleTestConnection(server.id)}
-                                disabled={testingId === server.id}
-                              >
-                                {testingId === server.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Plug className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Test connection</TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => handleEdit(server)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setDeleteServerId(server.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
+            <p className="text-sm text-muted-foreground">Loading mail servers...</p>
+          ) : servers.length === 0 ? (
             <div className="text-sm text-muted-foreground py-6 text-center">
               <Server className="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p>No mail servers configured</p>
               <p className="text-xs mt-1">Add an IMAP or SMTP server to enable email integrations</p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {servers.map((server) => (
+                <div
+                  key={server.id}
+                  className="flex items-center justify-between px-3 py-2 border rounded-lg"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-medium text-sm truncate">{server.name}</span>
+                    <Badge variant="outline" className="uppercase text-xs shrink-0">
+                      {server.server_type}
+                    </Badge>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-xs text-muted-foreground cursor-help truncate">
+                            {server.host}:{server.port}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          {server.host}:{server.port} ({(server.encryption_type || "ssl").toUpperCase()})
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => handleTestConnection(server.id)}
+                            disabled={testingId === server.id}
+                          >
+                            {testingId === server.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Plug className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Test connection</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => handleEdit(server)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => setDeleteServerId(server.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardContent>

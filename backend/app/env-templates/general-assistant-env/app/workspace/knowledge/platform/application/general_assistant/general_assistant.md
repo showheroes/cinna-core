@@ -1,5 +1,7 @@
 # General Assistant
 
+> **Status: Prototype Draft** — This feature is not yet available to end users. The General Assistant tab has been removed from Settings UI pending further development. The backend implementation and environment template exist but the feature is not exposed in the current interface.
+
 The General Assistant (GA) is a system-created agent that helps users set up, configure, and manage their agentic workflows by reading platform documentation and executing Python scripts against the platform's own REST API. It is a special-purpose building-mode agent that each user owns at most one of.
 
 ---

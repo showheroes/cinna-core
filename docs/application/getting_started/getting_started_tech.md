@@ -39,7 +39,9 @@
 - Articles defined in a local `articles[]` config array (not fetched from backend)
 - `setSelectedArticle` passed into article content functions to enable cross-article navigation
 - "Start Building" gradient button closes the modal
-- Four articles (IDs): `gmail-quickstart`, `build-agent`, `share-credentials`, `conversation-vs-building`
+- Five articles (IDs): `gmail-quickstart`, `build-agent`, `share-credentials`, `conversation-vs-building`, `app-mcp-setup`
+- Accepts optional `initialArticle` prop to open the modal at a specific article (used by the MCP Server card in Settings > Channels)
+- Exports `ArticleId` type for use by other components
 
 ### RotatingHints (`frontend/src/components/Common/RotatingHints.tsx`)
 

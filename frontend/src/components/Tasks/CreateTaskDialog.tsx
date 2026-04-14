@@ -4,6 +4,8 @@ import { Loader2, Bot, X, Crown } from "lucide-react"
 
 import { TasksService, AgentsService, AgenticTeamsService } from "@/client"
 import type { InputTaskCreate } from "@/client"
+import { AgentSelectorDialog } from "@/components/Common/AgentSelectorDialog"
+import type { AgentOption } from "@/components/Common/AgentSelectorDialog"
 import {
   Dialog,
   DialogContent,
@@ -44,6 +46,7 @@ export function CreateTaskDialog({
   const [selectedTeamId, setSelectedTeamId] = useState<string>(defaultTeamId ?? "")
   const [selectedNodeId, setSelectedNodeId] = useState<string>("")
   const [autoExecute, setAutoExecute] = useState(true)
+  const [agentSelectorOpen, setAgentSelectorOpen] = useState(false)
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -159,15 +162,29 @@ export function CreateTaskDialog({
     createMutation.mutate(payload)
   }
 
-  const handleAgentSelect = (agentId: string, nodeId: string | null) => {
-    if (selectedTeamId && nodeId) {
-      const isSame = selectedNodeId === nodeId
-      setSelectedNodeId(isSame ? "" : nodeId)
-      setSelectedAgentId(isSame ? "" : agentId)
+  const handleAgentSelect = (agentId: string) => {
+    if (selectedTeamId) {
+      const node = teamNodes.find((n) => n.agent_id === agentId)
+      if (node) {
+        const isSame = selectedNodeId === node.id
+        setSelectedNodeId(isSame ? "" : node.id)
+        setSelectedAgentId(isSame ? "" : agentId)
+      }
     } else {
       setSelectedAgentId((prev) => (prev === agentId ? "" : agentId))
     }
   }
+
+  const agentOptions: AgentOption[] = displayAgents.map((a) => ({
+    id: a.id,
+    name: a.name,
+    colorPreset: a.colorPreset,
+  }))
+
+  const selectedDisplayAgent = displayAgents.find((a) =>
+    selectedTeamId ? a.nodeId === selectedNodeId : a.id === selectedAgentId
+  )
+  const selectedPreset = selectedDisplayAgent ? getColorPreset(selectedDisplayAgent.colorPreset) : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -244,45 +261,39 @@ export function CreateTaskDialog({
             </div>
           )}
 
-          {/* Agent badges */}
+          {/* Agent selector */}
           <div className="space-y-2">
             <Label>{selectedTeamId ? "Assign to team member" : "Assign to agent"}</Label>
-            <div className="flex flex-wrap gap-2">
-              {displayAgents.length > 0 ? (
-                displayAgents.map((agent) => {
-                  const preset = getColorPreset(agent.colorPreset)
-                  const isSelected = selectedTeamId
-                    ? selectedNodeId === agent.nodeId
-                    : selectedAgentId === agent.id
-                  return (
-                    <button
-                      type="button"
-                      key={agent.nodeId ?? agent.id}
-                      className={cn(
-                        "cursor-pointer px-3 py-1.5 text-sm rounded-md transition-all flex items-center gap-1.5",
-                        preset.badgeBg,
-                        preset.badgeText,
-                        preset.badgeHover,
-                        isSelected && preset.badgeOutline
-                      )}
-                      onClick={() => handleAgentSelect(agent.id, agent.nodeId)}
-                    >
-                      {agent.isLead ? (
-                        <Crown className="h-3.5 w-3.5" />
-                      ) : (
-                        <Bot className="h-3.5 w-3.5" />
-                      )}
-                      {agent.name}
-                    </button>
-                  )
-                })
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {selectedTeamId ? "No agents in this team" : "No agents available"}
-                </p>
+            <button
+              type="button"
+              onClick={() => setAgentSelectorOpen(true)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all",
+                selectedPreset
+                  ? `${selectedPreset.badgeBg} ${selectedPreset.badgeText} ${selectedPreset.badgeHover}`
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
               )}
-            </div>
+            >
+              {selectedDisplayAgent?.isLead ? (
+                <Crown className="h-3.5 w-3.5" />
+              ) : (
+                <Bot className="h-3.5 w-3.5" />
+              )}
+              <span className="truncate max-w-[200px]">
+                {selectedDisplayAgent?.name || "Select agent..."}
+              </span>
+            </button>
           </div>
+
+          <AgentSelectorDialog
+            open={agentSelectorOpen}
+            onOpenChange={setAgentSelectorOpen}
+            onSelect={handleAgentSelect}
+            selectedAgentId={selectedAgentId}
+            agents={agentOptions}
+            title={selectedTeamId ? "Assign to team member" : "Assign to agent"}
+            allowDeselect
+          />
 
           {createMutation.error && (
             <Alert variant="destructive">

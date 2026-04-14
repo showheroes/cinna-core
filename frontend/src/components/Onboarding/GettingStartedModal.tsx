@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Dialog,
   DialogContent,
@@ -6,15 +6,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { BookOpen, Key, Bot, ChevronRight, Sparkles, ArrowRight, ToggleRight, Mail, MessageSquare } from "lucide-react"
+import { BookOpen, Key, Bot, ChevronRight, Sparkles, ArrowRight, ToggleRight, Mail, MessageSquare, Network } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface GettingStartedModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialArticle?: ArticleId
 }
 
-type ArticleId = "gmail-quickstart" | "build-agent" | "share-credentials" | "conversation-vs-building"
+export type ArticleId = "gmail-quickstart" | "build-agent" | "share-credentials" | "conversation-vs-building" | "app-mcp-setup"
 
 interface Article {
   id: ArticleId
@@ -289,10 +290,69 @@ const articles: Article[] = [
       </div>
     ),
   },
+  {
+    id: "app-mcp-setup",
+    title: "Connect via MCP",
+    icon: <Network className="h-4 w-4" />,
+    content: () => (
+      <div className="space-y-4">
+        <div>
+          <h3 className="font-medium text-base mb-2">What is MCP?</h3>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            The <strong>Model Context Protocol (MCP)</strong> lets external AI clients — such as
+            Claude Desktop, Cursor, or Windsurf — connect to your agents as tool servers.
+            Once connected, you can talk to your agents directly from those clients.
+          </p>
+        </div>
+
+        <div>
+          <h3 className="font-medium text-base mb-2">How to Connect</h3>
+          <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+            <li>
+              <strong>Copy the MCP Server URL</strong> from the card on the left
+            </li>
+            <li>
+              Open your MCP client and find the <strong>MCP Connectors</strong> (or MCP Servers) list
+            </li>
+            <li>
+              Add a new connector — give it a <strong>name</strong> (e.g., "My Agents") and paste the <strong>URL</strong>
+            </li>
+            <li>
+              Click <strong>"Authorize"</strong> or <strong>"Connect"</strong> (the label varies by client) to complete the OAuth flow
+            </li>
+          </ol>
+        </div>
+
+        <div className="bg-muted/50 rounded-lg p-4 border">
+          <p className="text-xs font-medium text-muted-foreground mb-2">Example — Claude Desktop:</p>
+          <p className="text-sm">
+            Open <strong>Settings → Connectors → Add Custom Connector</strong>, paste your URL,
+            and click <strong>Connect</strong>. Claude Desktop will open a browser window
+            for OAuth consent. Once approved, your agents appear as available tools.
+          </p>
+        </div>
+
+        <div>
+          <h3 className="font-medium text-base mb-2">After Connecting</h3>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Your MCP client will have access to a <code className="text-xs bg-muted px-1 py-0.5 rounded">send_message</code> tool.
+            Messages are automatically routed to the right agent based on your configured agent routes
+            and trigger prompts. You can manage which agents are available in the <strong>MCP Server</strong> card.
+          </p>
+        </div>
+      </div>
+    ),
+  },
 ]
 
-export function GettingStartedModal({ open, onOpenChange }: GettingStartedModalProps) {
-  const [selectedArticle, setSelectedArticle] = useState<ArticleId>("gmail-quickstart")
+export function GettingStartedModal({ open, onOpenChange, initialArticle }: GettingStartedModalProps) {
+  const [selectedArticle, setSelectedArticle] = useState<ArticleId>(initialArticle ?? "gmail-quickstart")
+
+  useEffect(() => {
+    if (open && initialArticle) {
+      setSelectedArticle(initialArticle)
+    }
+  }, [open, initialArticle])
 
   const currentArticle = articles.find((a) => a.id === selectedArticle) || articles[0]
 

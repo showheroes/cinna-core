@@ -40,14 +40,6 @@ Auto-generated from OpenAPI spec. Tag: `cli`
 
 ---
 
-## GET `/api/v1/cli/agents/{agent_id}/credentials`
-**Get Credentials**
-
-**Path parameters:**
-- `agent_id`: uuid
-
----
-
 ## GET `/api/v1/cli/agents/{agent_id}/building-context`
 **Get Building Context**
 
@@ -97,7 +89,15 @@ Auto-generated from OpenAPI spec. Tag: `cli`
 
 ---
 
-## POST `/cli-setup/{token}`
+## GET `/api/cli-setup/{token}`
+**Get Bootstrap Script**
+
+**Path parameters:**
+- `token`: string
+
+---
+
+## POST `/api/cli-setup/{token}`
 **Exchange Setup Token**
 
 **Path parameters:**

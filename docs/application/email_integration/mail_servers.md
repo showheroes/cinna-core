@@ -16,8 +16,8 @@ Allow users to configure reusable IMAP and SMTP server connections for email int
 
 ### 1. Add a Mail Server
 
-1. User navigates to **Settings > Mail Servers**
-2. Clicks "Add Server" to open the add dialog
+1. User navigates to **Settings > Channels** tab
+2. Clicks "Add" on the Mail Servers card to open the add dialog
 3. Fills in: name, server type (IMAP/SMTP), host, port, encryption, username, password
 4. Port auto-updates when server type or encryption changes (sensible defaults)
 5. Clicks "Save" — server config is stored with encrypted password

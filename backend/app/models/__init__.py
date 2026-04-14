@@ -425,6 +425,29 @@ from .agentic_teams.agentic_team import (
     AgenticTeamChartPublic,
     GenerateConnectionPromptResponse,
 )
+from .app_mcp.app_agent_route import (
+    AppAgentRoute,
+    AppAgentRouteAssignment,
+    UserAppAgentRoute,
+    AppAgentRouteCreate,
+    AppAgentRouteUpdate,
+    AppAgentRoutePublic,
+    AppAgentRouteAssignmentPublic,
+    UserAppAgentRouteCreate,
+    UserAppAgentRouteUpdate,
+    UserAppAgentRoutePublic,
+    SharedRoutePublic,
+    UserAppAgentRoutesResponse,
+)
+from .app_mcp.app_mcp_token import AppMCPToken
+from .app_mcp.app_mcp_oauth_client import (
+    AppMCPOAuthClient,
+    AppMCPOAuthClientPublic,
+)
+from .app_mcp.app_mcp_auth_code import (
+    AppMCPAuthCode,
+    AppMCPAuthRequest,
+)
 
 __all__ = [
     # Core
@@ -797,4 +820,23 @@ __all__ = [
     "AgenticTeamConnectionsPublic",
     "AgenticTeamChartPublic",
     "GenerateConnectionPromptResponse",
+    # App MCP Server — Route Models
+    "AppAgentRoute",
+    "AppAgentRouteAssignment",
+    "UserAppAgentRoute",
+    "AppAgentRouteCreate",
+    "AppAgentRouteUpdate",
+    "AppAgentRoutePublic",
+    "AppAgentRouteAssignmentPublic",
+    "UserAppAgentRouteCreate",
+    "UserAppAgentRouteUpdate",
+    "UserAppAgentRoutePublic",
+    "SharedRoutePublic",
+    "UserAppAgentRoutesResponse",
+    # App MCP Server — Token & OAuth
+    "AppMCPToken",
+    "AppMCPOAuthClient",
+    "AppMCPOAuthClientPublic",
+    "AppMCPAuthCode",
+    "AppMCPAuthRequest",
 ]

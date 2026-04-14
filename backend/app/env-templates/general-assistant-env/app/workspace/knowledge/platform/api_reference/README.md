@@ -9,11 +9,13 @@ Each file below documents one API domain.
 | A2A | [a2a.md](./a2a.md) | 3 |
 | Access Tokens | [access_tokens.md](./access_tokens.md) | 5 |
 | Activities | [activities.md](./activities.md) | 8 |
+| Agent App Mcp Routes | [agent_app_mcp_routes.md](./agent_app_mcp_routes.md) | 6 |
 | Agent Shares | [agent_shares.md](./agent_shares.md) | 14 |
 | Agent Tasks | [agent_tasks.md](./agent_tasks.md) | 11 |
 | Agentic Teams | [agentic_teams.md](./agentic_teams.md) | 18 |
 | Agents | [agents.md](./agents.md) | 32 |
 | Ai Credentials | [ai_credentials.md](./ai_credentials.md) | 8 |
+| App Agent Routes | [app_agent_routes.md](./app_agent_routes.md) | 7 |
 | Cli | [cli.md](./cli.md) | 11 |
 | Credentials | [credentials.md](./credentials.md) | 16 |
 | Email Integration | [email_integration.md](./email_integration.md) | 6 |
@@ -32,6 +34,7 @@ Each file below documents one API domain.
 | Ssh Keys | [ssh_keys.md](./ssh_keys.md) | 6 |
 | Task Triggers | [task_triggers.md](./task_triggers.md) | 16 |
 | Tasks | [tasks.md](./tasks.md) | 26 |
+| User App Agent Routes | [user_app_agent_routes.md](./user_app_agent_routes.md) | 5 |
 | User Workspaces | [user_workspaces.md](./user_workspaces.md) | 5 |
 | Users | [users.md](./users.md) | 16 |
 | Webapp | [webapp.md](./webapp.md) | 4 |

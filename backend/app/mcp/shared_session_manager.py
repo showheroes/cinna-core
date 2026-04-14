@@ -84,6 +84,14 @@ class SharedSessionManager(StreamableHTTPSessionManager):
             retry_interval=retry_interval,
         )
         self._connector_id = connector_id
+        # connector_id is a UUID string for per-connector servers, or the
+        # sentinel "app" for the App MCP Server.  DB persistence of transport
+        # sessions requires a valid UUID (FK to mcp_connector), so we skip
+        # DB operations for non-UUID connector IDs.
+        try:
+            self._connector_uuid: uuid.UUID | None = uuid.UUID(connector_id)
+        except ValueError:
+            self._connector_uuid = None
         # Per-session warming locks to prevent duplicate warming when
         # multiple concurrent requests arrive for the same unwarmed session.
         self._warming_locks: dict[str, anyio.Lock] = {}
@@ -94,11 +102,13 @@ class SharedSessionManager(StreamableHTTPSessionManager):
 
     def _db_save_session(self, session_id: str) -> None:
         """Persist a new transport session to the shared registry."""
+        if self._connector_uuid is None:
+            return
         try:
             with DBSession(engine) as db:
                 record = MCPTransportSession(
                     session_id=session_id,
-                    connector_id=uuid.UUID(self._connector_id),
+                    connector_id=self._connector_uuid,
                 )
                 db.add(record)
                 db.commit()
@@ -116,11 +126,13 @@ class SharedSessionManager(StreamableHTTPSessionManager):
 
     def _db_session_exists(self, session_id: str) -> bool:
         """Check whether a transport session exists in the shared registry."""
+        if self._connector_uuid is None:
+            return False
         try:
             with DBSession(engine) as db:
                 stmt = select(MCPTransportSession).where(
                     MCPTransportSession.session_id == session_id,
-                    MCPTransportSession.connector_id == uuid.UUID(self._connector_id),
+                    MCPTransportSession.connector_id == self._connector_uuid,
                 )
                 return db.exec(stmt).first() is not None
         except Exception:
@@ -132,6 +144,8 @@ class SharedSessionManager(StreamableHTTPSessionManager):
 
     def _db_delete_session(self, session_id: str) -> None:
         """Remove a transport session from the shared registry."""
+        if self._connector_uuid is None:
+            return
         try:
             with DBSession(engine) as db:
                 record = db.get(MCPTransportSession, session_id)

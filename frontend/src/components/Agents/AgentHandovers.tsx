@@ -3,6 +3,8 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { Sparkles, Trash2, Plus, Bot } from "lucide-react"
 import type { AgentPublic, HandoverConfigPublic } from "@/client"
 import { AgentsService } from "@/client"
+import { AgentSelectorDialog } from "@/components/Common/AgentSelectorDialog"
+import type { AgentOption } from "@/components/Common/AgentSelectorDialog"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -11,14 +13,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import useCustomToast from "@/hooks/useCustomToast"
 import useWorkspace from "@/hooks/useWorkspace"
@@ -210,42 +204,23 @@ export function AgentHandovers({ agent, readOnly = false }: AgentHandoversProps)
             </CardDescription>
           </div>
           {!readOnly && availableAgents.length > 0 && (
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus className="mr-2" />
-                  Add Handover
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Add Handover</DialogTitle>
-                  <DialogDescription>
-                    Select an agent to hand over to. Click on an agent to add it.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                  {availableAgents.map((a) => {
-                    const colorPreset = getColorPreset(a.ui_color_preset)
-                    return (
-                      <button
-                        key={a.id}
-                        onClick={() => createHandoverMutation.mutate(a.id)}
-                        disabled={createHandoverMutation.isPending}
-                        className={`w-full text-left px-4 py-2.5 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${colorPreset.badgeBg} ${colorPreset.badgeText} ${colorPreset.badgeHover}`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`rounded-lg p-2 ${colorPreset.iconBg}`}>
-                            <Bot className={`h-4 w-4 ${colorPreset.iconText}`} />
-                          </div>
-                          <span className="font-medium">{a.name}</span>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </DialogContent>
-            </Dialog>
+            <>
+              <Button size="sm" onClick={() => setIsDialogOpen(true)}>
+                <Plus className="mr-2" />
+                Add Handover
+              </Button>
+              <AgentSelectorDialog
+                open={isDialogOpen}
+                onOpenChange={setIsDialogOpen}
+                onSelect={(agentId) => createHandoverMutation.mutate(agentId)}
+                agents={availableAgents.map((a): AgentOption => ({
+                  id: a.id,
+                  name: a.name,
+                  colorPreset: a.ui_color_preset,
+                }))}
+                title="Add Handover"
+              />
+            </>
           )}
         </div>
       </CardHeader>

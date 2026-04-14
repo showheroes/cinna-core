@@ -3,7 +3,7 @@ from typing import Any
 import logging
 import asyncio
 from sqlmodel import Session as DBSession, select, and_, func, desc
-from app.models import Activity, ActivityCreate, ActivityUpdate, ActivityPublicExtended, ActivitiesPublicExtended, Agent, Session, AgentEnvironment, SessionMessage
+from app.models import Activity, ActivityCreate, ActivityUpdate, ActivityPublicExtended, ActivitiesPublicExtended, Agent, Session, SessionMessage
 from app.models.tasks.input_task import InputTask
 from app.models.events.event import EventType
 from app.core.db import create_session
@@ -461,19 +461,13 @@ class ActivityService:
                 logger.debug(f"session_running activity already exists for session {session_id}, skipping")
                 return existing
 
-            # Get session to find user_id and environment_id
+            # Get session to find user_id and agent_id
             chat_session = db_session.get(Session, session_id)
             if not chat_session:
                 logger.warning(f"Cannot create running activity: session {session_id} not found")
                 return None
 
-            # Get environment to find agent_id
-            environment = db_session.get(AgentEnvironment, chat_session.environment_id)
-            if not environment:
-                logger.warning(f"Cannot create running activity: environment not found for session {session_id}")
-                return None
-
-            agent_id = environment.agent_id
+            agent_id = chat_session.agent_id
             user_id = chat_session.user_id
             task_id = chat_session.source_task_id
 
@@ -569,19 +563,13 @@ class ActivityService:
         Called when stream fails while user was disconnected.
         """
         try:
-            # Get session to find user_id and environment_id
+            # Get session to find user_id and agent_id
             chat_session = db_session.get(Session, session_id)
             if not chat_session:
                 logger.warning(f"Cannot create error activity: session {session_id} not found")
                 return None
 
-            # Get environment to find agent_id
-            environment = db_session.get(AgentEnvironment, chat_session.environment_id)
-            if not environment:
-                logger.warning(f"Cannot create error activity: environment not found for session {session_id}")
-                return None
-
-            agent_id = environment.agent_id
+            agent_id = chat_session.agent_id
             user_id = chat_session.user_id
             task_id = chat_session.source_task_id
 
@@ -649,19 +637,13 @@ class ActivityService:
             tuple: (completed_activity, questions_activity)
         """
         try:
-            # Get session to find user_id and environment_id
+            # Get session to find user_id and agent_id
             chat_session = db_session.get(Session, session_id)
             if not chat_session:
                 logger.warning(f"Cannot create activities: session {session_id} not found")
                 return None, None
 
-            # Get environment to find agent_id
-            environment = db_session.get(AgentEnvironment, chat_session.environment_id)
-            if not environment:
-                logger.warning(f"Cannot create activities: environment not found for session {session_id}")
-                return None, None
-
-            agent_id = environment.agent_id
+            agent_id = chat_session.agent_id
             user_id = chat_session.user_id
             task_id = chat_session.source_task_id  # link activity to originating task
 
@@ -1034,8 +1016,7 @@ class ActivityService:
                     logger.warning(f"Session {session_id} not found for state update activity")
                     return
 
-                environment = db.get(AgentEnvironment, chat_session.environment_id)
-                agent_id = environment.agent_id if environment else None
+                agent_id = chat_session.agent_id
                 task_id = chat_session.source_task_id
 
                 # Delete any existing session_running activity

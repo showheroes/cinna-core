@@ -22,6 +22,7 @@ from app.services.mcp.mcp_oauth_service import (
     get_as_metadata_dict,
 )
 from app.services.mcp.mcp_errors import MCPError
+from app.services.app_mcp.app_mcp_oauth_service import AppMCPOAuthService, is_app_mcp_resource
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,22 @@ wellknown_router = APIRouter(tags=["mcp-oauth"])
 @wellknown_router.get("/.well-known/oauth-protected-resource/{resource_path:path}")
 def get_protected_resource_metadata(resource_path: str) -> JSONResponse:
     """RFC 9728 — OAuth Protected Resource Metadata."""
+    base = settings.MCP_SERVER_BASE_URL.rstrip("/") if settings.MCP_SERVER_BASE_URL else ""
+
+    # Handle App MCP Server path (e.g. "mcp/app/mcp" or "app/mcp")
+    stripped = resource_path.strip("/")
+    if stripped in ("mcp/app/mcp", "app/mcp"):
+        return JSONResponse({
+            "resource": f"{base}/app/mcp",
+            "authorization_servers": [f"{base}/oauth"],
+            "bearer_methods_supported": ["header"],
+            "scopes_supported": ["mcp:tools", "mcp:resources"],
+        })
+
     connector_id_str = extract_connector_id_from_resource_path(resource_path)
     if not connector_id_str:
         raise HTTPException(status_code=404, detail="Resource not found")
 
-    base = settings.MCP_SERVER_BASE_URL.rstrip("/") if settings.MCP_SERVER_BASE_URL else ""
     resource_url = f"{base}/{connector_id_str}/mcp"
 
     return JSONResponse({
@@ -103,9 +115,26 @@ def register_client(body: DCRRequest) -> JSONResponse:
 
     The `resource` field is optional — some MCP clients (e.g. Claude Desktop)
     don't send it during DCR. If provided, the client is linked to the specific
-    connector. Otherwise, the client is registered globally and the connector
+    connector (or the App MCP Server if resource ends in /app/mcp).
+    Otherwise, the client is registered globally and the connector
     binding happens during the authorize step.
     """
+    # Delegate to App MCP OAuth if resource points to the app-level server
+    if is_app_mcp_resource(body.resource):
+        with create_session() as db:
+            from app.services.app_mcp.app_mcp_oauth_service import AppDCRInput
+            result = AppMCPOAuthService.register_client(
+                db,
+                AppDCRInput(
+                    client_name=body.client_name,
+                    redirect_uris=body.redirect_uris,
+                    grant_types=body.grant_types,
+                    response_types=body.response_types,
+                    resource=body.resource,
+                ),
+            )
+        return JSONResponse(status_code=201, content=result)
+
     with create_session() as db:
         try:
             result = MCPOAuthService.register_client(
@@ -148,6 +177,34 @@ def authorize(
     resource: str = "",
 ) -> RedirectResponse:
     """OAuth 2.1 Authorization Endpoint — redirects to frontend consent page."""
+    # Detect App MCP clients: by resource URL or by client_id lookup
+    # (some MCP clients omit the resource parameter during authorize)
+    use_app_mcp = is_app_mcp_resource(resource)
+    if not use_app_mcp:
+        with create_session() as db:
+            from app.models.app_mcp.app_mcp_oauth_client import AppMCPOAuthClient
+            from sqlmodel import select as sa_select
+            use_app_mcp = db.exec(
+                sa_select(AppMCPOAuthClient).where(AppMCPOAuthClient.client_id == client_id)
+            ).first() is not None
+
+    if use_app_mcp:
+        with create_session() as db:
+            try:
+                consent_url = AppMCPOAuthService.create_authorization(
+                    db_session=db,
+                    client_id=client_id,
+                    redirect_uri=redirect_uri,
+                    scope=scope,
+                    state=state,
+                    code_challenge=code_challenge,
+                    code_challenge_method=code_challenge_method,
+                    resource=resource,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        return RedirectResponse(url=consent_url, status_code=302)
+
     with create_session() as db:
         try:
             consent_url = MCPOAuthService.create_authorization(
@@ -183,6 +240,63 @@ def exchange_token(
     refresh_token: str = Form(""),
 ) -> JSONResponse:
     """OAuth 2.1 Token Endpoint (application/x-www-form-urlencoded)."""
+    # Detect App MCP clients: check client_id in AppMCPOAuthClient first,
+    # then check if the auth code belongs to the App MCP flow (client may
+    # have registered in the per-connector table without resource during DCR)
+    with create_session() as db:
+        from app.models.app_mcp.app_mcp_oauth_client import AppMCPOAuthClient
+        from sqlmodel import select as sa_select
+        is_app_client = db.exec(
+            sa_select(AppMCPOAuthClient).where(AppMCPOAuthClient.client_id == client_id)
+        ).first() is not None
+        if not is_app_client and grant_type == "authorization_code" and code:
+            from app.models.app_mcp.app_mcp_auth_code import AppMCPAuthCode
+            is_app_client = db.get(AppMCPAuthCode, code) is not None
+        if not is_app_client and grant_type == "refresh_token" and refresh_token:
+            from app.models.app_mcp.app_mcp_token import AppMCPToken
+            import hashlib
+            rh = hashlib.sha256(refresh_token.encode()).hexdigest()
+            is_app_client = db.exec(
+                sa_select(AppMCPToken).where(
+                    AppMCPToken.token_hash == rh,
+                    AppMCPToken.token_type == "refresh",
+                )
+            ).first() is not None
+
+    if is_app_client:
+        with create_session() as db:
+            try:
+                if grant_type == "authorization_code":
+                    result = AppMCPOAuthService.exchange_authorization_code(
+                        db_session=db,
+                        code=code,
+                        redirect_uri=redirect_uri,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        code_verifier=code_verifier,
+                        resource=resource,
+                    )
+                elif grant_type == "refresh_token":
+                    result = AppMCPOAuthService.refresh_access_token(
+                        db_session=db,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        refresh_token=refresh_token,
+                    )
+                else:
+                    raise HTTPException(status_code=400, detail="Unsupported grant_type")
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        response = {
+            "access_token": result.access_token,
+            "token_type": result.token_type,
+            "expires_in": result.expires_in,
+            "scope": result.scope,
+        }
+        if result.refresh_token:
+            response["refresh_token"] = result.refresh_token
+        return JSONResponse(response)
+
     with create_session() as db:
         try:
             if grant_type == "authorization_code":
@@ -231,8 +345,14 @@ def revoke_token(
     client_id: str = Form(""),
     client_secret: str = Form(""),
 ) -> JSONResponse:
-    """Revoke an access or refresh token (application/x-www-form-urlencoded)."""
+    """Revoke an access or refresh token.
+
+    Tries both App MCP and per-connector token stores.
+    Always returns 200 per RFC 7009.
+    """
     with create_session() as db:
+        # Try App MCP token first
+        AppMCPOAuthService.revoke_token(db, token)
+        # Also try per-connector token
         MCPOAuthService.revoke_token(db, token)
-    # Always return 200 per RFC 7009
     return JSONResponse(status_code=200, content={})

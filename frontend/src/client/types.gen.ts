@@ -937,6 +937,56 @@ export type AllowedToolsUpdate = {
     tools: Array<(string)>;
 };
 
+export type AppAgentRouteAssignmentPublic = {
+    id: string;
+    route_id: string;
+    user_id: string;
+    is_enabled: boolean;
+    created_at: string;
+};
+
+export type AppAgentRouteCreate = {
+    name: string;
+    agent_id: string;
+    session_mode?: string;
+    trigger_prompt: string;
+    message_patterns?: (string | null);
+    channel_app_mcp?: boolean;
+    is_active?: boolean;
+    auto_enable_for_users?: boolean;
+    activate_for_myself?: boolean;
+    assigned_user_ids?: Array<(string)>;
+};
+
+export type AppAgentRoutePublic = {
+    id: string;
+    name: string;
+    agent_id: string;
+    agent_name?: string;
+    session_mode: string;
+    trigger_prompt: string;
+    message_patterns: (string | null);
+    channel_app_mcp: boolean;
+    is_active: boolean;
+    auto_enable_for_users?: boolean;
+    agent_owner_name?: string;
+    agent_owner_email?: string;
+    created_by: string;
+    created_at: string;
+    updated_at: string;
+    assignments?: Array<AppAgentRouteAssignmentPublic>;
+};
+
+export type AppAgentRouteUpdate = {
+    name?: (string | null);
+    session_mode?: (string | null);
+    trigger_prompt?: (string | null);
+    message_patterns?: (string | null);
+    channel_app_mcp?: (boolean | null);
+    is_active?: (boolean | null);
+    auto_enable_for_users?: (boolean | null);
+};
+
 /**
  * Full article content for retrieval step.
  */
@@ -1050,7 +1100,6 @@ export type CLISetupTokenCreated = {
     expires_at: string;
     created_at: string;
     setup_command: string;
-    setup_url: string;
 };
 
 export type CLITokenPublic = {
@@ -1867,6 +1916,13 @@ export type MCPConnectorUpdate = {
     max_clients?: (number | null);
 };
 
+/**
+ * App MCP Server connection info.
+ */
+export type McpInfoResponse = {
+    mcp_server_url: string;
+};
+
 export type Message = {
     message: string;
 };
@@ -2217,6 +2273,7 @@ export type SessionCreate = {
 export type SessionPublic = {
     id: string;
     environment_id: string;
+    agent_id?: (string | null);
     user_id: string;
     user_workspace_id: (string | null);
     access_token_id: (string | null);
@@ -2249,6 +2306,7 @@ export type SessionPublic = {
 export type SessionPublicExtended = {
     id: string;
     environment_id: string;
+    agent_id?: (string | null);
     user_id: string;
     user_workspace_id: (string | null);
     access_token_id: (string | null);
@@ -2275,7 +2333,6 @@ export type SessionPublicExtended = {
     last_message_at: (string | null);
     external_session_id?: (string | null);
     sdk_type?: (string | null);
-    agent_id?: (string | null);
     agent_name?: (string | null);
     agent_ui_color_preset?: (string | null);
     message_count?: (number | null);
@@ -2330,6 +2387,23 @@ export type SharedCredentialPublic = {
 export type SharedCredentialsPublic = {
     data: Array<SharedCredentialPublic>;
     count: number;
+};
+
+/**
+ * Route shared with a user (via assignment), as seen by the assignee.
+ */
+export type SharedRoutePublic = {
+    route_id: string;
+    name: string;
+    agent_name: string;
+    agent_owner_name?: string;
+    agent_owner_email?: string;
+    shared_by_name?: string;
+    session_mode: string;
+    trigger_prompt: string;
+    is_active: boolean;
+    assignment_id: string;
+    is_enabled: boolean;
 };
 
 /**
@@ -2558,6 +2632,45 @@ export type UpdateStatusResponse = {
     update_mode: (string | null);
     parent_exists: boolean;
     parent_name: (string | null);
+};
+
+export type UserAppAgentRouteCreate = {
+    agent_id: string;
+    session_mode?: string;
+    trigger_prompt: string;
+    message_patterns?: (string | null);
+    channel_app_mcp?: boolean;
+    is_active?: boolean;
+};
+
+export type UserAppAgentRoutePublic = {
+    id: string;
+    user_id: string;
+    agent_id: string;
+    agent_name?: string;
+    session_mode: string;
+    trigger_prompt: string;
+    message_patterns: (string | null);
+    channel_app_mcp: boolean;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+};
+
+/**
+ * Combined response for user's personal + shared routes.
+ */
+export type UserAppAgentRoutesResponse = {
+    personal_routes: Array<UserAppAgentRoutePublic>;
+    shared_routes: Array<SharedRoutePublic>;
+};
+
+export type UserAppAgentRouteUpdate = {
+    session_mode?: (string | null);
+    trigger_prompt?: (string | null);
+    message_patterns?: (string | null);
+    channel_app_mcp?: (boolean | null);
+    is_active?: (boolean | null);
 };
 
 export type UserCreate = {
@@ -2889,6 +3002,50 @@ export type ActivitiesMarkActivitiesAsReadData = {
 export type ActivitiesMarkActivitiesAsReadResponse = ({
     [key: string]: unknown;
 });
+
+export type AgentAppMcpRoutesListAgentAppMcpRoutesData = {
+    agentId: string;
+};
+
+export type AgentAppMcpRoutesListAgentAppMcpRoutesResponse = (Array<AppAgentRoutePublic>);
+
+export type AgentAppMcpRoutesCreateAgentAppMcpRouteData = {
+    agentId: string;
+    requestBody: AppAgentRouteCreate;
+};
+
+export type AgentAppMcpRoutesCreateAgentAppMcpRouteResponse = (AppAgentRoutePublic);
+
+export type AgentAppMcpRoutesUpdateAgentAppMcpRouteData = {
+    agentId: string;
+    requestBody: AppAgentRouteUpdate;
+    routeId: string;
+};
+
+export type AgentAppMcpRoutesUpdateAgentAppMcpRouteResponse = (AppAgentRoutePublic);
+
+export type AgentAppMcpRoutesDeleteAgentAppMcpRouteData = {
+    agentId: string;
+    routeId: string;
+};
+
+export type AgentAppMcpRoutesDeleteAgentAppMcpRouteResponse = (Message);
+
+export type AgentAppMcpRoutesAssignUsersToAgentRouteData = {
+    agentId: string;
+    requestBody: Array<(string)>;
+    routeId: string;
+};
+
+export type AgentAppMcpRoutesAssignUsersToAgentRouteResponse = (Array<AppAgentRouteAssignmentPublic>);
+
+export type AgentAppMcpRoutesRemoveUserAssignmentFromAgentRouteData = {
+    agentId: string;
+    routeId: string;
+    userId: string;
+};
+
+export type AgentAppMcpRoutesRemoveUserAssignmentFromAgentRouteResponse = (Message);
 
 export type AgenticTeamsListAgenticTeamsData = {
     limit?: number;
@@ -3429,6 +3586,47 @@ export type AiCredentialsGetAffectedEnvironmentsData = {
 
 export type AiCredentialsGetAffectedEnvironmentsResponse = (AffectedEnvironmentsPublic);
 
+export type AppAgentRoutesListAppAgentRoutesResponse = (Array<AppAgentRoutePublic>);
+
+export type AppAgentRoutesCreateAppAgentRouteData = {
+    requestBody: AppAgentRouteCreate;
+};
+
+export type AppAgentRoutesCreateAppAgentRouteResponse = (AppAgentRoutePublic);
+
+export type AppAgentRoutesGetAppAgentRouteData = {
+    routeId: string;
+};
+
+export type AppAgentRoutesGetAppAgentRouteResponse = (AppAgentRoutePublic);
+
+export type AppAgentRoutesUpdateAppAgentRouteData = {
+    requestBody: AppAgentRouteUpdate;
+    routeId: string;
+};
+
+export type AppAgentRoutesUpdateAppAgentRouteResponse = (AppAgentRoutePublic);
+
+export type AppAgentRoutesDeleteAppAgentRouteData = {
+    routeId: string;
+};
+
+export type AppAgentRoutesDeleteAppAgentRouteResponse = (Message);
+
+export type AppAgentRoutesAssignUsersToRouteData = {
+    requestBody: Array<(string)>;
+    routeId: string;
+};
+
+export type AppAgentRoutesAssignUsersToRouteResponse = (Array<AppAgentRouteAssignmentPublic>);
+
+export type AppAgentRoutesRemoveUserAssignmentData = {
+    routeId: string;
+    userId: string;
+};
+
+export type AppAgentRoutesRemoveUserAssignmentResponse = (Message);
+
 export type CliCreateSetupTokenData = {
     requestBody: CLISetupTokenCreate;
 };
@@ -3452,12 +3650,6 @@ export type CliGetBuildContextData = {
 };
 
 export type CliGetBuildContextResponse = (unknown);
-
-export type CliGetCredentialsData = {
-    agentId: string;
-};
-
-export type CliGetCredentialsResponse = (unknown);
 
 export type CliGetBuildingContextData = {
     agentId: string;
@@ -3490,6 +3682,12 @@ export type CliSearchKnowledgeData = {
 };
 
 export type CliSearchKnowledgeResponse = (unknown);
+
+export type CliGetBootstrapScriptData = {
+    token: string;
+};
+
+export type CliGetBootstrapScriptResponse = (string);
 
 export type CliExchangeSetupTokenData = {
     requestBody: ExchangeSetupTokenBody;
@@ -4188,6 +4386,7 @@ export type McpConnectorsDeleteMcpConnectorData = {
 export type McpConnectorsDeleteMcpConnectorResponse = (Message);
 
 export type McpConsentGetConsentInfoData = {
+    appMcp?: boolean;
     nonce: string;
 };
 
@@ -4679,6 +4878,34 @@ export type TaskTriggersRegenerateTokenData = {
 
 export type TaskTriggersRegenerateTokenResponse = (TaskTriggerPublicWithToken);
 
+export type UserAppAgentRoutesListUserAppAgentRoutesResponse = (UserAppAgentRoutesResponse);
+
+export type UserAppAgentRoutesCreateUserAppAgentRouteData = {
+    requestBody: UserAppAgentRouteCreate;
+};
+
+export type UserAppAgentRoutesCreateUserAppAgentRouteResponse = (UserAppAgentRoutePublic);
+
+export type UserAppAgentRoutesUpdateUserAppAgentRouteData = {
+    requestBody: UserAppAgentRouteUpdate;
+    routeId: string;
+};
+
+export type UserAppAgentRoutesUpdateUserAppAgentRouteResponse = (UserAppAgentRoutePublic);
+
+export type UserAppAgentRoutesDeleteUserAppAgentRouteData = {
+    routeId: string;
+};
+
+export type UserAppAgentRoutesDeleteUserAppAgentRouteResponse = (Message);
+
+export type UserAppAgentRoutesToggleAdminAssignmentData = {
+    assignmentId: string;
+    isEnabled: boolean;
+};
+
+export type UserAppAgentRoutesToggleAdminAssignmentResponse = (AppAgentRouteAssignmentPublic);
+
 export type UsersReadUsersData = {
     limit?: number;
     skip?: number;
@@ -4792,6 +5019,8 @@ export type UtilsTestEmailData = {
 export type UtilsTestEmailResponse = (Message);
 
 export type UtilsHealthCheckResponse = (boolean);
+
+export type UtilsGetMcpInfoResponse = (McpInfoResponse);
 
 export type UtilsRefinePromptData = {
     requestBody: RefinePromptRequest;
