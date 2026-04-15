@@ -71,6 +71,18 @@ class AppMCPRoutingService:
             logger.debug("No effective routes for user %s", user_id)
             return None
 
+        logger.info(
+            "[Stage1] Routing message for user=%s | message=%r | %d effective routes:",
+            user_id, message[:120], len(effective_routes),
+        )
+        for i, r in enumerate(effective_routes):
+            logger.info(
+                "[Stage1]   route[%d] source=%s agent=%s (%s) trigger=%r patterns=%r",
+                i, r.source, r.agent_name, r.agent_id,
+                (r.trigger_prompt or "")[:80],
+                (r.message_patterns or "")[:60] or None,
+            )
+
         stage1_transformed_message: str | None = None
 
         # If only one route, use it directly (no need to classify)
@@ -78,25 +90,45 @@ class AppMCPRoutingService:
             route = effective_routes[0]
             selected = route
             stage1_method = "only_one"
+            logger.info("[Stage1] Single route — using directly: %s (%s)", selected.agent_name, selected.agent_id)
         else:
             # 1. Try pattern matching (identity routes have no patterns)
             matched = AppMCPRoutingService._try_pattern_match(message, effective_routes)
             if matched:
                 selected = matched
                 stage1_method = "pattern"
+                logger.info("[Stage1] Pattern match hit: %s (%s)", selected.agent_name, selected.agent_id)
             else:
+                logger.info("[Stage1] No pattern match — falling back to AI classification")
                 # 2. Fall back to AI classification
                 ai_result = AppMCPRoutingService._ai_classify(message, effective_routes)
                 if ai_result:
                     selected, stage1_transformed_message = ai_result
                     stage1_method = "ai"
+                    logger.info(
+                        "[Stage1] AI selected: %s (%s) | transformed_message=%r",
+                        selected.agent_name, selected.agent_id,
+                        stage1_transformed_message[:120] if stage1_transformed_message else None,
+                    )
                 else:
-                    logger.debug("No route matched for message (user=%s)", user_id)
+                    logger.info("[Stage1] AI classification returned no match (user=%s)", user_id)
                     return None
+
+        logger.info(
+            "[Stage1] Result: method=%s agent=%s source=%s is_identity=%s",
+            stage1_method, selected.agent_name, selected.source,
+            selected.source == "identity",
+        )
 
         # Stage 2: If the selected route is an identity contact, invoke identity routing
         if selected.source == "identity" and selected.identity_owner_id:
-            return AppMCPRoutingService._route_identity(
+            logger.info(
+                "[Stage1→Stage2] Identity route detected — handing off to Stage 2 | "
+                "identity_owner=%s (%s) | stage2_input=%r",
+                selected.identity_owner_name, selected.identity_owner_id,
+                (stage1_transformed_message or message)[:120],
+            )
+            result = AppMCPRoutingService._route_identity(
                 db_session=db_session,
                 selected_route=selected,
                 caller_user_id=user_id,
@@ -104,6 +136,17 @@ class AppMCPRoutingService:
                 stage1_method=stage1_method,
                 transformed_message=stage1_transformed_message,
             )
+            if result:
+                logger.info(
+                    "[Stage1→Stage2] Final routing result: agent=%s (%s) | "
+                    "stage1_method=%s stage2_method=%s | final_message=%r",
+                    result.agent_name, result.agent_id,
+                    result.match_method, result.identity_stage2_match_method,
+                    (result.transformed_message or message)[:120],
+                )
+            else:
+                logger.info("[Stage1→Stage2] Stage 2 returned no result — routing failed")
+            return result
 
         return RoutingResult(
             agent_id=selected.agent_id,

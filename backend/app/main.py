@@ -13,11 +13,21 @@ from app.mcp.server import mcp_registry
 from app.core.config import settings
 
 # Configure logging
+# Note: basicConfig is a no-op when uvicorn already configured root logger,
+# so we also attach a handler to the "app" logger explicitly below.
 logging.basicConfig(
     level=logging.DEBUG if settings.ENVIRONMENT == "local" else logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Ensure all app.* loggers can emit to console even when uvicorn owns root.
+_app_logger = logging.getLogger("app")
+if not _app_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    _app_logger.addHandler(_handler)
+_app_logger.setLevel(logging.DEBUG if settings.ENVIRONMENT == "local" else logging.INFO)
 
 # Set DEBUG level for specific modules we want to debug
 if settings.ENVIRONMENT == "local":

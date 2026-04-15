@@ -109,6 +109,7 @@ interface AppMcpRoute {
   session_mode: string
   trigger_prompt: string
   message_patterns: string | null
+  prompt_examples: string | null
   is_active: boolean
   auto_enable_for_users: boolean
   agent_owner_name: string
@@ -129,6 +130,7 @@ interface IdentityAgentBinding {
   agent_name: string
   trigger_prompt: string
   message_patterns: string | null
+  prompt_examples: string | null
   session_mode: string
   is_active: boolean
   assignments: Array<{
@@ -198,6 +200,9 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
   const [identitySessionMode, setIdentitySessionMode] = useState("conversation")
   const [identityTriggerPrompt, setIdentityTriggerPrompt] = useState("")
   const [identityMessagePatterns, setIdentityMessagePatterns] = useState("")
+  const [appMcpPromptExamples, setAppMcpPromptExamples] = useState("")
+  const [editRoutePromptExamples, setEditRoutePromptExamples] = useState("")
+  const [identityPromptExamples, setIdentityPromptExamples] = useState("")
   const [identityAssignedUserIds, setIdentityAssignedUserIds] = useState<string[]>([])
   const [identityUserSearchQuery, setIdentityUserSearchQuery] = useState("")
 
@@ -392,6 +397,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       session_mode: string
       trigger_prompt: string
       message_patterns: string | null
+      prompt_examples: string | null
       auto_enable_for_users: boolean
       assigned_user_ids: string[]
       activate_for_myself: boolean
@@ -464,6 +470,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
         session_mode?: string
         trigger_prompt?: string
         message_patterns?: string | null
+        prompt_examples?: string | null
         auto_enable_for_users?: boolean
       }
     }) => {
@@ -533,6 +540,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       agent_id: string
       trigger_prompt: string
       message_patterns: string | null
+      prompt_examples: string | null
       session_mode: string
       assigned_user_ids: string[]
     }) => {
@@ -610,6 +618,8 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       setIdentitySessionMode("conversation")
       setIdentityTriggerPrompt("")
       setIdentityMessagePatterns("")
+      setAppMcpPromptExamples("")
+      setIdentityPromptExamples("")
       setIdentityAssignedUserIds([])
       setIdentityUserSearchQuery("")
     }
@@ -628,6 +638,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       agent_id: agentId,
       trigger_prompt: identityTriggerPrompt.trim(),
       message_patterns: identityMessagePatterns.trim() || null,
+      prompt_examples: identityPromptExamples.trim() || null,
       session_mode: identitySessionMode,
       assigned_user_ids: identityAssignedUserIds,
     })
@@ -648,6 +659,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       session_mode: appMcpSessionMode,
       trigger_prompt: appMcpTriggerPrompt,
       message_patterns: appMcpMessagePatterns || null,
+      prompt_examples: appMcpPromptExamples.trim() || null,
       auto_enable_for_users: appMcpAutoEnable,
       assigned_user_ids: appMcpAssignedUserIds,
       activate_for_myself: appMcpActivateForMyself,
@@ -693,6 +705,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
     setEditRouteSessionMode(route.session_mode)
     setEditRouteTriggerPrompt(route.trigger_prompt)
     setEditRouteMessagePatterns(route.message_patterns ?? "")
+    setEditRoutePromptExamples(route.prompt_examples ?? "")
     setEditRouteAutoEnable(route.auto_enable_for_users)
     setEditRouteUserSearchQuery("")
     setEditRouteDialogOpen(true)
@@ -707,6 +720,7 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
         session_mode: editRouteSessionMode,
         trigger_prompt: editRouteTriggerPrompt,
         message_patterns: editRouteMessagePatterns || null,
+        prompt_examples: editRoutePromptExamples.trim() || null,
         auto_enable_for_users: editRouteAutoEnable,
       },
     })
@@ -977,6 +991,21 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
                         </div>
 
                         <div className="space-y-2">
+                          <Label htmlFor="identity-prompt-examples">Prompt Examples (optional)</Label>
+                          <Textarea
+                            id="identity-prompt-examples"
+                            placeholder={"generate employee report\nprepare quarterly analysis"}
+                            value={identityPromptExamples}
+                            onChange={(e) => setIdentityPromptExamples(e.target.value)}
+                            rows={3}
+                            className="font-mono text-sm"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Short example prompts. MCP clients will see these prefixed with your name (e.g., 'ask Your Name to generate employee report').
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
                           <Label className="flex items-center gap-2">
                             <Users className="h-4 w-4" />
                             Share with Users
@@ -1121,6 +1150,21 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
                       />
                       <p className="text-xs text-muted-foreground">
                         One glob-style pattern per line. Pattern matching runs before AI routing.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="app-mcp-prompt-examples">Prompt Examples (optional)</Label>
+                      <Textarea
+                        id="app-mcp-prompt-examples"
+                        placeholder={"generate employee report\nsummarize last quarter sales"}
+                        value={appMcpPromptExamples}
+                        onChange={(e) => setAppMcpPromptExamples(e.target.value)}
+                        rows={3}
+                        className="font-mono text-sm"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Short example prompts shown to MCP clients. One per line. These skip the 'ask cinna to...' prefix.
                       </p>
                     </div>
 
@@ -1689,6 +1733,20 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
               />
               <p className="text-xs text-muted-foreground">
                 One glob-style pattern per line. Pattern matching runs before AI routing.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Prompt Examples (optional)</Label>
+              <Textarea
+                value={editRoutePromptExamples}
+                onChange={(e) => setEditRoutePromptExamples(e.target.value)}
+                rows={3}
+                placeholder={"generate employee report\nsummarize last quarter sales"}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Short example prompts shown to MCP clients. One per line. These skip the 'ask cinna to...' prefix.
               </p>
             </div>
 

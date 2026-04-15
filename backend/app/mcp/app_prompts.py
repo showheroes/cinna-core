@@ -65,4 +65,14 @@ def register_app_mcp_prompts(server) -> None:
                     ),
                 )
             )
+            if route.prompt_examples:
+                for raw_line in route.prompt_examples.splitlines():
+                    line = raw_line.strip()
+                    if line:
+                        prompts.append(
+                            PromptMessage(
+                                role="user",
+                                content=TextContent(type="text", text=line),
+                            )
+                        )
         return prompts

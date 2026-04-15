@@ -16,6 +16,7 @@ Auto-generated from OpenAPI spec. Tag: `app-agent-routes`
   - `session_mode`: string
   - `trigger_prompt`: string (required)
   - `message_patterns`: string | null
+  - `prompt_examples`: string | null
   - `channel_app_mcp`: boolean
   - `is_active`: boolean
   - `auto_enable_for_users`: boolean
@@ -47,6 +48,7 @@ Auto-generated from OpenAPI spec. Tag: `app-agent-routes`
   - `session_mode`: string | null
   - `trigger_prompt`: string | null
   - `message_patterns`: string | null
+  - `prompt_examples`: string | null
   - `channel_app_mcp`: boolean | null
   - `is_active`: boolean | null
   - `auto_enable_for_users`: boolean | null

@@ -79,11 +79,18 @@ def route_to_agent(
 Return JSON only:
 """
 
+        logger.info(
+            "[AIRouter] Classifying message=%r | %d candidates: %s",
+            message[:120],
+            len(available_agents),
+            ", ".join(f"{a['name']} ({a['id'][:8]}…)" for a in available_agents),
+        )
+
         manager = get_provider_manager()
         response = manager.generate_content(prompt, **(provider_kwargs or {}))
 
         raw = response.text.strip()
-        logger.debug("App agent router response: %r", raw)
+        logger.info("[AIRouter] LLM raw response: %r", raw[:300])
 
         # Strip markdown code fences if present
         if raw.startswith("```"):
@@ -96,16 +103,17 @@ Return JSON only:
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
-            logger.warning("App agent router returned non-JSON response: %r", raw)
+            logger.warning("[AIRouter] Non-JSON response: %r", raw)
             return None
 
         agent_id = data.get("agent_id", "")
         if not agent_id or agent_id == "NONE":
+            logger.info("[AIRouter] LLM returned NONE — no agent matched")
             return None
 
         # Validate it looks like a UUID (basic check)
         if not (len(agent_id) == 36 and agent_id.count("-") == 4):
-            logger.warning("App agent router returned unexpected agent_id: %r", agent_id)
+            logger.warning("[AIRouter] Unexpected agent_id format: %r", agent_id)
             return None
 
         # Extract and validate transformed_message
@@ -120,11 +128,21 @@ Return JSON only:
             ):
                 transformed_message = stripped
 
+        # Find matched agent name for logging
+        matched_name = next(
+            (a["name"] for a in available_agents if a["id"] == agent_id), "?"
+        )
+        logger.info(
+            "[AIRouter] Result: agent=%s (%s) | transformed_message=%r",
+            matched_name, agent_id,
+            transformed_message[:120] if transformed_message else None,
+        )
+
         return RouteToAgentResult(
             agent_id=agent_id,
             transformed_message=transformed_message,
         )
 
     except Exception as e:
-        logger.error("App agent routing failed: %s", e, exc_info=True)
+        logger.error("[AIRouter] Routing failed: %s", e, exc_info=True)
         return None

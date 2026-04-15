@@ -20,6 +20,7 @@ This lets callers address colleagues naturally ("ask User B to prepare the annua
 | **Stage 1 Routing** | The App MCP Server's existing routing engine — resolves a message to a person or direct agent |
 | **Stage 2 Routing** | Identity-specific routing — runs after Stage 1 selects a person, picks the right agent from their accessible bindings |
 | **Identity Session** | A session created in the identity owner's space, with `integration_type = "identity_mcp"` and `identity_caller_id` tracking the caller |
+| **Prompt Examples** | Optional newline-separated short prompts on an `IdentityAgentBinding`, aggregated and prefixed with the owner's name for MCP client discovery |
 
 ## Two-Stage Routing Flow
 
@@ -139,6 +140,12 @@ Stage 2 only considers agents where the caller has an active, enabled binding as
   - The binding assignment (`identity_binding_assignment_id`) still exists with `is_active = True` and `is_enabled = True`
   - If either check fails: "This identity connection is no longer active."
 - This is stricter than regular App MCP sessions, which survive route deletion
+
+## Prompt Examples
+
+Identity Agent Bindings support prompt examples — optional short task suggestions that MCP clients discover via `prompts/list`. For identity bindings, each example is automatically prefixed with the owner's name so callers address the right person (e.g., "ask John Doe (john@example.com) to generate employee report").
+
+See **[Prompt Examples](../app_mcp_server/prompt_examples.md)** for full details on the concept, validation rules, prefixing behavior, and user flows.
 
 ## Integration Points
 

@@ -951,6 +951,7 @@ export type AppAgentRouteCreate = {
     session_mode?: string;
     trigger_prompt: string;
     message_patterns?: (string | null);
+    prompt_examples?: (string | null);
     channel_app_mcp?: boolean;
     is_active?: boolean;
     auto_enable_for_users?: boolean;
@@ -966,6 +967,7 @@ export type AppAgentRoutePublic = {
     session_mode: string;
     trigger_prompt: string;
     message_patterns: (string | null);
+    prompt_examples?: (string | null);
     channel_app_mcp: boolean;
     is_active: boolean;
     auto_enable_for_users?: boolean;
@@ -982,6 +984,7 @@ export type AppAgentRouteUpdate = {
     session_mode?: (string | null);
     trigger_prompt?: (string | null);
     message_patterns?: (string | null);
+    prompt_examples?: (string | null);
     channel_app_mcp?: (boolean | null);
     is_active?: (boolean | null);
     auto_enable_for_users?: (boolean | null);
@@ -1533,6 +1536,61 @@ export type HandoverConfigUpdate = {
 
 export type HTTPValidationError = {
     detail?: Array<ValidationError>;
+};
+
+export type IdentityAgentBindingCreate = {
+    agent_id: string;
+    trigger_prompt: string;
+    message_patterns?: (string | null);
+    prompt_examples?: (string | null);
+    session_mode?: string;
+    assigned_user_ids?: Array<(string)>;
+    auto_enable?: boolean;
+};
+
+export type IdentityAgentBindingPublic = {
+    id: string;
+    agent_id: string;
+    agent_name?: string;
+    trigger_prompt: string;
+    message_patterns: (string | null);
+    prompt_examples?: (string | null);
+    session_mode: string;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+    assignments?: Array<IdentityBindingAssignmentPublic>;
+};
+
+export type IdentityAgentBindingUpdate = {
+    trigger_prompt?: (string | null);
+    message_patterns?: (string | null);
+    prompt_examples?: (string | null);
+    session_mode?: (string | null);
+    is_active?: (boolean | null);
+};
+
+export type IdentityBindingAssignmentPublic = {
+    id: string;
+    binding_id: string;
+    target_user_id: string;
+    target_user_name?: string;
+    target_user_email?: string;
+    is_active: boolean;
+    is_enabled: boolean;
+    created_at: string;
+};
+
+/**
+ * Represents a person who has shared agents with the current user via identity.
+ */
+export type IdentityContactPublic = {
+    owner_id: string;
+    owner_name: string;
+    owner_email: string;
+    is_enabled: boolean;
+    agent_count: number;
+    assignment_ids: Array<(string)>;
 };
 
 export type InputTaskCreate = {
@@ -2402,6 +2460,7 @@ export type SharedRoutePublic = {
     session_mode: string;
     trigger_prompt: string;
     message_patterns?: (string | null);
+    prompt_examples?: (string | null);
     is_active: boolean;
     assignment_id: string;
     is_enabled: boolean;
@@ -2580,6 +2639,10 @@ export type TaskTriggerUpdate = {
     natural_language?: (string | null);
     timezone?: (string | null);
     execute_at?: (string | null);
+};
+
+export type ToggleIdentityContactRequest = {
+    is_enabled: boolean;
 };
 
 export type Token = {
@@ -4118,6 +4181,52 @@ export type GuestSharesUpdateGuestShareData = {
 };
 
 export type GuestSharesUpdateGuestShareResponse = (AgentGuestSharePublic);
+
+export type IdentityListIdentityBindingsResponse = (Array<IdentityAgentBindingPublic>);
+
+export type IdentityCreateIdentityBindingData = {
+    requestBody: IdentityAgentBindingCreate;
+};
+
+export type IdentityCreateIdentityBindingResponse = (IdentityAgentBindingPublic);
+
+export type IdentityUpdateIdentityBindingData = {
+    bindingId: string;
+    requestBody: IdentityAgentBindingUpdate;
+};
+
+export type IdentityUpdateIdentityBindingResponse = (IdentityAgentBindingPublic);
+
+export type IdentityDeleteIdentityBindingData = {
+    bindingId: string;
+};
+
+export type IdentityDeleteIdentityBindingResponse = (Message);
+
+export type IdentityAssignUsersToBindingData = {
+    bindingId: string;
+    requestBody: Array<(string)>;
+};
+
+export type IdentityAssignUsersToBindingResponse = (Array<IdentityBindingAssignmentPublic>);
+
+export type IdentityRemoveUserAssignmentData = {
+    bindingId: string;
+    userId: string;
+};
+
+export type IdentityRemoveUserAssignmentResponse = (Message);
+
+export type IdentityGetIdentitySummaryResponse = (Array<IdentityAgentBindingPublic>);
+
+export type IdentityContactsListIdentityContactsResponse = (Array<IdentityContactPublic>);
+
+export type IdentityContactsToggleIdentityContactData = {
+    ownerId: string;
+    requestBody: ToggleIdentityContactRequest;
+};
+
+export type IdentityContactsToggleIdentityContactResponse = (Message);
 
 export type KnowledgeQueryKnowledgeData = {
     authorization?: (string | null);

@@ -23,6 +23,7 @@ class AppAgentRoute(SQLModel, table=True):
     session_mode: str = Field(max_length=20, default="conversation")
     trigger_prompt: str = Field(sa_column=Column(Text, nullable=False))
     message_patterns: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    prompt_examples: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     channel_app_mcp: bool = Field(default=True)
     is_active: bool = Field(default=True)
     auto_enable_for_users: bool = Field(default=False)
@@ -77,6 +78,7 @@ class AppAgentRouteCreate(SQLModel):
     session_mode: str = "conversation"
     trigger_prompt: str
     message_patterns: str | None = None
+    prompt_examples: str | None = None
     channel_app_mcp: bool = True
     is_active: bool = True
     auto_enable_for_users: bool = False
@@ -89,6 +91,7 @@ class AppAgentRouteUpdate(SQLModel):
     session_mode: str | None = None
     trigger_prompt: str | None = None
     message_patterns: str | None = None
+    prompt_examples: str | None = None
     channel_app_mcp: bool | None = None
     is_active: bool | None = None
     auto_enable_for_users: bool | None = None
@@ -110,6 +113,7 @@ class AppAgentRoutePublic(SQLModel):
     session_mode: str
     trigger_prompt: str
     message_patterns: str | None
+    prompt_examples: str | None = None
     channel_app_mcp: bool
     is_active: bool
     auto_enable_for_users: bool = False
@@ -174,6 +178,7 @@ class SharedRoutePublic(SQLModel):
     session_mode: str
     trigger_prompt: str
     message_patterns: str | None = None
+    prompt_examples: str | None = None
     is_active: bool  # route-level toggle (set by route creator)
     assignment_id: uuid.UUID
     is_enabled: bool  # user-level toggle

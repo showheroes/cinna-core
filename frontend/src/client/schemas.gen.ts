@@ -4804,6 +4804,17 @@ export const AppAgentRouteCreateSchema = {
             ],
             title: 'Message Patterns'
         },
+        prompt_examples: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Examples'
+        },
         channel_app_mcp: {
             type: 'boolean',
             title: 'Channel App Mcp',
@@ -4878,6 +4889,17 @@ export const AppAgentRoutePublicSchema = {
                 }
             ],
             title: 'Message Patterns'
+        },
+        prompt_examples: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Examples'
         },
         channel_app_mcp: {
             type: 'boolean',
@@ -4976,6 +4998,17 @@ export const AppAgentRouteUpdateSchema = {
                 }
             ],
             title: 'Message Patterns'
+        },
+        prompt_examples: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Examples'
         },
         channel_app_mcp: {
             anyOf: [
@@ -7086,6 +7119,285 @@ export const HandoverConfigsPublicSchema = {
     required: ['data', 'count'],
     title: 'HandoverConfigsPublic',
     description: 'List of handover configurations.'
+} as const;
+
+export const IdentityAgentBindingCreateSchema = {
+    properties: {
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        trigger_prompt: {
+            type: 'string',
+            title: 'Trigger Prompt'
+        },
+        message_patterns: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message Patterns'
+        },
+        prompt_examples: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Examples'
+        },
+        session_mode: {
+            type: 'string',
+            title: 'Session Mode',
+            default: 'conversation'
+        },
+        assigned_user_ids: {
+            items: {
+                type: 'string',
+                format: 'uuid'
+            },
+            type: 'array',
+            title: 'Assigned User Ids',
+            default: []
+        },
+        auto_enable: {
+            type: 'boolean',
+            title: 'Auto Enable',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['agent_id', 'trigger_prompt'],
+    title: 'IdentityAgentBindingCreate'
+} as const;
+
+export const IdentityAgentBindingPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        agent_name: {
+            type: 'string',
+            title: 'Agent Name',
+            default: ''
+        },
+        trigger_prompt: {
+            type: 'string',
+            title: 'Trigger Prompt'
+        },
+        message_patterns: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message Patterns'
+        },
+        prompt_examples: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Examples'
+        },
+        session_mode: {
+            type: 'string',
+            title: 'Session Mode'
+        },
+        is_active: {
+            type: 'boolean',
+            title: 'Is Active'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        assignments: {
+            items: {
+                '$ref': '#/components/schemas/IdentityBindingAssignmentPublic'
+            },
+            type: 'array',
+            title: 'Assignments',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['id', 'agent_id', 'trigger_prompt', 'message_patterns', 'session_mode', 'is_active', 'created_at', 'updated_at'],
+    title: 'IdentityAgentBindingPublic'
+} as const;
+
+export const IdentityAgentBindingUpdateSchema = {
+    properties: {
+        trigger_prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Trigger Prompt'
+        },
+        message_patterns: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message Patterns'
+        },
+        prompt_examples: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Examples'
+        },
+        session_mode: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Mode'
+        },
+        is_active: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Is Active'
+        }
+    },
+    type: 'object',
+    title: 'IdentityAgentBindingUpdate'
+} as const;
+
+export const IdentityBindingAssignmentPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        binding_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Binding Id'
+        },
+        target_user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Target User Id'
+        },
+        target_user_name: {
+            type: 'string',
+            title: 'Target User Name',
+            default: ''
+        },
+        target_user_email: {
+            type: 'string',
+            title: 'Target User Email',
+            default: ''
+        },
+        is_active: {
+            type: 'boolean',
+            title: 'Is Active'
+        },
+        is_enabled: {
+            type: 'boolean',
+            title: 'Is Enabled'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'binding_id', 'target_user_id', 'is_active', 'is_enabled', 'created_at'],
+    title: 'IdentityBindingAssignmentPublic'
+} as const;
+
+export const IdentityContactPublicSchema = {
+    properties: {
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        owner_name: {
+            type: 'string',
+            title: 'Owner Name'
+        },
+        owner_email: {
+            type: 'string',
+            title: 'Owner Email'
+        },
+        is_enabled: {
+            type: 'boolean',
+            title: 'Is Enabled'
+        },
+        agent_count: {
+            type: 'integer',
+            title: 'Agent Count'
+        },
+        assignment_ids: {
+            items: {
+                type: 'string',
+                format: 'uuid'
+            },
+            type: 'array',
+            title: 'Assignment Ids'
+        }
+    },
+    type: 'object',
+    required: ['owner_id', 'owner_name', 'owner_email', 'is_enabled', 'agent_count', 'assignment_ids'],
+    title: 'IdentityContactPublic',
+    description: 'Represents a person who has shared agents with the current user via identity.'
 } as const;
 
 export const InputTaskCreateSchema = {
@@ -11783,6 +12095,17 @@ export const SharedRoutePublicSchema = {
             ],
             title: 'Message Patterns'
         },
+        prompt_examples: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Examples'
+        },
         is_active: {
             type: 'boolean',
             title: 'Is Active'
@@ -12687,6 +13010,18 @@ export const TaskTriggersPublicSchema = {
     type: 'object',
     required: ['data', 'count'],
     title: 'TaskTriggersPublic'
+} as const;
+
+export const ToggleIdentityContactRequestSchema = {
+    properties: {
+        is_enabled: {
+            type: 'boolean',
+            title: 'Is Enabled'
+        }
+    },
+    type: 'object',
+    required: ['is_enabled'],
+    title: 'ToggleIdentityContactRequest'
 } as const;
 
 export const TokenSchema = {

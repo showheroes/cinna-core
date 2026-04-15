@@ -21,6 +21,7 @@ Users connect once with a single URL and interact with multiple agents through n
 | **Channel** | Delivery mechanism for the App MCP Server (currently `app_mcp`; extensible to `google-chat`, `slack`, etc.) |
 | **auto_enable_for_users** | Flag on a route that, when set by a superuser, automatically enables assignments for newly assigned users |
 | **activate_for_myself** | Flag on route creation that auto-adds the creator as an assigned user with `is_enabled=True`; defaults ON in the UI |
+| **Prompt Examples** | Optional newline-separated short prompts on a route, exposed as individual MCP prompts via `prompts/list` to give MCP clients ready-to-use task suggestions |
 
 ## User Stories / Flows
 
@@ -204,6 +205,26 @@ User Settings:   Settings > Channels tab > "MCP Server" card (read view + toggle
 ## MCP Prompts
 
 The App MCP Server exposes the user's active route trigger prompts as MCP prompts via `prompts/list`. This allows external AI clients (like Claude Desktop) to discover available agents without guessing. Each prompt includes the route name and trigger description.
+
+### Prompt Examples
+
+App Agent Routes support an optional `prompt_examples` field: a newline-separated list of short, actionable example prompts. When set, each non-empty line is emitted as an individual MCP prompt alongside the existing trigger-prompt-based prompt.
+
+- Examples are returned **as-is** — they already skip the "ask cinna to..." routing prefix, so MCP clients can send them directly
+- Routes without `prompt_examples` behave exactly as before (only the trigger-prompt-based prompt is emitted)
+- Validation: max 2000 characters total, max 10 non-empty lines per route
+
+Owners set prompt examples in the App MCP Server Integration form (Integrations tab → "Prompt Examples" textarea, one example per line).
+
+```
+Route prompt_examples:
+  "generate employee report"
+  "summarize last quarter sales"
+
+MCP client prompts/list sees:
+  "generate employee report"
+  "summarize last quarter sales"
+```
 
 ## Deprecation Notes
 

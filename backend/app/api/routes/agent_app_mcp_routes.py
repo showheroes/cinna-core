@@ -25,6 +25,16 @@ router = APIRouter(
 )
 
 
+def _validate_prompt_examples(value: str | None) -> None:
+    if not value:
+        return
+    if len(value) > 2000:
+        raise HTTPException(status_code=422, detail="Prompt examples must be under 2000 characters")
+    non_empty = [line for line in value.splitlines() if line.strip()]
+    if len(non_empty) > 10:
+        raise HTTPException(status_code=422, detail="Maximum 10 prompt examples allowed")
+
+
 @router.get("/", response_model=list[AppAgentRoutePublic])
 def list_agent_app_mcp_routes(
     agent_id: uuid.UUID,
@@ -60,6 +70,7 @@ def create_agent_app_mcp_route(
     Non-superusers can only create routes for agents they own.
     Only superusers can set auto_enable_for_users=True.
     """
+    _validate_prompt_examples(route_in.prompt_examples)
     # Override agent_id in body with the path parameter
     route_in_with_agent = route_in.model_copy(update={"agent_id": agent_id})
     try:
@@ -81,6 +92,7 @@ def update_agent_app_mcp_route(
     current_user: CurrentUser,
 ) -> Any:
     """Update an App MCP route."""
+    _validate_prompt_examples(route_in.prompt_examples)
     try:
         route = AppAgentRouteService.update_route_for_agent(
             db_session=session,

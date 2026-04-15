@@ -27,6 +27,16 @@ from app.services.identity.identity_service import (
 router = APIRouter(prefix="/identity", tags=["identity"])
 
 
+def _validate_prompt_examples(value: str | None) -> None:
+    if not value:
+        return
+    if len(value) > 2000:
+        raise HTTPException(status_code=422, detail="Prompt examples must be under 2000 characters")
+    non_empty = [line for line in value.splitlines() if line.strip()]
+    if len(non_empty) > 10:
+        raise HTTPException(status_code=422, detail="Maximum 10 prompt examples allowed")
+
+
 # ---------------------------------------------------------------------------
 # Identity Agent Bindings
 # ---------------------------------------------------------------------------
@@ -52,6 +62,7 @@ def create_identity_binding(
     binding_in: IdentityAgentBindingCreate,
 ) -> Any:
     """Create a new identity agent binding."""
+    _validate_prompt_examples(binding_in.prompt_examples)
     try:
         return IdentityService.create_binding(
             db_session=session,
@@ -79,6 +90,7 @@ def update_identity_binding(
     binding_in: IdentityAgentBindingUpdate,
 ) -> Any:
     """Update an identity agent binding."""
+    _validate_prompt_examples(binding_in.prompt_examples)
     result = IdentityService.update_binding(
         db_session=session,
         binding_id=binding_id,

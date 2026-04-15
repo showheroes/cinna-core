@@ -49,6 +49,7 @@ class EffectiveRoute:
     identity_owner_id: uuid.UUID | None = None
     identity_owner_name: str | None = None
     identity_owner_email: str | None = None
+    prompt_examples: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +101,7 @@ def _route_to_public(
         session_mode=route.session_mode,
         trigger_prompt=route.trigger_prompt,
         message_patterns=route.message_patterns,
+        prompt_examples=route.prompt_examples,
         channel_app_mcp=route.channel_app_mcp,
         is_active=route.is_active,
         auto_enable_for_users=route.auto_enable_for_users,
@@ -172,6 +174,7 @@ class AppAgentRouteService:
             session_mode=data.session_mode,
             trigger_prompt=data.trigger_prompt,
             message_patterns=data.message_patterns,
+            prompt_examples=data.prompt_examples,
             channel_app_mcp=data.channel_app_mcp,
             is_active=data.is_active,
             auto_enable_for_users=data.auto_enable_for_users,
@@ -407,6 +410,11 @@ class AppAgentRouteService:
         """
         results: list[EffectiveRoute] = []
 
+        logger.info(
+            "[EffectiveRoutes] Building routes for user=%s channel=%s",
+            user_id, channel,
+        )
+
         # Assigned routes (AppAgentRoute via AppAgentRouteAssignment)
         stmt = (
             select(AppAgentRoute, AppAgentRouteAssignment)
@@ -423,8 +431,14 @@ class AppAgentRouteService:
         if channel == "app_mcp":
             stmt = stmt.where(AppAgentRoute.channel_app_mcp == True)  # noqa: E712
 
-        for route, _assignment in db_session.exec(stmt).all():
+        assigned_rows = db_session.exec(stmt).all()
+        logger.info("[EffectiveRoutes]   Assigned routes: %d", len(assigned_rows))
+        for route, _assignment in assigned_rows:
             agent_name = _get_agent_name(db_session, route.agent_id)
+            logger.info(
+                "[EffectiveRoutes]     - %s (agent=%s, route=%s)",
+                agent_name, route.agent_id, route.id,
+            )
             results.append(
                 EffectiveRoute(
                     route_id=route.id,
@@ -434,6 +448,7 @@ class AppAgentRouteService:
                     trigger_prompt=route.trigger_prompt,
                     message_patterns=route.message_patterns,
                     source="admin",
+                    prompt_examples=route.prompt_examples,
                 )
             )
 
@@ -447,7 +462,9 @@ class AppAgentRouteService:
                 UserAppAgentRoute.channel_app_mcp == True  # noqa: E712
             )
 
-        for user_route in db_session.exec(user_stmt).all():
+        personal_rows = db_session.exec(user_stmt).all()
+        logger.info("[EffectiveRoutes]   Personal routes: %d", len(personal_rows))
+        for user_route in personal_rows:
             agent_name = _get_agent_name(db_session, user_route.agent_id)
             results.append(
                 EffectiveRoute(
@@ -468,6 +485,27 @@ class AppAgentRouteService:
             IdentityBindingAssignment,
         )
 
+        # Debug: count raw identity assignments for this user (before filters)
+        raw_assignments_stmt = select(IdentityBindingAssignment).where(
+            IdentityBindingAssignment.target_user_id == user_id,
+        )
+        raw_assignments = db_session.exec(raw_assignments_stmt).all()
+        logger.info(
+            "[EffectiveRoutes]   Identity assignments (raw, all states): %d",
+            len(raw_assignments),
+        )
+        for ra in raw_assignments:
+            binding = db_session.get(IdentityAgentBinding, ra.binding_id)
+            logger.info(
+                "[EffectiveRoutes]     - assignment=%s binding=%s "
+                "assign.is_active=%s assign.is_enabled=%s "
+                "binding.is_active=%s binding.owner=%s",
+                ra.id, ra.binding_id,
+                ra.is_active, ra.is_enabled,
+                binding.is_active if binding else "MISSING",
+                binding.owner_id if binding else "MISSING",
+            )
+
         identity_stmt = (
             select(User)
             .join(
@@ -487,7 +525,20 @@ class AppAgentRouteService:
             .distinct()
         )
 
-        for owner in db_session.exec(identity_stmt).all():
+        identity_owners = db_session.exec(identity_stmt).all()
+        logger.info("[EffectiveRoutes]   Identity contacts (filtered): %d", len(identity_owners))
+        for owner in identity_owners:
+            logger.info(
+                "[EffectiveRoutes]     - owner=%s (%s)",
+                owner.full_name or owner.email, owner.id,
+            )
+            identity_examples = AppAgentRouteService._build_identity_prompt_examples(
+                db_session=db_session,
+                owner_id=owner.id,
+                owner_name=owner.full_name or "",
+                owner_email=owner.email or "",
+                target_user_id=user_id,
+            )
             results.append(
                 EffectiveRoute(
                     route_id=uuid.UUID(int=0),  # placeholder — identity uses owner_id
@@ -503,9 +554,11 @@ class AppAgentRouteService:
                     identity_owner_id=owner.id,
                     identity_owner_name=owner.full_name or "",
                     identity_owner_email=owner.email or "",
+                    prompt_examples=identity_examples,
                 )
             )
 
+        logger.info("[EffectiveRoutes] Total effective routes: %d", len(results))
         return results
 
     @staticmethod
@@ -530,6 +583,46 @@ class AppAgentRouteService:
             is_enabled=assignment.is_enabled,
             created_at=assignment.created_at,
         )
+
+    @staticmethod
+    def _build_identity_prompt_examples(
+        db_session: DBSession,
+        owner_id: uuid.UUID,
+        owner_name: str,
+        owner_email: str,
+        target_user_id: uuid.UUID,
+    ) -> str | None:
+        """Build prefixed prompt examples for an identity route.
+
+        Aggregates prompt_examples from all active bindings accessible to the caller,
+        prefixing each with the identity owner's name.
+        """
+        from app.models.identity.identity_models import (
+            IdentityAgentBinding,
+            IdentityBindingAssignment,
+        )
+        stmt = (
+            select(IdentityAgentBinding)
+            .join(
+                IdentityBindingAssignment,
+                IdentityBindingAssignment.binding_id == IdentityAgentBinding.id,
+            )
+            .where(
+                IdentityAgentBinding.owner_id == owner_id,
+                IdentityBindingAssignment.target_user_id == target_user_id,
+                IdentityBindingAssignment.is_active == True,  # noqa: E712
+                IdentityBindingAssignment.is_enabled == True,  # noqa: E712
+                IdentityAgentBinding.is_active == True,  # noqa: E712
+            )
+        )
+        lines: list[str] = []
+        for binding in db_session.exec(stmt).all():
+            if binding.prompt_examples:
+                for raw_line in binding.prompt_examples.splitlines():
+                    line = raw_line.strip()
+                    if line:
+                        lines.append(f"ask {owner_name} ({owner_email}) to {line}")
+        return "\n".join(lines) if lines else None
 
 
 # ---------------------------------------------------------------------------
@@ -656,6 +749,7 @@ class UserAppAgentRouteService:
                     session_mode=route.session_mode,
                     trigger_prompt=route.trigger_prompt,
                     message_patterns=route.message_patterns,
+                    prompt_examples=route.prompt_examples,
                     is_active=route.is_active,
                     assignment_id=assignment.id,
                     is_enabled=assignment.is_enabled,

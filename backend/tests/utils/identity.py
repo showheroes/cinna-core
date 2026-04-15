@@ -20,6 +20,7 @@ def create_identity_binding(
     agent_id: str,
     trigger_prompt: str = "Route to this agent when asked about support.",
     message_patterns: str | None = None,
+    prompt_examples: str | None = None,
     session_mode: str = "conversation",
     assigned_user_ids: list[str] | None = None,
     auto_enable: bool = False,
@@ -34,6 +35,8 @@ def create_identity_binding(
     }
     if message_patterns is not None:
         payload["message_patterns"] = message_patterns
+    if prompt_examples is not None:
+        payload["prompt_examples"] = prompt_examples
 
     r = client.post(f"{_BASE}/bindings/", headers=token_headers, json=payload)
     assert r.status_code == 200, f"Create binding failed: {r.text}"

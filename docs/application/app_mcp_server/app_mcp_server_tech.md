@@ -64,6 +64,7 @@
 - `backend/tests/api/app_mcp/conftest.py` -- domain fixtures (patched create_session, environment adapter, background tasks)
 - `backend/tests/api/app_mcp/app_agent_routes_test.py` -- admin CRUD lifecycle, assignments, user personal routes, toggle, unique constraint
 - `backend/tests/api/app_mcp/app_mcp_session_test.py` -- session creation, context_id reuse, invalid context_id, no routes, two independent sessions
+- `backend/tests/api/app_mcp/prompt_examples_test.py` -- prompt_examples lifecycle and validation for both AppAgentRoute and IdentityAgentBinding
 - `backend/tests/utils/app_agent_route.py` -- test utility helpers for admin and user route API calls
 - `backend/tests/unit/test_routing_message_transformation.py` -- unit tests for `RouteToAgentResult`, JSON parsing, sanity guards, `_ai_classify()` tuple propagation, cascade logic, and `AIFunctionsService` passthrough
 
@@ -71,7 +72,7 @@
 
 ### `app_agent_route` -- Route definitions (any agent owner or superuser)
 
-- `id` (UUID, PK), `name` (str), `agent_id` (FK > agent, CASCADE), `session_mode` (str), `trigger_prompt` (Text), `message_patterns` (Text, nullable), `channel_app_mcp` (bool), `is_active` (bool), `auto_enable_for_users` (bool, default False), `created_by` (FK > user, CASCADE), `created_at`, `updated_at`
+- `id` (UUID, PK), `name` (str), `agent_id` (FK > agent, CASCADE), `session_mode` (str), `trigger_prompt` (Text), `message_patterns` (Text, nullable), `prompt_examples` (Text, nullable), `channel_app_mcp` (bool), `is_active` (bool), `auto_enable_for_users` (bool, default False), `created_by` (FK > user, CASCADE), `created_at`, `updated_at`
 - Indexes: `agent_id`, `created_by`
 - `auto_enable_for_users`: when `True`, assignments to new users are created with `is_enabled=True`; only superusers may set this field
 

@@ -57,6 +57,11 @@ class IdentityRoutingService:
 
         Returns IdentityRoutingResult or None if no agent available.
         """
+        logger.info(
+            "[Stage2] Identity routing: owner=%s caller=%s | message=%r",
+            owner_id, caller_user_id, message[:120],
+        )
+
         bindings = IdentityService.get_active_bindings_for_user(
             db_session=db_session,
             owner_id=owner_id,
@@ -64,12 +69,23 @@ class IdentityRoutingService:
         )
 
         if not bindings:
-            logger.debug(
-                "[IdentityRouting] No accessible bindings for caller=%s in identity=%s",
+            logger.info(
+                "[Stage2] No accessible bindings for caller=%s in identity=%s",
                 caller_user_id,
                 owner_id,
             )
             return None
+
+        logger.info("[Stage2] %d accessible binding(s) for caller:", len(bindings))
+        for i, b in enumerate(bindings):
+            agent = db_session.get(Agent, b.agent_id)
+            logger.info(
+                "[Stage2]   binding[%d] agent=%s (%s) trigger=%r patterns=%r active=%s mode=%s",
+                i, agent.name if agent else "?", b.agent_id,
+                (b.trigger_prompt or "")[:80],
+                (b.message_patterns or "")[:60] or None,
+                b.is_active, b.session_mode,
+            )
 
         # Enrich bindings with their assignment IDs for the caller
         # We need the assignment ID (to store on session) for each binding
@@ -84,7 +100,12 @@ class IdentityRoutingService:
             agent_name = agent.name if agent else ""
             assignment_id = binding_assignments.get(binding.id)
             if not assignment_id:
+                logger.info("[Stage2] Single binding but no assignment found — aborting")
                 return None
+            logger.info(
+                "[Stage2] Single binding — using directly: %s (%s)",
+                agent_name, binding.agent_id,
+            )
             return IdentityRoutingResult(
                 agent_id=binding.agent_id,
                 agent_name=agent_name,
@@ -101,7 +122,12 @@ class IdentityRoutingService:
             agent_name = agent.name if agent else ""
             assignment_id = binding_assignments.get(matched.id)
             if not assignment_id:
+                logger.info("[Stage2] Pattern matched binding but no assignment — aborting")
                 return None
+            logger.info(
+                "[Stage2] Pattern match hit: %s (%s)",
+                agent_name, matched.agent_id,
+            )
             return IdentityRoutingResult(
                 agent_id=matched.agent_id,
                 agent_name=agent_name,
@@ -112,6 +138,7 @@ class IdentityRoutingService:
             )
 
         # Fall back to AI classification
+        logger.info("[Stage2] No pattern match — falling back to AI classification")
         ai_result = IdentityRoutingService._ai_classify(message, bindings, db_session)
         if ai_result:
             ai_matched, ai_transformed_message = ai_result
@@ -119,7 +146,13 @@ class IdentityRoutingService:
             agent_name = agent.name if agent else ""
             assignment_id = binding_assignments.get(ai_matched.id)
             if not assignment_id:
+                logger.info("[Stage2] AI matched binding but no assignment — aborting")
                 return None
+            logger.info(
+                "[Stage2] AI selected: %s (%s) | transformed_message=%r",
+                agent_name, ai_matched.agent_id,
+                ai_transformed_message[:120] if ai_transformed_message else None,
+            )
             return IdentityRoutingResult(
                 agent_id=ai_matched.agent_id,
                 agent_name=agent_name,
@@ -130,8 +163,8 @@ class IdentityRoutingService:
                 transformed_message=ai_transformed_message,
             )
 
-        logger.debug(
-            "[IdentityRouting] No agent matched for caller=%s in identity=%s",
+        logger.info(
+            "[Stage2] No agent matched for caller=%s in identity=%s",
             caller_user_id,
             owner_id,
         )

@@ -77,6 +77,7 @@ def _binding_to_public(
         agent_name=agent_name,
         trigger_prompt=binding.trigger_prompt,
         message_patterns=binding.message_patterns,
+        prompt_examples=binding.prompt_examples,
         session_mode=binding.session_mode,
         is_active=binding.is_active,
         created_at=binding.created_at,
@@ -127,6 +128,7 @@ class IdentityService:
             agent_id=data.agent_id,
             trigger_prompt=data.trigger_prompt,
             message_patterns=data.message_patterns,
+            prompt_examples=data.prompt_examples,
             session_mode=data.session_mode,
             is_active=True,
         )

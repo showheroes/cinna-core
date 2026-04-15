@@ -24,6 +24,8 @@ Each file below documents one API domain.
 | Files | [files.md](./files.md) | 3 |
 | Guest Share | [guest_share.md](./guest_share.md) | 3 |
 | Guest Shares | [guest_shares.md](./guest_shares.md) | 5 |
+| Identity | [identity.md](./identity.md) | 7 |
+| Identity Contacts | [identity_contacts.md](./identity_contacts.md) | 2 |
 | Knowledge | [knowledge.md](./knowledge.md) | 1 |
 | Knowledge Sources | [knowledge_sources.md](./knowledge_sources.md) | 11 |
 | Llm Plugins | [llm_plugins.md](./llm_plugins.md) | 13 |

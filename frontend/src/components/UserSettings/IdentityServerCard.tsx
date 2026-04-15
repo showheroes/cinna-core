@@ -98,6 +98,7 @@ interface IdentityAgentBinding {
   agent_name: string
   trigger_prompt: string
   message_patterns: string | null
+  prompt_examples: string | null
   session_mode: string
   is_active: boolean
   created_at: string
@@ -129,6 +130,7 @@ export function IdentityServerCard() {
   const [editTriggerPrompt, setEditTriggerPrompt] = useState("")
   const [editMessagePatterns, setEditMessagePatterns] = useState("")
   const [editSessionMode, setEditSessionMode] = useState("conversation")
+  const [editPromptExamples, setEditPromptExamples] = useState("")
   const [editUserSearchQuery, setEditUserSearchQuery] = useState("")
 
   // ---------------------------------------------------------------------------
@@ -183,6 +185,7 @@ export function IdentityServerCard() {
       body: {
         trigger_prompt?: string
         message_patterns?: string | null
+        prompt_examples?: string | null
         session_mode?: string
         is_active?: boolean
       }
@@ -305,6 +308,7 @@ export function IdentityServerCard() {
     setEditingBinding(binding)
     setEditTriggerPrompt(binding.trigger_prompt)
     setEditMessagePatterns(binding.message_patterns ?? "")
+    setEditPromptExamples(binding.prompt_examples ?? "")
     setEditSessionMode(binding.session_mode)
     setEditUserSearchQuery("")
     setEditDialogOpen(true)
@@ -317,6 +321,7 @@ export function IdentityServerCard() {
       body: {
         trigger_prompt: editTriggerPrompt.trim(),
         message_patterns: editMessagePatterns.trim() || null,
+        prompt_examples: editPromptExamples.trim() || null,
         session_mode: editSessionMode,
       },
     })
@@ -596,6 +601,20 @@ export function IdentityServerCard() {
               />
               <p className="text-xs text-muted-foreground">
                 One glob-style pattern per line. Matched before AI routing.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Prompt Examples (optional)</Label>
+              <Textarea
+                value={editPromptExamples}
+                onChange={(e) => setEditPromptExamples(e.target.value)}
+                rows={3}
+                placeholder={"generate employee report\nprepare quarterly analysis"}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Short example prompts. MCP clients will see these prefixed with your name (e.g., 'ask Your Name to generate employee report').
               </p>
             </div>
 
