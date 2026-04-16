@@ -332,6 +332,13 @@ async def get_cli_context(
     cli_token.last_used_at = now
     cli_token.expires_at = now + timedelta(days=7)
     db.add(cli_token)
+
+    # 7. Keep environment alive — update last_activity_at so the
+    #    suspension scheduler doesn't suspend while CLI is actively working
+    if environment:
+        environment.last_activity_at = now
+        db.add(environment)
+
     db.commit()
     db.refresh(cli_token)
 

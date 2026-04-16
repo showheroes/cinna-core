@@ -69,6 +69,91 @@ class CLIService:
     All methods are static — follow the same pattern as AccessTokenService.
     """
 
+    # ── Environment Readiness ───────────────────────────────────────────
+
+    @staticmethod
+    async def ensure_environment_running(
+        environment: AgentEnvironment | None,
+        agent: Agent,
+    ) -> None:
+        """
+        Ensure the environment is running for CLI workspace operations.
+
+        Auto-activates suspended environments so CLI sync (push/pull/manifest)
+        can proceed without the user waking the env from the web UI.
+
+        Args:
+            environment: The agent's active environment (may be None)
+            agent: The agent instance
+
+        Raises:
+            ValueError: If no environment exists or env is in a non-recoverable state
+            RuntimeError: If activation fails or times out
+        """
+        if not environment:
+            raise ValueError("No active environment for this agent")
+
+        env_status = environment.status
+        if env_status == "running":
+            return
+
+        if env_status not in ("suspended", "activating"):
+            raise ValueError(
+                f"Environment is in '{env_status}' state and cannot be used for sync"
+            )
+
+        if env_status == "activating":
+            # Another process already triggered activation — just wait
+            logger.info(f"CLI: environment {environment.id} is already activating, polling...")
+        else:
+            logger.info(
+                f"CLI auto-activating suspended environment {environment.id} "
+                f"for agent {agent.id}"
+            )
+            from app.services.environments.environment_lifecycle import EnvironmentLifecycleManager
+
+            lifecycle = EnvironmentLifecycleManager()
+            from app.core.db import engine
+
+            with Session(engine) as fresh_db:
+                fresh_env = fresh_db.get(AgentEnvironment, environment.id)
+                fresh_agent = fresh_db.get(Agent, agent.id)
+                if not fresh_env or not fresh_agent:
+                    raise RuntimeError("Environment or agent not found during activation")
+
+                success = await lifecycle.activate_suspended_environment(
+                    db_session=fresh_db,
+                    environment=fresh_env,
+                    agent=fresh_agent,
+                    emit_events=True,
+                )
+                if not success:
+                    raise RuntimeError("Failed to activate suspended environment")
+
+        # Poll until running (handles both just-activated and already-activating cases)
+        import asyncio
+        from app.core.db import engine
+
+        deadline = asyncio.get_event_loop().time() + 120
+        while asyncio.get_event_loop().time() < deadline:
+            with Session(engine) as fresh_db:
+                fresh_env = fresh_db.get(AgentEnvironment, environment.id)
+                if not fresh_env:
+                    raise RuntimeError("Environment disappeared during activation")
+                if fresh_env.status == "running":
+                    logger.info(f"CLI: environment {environment.id} is now running")
+                    return
+                if fresh_env.status == "error":
+                    raise RuntimeError(
+                        f"Environment entered error state during activation: "
+                        f"{fresh_env.status_message}"
+                    )
+            await asyncio.sleep(3)
+
+        raise RuntimeError(
+            f"Environment {environment.id} activation timed out after 120 seconds"
+        )
+
     # ── Setup Token Lifecycle ────────────────────────────────────────────
 
     @staticmethod

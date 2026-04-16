@@ -23,6 +23,25 @@ def _verify_cli_agent_scope(cli_ctx: CLIContext, agent_id: uuid.UUID) -> None:
     if cli_ctx.agent.id != agent_id:
         raise HTTPException(status_code=403, detail="Token is not scoped to this agent")
 
+
+async def _ensure_environment_running(cli_ctx: CLIContext, db: "Session") -> None:
+    """
+    Thin route-layer wrapper: delegates to CLIService.ensure_environment_running()
+    and converts service exceptions to HTTP responses.
+    """
+    try:
+        await CLIService.ensure_environment_running(cli_ctx.environment, cli_ctx.agent)
+    except ValueError as e:
+        # "No active environment" → 404, state conflicts → 409
+        code = status.HTTP_404_NOT_FOUND if "No active" in str(e) else status.HTTP_409_CONFLICT
+        raise HTTPException(status_code=code, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+    # Refresh so the route sees updated environment state after activation
+    if cli_ctx.environment:
+        db.refresh(cli_ctx.environment)
+
 # ── Setup Bootstrap Router ───────────────────────────────────────────────────
 # Registered directly on the FastAPI app at top level (short URL for curl oneliner)
 
@@ -260,14 +279,10 @@ async def get_workspace(
     Download the remote workspace as a tarball.
 
     Used for initial clone (cinna setup) and subsequent pulls (cinna pull).
+    Auto-activates suspended environments.
     """
     _verify_cli_agent_scope(cli_ctx, agent_id)
-
-    if not cli_ctx.environment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active environment for this agent",
-        )
+    await _ensure_environment_running(cli_ctx, db)
 
     try:
         return await CLIService.get_workspace_tarball(
@@ -293,14 +308,10 @@ async def upload_workspace(
     Upload local workspace to the remote environment.
 
     Used by cinna push to sync local changes to production.
+    Auto-activates suspended environments.
     """
     _verify_cli_agent_scope(cli_ctx, agent_id)
-
-    if not cli_ctx.environment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active environment for this agent",
-        )
+    await _ensure_environment_running(cli_ctx, db)
 
     try:
         await CLIService.upload_workspace(
@@ -327,14 +338,10 @@ async def get_workspace_manifest(
     Get the remote workspace file manifest for diffing during push/pull.
 
     Returns a dict of relative paths → {sha256, size, mtime}.
+    Auto-activates suspended environments.
     """
     _verify_cli_agent_scope(cli_ctx, agent_id)
-
-    if not cli_ctx.environment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active environment for this agent",
-        )
+    await _ensure_environment_running(cli_ctx, db)
 
     try:
         return await CLIService.get_workspace_manifest(

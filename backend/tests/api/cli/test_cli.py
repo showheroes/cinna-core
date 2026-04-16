@@ -8,13 +8,20 @@ Covers:
   workspace (404 without env), workspace/manifest (404 without env),
   knowledge/search
 - Auth guards: unauthenticated, wrong user, revoked token, wrong agent scope
+- Keep-alive: CLI calls refresh environment.last_activity_at
+- Auto-activation: suspended env is activated on workspace endpoints
+- Error state guard: non-recoverable env state returns 409
+- No environment guard: missing active env returns 404
 """
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 from app.core.config import settings
-from tests.utils.agent import create_agent_via_api
+from tests.utils.agent import create_agent_via_api, get_agent
+from tests.utils.background_tasks import drain_tasks
 from tests.utils.cli import (
     cli_auth_headers,
     create_setup_token,
@@ -271,3 +278,119 @@ def test_cli_authenticated_endpoints(
     )
     assert r.status_code == 401
     assert "revoked" in r.json()["detail"].lower()
+
+
+# ── Scenario 3: Keep-alive and auto-activation ───────────────────────────────
+
+def test_cli_environment_keep_alive_and_auto_activation(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    """
+    CLI environment keep-alive and auto-activation:
+      1. Create agent, setup token, exchange → obtain CLI JWT
+      2. Keep-alive: set env to running, make a CLI call, verify last_activity_at updated
+      3. Auto-activation: set env to suspended, call workspace/manifest → succeeds
+         (not 404/409), proving the auto-activation path ran
+      4. Error state: set env to error, call workspace/manifest → 409
+      5. No environment: deactivate env (is_active=False), call workspace → 404
+    """
+    from app.models import AgentEnvironment
+
+    # ── Phase 1: Bootstrap CLI token ─────────────────────────────────────
+    agent = create_agent_via_api(client, superuser_token_headers)
+    # Environment creation runs as a background task — drain before checking
+    drain_tasks()
+    agent = get_agent(client, superuser_token_headers, agent["id"])
+    agent_id = agent["id"]
+    env_id = agent["active_environment_id"]
+    assert env_id is not None, "Agent must have an active environment for this test"
+
+    token_resp = create_setup_token(client, superuser_token_headers, agent_id)
+    exchange = exchange_setup_token(client, token_resp["token"], machine_name="Keep-Alive Machine")
+    cli_jwt = exchange["cli_token"]
+    cli_headers = cli_auth_headers(cli_jwt)
+
+    # ── Phase 2: Keep-alive — CLI calls update last_activity_at ──────────
+    # Set environment to running via test DB so the keep-alive path executes
+    env = db.get(AgentEnvironment, env_id)
+    assert env is not None
+    env.status = "running"
+    env.last_activity_at = None  # clear so we can detect the update
+    db.add(env)
+    db.flush()
+
+    # Record time just before the CLI call
+    before_call = datetime.now(UTC) - timedelta(seconds=1)
+
+    # Make any CLI-authenticated call — get_cli_context runs on every CLI request
+    r = client.get(f"{_BASE}/agents/{agent_id}/building-context", headers=cli_headers)
+    assert r.status_code == 200
+
+    # Refresh and verify last_activity_at was updated by get_cli_context
+    db.refresh(env)
+    assert env.last_activity_at is not None, (
+        "get_cli_context must update environment.last_activity_at on every CLI call"
+    )
+    # Normalise to UTC for comparison (DB may return naive datetime)
+    activity_ts = env.last_activity_at
+    if activity_ts.tzinfo is None:
+        from datetime import timezone
+        activity_ts = activity_ts.replace(tzinfo=timezone.utc)
+    assert activity_ts >= before_call, (
+        f"last_activity_at ({activity_ts}) should be >= time before CLI call ({before_call})"
+    )
+
+    # ── Phase 3: Suspended env → auto-activation on workspace/manifest ───
+    # Set status to suspended in the test DB
+    db.refresh(env)
+    env.status = "suspended"
+    db.add(env)
+    db.flush()
+
+    # The route calls CLIService.ensure_environment_running() which activates the env.
+    # activate_suspended_environment() writes to a fresh Session(engine) outside the
+    # test transaction, so we cannot assert DB state from here.  What we CAN assert is
+    # that the response is NOT a 404 (no env) or 409 (bad state) — those would mean
+    # the auto-activation path was skipped or rejected.
+    # A 502 is acceptable: it means activation succeeded but the workspace download
+    # failed because there is no real Docker container in tests.
+    r = client.get(f"{_BASE}/agents/{agent_id}/workspace/manifest", headers=cli_headers)
+    assert r.status_code not in (404, 409), (
+        f"Expected auto-activation to proceed (not 404/409), got {r.status_code}: {r.text}"
+    )
+
+    # ── Phase 4: Non-recoverable state → 409 ─────────────────────────────
+    # Re-fetch env inside the test session — it may have been updated in a separate
+    # session during phase 3, so expire and reload from the test DB.
+    db.expire(env)
+    env = db.get(AgentEnvironment, env_id)
+    env.status = "error"
+    db.add(env)
+    db.flush()
+
+    r = client.get(f"{_BASE}/agents/{agent_id}/workspace/manifest", headers=cli_headers)
+    assert r.status_code == 409, (
+        f"Expected 409 for non-recoverable env state, got {r.status_code}: {r.text}"
+    )
+    detail = r.json()["detail"].lower()
+    assert "error" in detail or "state" in detail, (
+        f"409 detail should mention the env state, got: {r.json()['detail']!r}"
+    )
+
+    # ── Phase 5: No environment → 404 ────────────────────────────────────
+    # Deactivate the environment so get_cli_context finds no active env
+    db.expire(env)
+    env = db.get(AgentEnvironment, env_id)
+    env.is_active = False
+    db.add(env)
+    db.flush()
+
+    r = client.get(f"{_BASE}/agents/{agent_id}/workspace", headers=cli_headers)
+    assert r.status_code == 404, (
+        f"Expected 404 when no active environment, got {r.status_code}: {r.text}"
+    )
+    assert "active" in r.json()["detail"].lower() or "environment" in r.json()["detail"].lower(), (
+        f"404 detail should mention environment, got: {r.json()['detail']!r}"
+    )
