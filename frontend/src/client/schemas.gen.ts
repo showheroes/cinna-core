@@ -11851,6 +11851,18 @@ export const SessionPublicExtendedSchema = {
                 }
             ],
             title: 'Last Message Content'
+        },
+        session_metadata: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Metadata'
         }
     },
     type: 'object',

@@ -153,6 +153,7 @@ class SessionPublicExtended(SessionPublic):
     agent_ui_color_preset: str | None = None
     message_count: int | None = None
     last_message_content: str | None = None
+    session_metadata: dict | None = None
 
 
 class SessionsPublic(SQLModel):

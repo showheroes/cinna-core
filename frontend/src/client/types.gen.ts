@@ -2395,6 +2395,9 @@ export type SessionPublicExtended = {
     agent_ui_color_preset?: (string | null);
     message_count?: (number | null);
     last_message_content?: (string | null);
+    session_metadata?: ({
+    [key: string]: unknown;
+} | null);
 };
 
 export type SessionsPublic = {
@@ -2985,6 +2988,42 @@ export type A2aGetAgentCardWellKnownData = {
 };
 
 export type A2aGetAgentCardWellKnownResponse = (unknown);
+
+export type A2aGetAgentCardV1Data = {
+    agentId: string;
+};
+
+export type A2aGetAgentCardV1Response = (unknown);
+
+export type A2aHandleJsonrpcV1Data = {
+    agentId: string;
+};
+
+export type A2aHandleJsonrpcV1Response = (unknown);
+
+export type A2aGetAgentCardWellKnownV1Data = {
+    agentId: string;
+};
+
+export type A2aGetAgentCardWellKnownV1Response = (unknown);
+
+export type A2aGetAgentCardV03Data = {
+    agentId: string;
+};
+
+export type A2aGetAgentCardV03Response = (unknown);
+
+export type A2aHandleJsonrpcV03Data = {
+    agentId: string;
+};
+
+export type A2aHandleJsonrpcV03Response = (unknown);
+
+export type A2aGetAgentCardWellKnownV03Data = {
+    agentId: string;
+};
+
+export type A2aGetAgentCardWellKnownV03Response = (unknown);
 
 export type AccessTokensListAccessTokensData = {
     agentId: string;
