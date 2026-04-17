@@ -1458,6 +1458,73 @@ export type ExecuteTaskResponse = {
 };
 
 /**
+ * Response schema for GET /api/v1/external/agents.
+ *
+ * Targets are ordered: personal agents first, then MCP shared agents,
+ * then identity contacts — each section sorted by name ascending.
+ */
+export type ExternalAgentListResponse = {
+    targets?: Array<ExternalTargetPublic>;
+};
+
+/**
+ * Session metadata returned by GET /api/v1/external/sessions endpoints.
+ *
+ * A slim, read-only view of a session that native clients use to restore
+ * their thread list at launch. The chat path uses A2A Task objects; this
+ * schema is only for the list/metadata REST layer so the client can render
+ * a thread picker before opening any conversation.
+ *
+ * Uses pydantic.BaseModel (not SQLModel) to avoid the metadata field shadow
+ * warning — same pattern as ExternalTargetPublic established in Phase 1.
+ */
+export type ExternalSessionPublic = {
+    id: string;
+    title?: (string | null);
+    integration_type?: (string | null);
+    status: string;
+    interaction_status: string;
+    result_state?: (string | null);
+    result_summary?: (string | null);
+    last_message_at?: (string | null);
+    created_at: string;
+    agent_id?: (string | null);
+    agent_name?: (string | null);
+    caller_id?: (string | null);
+    identity_caller_id?: (string | null);
+    client_kind?: (string | null);
+    external_client_id?: (string | null);
+    target_type?: (string | null);
+    target_id?: (string | null);
+};
+
+/**
+ * A single addressable target returned by the external agent discovery endpoint.
+ *
+ * Covers three source types:
+ * - "agent"         — personal agent owned by (or cloned to) the user
+ * - "app_mcp_route" — agent shared with the user via an AppAgentRoute assignment
+ * - "identity"      — another user who has exposed agents via the Identity MCP server
+ */
+export type ExternalTargetPublic = {
+    target_type: 'agent' | 'app_mcp_route' | 'identity';
+    target_id: string;
+    name: string;
+    description?: (string | null);
+    entrypoint_prompt?: (string | null);
+    example_prompts?: Array<(string)>;
+    session_mode?: ('conversation' | 'building' | null);
+    ui_color_preset?: (string | null);
+    agent_card_url: string;
+    protocol_versions?: Array<(string)>;
+    metadata?: {
+        [key: string]: unknown;
+    };
+};
+
+export type target_type = 'agent' | 'app_mcp_route' | 'identity';
+
+/**
  * Response schema for file upload
  */
 export type FileUploadPublic = {
@@ -4239,6 +4306,112 @@ export type EventsBroadcastEventResponse = (unknown);
 export type EventsGetConnectionStatsResponse = (unknown);
 
 export type EventsTestEventResponse = (unknown);
+
+export type ExternalListExternalAgentsData = {
+    /**
+     * Optional workspace filter. When provided, limits the personal agents section to agents in this workspace. MCP shared agents and identity contacts are not filtered.
+     */
+    workspaceId?: (string | null);
+};
+
+export type ExternalListExternalAgentsResponse = (ExternalAgentListResponse);
+
+export type ExternalListExternalSessionsData = {
+    limit?: number;
+    offset?: number;
+};
+
+export type ExternalListExternalSessionsResponse = (Array<ExternalSessionPublic>);
+
+export type ExternalGetExternalSessionData = {
+    sessionId: string;
+};
+
+export type ExternalGetExternalSessionResponse = (ExternalSessionPublic);
+
+export type ExternalHideExternalSessionData = {
+    sessionId: string;
+};
+
+export type ExternalHideExternalSessionResponse = (void);
+
+export type ExternalListExternalSessionMessagesData = {
+    sessionId: string;
+};
+
+export type ExternalListExternalSessionMessagesResponse = (Array<MessagePublic>);
+
+export type ExternalA2aGetExternalAgentCardData = {
+    agentId: string;
+    /**
+     * Protocol version: 'v1.0' (default) or 'v0.3'
+     */
+    protocol?: (string | null);
+};
+
+export type ExternalA2aGetExternalAgentCardResponse = (unknown);
+
+export type ExternalA2aHandleExternalAgentJsonrpcData = {
+    agentId: string;
+    protocol?: (string | null);
+};
+
+export type ExternalA2aHandleExternalAgentJsonrpcResponse = (unknown);
+
+export type ExternalA2aGetExternalAgentCardWellKnownData = {
+    agentId: string;
+    protocol?: (string | null);
+};
+
+export type ExternalA2aGetExternalAgentCardWellKnownResponse = (unknown);
+
+export type ExternalA2aGetExternalRouteCardData = {
+    /**
+     * Protocol version: 'v1.0' (default) or 'v0.3'
+     */
+    protocol?: (string | null);
+    routeId: string;
+};
+
+export type ExternalA2aGetExternalRouteCardResponse = (unknown);
+
+export type ExternalA2aHandleExternalRouteJsonrpcData = {
+    protocol?: (string | null);
+    routeId: string;
+};
+
+export type ExternalA2aHandleExternalRouteJsonrpcResponse = (unknown);
+
+export type ExternalA2aGetExternalRouteCardWellKnownData = {
+    protocol?: (string | null);
+    routeId: string;
+};
+
+export type ExternalA2aGetExternalRouteCardWellKnownResponse = (unknown);
+
+export type ExternalA2aGetExternalIdentityCardData = {
+    ownerId: string;
+    /**
+     * Protocol version: 'v1.0' (default) or 'v0.3'
+     */
+    protocol?: (string | null);
+};
+
+export type ExternalA2aGetExternalIdentityCardResponse = (unknown);
+
+export type ExternalA2aHandleExternalIdentityJsonrpcData = {
+    ownerId: string;
+    protocol?: (string | null);
+};
+
+export type ExternalA2aHandleExternalIdentityJsonrpcResponse = (unknown);
+
+export type ExternalA2aGetExternalIdentityCardWellKnownData = {
+    ownerId: string;
+    protocol?: (string | null);
+};
+
+export type ExternalA2aGetExternalIdentityCardWellKnownResponse = (unknown);
 
 export type FilesUploadFileData = {
     formData: Body_files_upload_file;

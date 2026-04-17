@@ -1,0 +1,176 @@
+"""
+ExternalAccessPolicy — centralised access-check layer for the External A2A surface.
+
+All three target types (agent, app_mcp_route, identity) funnel through the methods
+here so access rules live in exactly one place.
+
+Raises domain exceptions from ``app.services.external.errors`` instead of plain
+``ValueError`` — the route and request-handler layers catch those and translate to
+JSON-RPC / HTTP error responses.
+"""
+from __future__ import annotations
+
+import uuid
+import logging
+from typing import Optional
+
+from sqlmodel import Session as DBSession
+
+from app.models import Agent, User
+from app.models.app_mcp.app_agent_route import AppAgentRoute
+from app.models.environments.environment import AgentEnvironment
+from app.models.identity.identity_models import IdentityAgentBinding
+from app.services.app_mcp.app_agent_route_service import (
+    AppAgentRouteService,
+    EffectiveRoute,
+)
+from app.services.external.errors import (
+    NoActiveEnvironmentError,
+    TargetNotAccessibleError,
+)
+from app.services.identity.identity_service import IdentityService
+
+logger = logging.getLogger(__name__)
+
+
+class ExternalAccessPolicy:
+    """Stateless access-check layer for the External A2A surface.
+
+    All methods are static — this class is a namespace, not a service instance.
+    """
+
+    @staticmethod
+    def resolve_agent(
+        db: DBSession,
+        user: User,
+        agent_id: uuid.UUID,
+        *,
+        require_env: bool = False,
+    ) -> tuple[Agent, Optional[AgentEnvironment]]:
+        """Resolve and verify ownership of an agent.
+
+        Ownership rule: ``agent.owner_id`` must equal ``user.id``.
+        Does NOT require ``a2a_config.enabled``.
+
+        Args:
+            db: Active database session.
+            user: Authenticated caller — must be the agent owner.
+            agent_id: UUID of the agent to resolve.
+            require_env: When ``True``, also require an active environment and
+                return it in the tuple.  Raises ``NoActiveEnvironmentError`` when
+                the agent has no active environment.
+
+        Returns:
+            ``(agent, environment)`` — ``environment`` is ``None`` when
+            ``require_env=False`` and no environment resolution is performed.
+
+        Raises:
+            TargetNotAccessibleError: Agent not found or not owned by caller.
+            NoActiveEnvironmentError: ``require_env=True`` and no active environment.
+        """
+        agent = db.get(Agent, agent_id)
+        if not agent or agent.owner_id != user.id:
+            raise TargetNotAccessibleError("Agent not found or access denied")
+
+        if not require_env:
+            return agent, None
+
+        environment = ExternalAccessPolicy._require_active_environment(db, agent)
+        return agent, environment
+
+    @staticmethod
+    def resolve_route(
+        db: DBSession,
+        user: User,
+        route_id: uuid.UUID,
+    ) -> tuple[AppAgentRoute, EffectiveRoute]:
+        """Resolve and verify route effectiveness for the caller.
+
+        Re-verifies every request so mid-conversation revocations are detected.
+
+        Args:
+            db: Active database session.
+            user: Authenticated caller.
+            route_id: UUID of the AppAgentRoute.
+
+        Returns:
+            ``(route, effective_route)`` where ``effective_route`` is the
+            caller-visible representation (contains ``source``, ``trigger_prompt``, etc.).
+
+        Raises:
+            TargetNotAccessibleError: Route not effective for this caller or not found.
+        """
+        effective = ExternalAccessPolicy._find_effective_route(db, user, route_id)
+        route = db.get(AppAgentRoute, route_id)
+        if route is None:
+            raise TargetNotAccessibleError("Route not found or access denied")
+        return route, effective
+
+    @staticmethod
+    def require_identity_access(
+        db: DBSession,
+        user: User,
+        owner_id: uuid.UUID,
+    ) -> list[IdentityAgentBinding]:
+        """Verify the caller has at least one active binding with the identity owner.
+
+        Args:
+            db: Active database session.
+            user: Authenticated caller.
+            owner_id: UUID of the identity owner (the other User).
+
+        Returns:
+            Non-empty list of active ``IdentityAgentBinding`` objects that the
+            caller is currently allowed to reach.
+
+        Raises:
+            TargetNotAccessibleError: Identity owner not found or the caller has no
+                active accessible bindings.
+        """
+        owner = db.get(User, owner_id)
+        if not owner:
+            raise TargetNotAccessibleError("Identity not found or access denied")
+
+        bindings = IdentityService.get_active_bindings_for_user(
+            db_session=db,
+            owner_id=owner_id,
+            target_user_id=user.id,
+        )
+        if not bindings:
+            raise TargetNotAccessibleError("Identity not found or access denied")
+
+        return bindings
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _find_effective_route(
+        db: DBSession,
+        user: User,
+        route_id: uuid.UUID,
+    ) -> EffectiveRoute:
+        """Return the EffectiveRoute for ``route_id`` or raise TargetNotAccessibleError."""
+        routes = AppAgentRouteService.get_effective_routes_for_user(
+            db_session=db,
+            user_id=user.id,
+            channel="app_mcp",
+        )
+        for r in routes:
+            if r.route_id == route_id and r.source != "identity":
+                return r
+        raise TargetNotAccessibleError("Route not found or access denied")
+
+    @staticmethod
+    def _require_active_environment(
+        db: DBSession,
+        agent: Agent,
+    ) -> AgentEnvironment:
+        """Return the active AgentEnvironment or raise NoActiveEnvironmentError."""
+        if not agent.active_environment_id:
+            raise NoActiveEnvironmentError()
+        env = db.get(AgentEnvironment, agent.active_environment_id)
+        if not env:
+            raise NoActiveEnvironmentError()
+        return env

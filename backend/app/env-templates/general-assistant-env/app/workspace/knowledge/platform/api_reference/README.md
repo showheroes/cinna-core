@@ -18,10 +18,12 @@ Each file below documents one API domain.
 | App Agent Routes | [app_agent_routes.md](./app_agent_routes.md) | 7 |
 | Cli | [cli.md](./cli.md) | 11 |
 | Credentials | [credentials.md](./credentials.md) | 16 |
-| Desktop Auth | [desktop_auth.md](./desktop_auth.md) | 8 |
+| Desktop Auth | [desktop_auth.md](./desktop_auth.md) | 9 |
 | Email Integration | [email_integration.md](./email_integration.md) | 6 |
 | Environments | [environments.md](./environments.md) | 11 |
 | Events | [events.md](./events.md) | 3 |
+| External | [external.md](./external.md) | 5 |
+| External A2A | [external_a2a.md](./external_a2a.md) | 9 |
 | Files | [files.md](./files.md) | 3 |
 | Guest Share | [guest_share.md](./guest_share.md) | 3 |
 | Guest Shares | [guest_shares.md](./guest_shares.md) | 5 |

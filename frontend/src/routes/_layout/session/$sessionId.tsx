@@ -436,6 +436,15 @@ function ChatInterface() {
                     )}
                   </span>
                 )}
+                {session.integration_type === "external" && (
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded text-[10px] font-medium bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300">
+                    <Package className="h-2.5 w-2.5" />
+                    {(session.session_metadata as Record<string, string> | null)?.client_kind
+                      ? ((session.session_metadata as Record<string, string>).client_kind.charAt(0).toUpperCase() +
+                          (session.session_metadata as Record<string, string>).client_kind.slice(1))
+                      : "External"}
+                  </span>
+                )}
                 {session.caller_email && (
                   <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
                     <User className="h-2.5 w-2.5" />

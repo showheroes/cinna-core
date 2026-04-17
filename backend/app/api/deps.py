@@ -351,3 +351,32 @@ async def get_cli_context(
 
 
 CLIContextDep = Annotated[CLIContext, Depends(get_cli_context)]
+
+
+# ── External client attribution ────────────────────────────────────────
+
+
+def get_current_client_claims(token: TokenDep) -> tuple[str | None, str | None]:
+    """Extract ``(client_kind, external_client_id)`` from the bearer JWT.
+
+    Desktop-issued access tokens include these extra claims.  Ordinary web-session
+    JWTs will not carry them, so both values default to ``None`` gracefully.
+
+    This dependency piggybacks on the same token that ``CurrentUser`` has already
+    validated — it does a second decode only to read the extra claims, and treats
+    any decode failure as a non-fatal absence of those claims.
+
+    Returns:
+        ``(client_kind, external_client_id)`` — either may be ``None``.
+    """
+    payload = security.decode_token_claims(token)
+    if payload is None:
+        return None, None
+    client_kind = payload.get("client_kind") or None
+    external_client_id = payload.get("external_client_id") or None
+    return client_kind, external_client_id
+
+
+CurrentClientClaims = Annotated[
+    tuple[str | None, str | None], Depends(get_current_client_claims)
+]

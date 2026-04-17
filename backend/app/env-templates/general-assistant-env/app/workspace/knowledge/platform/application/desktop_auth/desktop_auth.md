@@ -28,10 +28,10 @@ The flow uses a **consent-page pattern** (mirroring the MCP OAuth flow) so that 
 5. The SPA consent page loads, fetches display metadata (`GET /requests/{nonce}`), and shows the user a card: "Allow **{device_name}** to sign in as **{email}**?"
 6. If the user is not logged in, they are redirected to the login page and return to the consent page after logging in
 7. User clicks **Approve**; the SPA calls `POST /consent` with its localStorage JWT
-8. The backend lazily creates a new `DesktopOAuthClient` for this device, issues an authorization code, and returns `{redirect_to: "http://localhost:{port}/callback?code=...&state=..."}`
-9. The SPA navigates the browser to `redirect_to`; the desktop app's ephemeral local HTTP server captures the code
-10. Desktop exchanges the authorization code + PKCE verifier for tokens via `POST /token`
-11. The token response includes `client_id` — the desktop app stores it for future refresh calls
+8. The backend lazily creates a new `DesktopOAuthClient` for this device, issues an authorization code, and returns `{redirect_to: "http://localhost:{port}/callback?code=...&state=...&client_id=..."}` — `client_id` is included so lazy-registered clients learn their server-assigned id before calling `/token`
+9. The SPA navigates the browser to `redirect_to`; the desktop app's ephemeral local HTTP server captures the code and the `client_id`
+10. Desktop exchanges the authorization code + PKCE verifier for tokens via `POST /token` (using the `client_id` from the callback)
+11. The token response also includes `client_id` — the desktop app stores it for future refresh calls
 12. Desktop calls `GET /api/v1/desktop-auth/userinfo` with the new access token to fetch the user's email and name
 13. Desktop displays "Connected to {instance_name}" with user info
 

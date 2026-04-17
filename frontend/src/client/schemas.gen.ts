@@ -6897,6 +6897,307 @@ export const ExecuteTaskResponseSchema = {
     description: 'Response from task execution'
 } as const;
 
+export const ExternalAgentListResponseSchema = {
+    properties: {
+        targets: {
+            items: {
+                '$ref': '#/components/schemas/ExternalTargetPublic'
+            },
+            type: 'array',
+            title: 'Targets',
+            default: []
+        }
+    },
+    type: 'object',
+    title: 'ExternalAgentListResponse',
+    description: `Response schema for GET /api/v1/external/agents.
+
+Targets are ordered: personal agents first, then MCP shared agents,
+then identity contacts — each section sorted by name ascending.`
+} as const;
+
+export const ExternalSessionPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        integration_type: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Integration Type'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        interaction_status: {
+            type: 'string',
+            title: 'Interaction Status'
+        },
+        result_state: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result State'
+        },
+        result_summary: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result Summary'
+        },
+        last_message_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Message At'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Id'
+        },
+        agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Agent Name'
+        },
+        caller_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Caller Id'
+        },
+        identity_caller_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Identity Caller Id'
+        },
+        client_kind: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Client Kind'
+        },
+        external_client_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Client Id'
+        },
+        target_type: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Target Type'
+        },
+        target_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Target Id'
+        }
+    },
+    type: 'object',
+    required: ['id', 'status', 'interaction_status', 'created_at'],
+    title: 'ExternalSessionPublic',
+    description: `Session metadata returned by GET /api/v1/external/sessions endpoints.
+
+A slim, read-only view of a session that native clients use to restore
+their thread list at launch. The chat path uses A2A Task objects; this
+schema is only for the list/metadata REST layer so the client can render
+a thread picker before opening any conversation.
+
+Uses pydantic.BaseModel (not SQLModel) to avoid the metadata field shadow
+warning — same pattern as ExternalTargetPublic established in Phase 1.`
+} as const;
+
+export const ExternalTargetPublicSchema = {
+    properties: {
+        target_type: {
+            type: 'string',
+            enum: ['agent', 'app_mcp_route', 'identity'],
+            title: 'Target Type'
+        },
+        target_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Target Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        entrypoint_prompt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Entrypoint Prompt'
+        },
+        example_prompts: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Example Prompts',
+            default: []
+        },
+        session_mode: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['conversation', 'building']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Mode'
+        },
+        ui_color_preset: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Ui Color Preset'
+        },
+        agent_card_url: {
+            type: 'string',
+            title: 'Agent Card Url'
+        },
+        protocol_versions: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Protocol Versions',
+            default: ['1.0', '0.3.0']
+        },
+        metadata: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Metadata',
+            default: {}
+        }
+    },
+    type: 'object',
+    required: ['target_type', 'target_id', 'name', 'agent_card_url'],
+    title: 'ExternalTargetPublic',
+    description: `A single addressable target returned by the external agent discovery endpoint.
+
+Covers three source types:
+- "agent"         — personal agent owned by (or cloned to) the user
+- "app_mcp_route" — agent shared with the user via an AppAgentRoute assignment
+- "identity"      — another user who has exposed agents via the Identity MCP server`
+} as const;
+
 export const FileUploadPublicSchema = {
     properties: {
         id: {

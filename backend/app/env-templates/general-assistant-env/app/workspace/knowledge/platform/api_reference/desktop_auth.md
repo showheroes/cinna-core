@@ -54,14 +54,6 @@ Auto-generated from OpenAPI spec. Tag: `desktop-auth`
 ## POST `/api/v1/desktop-auth/token`
 **Token Endpoint**
 
-**Request body** (`TokenRequest`):
-  - `grant_type`: string (required)
-  - `client_id`: string (required)
-  - `code`: string | null
-  - `redirect_uri`: string | null
-  - `code_verifier`: string | null
-  - `refresh_token`: string | null
-
 **Response:** `TokenResponse`
 
 ---
@@ -70,10 +62,6 @@ Auto-generated from OpenAPI spec. Tag: `desktop-auth`
 **Userinfo**
 
 **Response:** `UserInfoResponse`
-  - `sub`: string (required)
-  - `email`: string (required)
-  - `full_name`: string | null
-  - `username`: string | null
 
 ---
 

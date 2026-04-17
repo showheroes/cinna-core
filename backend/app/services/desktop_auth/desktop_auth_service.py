@@ -551,6 +551,10 @@ class DesktopAuthService:
         access_token = create_access_token(
             subject=str(user_id),
             expires_delta=timedelta(minutes=settings.DESKTOP_ACCESS_TOKEN_EXPIRE_MINUTES),
+            extra_claims={
+                "client_kind": "desktop",
+                "external_client_id": str(client.id),
+            },
         )
 
         refresh_token_raw = generate_refresh_token()

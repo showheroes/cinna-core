@@ -756,3 +756,44 @@ class UserAppAgentRouteService:
                 )
             )
         return result
+
+    @staticmethod
+    def get_effective_route_or_raise(
+        db_session: DBSession,
+        user_id: uuid.UUID,
+        route_id: uuid.UUID,
+        *,
+        exclude_identity: bool = True,
+        channel: str = "app_mcp",
+    ) -> EffectiveRoute:
+        """Return the EffectiveRoute for ``route_id`` or raise ``ValueError``.
+
+        Convenience wrapper around :meth:`get_effective_routes_for_user` for the
+        common "find one specific route" case.
+
+        Args:
+            db_session: Active database session.
+            user_id: The user whose effective routes are checked.
+            route_id: The specific route UUID to look for.
+            exclude_identity: When ``True`` (default), identity-source routes are
+                excluded — used by the external surface where identity contacts have
+                their own target type.
+            channel: Passed through to :meth:`get_effective_routes_for_user`.
+
+        Returns:
+            The matching :class:`EffectiveRoute`.
+
+        Raises:
+            ValueError: Route not effective for this user or not found.
+        """
+        routes = AppAgentRouteService.get_effective_routes_for_user(
+            db_session=db_session,
+            user_id=user_id,
+            channel=channel,
+        )
+        for r in routes:
+            if r.route_id == route_id:
+                if exclude_identity and r.source == "identity":
+                    continue
+                return r
+        raise ValueError("Route not found or access denied")

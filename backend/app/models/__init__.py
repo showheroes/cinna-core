@@ -465,6 +465,11 @@ from .desktop_auth.desktop_oauth_client import (
 from .desktop_auth.desktop_refresh_token import DesktopRefreshToken
 from .desktop_auth.desktop_auth_code import DesktopAuthCode
 from .desktop_auth.desktop_auth_request import DesktopAuthRequest
+from .external.external_agents import (
+    ExternalTargetPublic,
+    ExternalAgentListResponse,
+    ExternalSessionPublic,
+)
 
 __all__ = [
     # Core
@@ -871,4 +876,8 @@ __all__ = [
     "DesktopRefreshToken",
     "DesktopAuthCode",
     "DesktopAuthRequest",
+    # External Agent Access API
+    "ExternalTargetPublic",
+    "ExternalAgentListResponse",
+    "ExternalSessionPublic",
 ]

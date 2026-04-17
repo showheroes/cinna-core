@@ -8,6 +8,7 @@ the identity owner's portfolio (filtered to those accessible to the specific cal
 import uuid
 import logging
 from datetime import datetime, UTC
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session as DBSession, select
@@ -394,3 +395,41 @@ class IdentityService:
 
         db_session.commit()
         return True
+
+    @staticmethod
+    def check_session_validity(
+        db: DBSession,
+        session: Any,
+    ) -> str | None:
+        """Verify the identity binding and assignment for a session are still active.
+
+        This is the canonical implementation shared by the App MCP and External A2A
+        handlers.  Both ``A2ARequestHandler._check_identity_session_validity`` and
+        ``AppMCPRequestHandler._check_identity_session_validity`` delegate here.
+
+        Args:
+            db: Active database session.
+            session: A ``Session`` ORM row that may carry ``identity_binding_id``
+                and ``identity_binding_assignment_id`` fields.
+
+        Returns:
+            ``None`` when the session is still valid.
+            An error message string when the binding or assignment has been disabled.
+        """
+        if session.identity_binding_id:
+            binding = db.get(IdentityAgentBinding, session.identity_binding_id)
+            if not binding or not binding.is_active:
+                return "This identity connection is no longer active."
+
+        if session.identity_binding_assignment_id:
+            assignment = db.get(
+                IdentityBindingAssignment, session.identity_binding_assignment_id
+            )
+            if (
+                not assignment
+                or not assignment.is_active
+                or not assignment.is_enabled
+            ):
+                return "This identity connection is no longer active."
+
+        return None

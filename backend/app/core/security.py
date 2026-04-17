@@ -53,11 +53,46 @@ def decrypt_field(encrypted_value: str) -> str:
     return decrypted_bytes.decode()
 
 
-def create_access_token(subject: str | Any, expires_delta: timedelta) -> str:
+def create_access_token(
+    subject: str | Any,
+    expires_delta: timedelta,
+    extra_claims: dict[str, Any] | None = None,
+) -> str:
+    """Create a signed JWT access token.
+
+    Args:
+        subject: The ``sub`` claim value (typically a user or token UUID string).
+        expires_delta: Token lifetime.
+        extra_claims: Optional additional claims merged into the payload before
+            signing. Keys that conflict with ``sub`` or ``exp`` are silently
+            ignored to prevent accidental claim shadowing.
+    """
     expire = datetime.now(timezone.utc) + expires_delta
-    to_encode = {"exp": expire, "sub": str(subject)}
+    to_encode: dict[str, Any] = {}
+    if extra_claims:
+        # Merge extra claims first so that sub/exp cannot be shadowed.
+        to_encode.update(extra_claims)
+    to_encode["sub"] = str(subject)
+    to_encode["exp"] = expire
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+def decode_token_claims(token: str) -> dict[str, Any] | None:
+    """Decode a JWT and return the full claim dict, or None on any failure.
+
+    Used by the external A2A surface to extract ``client_kind`` and
+    ``external_client_id`` claims from desktop-issued access tokens without
+    raising an error for ordinary web-session JWTs that omit those claims.
+
+    Returns:
+        The full decoded claim dict, or ``None`` if the token cannot be
+        decoded (expired, invalid signature, malformed, etc.).
+    """
+    try:
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+    except Exception:
+        return None
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

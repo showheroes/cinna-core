@@ -206,6 +206,14 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
   const [identityAssignedUserIds, setIdentityAssignedUserIds] = useState<string[]>([])
   const [identityUserSearchQuery, setIdentityUserSearchQuery] = useState("")
 
+  // Edit Identity Binding state
+  const [editIdentityDialogOpen, setEditIdentityDialogOpen] = useState(false)
+  const [editIdentityTriggerPrompt, setEditIdentityTriggerPrompt] = useState("")
+  const [editIdentityMessagePatterns, setEditIdentityMessagePatterns] = useState("")
+  const [editIdentityPromptExamples, setEditIdentityPromptExamples] = useState("")
+  const [editIdentitySessionMode, setEditIdentitySessionMode] = useState("conversation")
+  const [editIdentityUserSearchQuery, setEditIdentityUserSearchQuery] = useState("")
+
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -247,7 +255,6 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       if (!res.ok) throw new Error("Failed to load identity bindings")
       return res.json()
     },
-    enabled: createDialogOpen,
     staleTime: 30000,
   })
 
@@ -259,7 +266,8 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
     queryFn: () => UsersService.readUsers({ limit: 200 }),
     enabled:
       (createDialogOpen && createStep === "form" && (createType === "app_mcp" || createType === "identity_mcp")) ||
-      editRouteDialogOpen,
+      editRouteDialogOpen ||
+      editIdentityDialogOpen,
     staleTime: 30000,
   })
 
@@ -289,6 +297,17 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       !editRouteAssignedUserIds.includes(u.id) &&
       (u.email.toLowerCase().includes(editRouteUserSearchQuery.toLowerCase()) ||
         (u.full_name ?? "").toLowerCase().includes(editRouteUserSearchQuery.toLowerCase()))
+  )
+
+  // Edit Identity Binding: live data + filtered user picker
+  const editIdentityAssignments = existingIdentityBinding?.assignments ?? []
+  const editIdentityAssignedUserIds = editIdentityAssignments.map((a) => a.target_user_id)
+  const editIdentityFilteredUsers = allUsers.filter(
+    (u) =>
+      u.id !== currentUser?.id &&
+      !editIdentityAssignedUserIds.includes(u.id) &&
+      (u.email.toLowerCase().includes(editIdentityUserSearchQuery.toLowerCase()) ||
+        (u.full_name ?? "").toLowerCase().includes(editIdentityUserSearchQuery.toLowerCase()))
   )
 
   const connectors = connectorData?.data ?? []
@@ -597,6 +616,75 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
     onError: (error: Error) => showErrorToast(error.message),
   })
 
+  const toggleIdentityBindingMutation = useMutation({
+    mutationFn: async ({ bindingId, isActive }: { bindingId: string; isActive: boolean }) => {
+      const res = await fetch(`${API_BASE}/api/v1/identity/bindings/${bindingId}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ is_active: isActive }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail || "Failed to toggle identity binding")
+      }
+      return res.json()
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["identity-bindings"] }),
+    onError: (error: Error) => showErrorToast(error.message),
+  })
+
+  const updateIdentityBindingMutation = useMutation({
+    mutationFn: async ({
+      bindingId,
+      body,
+    }: {
+      bindingId: string
+      body: {
+        trigger_prompt?: string
+        message_patterns?: string | null
+        prompt_examples?: string | null
+        session_mode?: string
+      }
+    }) => {
+      const res = await fetch(`${API_BASE}/api/v1/identity/bindings/${bindingId}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail || "Failed to update identity binding")
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      showSuccessToast("Identity binding updated")
+      setEditIdentityDialogOpen(false)
+      queryClient.invalidateQueries({ queryKey: ["identity-bindings"] })
+    },
+    onError: (error: Error) => showErrorToast(error.message),
+  })
+
+  const addIdentityAssignmentMutation = useMutation({
+    mutationFn: async ({ bindingId, userIds }: { bindingId: string; userIds: string[] }) => {
+      const res = await fetch(
+        `${API_BASE}/api/v1/identity/bindings/${bindingId}/assignments`,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(userIds),
+        }
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { detail?: string }).detail || "Failed to assign user")
+      }
+      return res.json()
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["identity-bindings"] }),
+    onError: (error: Error) => showErrorToast(error.message),
+  })
+
   // ---- Handlers ----
 
   const handleDialogClose = (open: boolean) => {
@@ -697,6 +785,28 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
       body.allowed_emails = newEmails
     }
     updateConnectorMutation.mutate({ connectorId: editingConnector.id, body })
+  }
+
+  const handleEditIdentityOpen = (binding: IdentityAgentBinding) => {
+    setEditIdentityTriggerPrompt(binding.trigger_prompt)
+    setEditIdentityMessagePatterns(binding.message_patterns ?? "")
+    setEditIdentityPromptExamples(binding.prompt_examples ?? "")
+    setEditIdentitySessionMode(binding.session_mode)
+    setEditIdentityUserSearchQuery("")
+    setEditIdentityDialogOpen(true)
+  }
+
+  const handleEditIdentitySave = () => {
+    if (!existingIdentityBinding) return
+    updateIdentityBindingMutation.mutate({
+      bindingId: existingIdentityBinding.id,
+      body: {
+        trigger_prompt: editIdentityTriggerPrompt.trim(),
+        message_patterns: editIdentityMessagePatterns.trim() || null,
+        prompt_examples: editIdentityPromptExamples.trim() || null,
+        session_mode: editIdentitySessionMode,
+      },
+    })
   }
 
   const handleEditRouteOpen = (route: AppMcpRoute) => {
@@ -1561,26 +1671,132 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
               </p>
             )}
 
-            {/* Identity Server indicator */}
+            {/* Separator when identity section follows connectors/routes */}
+            {existingIdentityBinding &&
+              (connectors.length > 0 || appMcpRoutes.length > 0) && <Separator />}
+
+            {/* Identity Server binding */}
             {existingIdentityBinding && (
-              <div className="flex items-center gap-2 px-3 py-2 border rounded-lg border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20">
-                <Users className="h-3.5 w-3.5 text-violet-500 shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-violet-700 dark:text-violet-300">
-                    Part of Identity Server
-                  </span>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {existingIdentityBinding.assignments.length > 0
-                      ? `Shared with ${existingIdentityBinding.assignments.length} user${existingIdentityBinding.assignments.length !== 1 ? "s" : ""}`
-                      : "Not shared with any users yet"}
-                  </p>
-                </div>
-                <a
-                  href="/settings#channels"
-                  className="text-xs text-violet-600 hover:underline shrink-0"
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Identity Server
+                </p>
+                <div
+                  className={`flex items-center justify-between px-3 py-2 border rounded-lg ${
+                    !existingIdentityBinding.is_active ? "opacity-50 bg-muted" : ""
+                  }`}
                 >
-                  Manage
-                </a>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-medium text-sm truncate">
+                      {existingIdentityBinding.agent_name}
+                    </span>
+                    {existingIdentityBinding.session_mode === "building" ? (
+                      <Wrench className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                    ) : (
+                      <MessageCircle className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                    )}
+                    <Badge
+                      variant="outline"
+                      className="text-xs shrink-0 border-violet-300 text-violet-600"
+                    >
+                      Identity
+                    </Badge>
+                    {existingIdentityBinding.assignments.length > 0 && (
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {existingIdentityBinding.assignments.length} user
+                        {existingIdentityBinding.assignments.length !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {existingIdentityBinding.is_active ? (
+                      <Badge className="text-xs shrink-0 bg-emerald-500 hover:bg-emerald-600">
+                        Active
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="text-xs shrink-0">
+                        Inactive
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-0.5 ml-1 shrink-0">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => handleEditIdentityOpen(existingIdentityBinding)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          Edit identity binding
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() =>
+                              toggleIdentityBindingMutation.mutate({
+                                bindingId: existingIdentityBinding.id,
+                                isActive: !existingIdentityBinding.is_active,
+                              })
+                            }
+                          >
+                            <Users
+                              className={`h-3.5 w-3.5 ${
+                                existingIdentityBinding.is_active
+                                  ? "text-violet-500"
+                                  : "text-muted-foreground"
+                              }`}
+                            />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          {existingIdentityBinding.is_active ? "Deactivate" : "Activate"}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Remove from Identity</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This removes {existingIdentityBinding.agent_name} from your identity and
+                            revokes access for all assigned users. Existing identity sessions are
+                            not affected but cannot receive new messages.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() =>
+                              removeIdentityBindingMutation.mutate(existingIdentityBinding.id)
+                            }
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Remove
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -1858,6 +2074,149 @@ export function McpConnectorsCard({ agentId, agentName }: McpConnectorsCardProps
               }
             >
               {updateAppMcpRouteMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---- Edit Identity Binding Dialog ---- */}
+      <Dialog open={editIdentityDialogOpen} onOpenChange={setEditIdentityDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Identity Binding</DialogTitle>
+            <DialogDescription>
+              Update the routing configuration for{" "}
+              <strong>{existingIdentityBinding?.agent_name}</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="space-y-2">
+              <Label>Session Mode</Label>
+              <Select value={editIdentitySessionMode} onValueChange={setEditIdentitySessionMode}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="conversation">Conversation</SelectItem>
+                  <SelectItem value="building">Building</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Trigger Prompt</Label>
+              <Textarea
+                value={editIdentityTriggerPrompt}
+                onChange={(e) => setEditIdentityTriggerPrompt(e.target.value)}
+                rows={3}
+                placeholder="Describe when to route to this agent"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used when someone addresses you to select this agent over others in your identity.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Message Patterns (optional)</Label>
+              <Textarea
+                value={editIdentityMessagePatterns}
+                onChange={(e) => setEditIdentityMessagePatterns(e.target.value)}
+                rows={2}
+                placeholder={"annual report *\nfinancial analysis *"}
+              />
+              <p className="text-xs text-muted-foreground">
+                One glob-style pattern per line. Matched before AI routing.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Prompt Examples (optional)</Label>
+              <Textarea
+                value={editIdentityPromptExamples}
+                onChange={(e) => setEditIdentityPromptExamples(e.target.value)}
+                rows={3}
+                placeholder={"generate employee report\nprepare quarterly analysis"}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Short example prompts. MCP clients will see these prefixed with your name (e.g.,
+                'ask Your Name to generate employee report').
+              </p>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Shared with Users
+              </Label>
+              {editIdentityAssignments.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {editIdentityAssignments.map((assignment) => (
+                    <span
+                      key={assignment.id}
+                      className="flex items-center gap-1 bg-secondary text-secondary-foreground text-xs px-2 py-1 rounded-full"
+                    >
+                      {assignment.target_user_name || assignment.target_user_email}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          existingIdentityBinding &&
+                          removeIdentityAssignmentMutation.mutate({
+                            bindingId: existingIdentityBinding.id,
+                            userId: assignment.target_user_id,
+                          })
+                        }
+                        className="hover:text-destructive transition-colors"
+                        disabled={removeIdentityAssignmentMutation.isPending}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <Input
+                placeholder="Search users to add..."
+                value={editIdentityUserSearchQuery}
+                onChange={(e) => setEditIdentityUserSearchQuery(e.target.value)}
+              />
+              {editIdentityUserSearchQuery && editIdentityFilteredUsers.length > 0 && (
+                <div className="border rounded-md divide-y max-h-36 overflow-y-auto">
+                  {editIdentityFilteredUsers.slice(0, 8).map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent transition-colors"
+                      onClick={() => {
+                        if (existingIdentityBinding) {
+                          addIdentityAssignmentMutation.mutate({
+                            bindingId: existingIdentityBinding.id,
+                            userIds: [u.id],
+                          })
+                        }
+                        setEditIdentityUserSearchQuery("")
+                      }}
+                    >
+                      <span className="font-medium">{u.full_name || u.email}</span>
+                      {u.full_name && (
+                        <span className="text-muted-foreground text-xs">{u.email}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditIdentityDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEditIdentitySave}
+              disabled={
+                !editIdentityTriggerPrompt.trim() || updateIdentityBindingMutation.isPending
+              }
+            >
+              {updateIdentityBindingMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

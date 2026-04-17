@@ -314,21 +314,8 @@ class AppMCPRequestHandler:
     ) -> str | None:
         """Verify the identity binding and assignment are still active.
 
-        Returns an error message string if invalid, or None if valid.
+        Delegates to IdentityService.check_session_validity — the canonical
+        implementation shared by all handlers.
         """
-        from app.models.identity.identity_models import (
-            IdentityAgentBinding,
-            IdentityBindingAssignment,
-        )
-
-        if session.identity_binding_id:
-            binding = db.get(IdentityAgentBinding, session.identity_binding_id)
-            if not binding or not binding.is_active:
-                return "This identity connection is no longer active."
-
-        if session.identity_binding_assignment_id:
-            assignment = db.get(IdentityBindingAssignment, session.identity_binding_assignment_id)
-            if not assignment or not assignment.is_active or not assignment.is_enabled:
-                return "This identity connection is no longer active."
-
-        return None
+        from app.services.identity.identity_service import IdentityService
+        return IdentityService.check_session_validity(db, session)

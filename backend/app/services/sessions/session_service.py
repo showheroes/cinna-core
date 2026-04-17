@@ -41,7 +41,7 @@ class SessionService:
             access_token_id: Optional access token ID (for A2A token-created sessions)
             source_task_id: Optional task ID that spawned this session (for task management)
             email_thread_id: Optional email Message-ID for threading
-            integration_type: Optional integration source ("email", "a2a", etc.)
+            integration_type: Optional integration source ("email", "a2a", "external", "app_mcp", "identity_mcp", etc.)
             sender_email: Optional sender email address (owner mode: track original sender)
             guest_share_id: Optional guest share ID (for guest share sessions)
             webapp_share_id: Optional webapp share ID (for webapp chat sessions)
@@ -1083,6 +1083,7 @@ class SessionService:
         access_token_id: UUID | None = None,
         backend_base_url: str | None = None,
         page_context: str | None = None,
+        integration_type: str | None = None,
     ) -> dict[str, Any]:
         """
         Send a message to a session and optionally initiate streaming.
@@ -1116,6 +1117,9 @@ class SessionService:
                           webapp iframe. Stored in message_metadata so it is available when building
                           the agent prompt (via collect_pending_messages) without being rendered in
                           the chat UI as part of message content.
+            integration_type: Optional integration source stamped on newly created sessions
+                               ("email", "a2a", "external", "app_mcp", "identity_mcp", etc.).
+                               Ignored when resuming an existing session (session_id provided).
 
         Returns:
             dict with status information:
@@ -1160,6 +1164,7 @@ class SessionService:
                     user_id=user_id,
                     data=session_data,
                     access_token_id=access_token_id,
+                    integration_type=integration_type,
                 )
                 if not chat_session:
                     return {"action": "error", "message": "Failed to create session"}
@@ -1958,3 +1963,30 @@ class SessionService:
 
         except Exception as e:
             logger.error(f"Error handling ENVIRONMENT_ACTIVATED event: {e}", exc_info=True)
+
+    @staticmethod
+    def set_session_metadata_flag(
+        db_session: DBSession,
+        session_id: UUID,
+        key: str,
+        value: Any,
+    ) -> None:
+        """Set a single key in ``session.session_metadata`` and commit.
+
+        Fetches the session, merges the key into ``session_metadata``, adds and
+        commits the row.  A no-op when the session does not exist.
+
+        Args:
+            db_session: Active database session.
+            session_id: UUID of the session to update.
+            key: Metadata key to set.
+            value: Value to store.
+        """
+        session = db_session.get(Session, session_id)
+        if session is None:
+            return
+        meta: dict[str, Any] = dict(session.session_metadata or {})
+        meta[key] = value
+        session.session_metadata = meta
+        db_session.add(session)
+        db_session.commit()

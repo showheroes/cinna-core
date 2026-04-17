@@ -16,6 +16,8 @@ from app.api.routes import (
     desktop_auth,
     email_integration,
     environments,
+    external_a2a,
+    external_agents,
     identity,
     identity_contacts,
     mcp_connectors,
@@ -110,6 +112,8 @@ api_router.include_router(identity.router)
 api_router.include_router(identity_contacts.router)
 api_router.include_router(cli.router)
 api_router.include_router(desktop_auth.router)
+api_router.include_router(external_agents.router)
+api_router.include_router(external_a2a.router)
 
 
 if settings.ENVIRONMENT == "local":
