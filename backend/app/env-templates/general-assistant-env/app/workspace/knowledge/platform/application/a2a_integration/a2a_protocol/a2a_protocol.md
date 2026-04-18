@@ -48,13 +48,13 @@ Enables external agents and A2A-compatible tools to discover and communicate wit
 1. Client sends `SendStreamingMessage` JSON-RPC request
 2. Backend creates/retrieves session, yields initial `working` status
 3. Environment activated if suspended
-4. Agent response streamed as SSE events (status updates with messages)
+4. Agent response streamed as SSE events in the same chunked cadence the backend receives them from the agent-env — `assistant`, `tool`, and `thinking` events arrive incrementally, not in a burst at the end
 5. Stream ends with final event (`completed`, `canceled`, or `failed`)
 
 ### 5. Task Management
 
 1. `GetTask` - Retrieve task status and message history
-2. `CancelTask` - Request cancellation of a running task
+2. `CancelTask` - Request cancellation of a running task; forwards the interrupt to the agent-env via HTTP (same path as the UI interrupt button); idempotent if the task is already terminal
 3. `ListTasks` - List all tasks for the agent (custom extension)
 
 ### 6. Skills Generation Lifecycle
@@ -123,6 +123,8 @@ See [A2A v1.0 Support](./a2a_v1_support.md) for detailed specification.
 
 ### SSE Streaming Event Flow
 
+Events are delivered incrementally. `A2AStreamEventHandler` pushes each mapped event into an `asyncio.Queue` the moment `on_event` fires; the SSE generator drains the queue and yields to the client immediately. Clients receive `assistant`, `tool`, and `thinking` events in the same chunked cadence that the backend receives them from the agent-env — there is no end-of-stream burst.
+
 | Internal Event Type | A2A TaskState | final | Notes |
 |---------------------|---------------|-------|-------|
 | stream_started | working | false | Stream initialization |
@@ -145,7 +147,7 @@ A2A clients can inspect `TextPart.metadata` to distinguish the three kinds of ag
 | `tool` | Tool-call narration (from `tool` events) | `cinna.tool_name` — name of the tool invoked |
 
 - The `cinna.tool_name` key is present on `TextPart.metadata` only when `cinna.content_kind` is `"tool"`.
-- Tool event text still carries the legacy `[Tool: <name>] <content>` prefix for clients that do not inspect metadata.
+- Tool event text contains the raw tool-call narration; no prefix is added. Clients rely on `cinna.content_kind` / `cinna.tool_name` to identify tool parts.
 
 #### History Replay (GetTask)
 

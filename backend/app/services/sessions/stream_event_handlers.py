@@ -10,9 +10,10 @@ Concrete StreamEventHandler implementations for each integration path.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, AsyncIterator
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -183,9 +184,30 @@ class MCPEventHandler:
 # ---------------------------------------------------------------------------
 
 class A2AStreamEventHandler:
-    """Maps streaming events to A2A SSE format and pushes into an async queue.
+    """Maps streaming events to A2A SSE format and exposes them as an async iterator.
 
-    The A2A SSE generator reads from the queue to yield events to the client.
+    The handler owns three concerns:
+
+    1. **Protocol mapping** — each agent-env event is mapped to an A2A
+       SSE payload via ``A2AEventMapper``.
+    2. **Producer/consumer plumbing** — events are pushed into an
+       ``asyncio.Queue`` as they arrive from the processor; the SSE
+       generator drains the queue and yields them to the client. This
+       gives the client true incremental streaming (chunked ``assistant``/
+       ``tool``/``thinking`` events) rather than a single burst at the end.
+    3. **Background-task lifecycle** — ``stream(processor)`` runs
+       ``processor.process()`` as a detached task, handles errors and
+       cancellation, and guarantees the consumer always unblocks via a
+       ``None`` sentinel (posted by a done-callback on the task).
+
+    Callers should consume events with::
+
+        async for sse_event in handler.stream(processor):
+            yield sse_event
+
+    The ``on_event`` / ``on_error`` / ``on_*`` hooks continue to satisfy the
+    ``StreamEventHandler`` protocol so the handler can be passed to
+    ``SessionStreamProcessor`` unchanged.
     """
 
     def __init__(
@@ -200,7 +222,8 @@ class A2AStreamEventHandler:
         self.request_id = request_id
         self.format_sse_event = format_sse_event
         self._event_mapper = None
-        self.events: list[str] = []
+        self.queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self.error_enqueued: bool = False
 
     @property
     def event_mapper(self):
@@ -208,6 +231,10 @@ class A2AStreamEventHandler:
             from app.services.a2a.a2a_event_mapper import A2AEventMapper
             self._event_mapper = A2AEventMapper
         return self._event_mapper
+
+    # ------------------------------------------------------------------
+    # StreamEventHandler protocol
+    # ------------------------------------------------------------------
 
     async def on_stream_starting(self, pending_count: int) -> None:
         pass  # Initial "working" status is sent by the A2A handler before process()
@@ -217,18 +244,103 @@ class A2AStreamEventHandler:
             event, self.task_id, self.context_id
         )
         if a2a_event:
-            self.events.append(self.format_sse_event(self.request_id, a2a_event))
+            await self.queue.put(self.format_sse_event(self.request_id, a2a_event))
 
     async def on_error(self, error: Exception) -> None:
+        await self._enqueue_error_once(f"Error: {error}")
+
+    async def on_complete(self, response_text: str) -> None:
+        pass  # Final status is handled by the A2A event mapper's "done" event handling
+
+    # ------------------------------------------------------------------
+    # Producer / consumer
+    # ------------------------------------------------------------------
+
+    async def stream(self, processor: Any) -> AsyncIterator[str]:
+        """Run ``processor.process()`` as a background task and yield SSE events as they arrive.
+
+        The consumer is unblocked on every exit path:
+
+        - Normal completion → producer returns, done-callback posts sentinel.
+        - Error in processor (streaming or pre-streaming) → error event is
+          enqueued once (either by ``on_error`` from inside the processor
+          or by ``_run_processor``'s own except branch), then the sentinel.
+        - Client disconnect (``GeneratorExit`` inside this async generator)
+          → the ``finally`` block cancels the producer task; the
+          done-callback still posts the sentinel.
+        - Producer task killed before its ``finally`` runs (theoretical) →
+          the done-callback posts the sentinel anyway.
+        """
+        producer = asyncio.create_task(
+            self._run_processor(processor),
+            name=f"a2a-stream-producer-{self.task_id}",
+        )
+        # Defense-in-depth: guarantee the consumer unblocks even if the
+        # producer dies without running its own finally.
+        producer.add_done_callback(lambda _t: self.queue.put_nowait(None))
+
+        try:
+            while True:
+                item = await self.queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            if not producer.done():
+                producer.cancel()
+                try:
+                    await producer
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:  # noqa: BLE001 - log only, don't mask original
+                    logger.warning(
+                        "A2A producer task raised during cancel: %s", exc,
+                        exc_info=True,
+                    )
+
+    async def _run_processor(self, processor: Any) -> None:
+        try:
+            await processor.process()
+        except asyncio.CancelledError:
+            # Client disconnected or caller cancelled us — don't enqueue a
+            # "failed" event for a cancel we initiated ourselves.
+            raise
+        except (ValueError, RuntimeError) as exc:
+            logger.error(
+                "A2A streaming: environment not ready: %s", exc,
+            )
+            await self._enqueue_error_once(f"Environment error: {exc}")
+        except Exception as exc:  # noqa: BLE001 - surface as error event
+            logger.error(
+                "A2A streaming: error during processing",
+                exc_info=True,
+            )
+            await self._enqueue_error_once(f"Error: {exc}")
+
+    async def _enqueue_error_once(self, message: str) -> None:
+        """Enqueue a final ``failed`` status event, at most once.
+
+        The invariant ``error_enqueued == True  ⇒  error event is on the
+        queue`` is upheld by enqueueing *before* flipping the flag, so a
+        caller that sees the flag can safely skip its own enqueue.
+        """
+        if self.error_enqueued:
+            return
         from a2a.types import TaskState
+
         error_event = self.event_mapper._create_status_update(
             task_id=self.task_id,
             context_id=self.context_id,
             state=TaskState.failed,
             final=True,
-            message=f"Error: {error}",
+            message=message,
         )
-        self.events.append(self.format_sse_event(self.request_id, error_event))
-
-    async def on_complete(self, response_text: str) -> None:
-        pass  # Final status is handled by the A2A event mapper's "done" event handling
+        try:
+            await self.queue.put(self.format_sse_event(self.request_id, error_event))
+        except Exception as exc:  # noqa: BLE001 - logging-only; don't mask original
+            logger.warning(
+                "A2A streaming: failed to enqueue error event: %s", exc,
+                exc_info=True,
+            )
+            return
+        self.error_enqueued = True

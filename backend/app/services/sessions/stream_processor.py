@@ -283,7 +283,7 @@ class SessionStreamProcessor:
             await self.event_handler.on_error(e)
             raise
 
-        full_response = "\n\n".join(response_parts)
+        full_response = "".join(response_parts)
 
         # Step 7: Notify handler of completion
         await self.event_handler.on_complete(full_response)

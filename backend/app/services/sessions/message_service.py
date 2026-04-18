@@ -1012,6 +1012,14 @@ class MessageService:
         Handles the full flow: request interrupt via active_streaming_manager,
         check for pending state, and forward to agent environment if needed.
 
+        Access control: **the caller must authorize session access before
+        calling this method.** This method trusts its inputs and does not
+        re-check ownership, sharing, or scope. Callers today:
+        ``messages.interrupt_message`` (UI/guest via ``_verify_message_access``),
+        ``webapp_chat.interrupt_message`` (webapp-share scope), and
+        ``A2ARequestHandler.handle_tasks_cancel`` (A2A scope via
+        ``_authorize_existing_session``). Any new caller must follow suit.
+
         Returns:
             dict with status, message, session_id, and queued flag.
 
@@ -1287,7 +1295,7 @@ class MessageService:
     ) -> None:
         """Periodic flush of streaming content to DB for crash recovery."""
         flush_events = list(streaming_events)
-        flush_content = "\n\n".join(
+        flush_content = "".join(
             e["content"] for e in flush_events
             if e["type"] == "assistant" and e.get("content")
         ) or "Agent is responding..."
@@ -1633,7 +1641,7 @@ class MessageService:
             # After stream completes, save agent response to database
             if streaming_events:
                 text_parts = [e["content"] for e in streaming_events if e["type"] == "assistant" and e.get("content")]
-                agent_content = "\n\n".join(text_parts) if text_parts else "Agent response"
+                agent_content = "".join(text_parts) if text_parts else "Agent response"
 
                 # Emit any webapp_action tags that appear in the final assembled content
                 # but were not caught mid-stream (e.g. they spanned two chunk boundaries

@@ -18,7 +18,7 @@
 - `backend/app/services/sessions/session_service.py` - Session operations
 - `backend/app/services/sessions/message_service.py` - Message operations
 - `backend/app/services/sessions/stream_processor.py` - `SessionStreamProcessor` unified streaming pipeline
-- `backend/app/services/sessions/stream_event_handlers.py` - `A2AStreamEventHandler` for A2A SSE event mapping
+- `backend/app/services/sessions/stream_event_handlers.py` - `A2AStreamEventHandler` for A2A SSE event mapping; owns producer/consumer lifecycle via `stream(processor)`, `_run_processor()`, and `_enqueue_error_once()`
 - `backend/app/services/agents/agent_service.py` - Skills generation integration
 
 ### Backend - AI Functions
@@ -43,6 +43,8 @@
 
 ### Tests
 - `backend/tests/api/a2a_integration/` - A2A integration tests
+- `backend/tests/api/a2a_integration/test_a2a_cancel.py` - Integration tests for `CancelTask`: happy-path cancel verifies `forward_interrupt_to_environment` is called with the correct `external_session_id`; idempotent cancel verifies zero forwards; unknown-task cancel returns `-32001`
+- `backend/tests/unit/test_a2a_stream_event_handler.py` - Unit tests for `A2AStreamEventHandler`: incremental delivery regression guard (measures inter-event gaps), sentinel on every exit path, cancel on disconnect, error deduplication, pre-stream errors
 
 ## Database Schema
 
@@ -101,9 +103,9 @@ Use PascalCase methods on `/a2a/` and `/a2a/v1.0/` URLs. Use slash-case methods 
 Shared dispatch methods (used by both the `/a2a/` surface and, via `ExternalA2AContextHandler`, the `/external/a2a/` surface):
 
 - `A2ARequestHandler.handle_message_send()` - Non-streaming message handling (polls for completion)
-- `A2ARequestHandler.handle_message_stream()` - SSE streaming handler; delegates core streaming to `SessionStreamProcessor` with `A2AStreamEventHandler`
+- `A2ARequestHandler.handle_message_stream()` - SSE streaming handler; creates `A2AStreamEventHandler` and iterates `handler.stream(processor)` to yield events incrementally to the client
 - `A2ARequestHandler.handle_tasks_get()` - Task query
-- `A2ARequestHandler.handle_tasks_cancel()` - Task cancellation
+- `A2ARequestHandler.handle_tasks_cancel()` - Task cancellation; delegates to `MessageService.interrupt_stream()` so the interrupt is forwarded to the agent-env via HTTP, not merely flagged on the backend; treats "No active stream to interrupt" as idempotent success (terminal-task cancel per A2A spec); other errors (`ValueError`) propagate
 - `A2ARequestHandler.handle_tasks_list()` - List tasks (custom extension)
 
 Hook methods — subclasses override to customize access control and session stamping. Default implementations enforce A2A-access-token scope (used by the core `/a2a/` route):
@@ -178,6 +180,7 @@ The adapter is only applied for v1.0 and latest endpoints. The v0.3 endpoint byp
 
 **MessageService:** `backend/app/services/sessions/message_service.py`
 - `stream_message_with_events()` - Streams responses as internal events
+- `interrupt_stream()` - Full interrupt flow: flag → resolve env → HTTP POST to agent-env `/chat/interrupt/{external_session_id}`; called by the UI route, webapp-chat route, and `A2ARequestHandler.handle_tasks_cancel`. Caller must authorize session access before calling (trust-based contract).
 - `get_last_message()` - Get last message (for tool_questions_status check)
 - `get_last_n_messages()` - Get message history
 
@@ -185,8 +188,17 @@ The adapter is only applied for v1.0 and latest endpoints. The v0.3 endpoint byp
 - Detects workflow_prompt changes, triggers skills regeneration
 - Updates a2a_config with new skills and incremented version
 
-**ActiveStreamingManager:**
-- `active_streaming_manager.request_interrupt()` - Cancels tasks
+### A2A Stream Event Handler
+
+**File:** `backend/app/services/sessions/stream_event_handlers.py`
+
+`A2AStreamEventHandler` owns the producer/consumer lifecycle for A2A SSE streaming:
+
+- `on_event(event)` - Maps each agent-env event to A2A format via `A2AEventMapper` and puts it on an `asyncio.Queue`
+- `on_error(error)` - Calls `_enqueue_error_once` to enqueue a final `failed` status event
+- `stream(processor)` - Async iterator that runs `processor.process()` as a detached `asyncio.create_task`; drains the queue and yields each SSE string to the caller; a done-callback on the task posts a `None` sentinel to guarantee the consumer unblocks on every exit path (normal completion, error, client disconnect, abrupt task death)
+- `_run_processor(processor)` - Wraps `processor.process()`; re-raises `CancelledError` without enqueuing a spurious `failed` event; maps `ValueError`/`RuntimeError` to `_enqueue_error_once`
+- `_enqueue_error_once(message)` - Enqueues a final `failed` status event at most once (guarded by `error_enqueued` flag) to prevent duplicate error events when both `on_error` and `_run_processor`'s except branch fire
 
 ## Frontend Components
 

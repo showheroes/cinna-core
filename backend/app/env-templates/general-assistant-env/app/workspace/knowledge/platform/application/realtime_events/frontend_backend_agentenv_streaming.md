@@ -131,7 +131,7 @@ This event-driven approach ensures sessions are processed regardless of how the 
    - `WebSocketEventHandler.on_complete()` emits `stream_completed` and resets session state (`pending_messages_count=0`, `interaction_status=""`, `streaming_started_at=None`)
    - On completion: final DB update sets `streaming_in_progress=False`, `STREAM_COMPLETED` triggers `handle_stream_completed` which emits `session_interaction_status_changed` to user room
    
-   The same `SessionStreamProcessor` is used by MCP (with `MCPEventHandler` for progress notifications) and A2A (with `A2AStreamEventHandler` for SSE event mapping), ensuring a single streaming lifecycle across all integration paths
+   The same `SessionStreamProcessor` is used by MCP (with `MCPEventHandler` for progress notifications) and A2A (with `A2AStreamEventHandler` for SSE event mapping), ensuring a single streaming lifecycle across all integration paths. For A2A, `A2AStreamEventHandler.stream(processor)` runs the processor as a detached background task and pushes each mapped event onto an `asyncio.Queue`, yielding them to the A2A SSE client incrementally — the same chunked cadence as the WebSocket path, not a burst at end-of-stream.
 
 **Event Service** (`event_service.py:emit_stream_event`):
 - Emits events to session-specific room: `session_{session_id}_stream`

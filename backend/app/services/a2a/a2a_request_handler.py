@@ -59,7 +59,6 @@ from app.models.environments.environment import AgentEnvironment
 from app.services.sessions.session_service import SessionService
 from app.services.a2a.a2a_event_mapper import A2AEventMapper
 from app.services.a2a.a2a_task_store import DatabaseTaskStore
-from app.services.sessions.active_streaming_manager import active_streaming_manager
 from app.services.a2a.access_token_service import AccessTokenService
 
 logger = logging.getLogger(__name__)
@@ -459,7 +458,11 @@ class A2ARequestHandler:
             )
             yield self._format_sse_event(request_id, activation_event)
 
-        # Delegate streaming to the unified processor
+        # Delegate streaming to the unified processor. The handler owns
+        # the producer/consumer plumbing (queue, background task,
+        # cancellation) so we can yield A2A SSE events to the client in
+        # the same chunked cadence we receive them from the agent-env,
+        # rather than buffering everything until the stream finishes.
         handler = A2AStreamEventHandler(
             task_id=task_id_str,
             context_id=context_id_str,
@@ -477,33 +480,7 @@ class A2ARequestHandler:
             log_prefix=self.log_prefix,
         )
 
-        try:
-            await processor.process()
-        except (ValueError, RuntimeError) as e:
-            logger.error("%s environment not ready for streaming: %s", self.log_prefix, e)
-            error_event = A2AEventMapper._create_status_update(
-                task_id=task_id_str,
-                context_id=context_id_str,
-                state=TaskState.failed,
-                final=True,
-                message=f"Environment error: {str(e)}",
-            )
-            yield self._format_sse_event(request_id, error_event)
-            return
-        except Exception as e:
-            logger.error("%s error streaming message: %s", self.log_prefix, e)
-            error_event = A2AEventMapper._create_status_update(
-                task_id=task_id_str,
-                context_id=context_id_str,
-                state=TaskState.failed,
-                final=True,
-                message=f"Error: {str(e)}",
-            )
-            yield self._format_sse_event(request_id, error_event)
-            return
-
-        # Yield all collected A2A events
-        for sse_event in handler.events:
+        async for sse_event in handler.stream(processor):
             yield sse_event
 
     async def handle_tasks_get(self, params: dict[str, Any]) -> Task | None:
@@ -569,10 +546,23 @@ class A2ARequestHandler:
         """
         Handle tasks/cancel request.
 
+        Goes through ``MessageService.interrupt_stream`` (the same path
+        the UI interrupt button uses) so the interrupt is *actually
+        forwarded to the agent-env* via HTTP, not just flagged on the
+        backend. Without this, cancels would be silently no-ops whenever
+        the external_session_id was already known at cancel time.
+
+        Idempotency: per the A2A spec, cancelling a task that is no longer
+        running is a best-effort no-op, not an error. If there is no
+        active stream, this returns ``{}`` instead of raising — the
+        caller's intent (stop the task) is already satisfied.
+
         Raises:
             ValueError: If task not found, doesn't belong to agent, or
                 scope denies access (see ``_authorize_existing_session``).
         """
+        from app.services.sessions.message_service import MessageService
+
         task_id = params.get("id")
         if not task_id:
             raise ValueError("Task ID is required")
@@ -588,7 +578,18 @@ class A2ARequestHandler:
 
             self._authorize_existing_session(session)
 
-        await active_streaming_manager.request_interrupt(session_id)
+            try:
+                await MessageService.interrupt_stream(
+                    db_session=db,
+                    session_id=session_id,
+                    environment_id=self.environment.id,
+                )
+            except ValueError as exc:
+                # "No active stream to interrupt" → idempotent success.
+                # Anything else (e.g. "Environment not found") is a real
+                # error and should propagate.
+                if "No active stream to interrupt" not in str(exc):
+                    raise
 
         return {}
 
