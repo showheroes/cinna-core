@@ -134,6 +134,23 @@ See [A2A v1.0 Support](./a2a_v1_support.md) for detailed specification.
 | interrupted | canceled | true | User requested cancellation |
 | done | completed/canceled | true | Final stream event from MessageService |
 
+#### Content-Kind Metadata on TextParts
+
+A2A clients can inspect `TextPart.metadata` to distinguish the three kinds of agent content emitted during a stream. This metadata is placed on the `TextPart` (not on `Message`) because a single agent message can contain parts of mixed kinds.
+
+| `cinna.content_kind` value | Meaning | Additional metadata key |
+|----------------------------|---------|------------------------|
+| `text` | Agent's final answer text (from `assistant` events) | — |
+| `thinking` | Chain-of-thought reasoning (from `thinking` events) | — |
+| `tool` | Tool-call narration (from `tool` events) | `cinna.tool_name` — name of the tool invoked |
+
+- The `cinna.tool_name` key is present on `TextPart.metadata` only when `cinna.content_kind` is `"tool"`.
+- Tool event text contains the raw tool-call narration; no prefix is added. Clients rely on `cinna.content_kind` / `cinna.tool_name` to identify tool parts.
+
+#### History Replay (GetTask)
+
+When a client calls `GetTask`, agent messages in `history` are returned with **multiple TextParts** — one per persisted streaming event (assistant, thinking, tool). Each part carries its own `cinna.content_kind` metadata so clients replaying the history can reconstruct the full content breakdown. Messages without a persisted streaming trace fall back to a single TextPart built from the stored message content.
+
 ### Environment Activation
 
 - If environment is suspended: activates synchronously and waits for completion
@@ -208,4 +225,4 @@ A2A Event Mapper ---------> Centralized A2A protocol mapping logic
 
 ---
 
-*Last updated: 2026-04-16*
+*Last updated: 2026-04-18*

@@ -126,7 +126,22 @@ Uses `SessionService` for session operations (no direct DB queries); streaming d
 - `A2AEventMapper.map_stream_event()` - Internal streaming event to A2A event
 - `A2AEventMapper.map_session_status_to_task_state()` - Session status to TaskState
 - `A2AEventMapper.convert_session_messages_to_a2a()` - SessionMessage list to A2A Message list
-- `A2AEventMapper._create_status_update()` - TaskStatusUpdateEvent construction
+- `A2AEventMapper._create_status_update(part_metadata=...)` - TaskStatusUpdateEvent construction; the optional `part_metadata` kwarg is attached to the embedded `TextPart` (not the `Message`) so streaming events carry content-kind metadata at part level
+- `A2AEventMapper._build_parts_for_session_message()` - Expands a stored agent `SessionMessage` into one `TextPart` per persisted streaming event, each carrying `cinna.content_kind` metadata; falls back to a single TextPart from `msg.content` when no trace is stored
+
+#### Content-Kind Module-Level Constants
+
+Defined at module level in `backend/app/services/a2a/a2a_event_mapper.py`; import from there rather than hardcoding string literals:
+
+| Constant | Value | Use |
+|----------|-------|-----|
+| `CONTENT_KIND_KEY` | `"cinna.content_kind"` | Metadata key placed on each `TextPart` |
+| `TOOL_NAME_KEY` | `"cinna.tool_name"` | Metadata key for tool name; present only on tool parts |
+| `CONTENT_KIND_TEXT` | `"text"` | Value for `assistant` events (agent final answer) |
+| `CONTENT_KIND_THINKING` | `"thinking"` | Value for `thinking` events (chain-of-thought) |
+| `CONTENT_KIND_TOOL` | `"tool"` | Value for `tool` events (tool-call narration) |
+
+Metadata is always placed on `TextPart.metadata`, never on `Message.metadata`, because a history-replay `Message` can contain parts of mixed kinds.
 
 ### A2A Task Store
 **File:** `backend/app/services/a2a/a2a_task_store.py`
