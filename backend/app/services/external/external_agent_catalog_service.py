@@ -82,8 +82,13 @@ class ExternalAgentCatalogService:
         personal = ExternalAgentCatalogService._list_personal_agents(
             db, user, request_base_url, workspace_id=workspace_id
         )
+        # Track agents already surfaced so the same underlying agent is never
+        # returned twice (e.g. an agent exposed both as personal and via an
+        # AppAgentRoute shared to the same user, or two routes pointing at the
+        # same agent).
+        seen_agent_ids: set[uuid.UUID] = {t.target_id for t in personal}
         shared = ExternalAgentCatalogService._list_mcp_shared_agents(
-            db, user, request_base_url
+            db, user, request_base_url, seen_agent_ids=seen_agent_ids
         )
         identity = ExternalAgentCatalogService._list_identity_contacts(
             db, user, request_base_url
@@ -167,10 +172,15 @@ class ExternalAgentCatalogService:
         db: DBSession,
         user: User,
         base_url: str,
+        seen_agent_ids: set[uuid.UUID] | None = None,
     ) -> list[ExternalTargetPublic]:
         """Return agents shared with the user via active AppAgentRoute assignments.
 
-        Excludes identity-source routes (those are handled by the identity section).
+        Excludes identity-source routes (those are handled by the identity
+        section) and any route whose underlying agent is already present in
+        ``seen_agent_ids`` — this de-duplicates against the personal section
+        and collapses multiple routes pointing at the same agent into a single
+        entry.
         """
         routes = AppAgentRouteService.get_effective_routes_for_user(
             db_session=db,
@@ -182,10 +192,20 @@ class ExternalAgentCatalogService:
         # Sort by agent name ascending
         routes.sort(key=lambda r: r.agent_name.lower())
 
+        if seen_agent_ids is None:
+            seen_agent_ids = set()
+
         results: list[ExternalTargetPublic] = []
         for route in routes:
+            # Skip if we've already surfaced this agent (personal section or
+            # an earlier route in this loop).
+            if route.agent_id in seen_agent_ids:
+                continue
+            seen_agent_ids.add(route.agent_id)
+
             # Resolve agent to get entrypoint_prompt
             agent = db.get(Agent, route.agent_id)
+
             entrypoint_prompt = (
                 agent.entrypoint_prompt
                 if agent and agent.entrypoint_prompt

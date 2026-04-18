@@ -71,6 +71,7 @@ A dedicated REST + A2A surface under `/api/v1/external/` that gives authenticate
 - Each section is sorted by name ascending; sections appear in order: personal → shared → identity
 - `?workspace_id=` filters only the personal agents section; MCP shared and identity sections are always fully included
 - `a2a_config.enabled` is NOT required on personal agents — the external surface is owner-only and always available
+- Results are de-duplicated by `agent_id`: if the same underlying agent is reachable via more than one path (e.g. an owner who also exposed their own agent via an `AppAgentRoute`, or two routes pointing at the same agent), only the first occurrence in section order (personal → shared) is emitted. The personal entry always wins over a route entry
 
 ### A2A Endpoints
 - `a2a_config.enabled` is NOT checked for `target_type="agent"` (owner has full access regardless)
@@ -136,4 +137,4 @@ DELETE /api/v1/external/sessions/{id}     ExternalSessionService.hide_session_fo
 
 ---
 
-*Last updated: 2026-04-18*
+*Last updated: 2026-04-18 — added agent_id de-duplication across the personal/shared sections*
