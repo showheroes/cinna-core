@@ -24,6 +24,7 @@ from tests.utils.agent import (
     get_agent,
     set_agent_status_rate_limit,
 )
+from tests.utils.background_tasks import drain_tasks
 from tests.utils.user import create_random_user, user_authentication_headers
 
 
@@ -218,6 +219,10 @@ def test_get_agent_status_force_refresh_rate_limited(
     """
     agent = create_agent_via_api(client, superuser_token_headers)
     agent_id = agent["id"]
+
+    # Environment auto-start runs as a collected background task — drain so
+    # active_environment_id is set on the agent before we read it.
+    drain_tasks()
 
     # Fetch the agent to get active_environment_id (exposed in AgentPublic)
     agent_data = get_agent(client, superuser_token_headers, agent_id)
