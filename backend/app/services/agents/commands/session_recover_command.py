@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class SessionRecoverCommandHandler(CommandHandler):
+    include_in_llm_context = False  # Meta-command; recovery context injected separately
     """Handler for /session-recover — recover session from lost SDK connection."""
 
     @property

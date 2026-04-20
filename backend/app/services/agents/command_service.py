@@ -30,10 +30,16 @@ class CommandResult:
     """Result from a command execution."""
     content: str
     is_error: bool = False
+    routing: str | None = None                      # "command_stream" when handler requests async dispatch
+    resolved_command: str | None = None             # Shell command for routing=command_stream
+    exec_command_short_name: str | None = None      # Short name for the command
 
 
 class CommandHandler(ABC):
     """Abstract base class for command handlers."""
+
+    streams: bool = False  # If True, handler queues a pending message instead of returning content
+    include_in_llm_context: bool = True  # If False, command output is excluded from <prior_commands> block
 
     @property
     @abstractmethod
@@ -66,23 +72,49 @@ class CommandService:
 
     @classmethod
     def is_command(cls, content: str) -> bool:
-        """Check if a message starts with a registered command."""
+        """Check if a message starts with a registered command.
+
+        Supports both space-separated form ("/run check") and colon form ("/run:check").
+        """
         if not content:
             return False
         stripped = content.strip()
         if not stripped.startswith("/"):
             return False
-        name = stripped.split()[0].lower()
-        return name in cls._handlers
+        # Check colon form: "/run:name" → base name is "/run"
+        first_token = stripped.split()[0].lower()
+        if ":" in first_token:
+            base_name = first_token.split(":")[0]
+            return base_name in cls._handlers
+        return first_token in cls._handlers
 
     @classmethod
     def parse_command(cls, content: str) -> tuple[str, str]:
-        """Parse command name and arguments from message content."""
+        """Parse command name and arguments from message content.
+
+        Handles both "/run check" and "/run:check" forms.
+        For colon form, the suffix becomes the args.
+        """
         stripped = content.strip()
         parts = stripped.split(maxsplit=1)
-        name = parts[0].lower()
-        args = parts[1] if len(parts) > 1 else ""
+        first_token = parts[0].lower()
+        if ":" in first_token:
+            # Colon form: "/run:check" → name="/run", args="check"
+            colon_idx = first_token.index(":")
+            name = first_token[:colon_idx]
+            colon_suffix = first_token[colon_idx + 1:]
+            # Remaining space-separated args (if any) are appended
+            space_args = parts[1] if len(parts) > 1 else ""
+            args = (colon_suffix + (" " + space_args if space_args else "")).strip()
+        else:
+            name = first_token
+            args = parts[1] if len(parts) > 1 else ""
         return name, args
+
+    @classmethod
+    def get_handler(cls, name: str) -> "CommandHandler | None":
+        """Return the handler instance for a given command name, or None if not registered."""
+        return cls._handlers.get(name)
 
     @classmethod
     def list_handlers(cls) -> list[CommandHandler]:

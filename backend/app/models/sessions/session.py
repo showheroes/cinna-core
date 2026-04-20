@@ -205,6 +205,7 @@ class SessionCommandPublic(SQLModel):
     name: str
     description: str
     is_available: bool
+    resolved_command: str | None = None  # Raw shell command for /run:<name> entries; None for static commands
 
 
 class SessionCommandsPublic(SQLModel):

@@ -37,6 +37,7 @@ from .models import (
     SQLiteQueryResult,
     PluginsUpdate,
     PluginsSettingsResponse,
+    CommandStreamRequest,
 )
 from .sdk_manager import sdk_manager
 from .agent_env_service import AgentEnvService
@@ -1512,3 +1513,211 @@ async def exec_command(request: _ExecRequest) -> _ExecResponse:
             stdout="",
             stderr=f"Execution error: {str(e)}",
         )
+
+
+# ── /run command streaming ────────────────────────────────────────────────────
+
+# Module-level dict: exec_id → asyncio.subprocess.Process
+# Used by /command/interrupt/{exec_id} for SIGTERM/SIGKILL routing.
+_active_execs: dict[str, asyncio.subprocess.Process] = {}
+
+
+@router.post("/command/stream", dependencies=[Depends(verify_auth_token)])
+async def stream_command(request: CommandStreamRequest):
+    """
+    Stream a shell command execution via SSE.
+
+    Called by the backend stream_command_via_agent_env method for /run:<name> commands.
+    Emits a sequence of SSE events:
+      1. tool event (bash invocation)
+      2. tool_result_delta events (stdout/stderr chunks)
+      3. done event (exit code, duration) — always emitted via try/finally
+
+    Auth: Authorization: Bearer {AGENT_AUTH_TOKEN} (same as /chat/stream).
+    """
+    exec_id = request.exec_id
+    command = request.command
+    timeout = request.timeout
+    max_output_bytes = request.max_output_bytes
+
+    async def generate():
+        import time as _time
+
+        # Emit tool invocation event immediately
+        tool_event = {
+            "type": "tool",
+            "tool_name": "bash",
+            "content": exec_id,
+            "metadata": {
+                "tool_id": exec_id,
+                "tool_input": {"command": command},
+                "synthesized": True,
+            },
+        }
+        yield f"data: {json.dumps(tool_event)}\n\n"
+
+        proc = None
+        start_time = _time.monotonic()
+        exit_code = -1
+        timed_out = False
+        interrupted = False
+        total_bytes = 0
+
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _active_execs[exec_id] = proc
+
+            # Read stdout and stderr concurrently via a shared asyncio.Queue
+            output_queue: asyncio.Queue = asyncio.Queue()
+
+            async def _read_stream(stream, stream_name: str):
+                while True:
+                    try:
+                        chunk = await stream.read(4096)
+                    except Exception:
+                        break
+                    if not chunk:
+                        break
+                    await output_queue.put((stream_name, chunk.decode("utf-8", errors="replace")))
+                await output_queue.put((stream_name, None))  # EOF sentinel
+
+            read_stdout = asyncio.create_task(_read_stream(proc.stdout, "stdout"))
+            read_stderr = asyncio.create_task(_read_stream(proc.stderr, "stderr"))
+
+            # Drain the output queue, collecting SSE lines, with overall timeout
+            sse_lines_to_yield: list[str] = []
+            deadline = _time.monotonic() + timeout
+            seen_eof = 0
+
+            while seen_eof < 2 and not interrupted:
+                remaining = deadline - _time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    item = await asyncio.wait_for(
+                        output_queue.get(),
+                        timeout=min(remaining, 1.0),
+                    )
+                except asyncio.TimeoutError:
+                    if _time.monotonic() >= deadline:
+                        timed_out = True
+                    break
+                stream_name, data = item
+                if data is None:
+                    seen_eof += 1
+                    continue
+                total_bytes += len(data.encode("utf-8"))
+                if total_bytes > max_output_bytes:
+                    trunc_event = {
+                        "type": "tool_result_delta",
+                        "content": f"\n[...output truncated at {max_output_bytes // 1024} KB]",
+                        "metadata": {"tool_id": exec_id, "stream": "stderr"},
+                    }
+                    sse_lines_to_yield.append(f"data: {json.dumps(trunc_event)}\n\n")
+                    interrupted = True
+                    break
+                chunk_event = {
+                    "type": "tool_result_delta",
+                    "content": data,
+                    "metadata": {"tool_id": exec_id, "stream": stream_name},
+                }
+                sse_lines_to_yield.append(f"data: {json.dumps(chunk_event)}\n\n")
+
+            # Yield all collected SSE lines
+            for sse_line in sse_lines_to_yield:
+                yield sse_line
+
+            # Cancel reader tasks if still running
+            for task in (read_stdout, read_stderr):
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+            if timed_out:
+                try:
+                    proc.kill()
+                    await proc.communicate()
+                except Exception:
+                    pass
+
+            if interrupted:
+                # Process was truncated — send interrupt
+                try:
+                    proc.terminate()
+                    await asyncio.sleep(1)
+                    if proc.returncode is None:
+                        proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
+                interrupted_event = {"type": "interrupted", "exit_code": -1}
+                yield f"data: {json.dumps(interrupted_event)}\n\n"
+                return
+
+            # Wait for process to exit (may already be done)
+            if proc.returncode is None:
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+
+            exit_code = proc.returncode if proc.returncode is not None else -1
+
+        except Exception as exc:
+            logger.error(f"command stream subprocess error: {exc}", exc_info=True)
+            error_event = {
+                "type": "error",
+                "content": f"Failed to start command: {exc}",
+                "error_type": "SubprocessError",
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+            return
+
+        finally:
+            _active_execs.pop(exec_id, None)
+            duration_seconds = _time.monotonic() - start_time
+            if not interrupted:
+                done_event: dict = {
+                    "type": "done",
+                    "exit_code": exit_code,
+                    "duration_seconds": round(duration_seconds, 2),
+                }
+                if timed_out:
+                    done_event["timed_out"] = True
+                yield f"data: {json.dumps(done_event)}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@router.post("/command/interrupt/{exec_id}", dependencies=[Depends(verify_auth_token)])
+async def interrupt_command(exec_id: str):
+    """
+    Interrupt a running command by exec_id.
+
+    Sends SIGTERM first; if the process is still alive after 2 seconds, sends SIGKILL.
+    Returns {"status": "ok"} in all cases (fire-and-forget on the caller's side).
+
+    Auth: Authorization: Bearer {AGENT_AUTH_TOKEN}.
+    """
+    proc = _active_execs.get(exec_id)
+    if proc:
+        try:
+            proc.terminate()
+            await asyncio.sleep(2)
+            if proc.returncode is None:
+                proc.kill()
+        except ProcessLookupError:
+            pass  # Process already exited
+        except Exception as exc:
+            logger.warning(f"interrupt_command error for exec_id={exec_id}: {exc}")
+    else:
+        logger.info(f"interrupt_command: exec_id={exec_id} not found (may have already finished)")
+    return {"status": "ok"}

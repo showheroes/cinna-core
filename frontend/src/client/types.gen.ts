@@ -2429,6 +2429,7 @@ export type SessionCommandPublic = {
     name: string;
     description: string;
     is_available: boolean;
+    resolved_command?: (string | null);
 };
 
 export type SessionCommandsPublic = {

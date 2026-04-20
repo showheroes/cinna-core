@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { eventService } from "@/services/eventService"
 
 export interface StreamEvent {
-  type: "assistant" | "tool" | "thinking" | "system" | "webapp_action"
+  type: "assistant" | "tool" | "thinking" | "system" | "webapp_action" | "tool_result_delta"
   content: string
   event_seq: number
   tool_name?: string
@@ -14,6 +14,10 @@ export interface StreamEvent {
     interrupt_notification?: boolean
     needs_approval?: boolean
     tool_name?: string
+    synthesized?: boolean           // true for /run command bash events
+    stream?: "stdout" | "stderr"    // present on tool_result_delta events
+    exit_code?: number              // present on command done (system) events
+    command_done?: boolean          // true on the final system event for a command
     action?: string
     data?: Record<string, unknown>
   }

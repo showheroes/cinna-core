@@ -324,4 +324,20 @@ async def list_session_commands(
             )
         )
 
+    # Append dynamic /run:<name> entries from CLI commands cache
+    from app.services.agents.cli_commands_service import CLICommandsService
+    from app.models import AgentEnvironment
+    if chat_session.environment_id:
+        environment = session.get(AgentEnvironment, chat_session.environment_id)
+        if environment:
+            for cmd in CLICommandsService.get_cached_commands(environment):
+                commands.append(
+                    SessionCommandPublic(
+                        name=f"/run:{cmd.name}",
+                        description=cmd.description if cmd.description else cmd.command[:80],
+                        is_available=True,
+                        resolved_command=cmd.command,
+                    )
+                )
+
     return SessionCommandsPublic(commands=commands)

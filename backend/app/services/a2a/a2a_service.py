@@ -52,6 +52,44 @@ class A2AService:
         return security_schemes, security
 
     @staticmethod
+    def _build_cli_command_skills(environment: AgentEnvironment | None) -> list[AgentSkill]:
+        """Build AgentSkill list from environment's cached CLI commands."""
+        if not environment or not environment.cli_commands_parsed:
+            return []
+        skills = []
+        for cmd in environment.cli_commands_parsed:
+            try:
+                skills.append(A2AService._build_single_cli_skill(cmd))
+            except Exception as e:
+                logger.warning(f"Failed to build CLI skill for command {cmd}: {e}")
+        return skills
+
+    @staticmethod
+    def _build_single_cli_skill(cmd: dict) -> AgentSkill:
+        """Build one AgentSkill from a parsed CLI command dict."""
+        name = cmd.get("name", "")
+        command = cmd.get("command", "")
+        description = cmd.get("description")  # may be None
+
+        skill_id = f"cinna.run.{name}"
+        skill_name = description.split("\n")[0] if description else f"Run: {name}"
+        invoke_line = f"Invoke by sending message: `/run:{name}`"
+        resolved_block = f"\n\nResolved command:\n```\n{command}\n```" if command else ""
+        full_description = (
+            f"{description}\n\n{invoke_line}{resolved_block}"
+            if description
+            else f"{invoke_line}{resolved_block}"
+        )
+
+        return AgentSkill(
+            id=skill_id,
+            name=skill_name,
+            description=full_description,
+            tags=["cinna-run", "command"],
+            examples=[f"/run:{name}"],
+        )
+
+    @staticmethod
     def build_public_agent_card(
         agent: Agent,
         base_url: str,
@@ -138,6 +176,9 @@ class A2AService:
                     ))
                 except Exception as e:
                     logger.warning(f"Failed to parse skill: {e}")
+
+        # Append CLI-generated skills from environment cache
+        skills.extend(A2AService._build_cli_command_skills(environment))
 
         # Build extensions from environment SDK type
         extensions = []

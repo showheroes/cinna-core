@@ -28,24 +28,81 @@ def build_simple_response_events(
     ]
 
 
+def build_command_stream_events(
+    exec_id: str,
+    command: str,
+    stdout_lines: list[str],
+    exit_code: int = 0,
+    duration_seconds: float = 0.5,
+    stderr_lines: list[str] | None = None,
+) -> list[dict]:
+    """Build a minimal command stream SSE event sequence."""
+    events = [
+        {
+            "type": "tool",
+            "tool_name": "bash",
+            "content": exec_id,
+            "metadata": {
+                "tool_id": exec_id,
+                "tool_input": {"command": command},
+                "synthesized": True,
+            },
+        }
+    ]
+    for line in stdout_lines:
+        events.append({
+            "type": "tool_result_delta",
+            "content": line,
+            "metadata": {"tool_id": exec_id, "stream": "stdout"},
+        })
+    for line in (stderr_lines or []):
+        events.append({
+            "type": "tool_result_delta",
+            "content": line,
+            "metadata": {"tool_id": exec_id, "stream": "stderr"},
+        })
+    events.append({
+        "type": "done",
+        "exit_code": exit_code,
+        "duration_seconds": duration_seconds,
+    })
+    return events
+
+
 class StubAgentEnvConnector:
-    """Returns predefined SSE events. Tracks stream_chat calls."""
+    """Returns predefined SSE events. Tracks stream_chat and stream_command calls."""
 
     def __init__(
         self,
         events: list[dict] | None = None,
         response_text: str | None = None,
+        command_events: list[dict] | None = None,
     ):
         if response_text:
             self.events = build_simple_response_events(response_text)
         else:
             self.events = events or []
+        self.command_events = command_events or []
         self.stream_calls: list[dict] = []
+        self.stream_command_calls: list[dict] = []
+        self.interrupt_command_calls: list[str] = []
 
     async def stream_chat(self, base_url, auth_headers, payload):
         self.stream_calls.append({"base_url": base_url, "payload": payload})
         for event in self.events:
             yield event
+
+    async def stream_command(self, base_url, auth_headers, exec_id, resolved_command, timeout=300, max_output_bytes=262144):
+        self.stream_command_calls.append({
+            "base_url": base_url,
+            "exec_id": exec_id,
+            "resolved_command": resolved_command,
+        })
+        for event in self.command_events:
+            yield event
+
+    async def interrupt_command(self, base_url, auth_headers, exec_id):
+        self.interrupt_command_calls.append(exec_id)
 
 
 class ScriptedAgentEnvConnector:

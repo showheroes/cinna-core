@@ -73,6 +73,21 @@ export function StreamEventRenderer({ events, conversationModeUi = "detailed" }:
               {event.content}
             </div>
           )
+        } else if (event.type === "tool_result_delta" && event.content) {
+          // Render command output chunk (stdout=default, stderr=amber)
+          const isStderr = event.metadata?.stream === "stderr"
+          return (
+            <pre
+              key={key}
+              className={`text-xs font-mono whitespace-pre-wrap break-all px-2 py-0.5 ${
+                isStderr
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-foreground"
+              }`}
+            >
+              {event.content}
+            </pre>
+          )
         }
         return null
       })}

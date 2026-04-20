@@ -1219,7 +1219,63 @@ class SessionService:
                 backend_base_url=backend_base_url or "",
             )
 
-            # Create user message (marked "sent" to skip LLM streaming)
+            # Create user message (marked "sent" to skip LLM streaming for sync commands,
+            # or "pending" for streaming commands that need async dispatch)
+            # We execute the command first (sync path) to get result.routing.
+            result = await CommandService.execute(content, context)
+
+            # --- Streaming command path (e.g., /run:name) ---
+            if result.routing == "command_stream":
+                # Determine the command_name label for metadata
+                stripped_content = content.strip()
+                # Use the full slash command text as typed (e.g., "/run:check")
+                command_label = stripped_content.split()[0] if stripped_content else "/run"
+
+                with get_fresh_db_session() as db:
+                    user_msg = MessageService.create_message(
+                        session=db,
+                        session_id=session_id,
+                        role="user",
+                        content=content,
+                        sent_to_agent_status="pending",  # queued for async streaming
+                        message_metadata={
+                            "command": True,
+                            "command_name": command_label,
+                            "routing": "command_stream",
+                            "resolved_command": result.resolved_command,
+                            "exec_command_short_name": result.exec_command_short_name,
+                        },
+                    )
+
+                # Title generation for new sessions (before streaming)
+                if is_new_session:
+                    with get_fresh_db_session() as db:
+                        chat_session = SessionService.get_session(db, session_id)
+                        if chat_session and (not chat_session.title or chat_session.title.strip() == ""):
+                            create_task_with_error_logging(
+                                SessionService.auto_generate_session_title(
+                                    session_id=session_id,
+                                    first_message_content=content,
+                                    get_fresh_db_session=get_fresh_db_session,
+                                    user_id=user_id,
+                                ),
+                                task_name=f"auto_generate_title_session_{session_id}",
+                            )
+
+                # Initiate streaming — same call as for LLM messages
+                if initiate_streaming:
+                    await SessionService.initiate_stream(
+                        session_id=session_id,
+                        get_fresh_db_session=get_fresh_db_session,
+                    )
+
+                return {
+                    "action": "queued",
+                    "session_id": session_id,
+                    "pending_count": 1,
+                }
+
+            # --- Synchronous command path (all other commands, including /run list mode) ---
             with get_fresh_db_session() as db:
                 user_msg = MessageService.create_message(
                     session=db,
@@ -1228,9 +1284,6 @@ class SessionService:
                     content=content,
                     sent_to_agent_status="sent",
                 )
-
-            # Execute command
-            result = await CommandService.execute(content, context)
 
             # Create system message with response (commands are deterministic, not LLM)
             command_name = content.strip().split()[0]

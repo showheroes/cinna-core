@@ -54,6 +54,11 @@ _FORWARDED_METADATA_KEYS = {"model", "total_cost_usd", "claude_code_version", "d
 # Keys to keep when copying event metadata for storage
 _STORED_EVENT_METADATA_KEYS = {"tool_id", "tool_input", "model", "needs_approval", "tool_name"}
 
+# Non-LLM to LLM context bridging
+NON_LLM_BRIDGE_MAX_PER_BLOCK_BYTES: int = 16_384   # 16 KB per command block
+NON_LLM_BRIDGE_MAX_TOTAL_BYTES: int = 65_536        # 64 KB total prior_commands block
+NON_LLM_BRIDGE_TRUNCATION_MARKER: str = "\n[output truncated]"
+
 
 def _extract_webapp_actions(content: str) -> tuple[list[dict], str]:
     """
@@ -775,6 +780,185 @@ class MessageService:
         return concatenated_content, pending_messages
 
     @staticmethod
+    def collect_pending_batches(db: Session, session_id: UUID) -> list[dict]:
+        """
+        Collect pending messages and partition them into contiguous same-routing batches.
+
+        Returns a list of batch dicts ordered by message sequence:
+            [
+              {"routing": None, "messages": [msg1, msg2], "content": "..."},
+              {"routing": "command_stream", "messages": [msg3],
+               "resolved_command": "...", "command_name": "/run:check"},
+              {"routing": None, "messages": [msg4], "content": "..."},
+            ]
+
+        For routing=None batches, "content" is the concatenated message content
+        (same logic as collect_pending_messages, including file paths and page-context diff).
+        For routing="command_stream" batches, "resolved_command" and "command_name" are
+        read from the single message's message_metadata.
+        """
+        # Fetch all pending user messages ordered by sequence number
+        statement = (
+            select(SessionMessage)
+            .where(
+                SessionMessage.session_id == session_id,
+                SessionMessage.role == "user",
+                SessionMessage.sent_to_agent_status == "pending",
+            )
+            .order_by(SessionMessage.sequence_number)
+        )
+        pending_messages = list(db.exec(statement).all())
+
+        if not pending_messages:
+            return []
+
+        # Partition into contiguous same-routing runs
+        batches: list[dict] = []
+        current_routing = (pending_messages[0].message_metadata or {}).get("routing")
+        current_group: list = [pending_messages[0]]
+
+        for msg in pending_messages[1:]:
+            routing = (msg.message_metadata or {}).get("routing")
+            if routing == current_routing:
+                current_group.append(msg)
+            else:
+                batches.append({"routing": current_routing, "messages": list(current_group)})
+                current_routing = routing
+                current_group = [msg]
+        batches.append({"routing": current_routing, "messages": list(current_group)})
+
+        # Enrich each batch with routing-specific data
+        result: list[dict] = []
+        for batch in batches:
+            routing = batch["routing"]
+            messages = batch["messages"]
+
+            if routing == "command_stream":
+                # Single command message — read metadata
+                msg = messages[0]
+                meta = msg.message_metadata or {}
+                result.append({
+                    "routing": "command_stream",
+                    "messages": messages,
+                    "resolved_command": meta.get("resolved_command", ""),
+                    "command_name": meta.get("command_name", "/run"),
+                })
+            else:
+                # LLM batch — build concatenated content using same logic as
+                # collect_pending_messages (file paths + page-context diff),
+                # but scoped to only the messages in this batch.
+                content = MessageService._build_llm_batch_content(db, session_id, messages)
+                result.append({
+                    "routing": None,
+                    "messages": messages,
+                    "content": content,
+                })
+
+        # Inject non-LLM prior-commands prefix into the first LLM batch
+        prefix, included_ids = MessageService.build_non_llm_prefix(db, session_id)
+        if prefix:
+            for batch in result:
+                if batch["routing"] is None:
+                    batch["content"] = f"{prefix}\n\n{batch['content']}"
+                    break
+
+        # Attach included_ids to the first batch so stream_processor can mark them
+        # after the streaming step completes.
+        if result:
+            result[0]["_included_command_ids"] = included_ids
+
+        return result
+
+    @staticmethod
+    def _build_llm_batch_content(
+        db: Session,
+        session_id: UUID,
+        messages: list,
+    ) -> str:
+        """
+        Build concatenated content string for a group of LLM pending messages.
+
+        Handles file path reconstruction and page-context diff injection,
+        mirroring the logic in collect_pending_messages but operating on
+        an arbitrary subset of messages.
+        """
+        from app.models.files.file_upload import MessageFile
+
+        if not messages:
+            return ""
+
+        # Find the last sent message that had page_context before the first message in this group
+        first_seq = messages[0].sequence_number
+        prev_context_stmt = (
+            select(SessionMessage)
+            .where(
+                SessionMessage.session_id == session_id,
+                SessionMessage.role == "user",
+                SessionMessage.sent_to_agent_status == "sent",
+                SessionMessage.sequence_number < first_seq,
+            )
+            .order_by(SessionMessage.sequence_number.desc())
+            .limit(20)
+        )
+        sent_recent = list(db.exec(prev_context_stmt).all())
+        last_sent_context: str | None = None
+        for sent_msg in sent_recent:
+            ctx = (sent_msg.message_metadata or {}).get("page_context")
+            if ctx:
+                last_sent_context = ctx
+                break
+
+        prev_context_ref: list[str | None] = [last_sent_context]
+
+        def _get_content(message: SessionMessage) -> str:
+            file_stmt = select(MessageFile).where(MessageFile.message_id == message.id)
+            message_files = list(db.exec(file_stmt).all())
+
+            if not message_files:
+                agent_content = message.content
+            else:
+                file_paths = [mf.agent_env_path for mf in message_files if mf.agent_env_path]
+                if not file_paths:
+                    agent_content = message.content
+                else:
+                    file_list = "\n".join(f"- {path}" for path in file_paths)
+                    agent_content = f"Uploaded files:\n{file_list}\n---\n\n{message.content}"
+
+            stored_page_context = (message.message_metadata or {}).get("page_context")
+            if stored_page_context:
+                previous = prev_context_ref[0]
+                context_block: str | None = None
+
+                if previous is None:
+                    context_block = f"<page_context>\n{stored_page_context}\n</page_context>"
+                else:
+                    try:
+                        diff = _compute_context_diff(previous, stored_page_context)
+                        if diff is None:
+                            context_block = None
+                        else:
+                            diff_json = json.dumps(diff, ensure_ascii=False)
+                            context_block = f"<context_update>\n{diff_json}\n</context_update>"
+                    except Exception:
+                        context_block = f"<page_context>\n{stored_page_context}\n</page_context>"
+
+                if context_block:
+                    agent_content = f"{agent_content}\n\n{context_block}"
+
+                prev_context_ref[0] = stored_page_context
+
+            return agent_content
+
+        if len(messages) == 1:
+            return _get_content(messages[0])
+
+        message_contents = []
+        for i, msg in enumerate(messages):
+            msg_content = _get_content(msg)
+            message_contents.append(f"[Message {i+1}]:\n{msg_content}")
+        return "\n\n".join(message_contents)
+
+    @staticmethod
     def mark_messages_as_sent(session: Session, message_ids: list[UUID]) -> None:
         """
         Mark messages as sent to agent-env.
@@ -791,6 +975,176 @@ class MessageService:
 
         session.commit()
         logger.info(f"Marked {len(message_ids)} messages as sent to agent")
+
+    @staticmethod
+    def build_non_llm_prefix(
+        db: Session,
+        session_id: UUID,
+    ) -> tuple[str | None, list[UUID]]:
+        """
+        Collect command pairs between the last agent message and now,
+        format them as a <prior_commands> XML block, and return
+        (prefix_text_or_none, list_of_included_system_message_ids).
+
+        Only system messages with message_metadata['command']==True and no
+        'forwarded_to_llm_at' key are eligible. Handlers with
+        include_in_llm_context=False are skipped and NOT marked.
+
+        Returns:
+            tuple: (prior_commands_xml_or_none, list_of_system_message_ids_included)
+        """
+        from app.services.agents.command_service import CommandService
+
+        # Step 1: Find boundary — sequence_number of the most recent agent message
+        boundary_stmt = (
+            select(func.max(SessionMessage.sequence_number))
+            .where(
+                SessionMessage.session_id == session_id,
+                SessionMessage.role == "agent",
+            )
+        )
+        boundary_seq: int = db.exec(boundary_stmt).one_or_none() or -1
+
+        # Step 2: Query eligible command system messages since the boundary
+        candidate_stmt = (
+            select(SessionMessage)
+            .where(
+                SessionMessage.session_id == session_id,
+                SessionMessage.role == "system",
+                SessionMessage.sequence_number > boundary_seq,
+            )
+            .order_by(SessionMessage.sequence_number)
+        )
+        candidates = list(db.exec(candidate_stmt).all())
+
+        # Filter to command messages without forwarded_to_llm_at
+        eligible = [
+            m for m in candidates
+            if (m.message_metadata or {}).get("command") is True
+            and "forwarded_to_llm_at" not in (m.message_metadata or {})
+        ]
+
+        if not eligible:
+            return None, []
+
+        command_blocks: list[str] = []
+        included_ids: list[UUID] = []
+        total_bytes = 0
+
+        for sys_msg in eligible:
+            meta = sys_msg.message_metadata or {}
+            command_name = meta.get("command_name")
+            if not command_name:
+                logger.warning(
+                    "[NonLLMBridge] session %s: system command message %s missing command_name key",
+                    session_id, sys_msg.id,
+                )
+                continue
+
+            # Normalize colon-form command names (e.g., "/run:check" → "/run")
+            # The handler registry stores base names like "/run", but command_name in
+            # message_metadata may be the full colon form (e.g., "/run:check").
+            lookup_name = command_name.split(":")[0] if ":" in command_name else command_name
+
+            # Check handler opt-in
+            handler = CommandService.get_handler(lookup_name)
+            if handler is None:
+                # Unknown handler — skip safely, do not mark
+                continue
+            if not handler.include_in_llm_context:
+                # Opted out — skip, do not mark
+                continue
+
+            # Skip if streaming is still in progress
+            if meta.get("streaming_in_progress") is True:
+                logger.debug(
+                    "[NonLLMBridge] session %s: skipping in-progress command message %s",
+                    session_id, sys_msg.id,
+                )
+                continue
+
+            # Fetch the paired user invocation message
+            user_msg: SessionMessage | None = None
+            if sys_msg.answers_to_message_id:
+                user_msg = db.get(SessionMessage, sys_msg.answers_to_message_id)
+            if user_msg is None:
+                # Fallback: sequence_number - 1
+                fallback_stmt = (
+                    select(SessionMessage)
+                    .where(
+                        SessionMessage.session_id == session_id,
+                        SessionMessage.sequence_number == sys_msg.sequence_number - 1,
+                        SessionMessage.role == "user",
+                    )
+                )
+                user_msg = db.exec(fallback_stmt).first()
+
+            invocation_text = user_msg.content if user_msg else f"<!-- {command_name} -->"
+            at_ts = sys_msg.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if sys_msg.timestamp else ""
+            output_text = sys_msg.content or ""
+
+            # Per-block size cap
+            output_bytes = output_text.encode("utf-8")
+            if len(output_bytes) > NON_LLM_BRIDGE_MAX_PER_BLOCK_BYTES:
+                truncated = output_bytes[:NON_LLM_BRIDGE_MAX_PER_BLOCK_BYTES].decode("utf-8", errors="ignore")
+                output_text = truncated + NON_LLM_BRIDGE_TRUNCATION_MARKER
+
+            block = (
+                f'  <command name="{command_name}" at="{at_ts}">\n'
+                f'    <invocation>{invocation_text}</invocation>\n'
+                f'    <output>\n{output_text}\n    </output>\n'
+                f'  </command>'
+            )
+            block_bytes = len(block.encode("utf-8"))
+
+            # Total budget check
+            if total_bytes + block_bytes > NON_LLM_BRIDGE_MAX_TOTAL_BYTES:
+                logger.warning(
+                    "[NonLLMBridge] session %s: dropping command '%s' from prior-commands block "
+                    "(total budget exceeded)",
+                    session_id, command_name,
+                )
+                continue
+
+            command_blocks.append(block)
+            included_ids.append(sys_msg.id)
+            total_bytes += block_bytes
+
+        if not command_blocks:
+            return None, []
+
+        prior_commands_xml = "<prior_commands>\n" + "\n".join(command_blocks) + "\n</prior_commands>"
+        return prior_commands_xml, included_ids
+
+    @staticmethod
+    def mark_command_messages_as_forwarded(
+        db: Session,
+        message_ids: list[UUID],
+    ) -> None:
+        """
+        Mark command system messages as forwarded to the LLM by setting
+        message_metadata['forwarded_to_llm_at'] to the current UTC timestamp.
+
+        Uses flag_modified to dirty JSON columns before commit, mirroring
+        the existing pattern in stream_processor.py.
+        """
+        from sqlalchemy.orm.attributes import flag_modified
+
+        if not message_ids:
+            return
+
+        ts = datetime.now(UTC).isoformat()
+        for msg_id in message_ids:
+            msg = db.get(SessionMessage, msg_id)
+            if msg:
+                meta = dict(msg.message_metadata or {})
+                meta["forwarded_to_llm_at"] = ts
+                msg.message_metadata = meta
+                flag_modified(msg, "message_metadata")
+                db.add(msg)
+
+        db.commit()
+        logger.info("[NonLLMBridge] Marked %d command messages as forwarded to LLM", len(message_ids))
 
     @staticmethod
     async def process_pending_messages(session_id: UUID, get_fresh_db_session: callable) -> None:
@@ -1032,6 +1386,22 @@ class MessageService:
         if not interrupt_info["found"]:
             raise ValueError("No active stream to interrupt")
 
+        # Command stream interrupt — forward to agent-env command interrupt endpoint
+        if interrupt_info.get("stream_type") == "command":
+            exec_id = interrupt_info.get("exec_id")
+            if exec_id:
+                environment = db_session.get(AgentEnvironment, environment_id)
+                if environment:
+                    base_url = MessageService.get_environment_url(environment)
+                    auth_headers = MessageService.get_auth_headers(environment)
+                    await agent_env_connector.interrupt_command(base_url, auth_headers, exec_id)
+            return {
+                "status": "ok",
+                "message": "Command interrupt sent",
+                "session_id": str(session_id),
+                "queued": False,
+            }
+
         if interrupt_info["pending"]:
             return {
                 "status": "ok",
@@ -1069,6 +1439,15 @@ class MessageService:
                 "stream_room": f"session_{session_id}_stream",
                 "message": "Command executed",
                 "command_executed": True,
+            }
+
+        if result["action"] == "queued":
+            return {
+                "status": "ok",
+                "session_id": str(session_id),
+                "stream_room": f"session_{session_id}_stream",
+                "message": "Command queued",
+                "queued": True,
             }
 
         response = {
@@ -1324,6 +1703,394 @@ class MessageService:
         flush_seq = streaming_events[-1].get("event_seq", 0) if streaming_events else 0
         await active_streaming_manager.update_last_flushed_seq(session_id, flush_seq)
         logger.debug(f"Flushed streaming content to DB (seq={flush_seq}) for session {session_id}")
+
+    @staticmethod
+    async def _flush_command_stream_to_db(
+        system_message_id: UUID,
+        streaming_events: list[dict],
+        command_metadata: dict,
+        get_fresh_db_session: callable,
+        session_id: UUID,
+    ) -> None:
+        """Periodic flush of command stream events to DB for crash recovery.
+
+        Mirrors _flush_streaming_to_db but is tailored for command output:
+        - Assembles in-progress content from tool_result_delta events
+        - Does not accumulate assistant text (commands have no LLM output)
+        """
+        flush_events = list(streaming_events)
+        # Build in-progress content from tool_result_delta events
+        output_chunks = [
+            e["content"] for e in flush_events
+            if e.get("type") == "tool_result_delta" and e.get("content")
+        ]
+        flush_content = "".join(output_chunks) or "Command is running..."
+
+        flush_metadata = dict(command_metadata)
+
+        def _flush(
+            msg_id=system_message_id,
+            content=flush_content,
+            events=flush_events,
+            metadata=flush_metadata,
+        ):
+            from sqlalchemy.orm.attributes import flag_modified
+            with get_fresh_db_session() as db:
+                msg = db.get(SessionMessage, msg_id)
+                if msg:
+                    msg.content = content
+                    metadata["streaming_in_progress"] = True
+                    metadata["streaming_events"] = events
+                    msg.message_metadata = metadata
+                    flag_modified(msg, "message_metadata")
+                    db.add(msg)
+                    db.commit()
+
+        await asyncio.to_thread(_flush)
+        flush_seq = flush_events[-1].get("event_seq", 0) if flush_events else 0
+        await active_streaming_manager.update_last_flushed_seq(session_id, flush_seq)
+        logger.debug(
+            f"Flushed command stream to DB (seq={flush_seq}) for session {session_id}"
+        )
+
+    @staticmethod
+    async def stream_command_via_agent_env(
+        session_id: UUID,
+        environment_id: UUID,
+        resolved_command: str,
+        command_name: str,
+        user_message_id: UUID,
+        get_fresh_db_session: callable,
+        event_handler,
+    ) -> None:
+        """
+        Stream a CLI command execution through agent-env and persist the output.
+
+        This method mirrors stream_message_with_events in structure but routes to
+        POST /command/stream on agent-env instead of POST /chat/stream.
+
+        Key differences from the LLM streaming path:
+        - No SDK session management (_get_session_context_and_reset_state not called)
+        - No external_session_id tracking
+        - No LLM token usage
+        - Events are tool / tool_result_delta / system (done) shaped
+
+        Args:
+            session_id: Backend session UUID.
+            environment_id: Agent environment UUID.
+            resolved_command: Shell command string to execute.
+            command_name: Human-readable command label (e.g., "/run:check").
+            user_message_id: The pending user message that triggered this command.
+            get_fresh_db_session: Callable returning a fresh DB session context manager.
+            event_handler: StreamEventHandler implementation for WS/MCP/A2A delivery.
+        """
+        from uuid import uuid4
+        from app.services.events.event_service import event_service
+        from app.core.config import settings
+
+        exec_id = str(uuid4())
+        system_message_id: UUID | None = None
+        streaming_events: list[dict] = []
+        event_seq_counter = 0
+        last_flush_time = time.time()
+        FLUSH_INTERVAL = 2.0
+        total_bytes = 0
+        was_interrupted = False
+        was_error = False
+        exec_exit_code: int | None = None
+        exec_duration_seconds: float | None = None
+        exec_timed_out = False
+        exec_truncated = False
+        truncation_interrupt_sent = False
+
+        # --- Resolve environment URL and auth ---
+        def _get_env_url_and_auth():
+            with get_fresh_db_session() as db:
+                env = db.get(AgentEnvironment, environment_id)
+                if not env:
+                    return None, None
+                return (
+                    MessageService.get_environment_url(env),
+                    MessageService.get_auth_headers(env),
+                )
+
+        base_url, auth_headers = await asyncio.to_thread(_get_env_url_and_auth)
+        if not base_url:
+            logger.error(f"stream_command_via_agent_env: environment {environment_id} not found")
+            return
+
+        # --- Create system message placeholder ---
+        command_metadata: dict = {
+            "command": True,
+            "command_name": command_name,
+            "routing": "command_stream",
+            "synthesized": True,
+            "resolved_command": resolved_command,
+            "streaming_in_progress": True,
+            "streaming_events": [],
+        }
+
+        def _create_system_message():
+            with get_fresh_db_session() as db:
+                msg = MessageService.create_message(
+                    session=db,
+                    session_id=session_id,
+                    role="system",
+                    content="",
+                    sent_to_agent_status="sent",
+                    answers_to_message_id=user_message_id,
+                    message_metadata=dict(command_metadata),
+                )
+                return msg.id
+
+        system_message_id = await asyncio.to_thread(_create_system_message)
+
+        # --- Register stream with ActiveStreamingManager ---
+        await active_streaming_manager.register_stream(session_id, external_session_id=None)
+        await active_streaming_manager.update_stream_type(
+            session_id, stream_type="command", exec_id=exec_id
+        )
+
+        logger.info(
+            f"[Command] Starting command stream for session {session_id} "
+            f"(exec_id={exec_id}, command={command_name})"
+        )
+
+        # --- Emit tool invocation event ---
+        event_seq_counter += 1
+        tool_event: dict = {
+            "type": "tool",
+            "tool_name": "bash",
+            "content": command_name,
+            "event_seq": event_seq_counter,
+            "metadata": {
+                "tool_id": exec_id,
+                "tool_input": {"command": resolved_command},
+                "tool_name": "bash",
+                "synthesized": True,
+            },
+        }
+        streaming_events.append(tool_event)
+        await active_streaming_manager.append_streaming_event(session_id, tool_event)
+        await event_handler.on_event(tool_event)
+
+        # --- Stream from agent-env ---
+        try:
+            async for raw_event in agent_env_connector.stream_command(
+                base_url=base_url,
+                auth_headers=auth_headers,
+                exec_id=exec_id,
+                resolved_command=resolved_command,
+                timeout=settings.RUN_COMMAND_TIMEOUT_SECONDS,
+                max_output_bytes=settings.RUN_COMMAND_MAX_OUTPUT_BYTES,
+            ):
+                event_type = raw_event.get("type", "")
+
+                # Check if backend-side interrupt was requested
+                stream_info = await active_streaming_manager.get_stream_events(session_id)
+                if stream_info is None:
+                    # Stream was unregistered externally
+                    break
+                active_stream = await active_streaming_manager.get_stream_info(session_id)
+                if active_stream and active_stream.get("is_interrupted"):
+                    was_interrupted = True
+                    # Send interrupt to agent-env if not already done
+                    if not truncation_interrupt_sent:
+                        await agent_env_connector.interrupt_command(base_url, auth_headers, exec_id)
+                    break
+
+                if event_type == "done":
+                    exec_exit_code = raw_event.get("exit_code")
+                    exec_duration_seconds = raw_event.get("duration_seconds")
+                    exec_timed_out = bool(raw_event.get("timed_out", False))
+                    break
+
+                if event_type == "interrupted":
+                    was_interrupted = True
+                    exec_exit_code = raw_event.get("exit_code", -1)
+                    break
+
+                if event_type == "error":
+                    was_error = True
+                    error_content = raw_event.get("content", "Command execution failed")
+                    event_seq_counter += 1
+                    error_event = {
+                        "type": "tool_result_delta",
+                        "content": f"\n[Error: {error_content}]",
+                        "event_seq": event_seq_counter,
+                        "metadata": {
+                            "tool_id": exec_id,
+                            "stream": "stderr",
+                        },
+                    }
+                    streaming_events.append(error_event)
+                    await active_streaming_manager.append_streaming_event(session_id, error_event)
+                    await event_handler.on_event(error_event)
+                    break
+
+                if event_type == "tool_result_delta":
+                    chunk_content = raw_event.get("content", "")
+                    chunk_bytes = len(chunk_content.encode("utf-8"))
+                    total_bytes += chunk_bytes
+
+                    # Output cap enforcement
+                    if total_bytes > settings.RUN_COMMAND_MAX_OUTPUT_BYTES:
+                        if not truncation_interrupt_sent:
+                            truncation_interrupt_sent = True
+                            exec_truncated = True
+                            await agent_env_connector.interrupt_command(
+                                base_url, auth_headers, exec_id
+                            )
+                        # Emit truncation marker
+                        event_seq_counter += 1
+                        trunc_event = {
+                            "type": "tool_result_delta",
+                            "content": f"\n[...output truncated at {settings.RUN_COMMAND_MAX_OUTPUT_BYTES // 1024} KB]",
+                            "event_seq": event_seq_counter,
+                            "metadata": {
+                                "tool_id": exec_id,
+                                "stream": "stderr",
+                            },
+                        }
+                        streaming_events.append(trunc_event)
+                        await active_streaming_manager.append_streaming_event(session_id, trunc_event)
+                        await event_handler.on_event(trunc_event)
+                        break
+
+                    event_seq_counter += 1
+                    stored_event = {
+                        "type": "tool_result_delta",
+                        "content": chunk_content,
+                        "event_seq": event_seq_counter,
+                        "metadata": {
+                            "tool_id": exec_id,
+                            "stream": raw_event.get("metadata", {}).get("stream", "stdout"),
+                        },
+                    }
+                    streaming_events.append(stored_event)
+                    await active_streaming_manager.append_streaming_event(session_id, stored_event)
+                    await event_handler.on_event(stored_event)
+
+                # Periodic flush to DB
+                if system_message_id and (time.time() - last_flush_time >= FLUSH_INTERVAL):
+                    await MessageService._flush_command_stream_to_db(
+                        system_message_id=system_message_id,
+                        streaming_events=streaming_events,
+                        command_metadata=command_metadata,
+                        get_fresh_db_session=get_fresh_db_session,
+                        session_id=session_id,
+                    )
+                    last_flush_time = time.time()
+
+        except Exception as exc:
+            logger.error(
+                f"[Command] Unexpected error during command stream for session {session_id}: {exc}",
+                exc_info=True,
+            )
+            was_error = True
+
+        # --- Build done event ---
+        done_summary_parts: list[str] = []
+        if exec_timed_out:
+            done_summary_parts.append("timed out")
+        elif was_interrupted:
+            done_summary_parts.append("interrupted")
+        elif was_error:
+            done_summary_parts.append("error")
+        elif exec_exit_code is not None:
+            done_summary_parts.append(f"exit {exec_exit_code}")
+        else:
+            done_summary_parts.append("done")
+
+        duration_str = f" ({exec_duration_seconds:.1f}s)" if exec_duration_seconds is not None else ""
+        done_content = f"Command {', '.join(done_summary_parts)}{duration_str}"
+
+        event_seq_counter += 1
+        done_event: dict = {
+            "type": "system",
+            "content": done_content,
+            "event_seq": event_seq_counter,
+            "metadata": {
+                "tool_id": exec_id,
+                "exit_code": exec_exit_code,
+                "duration_seconds": exec_duration_seconds,
+                "command_done": True,
+            },
+        }
+        streaming_events.append(done_event)
+        await event_handler.on_event(done_event)
+
+        # --- Build final message content ---
+        output_chunks = [
+            e["content"] for e in streaming_events
+            if e.get("type") == "tool_result_delta" and e.get("content")
+        ]
+        full_output = "".join(output_chunks)
+
+        resolved_display = (
+            resolved_command[:80] + "..." if len(resolved_command) > 80 else resolved_command
+        )
+        exit_label = f"exit {exec_exit_code}" if exec_exit_code is not None else "?"
+        if exec_timed_out:
+            exit_label = "timed out"
+        elif was_interrupted:
+            exit_label = "interrupted"
+
+        duration_label = f" · {exec_duration_seconds:.1f}s" if exec_duration_seconds is not None else ""
+        final_content = (
+            f"**Command**: `{command_name}` → `{resolved_display}`\n\n"
+            f"```\n{full_output}\n```\n\n"
+            f"**Exit**: {exit_label}{duration_label}"
+        )
+
+        # --- Finalize system message ---
+        final_metadata = {
+            "command": True,
+            "command_name": command_name,
+            "routing": "command_stream",
+            "synthesized": True,
+            "resolved_command": resolved_command,
+            "streaming_in_progress": False,
+            "streaming_events": streaming_events,
+            "exec_exit_code": exec_exit_code,
+            "exec_duration_seconds": exec_duration_seconds,
+            "exec_timed_out": exec_timed_out,
+            "exec_interrupted": was_interrupted,
+            "exec_truncated": exec_truncated,
+        }
+
+        message_status = ""
+        if exec_timed_out:
+            message_status = "error"
+        elif was_interrupted:
+            message_status = "user_interrupted"
+        elif was_error:
+            message_status = "error"
+
+        def _finalize():
+            from sqlalchemy.orm.attributes import flag_modified
+            with get_fresh_db_session() as db:
+                if system_message_id:
+                    msg = db.get(SessionMessage, system_message_id)
+                    if msg:
+                        msg.content = final_content
+                        msg.message_metadata = final_metadata
+                        flag_modified(msg, "message_metadata")
+                        if message_status:
+                            msg.status = message_status
+                        db.add(msg)
+                        db.commit()
+
+        await asyncio.to_thread(_finalize)
+
+        # --- Unregister stream ---
+        await active_streaming_manager.unregister_stream(session_id)
+
+        logger.info(
+            f"[Command] Command stream complete for session {session_id} "
+            f"(exec_id={exec_id}, exit={exec_exit_code}, "
+            f"interrupted={was_interrupted}, error={was_error})"
+        )
 
     @staticmethod
     async def _finalize_agent_message(

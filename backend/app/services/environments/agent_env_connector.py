@@ -150,6 +150,123 @@ class AgentEnvConnector:
                 f"Failed to connect to environment for exec: {str(e)}"
             ) from e
 
+    async def stream_command(
+        self,
+        base_url: str,
+        auth_headers: dict,
+        exec_id: str,
+        resolved_command: str,
+        timeout: int = 300,
+        max_output_bytes: int = 262144,
+    ) -> AsyncIterator[dict]:
+        """Stream command execution events from agent-env /command/stream endpoint.
+
+        Yields parsed SSE event dicts. Errors are yielded as
+        {"type": "error", "content": ..., "error_type": ...} rather than raised,
+        matching the existing stream_chat contract.
+
+        Expected event shapes from agent-env:
+            {"type": "tool", "tool_name": "bash", ...}
+            {"type": "tool_result_delta", "content": "...", "metadata": {...}}
+            {"type": "done", "exit_code": N, "duration_seconds": F}
+            {"type": "interrupted", "exit_code": -1}
+        """
+        headers = {**auth_headers, "Content-Type": "application/json"}
+        payload = {
+            "command": resolved_command,
+            "exec_id": exec_id,
+            "timeout": timeout,
+            "max_output_bytes": max_output_bytes,
+        }
+        command_timeout = httpx.Timeout(
+            connect=30.0,
+            read=float(timeout + 60),  # extra buffer beyond command timeout
+            write=30.0,
+            pool=30.0,
+        )
+
+        logger.info(f"Streaming command to {base_url}/command/stream (exec_id={exec_id})")
+
+        try:
+            async with httpx.AsyncClient(timeout=command_timeout) as client:
+                async with client.stream(
+                    "POST",
+                    f"{base_url}/command/stream",
+                    json=payload,
+                    headers=headers,
+                ) as response:
+                    response.raise_for_status()
+
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            try:
+                                yield json.loads(data_str)
+                            except json.JSONDecodeError as e:
+                                logger.error(f"Failed to parse command SSE event: {data_str}, error: {e}")
+                                continue
+
+        except httpx.HTTPStatusError as e:
+            try:
+                await e.response.aread()
+                error_text = e.response.text
+            except Exception:
+                error_text = "(unable to read response)"
+            logger.error(f"HTTP error from command stream: {e.response.status_code} - {error_text}")
+            yield {
+                "type": "error",
+                "content": f"Environment returned error: {e.response.status_code}",
+                "error_type": "HTTPError",
+            }
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout streaming command from environment: {e}")
+            yield {
+                "type": "error",
+                "content": "Connection to environment timed out during command execution.",
+                "error_type": "TimeoutError",
+            }
+        except httpx.RequestError as e:
+            logger.error(f"Request error during command stream: {e}")
+            yield {
+                "type": "error",
+                "content": f"Failed to connect to environment: {str(e)}",
+                "error_type": "ConnectionError",
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error during command stream: {e}", exc_info=True)
+            yield {
+                "type": "error",
+                "content": f"Unexpected error: {str(e)}",
+                "error_type": type(e).__name__,
+            }
+
+    async def interrupt_command(
+        self,
+        base_url: str,
+        auth_headers: dict,
+        exec_id: str,
+    ) -> None:
+        """Send a command interrupt request to agent-env (fire-and-forget).
+
+        Errors are logged but not raised — the caller should not depend on
+        this succeeding (e.g., the process may have already exited).
+        """
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{base_url}/command/interrupt/{exec_id}",
+                    headers=auth_headers,
+                )
+                if response.status_code == 200:
+                    logger.info(f"Command interrupt sent for exec_id={exec_id}")
+                else:
+                    logger.warning(
+                        f"Command interrupt returned status {response.status_code} "
+                        f"for exec_id={exec_id}"
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to send command interrupt for exec_id={exec_id}: {e}")
+
 
 # Module-level default instance (patched in tests)
 agent_env_connector = AgentEnvConnector()

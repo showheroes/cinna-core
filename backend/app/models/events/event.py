@@ -67,6 +67,9 @@ class EventType:
     # Agent status events
     AGENT_STATUS_UPDATED = "agent_status_updated"
 
+    # CLI commands cache events
+    CLI_COMMANDS_UPDATED = "cli_commands_updated"
+
     # CRON / schedule lifecycle events — emitted by agent_schedule_scheduler when
     # a scheduled execution finishes (success / triggered-session / error). Meta
     # always carries `environment_id`, `agent_id`, `schedule_id`, `schedule_type`

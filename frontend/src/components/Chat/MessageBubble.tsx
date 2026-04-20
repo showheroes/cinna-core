@@ -9,7 +9,7 @@ import { MessageActions } from "./MessageActions"
 import { AnswerQuestionsModal } from "./AnswerQuestionsModal"
 import { FileBadge } from "./FileBadge"
 import { Button } from "@/components/ui/button"
-import { Info, AlertCircle, ExternalLink, CheckCircle2, HelpCircle, AlertTriangle, Mail, RefreshCw, Clock } from "lucide-react"
+import { Info, AlertCircle, ExternalLink, CheckCircle2, HelpCircle, AlertTriangle, Mail, RefreshCw, Clock, Terminal, Copy, Check, XCircle } from "lucide-react"
 import { useToolApproval } from "@/hooks/useToolApproval"
 import { RecoverSessionModal } from "./RecoverSessionModal"
 
@@ -26,6 +26,7 @@ interface MessageBubbleProps {
 export function MessageBubble({ message, onSendAnswer, onSendMessage, conversationModeUi = "detailed", agentId, integrationTyp, sessionId }: MessageBubbleProps) {
   const [showAnswerModal, setShowAnswerModal] = useState(false)
   const [showRecoverModal, setShowRecoverModal] = useState(false)
+  const [commandOutputCopied, setCommandOutputCopied] = useState(false)
   const approvalMessageSentRef = useRef(false)
 
   // Tool approval hook
@@ -179,6 +180,15 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
 
   // Check if this is a command response (e.g. /files) - rendered directly, not via streaming events
   const isCommand = message.message_metadata?.command === true
+  // Check if this is a streaming command output message (/run:name)
+  const isCommandStream = isCommand && message.message_metadata?.routing === "command_stream"
+  const commandName = message.message_metadata?.command_name as string | undefined
+  const resolvedCommand = message.message_metadata?.resolved_command as string | undefined
+  const streamingInProgress = message.message_metadata?.streaming_in_progress === true
+  const execExitCode = message.message_metadata?.exec_exit_code as number | null | undefined
+  const execTimedOut = message.message_metadata?.exec_timed_out === true
+  const execInterrupted = message.message_metadata?.exec_interrupted === true
+  const execTruncated = message.message_metadata?.exec_truncated === true
 
   // Extract metadata for display
   const model = message.message_metadata?.model as string | undefined
@@ -220,6 +230,18 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
     if (onSendAnswer) {
       onSendAnswer(answers, messageId)
     }
+  }
+
+  // Handle copy for command output
+  const handleCopyCommandOutput = () => {
+    const outputChunks = streamingEvents
+      .filter((e: any) => e.type === "tool_result_delta" && e.content)
+      .map((e: any) => e.content as string)
+    const text = outputChunks.join("")
+    navigator.clipboard.writeText(text).then(() => {
+      setCommandOutputCopied(true)
+      setTimeout(() => setCommandOutputCopied(false), 2000)
+    })
   }
 
   // Format UTC timestamp - handle invalid dates
@@ -267,6 +289,96 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
                   )}
                   <p className="whitespace-pre-wrap break-words">{message.content}</p>
                 </>
+              ) : isCommandStream ? (
+                // Command stream output (/run:<name>)
+                <div className="space-y-2">
+                  {/* Header */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+                      <Terminal className="h-3.5 w-3.5 shrink-0" />
+                      <span className="font-mono font-medium truncate">{commandName || "/run"}</span>
+                      {resolvedCommand && (
+                        <span
+                          className="text-muted-foreground/60 truncate"
+                          title={resolvedCommand}
+                        >
+                          → {resolvedCommand.length > 80 ? resolvedCommand.slice(0, 80) + "…" : resolvedCommand}
+                        </span>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs shrink-0"
+                      onClick={handleCopyCommandOutput}
+                      title="Copy output"
+                    >
+                      {commandOutputCopied ? (
+                        <><Check className="h-3 w-3 mr-1" />Copied</>
+                      ) : (
+                        <><Copy className="h-3 w-3 mr-1" />Copy</>
+                      )}
+                    </Button>
+                  </div>
+
+                  {/* Output area */}
+                  <div
+                    className="bg-slate-950 dark:bg-slate-950 rounded text-xs font-mono overflow-x-auto max-h-[400px] overflow-y-auto"
+                    role="log"
+                    aria-live={streamingInProgress ? "polite" : undefined}
+                  >
+                    {streamingEvents.filter((e: any) => e.type === "tool_result_delta").length > 0 ? (
+                      <pre className="p-3 whitespace-pre-wrap break-all text-slate-100">
+                        {streamingEvents
+                          .filter((e: any) => e.type === "tool_result_delta" && e.content)
+                          .sort((a: any, b: any) => (a.event_seq || 0) - (b.event_seq || 0))
+                          .map((e: any, idx: number) => (
+                            <span
+                              key={e.event_seq ?? idx}
+                              className={e.metadata?.stream === "stderr" ? "text-amber-400" : ""}
+                            >
+                              {e.content}
+                            </span>
+                          ))}
+                        {streamingInProgress && (
+                          <span className="animate-pulse">▋</span>
+                        )}
+                      </pre>
+                    ) : streamingInProgress ? (
+                      <div className="p-3 text-slate-400">
+                        Running<span className="animate-pulse">▋</span>
+                      </div>
+                    ) : (
+                      <div className="p-3 text-slate-500 italic">Command completed — no output.</div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  {!streamingInProgress && (
+                    <div className="flex items-center gap-2 text-xs">
+                      {execTimedOut ? (
+                        <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="h-3 w-3" />Timed out
+                        </span>
+                      ) : execInterrupted ? (
+                        <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                          <AlertCircle className="h-3 w-3" />Interrupted
+                        </span>
+                      ) : execExitCode === 0 ? (
+                        <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                          <CheckCircle2 className="h-3 w-3" />Exit 0
+                        </span>
+                      ) : execExitCode != null ? (
+                        <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
+                          <XCircle className="h-3 w-3" />Exit {execExitCode}
+                        </span>
+                      ) : null}
+                      {execTruncated && (
+                        <span className="text-amber-600 dark:text-amber-400">[truncated]</span>
+                      )}
+                    </div>
+                  )}
+                </div>
               ) : isCommand ? (
                 <MarkdownRenderer
                   content={message.content || ""}

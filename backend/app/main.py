@@ -155,6 +155,26 @@ async def lifespan(app: FastAPI):
             handler=AgentStatusService.handle_post_action_event,
         )
 
+    # CLI commands service: pull CLI_COMMANDS.yaml after every backend-triggered action
+    # (env activation, session streams, scheduler executions). Same 5 post-action events
+    # as AgentStatusService, plus ENVIRONMENT_ACTIVATED for initial fetch on env start.
+    from app.services.agents.cli_commands_service import CLICommandsService
+    event_service.register_handler(
+        event_type=EventType.ENVIRONMENT_ACTIVATED,
+        handler=CLICommandsService.handle_post_action_event,
+    )
+    for _event_type in (
+        EventType.STREAM_COMPLETED,
+        EventType.STREAM_ERROR,
+        EventType.CRON_COMPLETED_OK,
+        EventType.CRON_TRIGGER_SESSION,
+        EventType.CRON_ERROR,
+    ):
+        event_service.register_handler(
+            event_type=_event_type,
+            handler=CLICommandsService.handle_post_action_event,
+        )
+
     # Activity service handlers for streaming lifecycle
     event_service.register_handler(
         event_type=EventType.STREAM_STARTED,

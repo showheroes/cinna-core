@@ -29,6 +29,10 @@ class ActiveStream:
     last_flushed_seq: int = 0
     # Accumulated assistant text content
     accumulated_content: str = ""
+    # Stream type: "llm" for LLM chat streams, "command" for /run command streams
+    stream_type: str = "llm"
+    # exec_id: UUID string of the running command exec (set for command streams)
+    exec_id: Optional[str] = None
 
 
 class ActiveStreamingManager:
@@ -130,6 +134,33 @@ class ActiveStreamingManager:
             logger.info(f"Marked session {session_id} as interrupted")
             return True
 
+    async def update_stream_type(
+        self,
+        session_id: UUID,
+        stream_type: str,
+        exec_id: Optional[str] = None,
+    ) -> None:
+        """
+        Update the stream type and optional exec_id for an active stream.
+
+        Called by stream_command_via_agent_env after register_stream to mark
+        the stream as a command stream rather than an LLM stream.
+
+        Args:
+            session_id: Backend session UUID
+            stream_type: "llm" or "command"
+            exec_id: UUID string of the running exec (for command streams)
+        """
+        async with self._lock:
+            if session_id in self._active_streams:
+                stream = self._active_streams[session_id]
+                stream.stream_type = stream_type
+                stream.exec_id = exec_id
+                logger.info(
+                    f"Updated stream type for session {session_id}: "
+                    f"stream_type={stream_type}, exec_id={exec_id}"
+                )
+
     async def request_interrupt(self, session_id: UUID) -> dict:
         """
         Request interrupt for a streaming session.
@@ -138,6 +169,9 @@ class ActiveStreamingManager:
         If external_session_id exists, returns it for immediate forwarding.
         If not, marks interrupt as pending.
 
+        For command streams (stream_type="command"), returns exec_id instead of
+        external_session_id so the caller can forward to the command interrupt endpoint.
+
         Args:
             session_id: Backend session UUID
 
@@ -145,33 +179,60 @@ class ActiveStreamingManager:
             {
                 "found": bool,
                 "external_session_id": str | None,
-                "pending": bool  # True if interrupt queued for later
+                "pending": bool,       # True if interrupt queued for later
+                "stream_type": str,    # "llm" or "command"
+                "exec_id": str | None, # Set for command streams
             }
         """
         async with self._lock:
             if session_id not in self._active_streams:
                 logger.warning(f"Cannot interrupt: session {session_id} not streaming")
-                return {"found": False, "external_session_id": None, "pending": False}
+                return {
+                    "found": False,
+                    "external_session_id": None,
+                    "pending": False,
+                    "stream_type": "llm",
+                    "exec_id": None,
+                }
 
             stream = self._active_streams[session_id]
 
+            if stream.stream_type == "command":
+                # Command stream — mark interrupted so the streaming loop can detect it
+                stream.is_interrupted = True
+                logger.info(
+                    f"Command interrupt requested for session {session_id} "
+                    f"(exec_id: {stream.exec_id})"
+                )
+                return {
+                    "found": True,
+                    "external_session_id": None,
+                    "pending": False,
+                    "stream_type": "command",
+                    "exec_id": stream.exec_id,
+                }
+
             if stream.external_session_id:
-                # External session ID available - can forward immediately
+                # LLM stream with external session ID available - can forward immediately
                 stream.is_interrupted = True
                 logger.info(f"Interrupt requested for session {session_id} (external_id: {stream.external_session_id})")
                 return {
                     "found": True,
                     "external_session_id": stream.external_session_id,
-                    "pending": False
+                    "pending": False,
+                    "stream_type": "llm",
+                    "exec_id": None,
                 }
             else:
-                # External session ID not yet available - queue interrupt
+                # LLM stream but external session ID not yet available - queue interrupt
                 stream.interrupt_pending = True
                 logger.info(f"Interrupt queued for session {session_id} (waiting for external_session_id)")
                 return {
                     "found": True,
                     "external_session_id": None,
-                    "pending": True
+                    "pending": True,
+                    "stream_type": "llm",
+                    "exec_id": None,
                 }
 
     async def is_streaming(self, session_id: UUID) -> bool:

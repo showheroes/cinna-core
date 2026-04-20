@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 class SessionResetCommandHandler(CommandHandler):
     """Handler for /session-reset — reset SDK session for a clean slate."""
 
+    include_in_llm_context = False  # Meta-command; no content value
+
     @property
     def name(self) -> str:
         return "/session-reset"

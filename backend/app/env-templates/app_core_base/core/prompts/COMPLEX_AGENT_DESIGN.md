@@ -470,6 +470,60 @@ Run `uv run python scripts/update_status.py --help` for full options.
 
 ---
 
+## Exposed CLI Commands
+
+Agents can expose a small set of named shell commands that users and A2A clients can run directly — without spending tokens on an LLM turn. These commands power the `/run:<name>` slash command in chat, surface as A2A skills in the agent card, and appear in the autocomplete popup.
+
+### File location
+
+```
+/app/workspace/docs/CLI_COMMANDS.yaml
+```
+
+### Purpose
+
+Declare deterministic operations the agent owner wants to be callable on demand: monthly checks, report generation, cache refreshes, reindex jobs. The platform reads this file when the environment starts, refreshes after each backend-triggered action, and caches the parsed list. Users invoke commands via `/run:<name>`; A2A clients discover them as `cinna.run.<name>` skills on the agent card; both paths execute the same shell string inside this environment with no LLM involvement.
+
+### Format
+
+```yaml
+commands:
+  - name: check                      # required, slug [a-z][a-z0-9_-]{0,31}
+    description: Monthly data check  # optional, 1–512 chars
+    command: uv run /app/workspace/scripts/check-data.py --month  # required, single-line shell string
+```
+
+- `name` — identifier the user types after `/run:`. Must be unique.
+- `description` — one-line explanation shown in autocomplete tooltips, the `/run` listing, and the A2A skill description. Be concrete about what the command does and when to use it.
+- `command` — the shell command to execute inside this environment. Write it exactly as you would at the shell prompt. No shell expansion tricks — keep it one line.
+
+Unknown top-level keys and unknown per-command keys are ignored, so the platform can add fields (`tags`, `timeout`, etc.) in the future without breaking existing files.
+
+### When to maintain this file
+
+- Add an entry whenever you write a script or one-liner the user (or a caller) should be able to trigger directly — treat it as the public CLI for this agent.
+- Remove entries when you remove or rename the underlying script.
+- Update the description when a command's behaviour changes materially.
+
+### Security hygiene
+
+Commands run with the agent's full environment access. Do not declare commands that:
+- Accept raw input from the user (the `command` string is fixed; users cannot pass arguments in MVP).
+- Leak secrets to stdout.
+- Perform destructive actions without a confirmation step inside the script itself.
+
+The resolved `command` string is visible in the A2A agent card description and the UI tooltip — do not embed credentials.
+
+### Helper
+
+Prefer writing scripts under `/app/workspace/scripts/` and referencing them by path in `command:`. This keeps the YAML readable and centralises logic.
+
+### Example
+
+See `/app/workspace/docs/CLI_COMMANDS.yaml` — a starter file is shipped with the environment.
+
+---
+
 ## Documentation Sync (non-negotiable)
 
 Every time scripts are added, modified, or removed, update in the same session:

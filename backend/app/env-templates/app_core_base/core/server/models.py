@@ -178,3 +178,11 @@ class PluginsUpdate(BaseModel):
 class PluginsSettingsResponse(BaseModel):
     """Current plugins settings"""
     active_plugins: list[PluginInfo]
+
+
+class CommandStreamRequest(BaseModel):
+    """Request to stream a shell command execution via SSE."""
+    command: str                         # Full shell command string to execute
+    exec_id: str                         # UUID string for interrupt routing
+    timeout: int = 300                   # Timeout in seconds; enforced by asyncio.wait_for
+    max_output_bytes: int = 262144       # 256 KB output cap; enforced by byte tracking

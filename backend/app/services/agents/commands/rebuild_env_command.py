@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class RebuildEnvCommandHandler(CommandHandler):
+    include_in_llm_context = False  # Infrastructure operation; output is a notification, not content
     """Handler for /rebuild-env — rebuild the agent's active environment."""
 
     @property
@@ -78,9 +79,20 @@ class RebuildEnvCommandHandler(CommandHandler):
 async def _rebuild_environment_background(env_id: UUID) -> None:
     """Run the environment rebuild as a background task."""
     from app.services.environments.environment_service import EnvironmentService
+    from app.services.agents.cli_commands_service import CLICommandsService
 
     try:
         with create_db_session() as db:
             await EnvironmentService.rebuild_environment(session=db, env_id=env_id)
+
+        # After a successful rebuild, refresh CLI commands cache so the command list
+        # reflects any changes the rebuild introduced to workspace scripts.
+        try:
+            with create_db_session() as db:
+                env = db.get(AgentEnvironment, env_id)
+                if env:
+                    await CLICommandsService.refresh_after_action(env, db_session=db)
+        except Exception as exc:
+            logger.debug("cli_commands post-rebuild refresh failed for env %s: %s", env_id, exc)
     except Exception as e:
         logger.error(f"Background rebuild failed for environment {env_id}: {e}", exc_info=True)

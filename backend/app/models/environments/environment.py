@@ -45,6 +45,11 @@ class AgentEnvironment(SQLModel, table=True):
     status_file_fetched_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     status_file_prev_severity: str | None = Field(default=None, sa_column=Column(sa.String(16), nullable=True))
     status_file_severity_changed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
+    # CLI commands cache (from docs/CLI_COMMANDS.yaml in workspace)
+    cli_commands_raw: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    cli_commands_parsed: list | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    cli_commands_fetched_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
+    cli_commands_error: str | None = Field(default=None, sa_column=Column(sa.String(256), nullable=True))
 
 
 # Pydantic Schemas

@@ -11,6 +11,7 @@ from app.services.agents.commands.session_reset_command import SessionResetComma
 from app.services.agents.commands.webapp_command import WebappCommandHandler
 from app.services.agents.commands.rebuild_env_command import RebuildEnvCommandHandler
 from app.services.agents.commands.agent_status_command import AgentStatusCommandHandler
+from app.services.agents.commands.run_command import RunCommandHandler
 
 # Register all command handlers
 CommandService.register(FilesCommandHandler())
@@ -20,3 +21,4 @@ CommandService.register(SessionResetCommandHandler())
 CommandService.register(WebappCommandHandler())
 CommandService.register(RebuildEnvCommandHandler())
 CommandService.register(AgentStatusCommandHandler())
+CommandService.register(RunCommandHandler())

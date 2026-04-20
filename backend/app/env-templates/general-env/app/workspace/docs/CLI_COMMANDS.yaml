@@ -1,0 +1,4 @@
+# Expose named shell commands users and A2A clients can invoke.
+# See /app/prompts/COMPLEX_AGENT_DESIGN.md → "Exposed CLI Commands" for details.
+
+commands: []

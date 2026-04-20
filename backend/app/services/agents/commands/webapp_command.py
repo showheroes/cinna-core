@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 class WebappCommandHandler(CommandHandler):
     """Handler for /webapp — returns the first available webapp share link."""
 
+    include_in_llm_context = False  # Just a URL; no information the LLM needs to act on
+
     @property
     def name(self) -> str:
         return "/webapp"

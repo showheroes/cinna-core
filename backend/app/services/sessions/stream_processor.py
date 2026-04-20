@@ -164,20 +164,23 @@ class SessionStreamProcessor:
             return await self._process_inner()
 
     async def _process_inner(self) -> str:
-        """Core pipeline: collect → context → mark sent → stream → return."""
-        # Step 1: Collect pending messages
+        """Core pipeline: collect → context → mark sent → stream → return.
+
+        Supports mixed batches of LLM messages and command stream messages.
+        LLM batches are routed to stream_message_with_events (unchanged).
+        Command batches are routed to stream_command_via_agent_env (new).
+        """
+        # Step 1: Collect and partition pending messages into routing batches
         with self.get_fresh_db_session() as db:
-            concatenated_content, pending_messages = MessageService.collect_pending_messages(
-                db, self.session_id
-            )
-            if not concatenated_content or not pending_messages:
+            batches = MessageService.collect_pending_batches(db, self.session_id)
+            if not batches:
                 logger.info(
                     "%s No pending messages for session %s",
                     self.log_prefix, self.session_id,
                 )
                 return ""
 
-            # Read session metadata for streaming
+            # Read session metadata (needed for LLM batches)
             chat_session = db.get(ChatSession, self.session_id)
             session_mode = (chat_session.mode or "conversation") if chat_session else "conversation"
             external_session_id = (
@@ -185,14 +188,21 @@ class SessionStreamProcessor:
                 if chat_session else None
             )
 
-            message_ids = [msg.id for msg in pending_messages]
+            all_message_ids = [msg.id for b in batches for msg in b["messages"]]
 
-            # Step 2: Inject recovery context (UI path only)
+            # Extract prior-command IDs attached by collect_pending_batches / build_non_llm_prefix
+            included_command_ids: list[UUID] = batches[0].get("_included_command_ids", []) if batches else []
+
+            # Step 2: Inject recovery context for the first LLM batch (UI path only)
+            # Find the first LLM batch and prepend recovery context to its content
             if self.inject_recovery_context and chat_session:
                 if chat_session.session_metadata.get("recovery_pending"):
                     recovery_context = MessageService.build_recovery_context(db, self.session_id)
                     if recovery_context:
-                        concatenated_content = f"{recovery_context}\n\n{concatenated_content}"
+                        for batch in batches:
+                            if batch["routing"] is None:
+                                batch["content"] = f"{recovery_context}\n\n{batch['content']}"
+                                break
                     # Clear recovery_pending flag
                     chat_session.session_metadata.pop("recovery_pending", None)
                     from sqlalchemy.orm.attributes import flag_modified
@@ -201,13 +211,15 @@ class SessionStreamProcessor:
                     db.commit()
                     db.refresh(chat_session)
 
-            # Step 3: Inject one-time webapp context (UI path only)
+            # Step 3: Determine webapp context injection (UI path only)
+            # Applies to the first LLM batch that has page_context messages
             include_extra_instructions: str | None = None
             extra_instructions_prepend: str | None = None
             if self.inject_webapp_context and chat_session:
+                all_pending_messages = [msg for b in batches for msg in b["messages"]]
                 has_page_context = any(
                     (msg.message_metadata or {}).get("page_context")
-                    for msg in pending_messages
+                    for msg in all_pending_messages
                 )
                 if has_page_context:
                     should_inject = SessionService.activate_webapp_context(db, self.session_id)
@@ -235,62 +247,119 @@ class SessionStreamProcessor:
                 self.environment = environment
 
         # Step 4: Notify handler that streaming is about to start
-        await self.event_handler.on_stream_starting(len(pending_messages))
+        await self.event_handler.on_stream_starting(len(all_message_ids))
 
-        # Step 5: Mark messages as sent
+        # Step 5: Mark all pending messages as sent before any batch starts
         with self.get_fresh_db_session() as db:
-            MessageService.mark_messages_as_sent(db, message_ids)
+            MessageService.mark_messages_as_sent(db, all_message_ids)
+
+        # Step 5b: Mark prior-command messages as forwarded to the LLM
+        # Must happen before streaming begins (Step 6) to prevent concurrent
+        # LLM turns from re-including the same command output.
+        if included_command_ids:
+            with self.get_fresh_db_session() as db:
+                MessageService.mark_command_messages_as_forwarded(db, included_command_ids)
 
         logger.info(
-            "%s Streaming %d pending message(s) for session %s",
-            self.log_prefix, len(pending_messages), self.session_id,
+            "%s Processing %d batch(es) / %d message(s) for session %s",
+            self.log_prefix, len(batches), len(all_message_ids), self.session_id,
         )
 
-        # Step 6: Stream and forward events
+        # Step 6: Process each batch in order
         response_parts: list[str] = []
-        try:
-            async for event in MessageService.stream_message_with_events(
-                session_id=self.session_id,
-                environment_id=self.environment.id,
-                user_message_content=concatenated_content,
-                session_mode=session_mode,
-                external_session_id=external_session_id,
-                get_fresh_db_session=self.get_fresh_db_session,
-                include_extra_instructions=include_extra_instructions,
-                extra_instructions_prepend=extra_instructions_prepend,
-            ):
-                event_type = event.get("type", "")
+        # webapp context only injected into the first LLM batch
+        webapp_context_injected = False
 
-                # Accumulate assistant response text
-                if event_type == "assistant":
-                    content = event.get("content", "")
-                    if content:
-                        response_parts.append(content)
+        for batch_idx, batch in enumerate(batches):
+            routing = batch["routing"]
 
-                # Forward every event to the handler
-                await self.event_handler.on_event(event)
-
-                # Early exit on error events
-                if event_type == "error":
+            if routing == "command_stream":
+                # --- Command streaming batch ---
+                logger.info(
+                    "%s Batch %d/%d: command stream (%s) for session %s",
+                    self.log_prefix, batch_idx + 1, len(batches),
+                    batch["command_name"], self.session_id,
+                )
+                try:
+                    await MessageService.stream_command_via_agent_env(
+                        session_id=self.session_id,
+                        environment_id=self.environment.id,
+                        resolved_command=batch["resolved_command"],
+                        command_name=batch["command_name"],
+                        user_message_id=batch["messages"][0].id,
+                        get_fresh_db_session=self.get_fresh_db_session,
+                        event_handler=self.event_handler,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "%s Error in command batch %d for session %s: %s",
+                        self.log_prefix, batch_idx + 1, self.session_id, e,
+                        exc_info=True,
+                    )
+                    await self.event_handler.on_error(e)
+                    # Stop processing remaining batches on command error
                     break
 
-        except Exception as e:
-            logger.error(
-                "%s Error streaming for session %s: %s",
-                self.log_prefix, self.session_id, e,
-                exc_info=True,
-            )
-            await self.event_handler.on_error(e)
-            raise
+            else:
+                # --- LLM streaming batch ---
+                batch_content = batch["content"]
+
+                # Apply webapp context only to the first LLM batch
+                batch_extra_instructions = None
+                batch_extra_prepend = None
+                if not webapp_context_injected:
+                    batch_extra_instructions = include_extra_instructions
+                    batch_extra_prepend = extra_instructions_prepend
+                    webapp_context_injected = True
+
+                logger.info(
+                    "%s Batch %d/%d: LLM stream for session %s",
+                    self.log_prefix, batch_idx + 1, len(batches), self.session_id,
+                )
+
+                try:
+                    async for event in MessageService.stream_message_with_events(
+                        session_id=self.session_id,
+                        environment_id=self.environment.id,
+                        user_message_content=batch_content,
+                        session_mode=session_mode,
+                        external_session_id=external_session_id,
+                        get_fresh_db_session=self.get_fresh_db_session,
+                        include_extra_instructions=batch_extra_instructions,
+                        extra_instructions_prepend=batch_extra_prepend,
+                    ):
+                        event_type = event.get("type", "")
+
+                        # Accumulate assistant response text
+                        if event_type == "assistant":
+                            event_content = event.get("content", "")
+                            if event_content:
+                                response_parts.append(event_content)
+
+                        # Forward every event to the handler
+                        await self.event_handler.on_event(event)
+
+                        # Early exit on error events
+                        if event_type == "error":
+                            break
+
+                except Exception as e:
+                    logger.error(
+                        "%s Error in LLM batch %d for session %s: %s",
+                        self.log_prefix, batch_idx + 1, self.session_id, e,
+                        exc_info=True,
+                    )
+                    await self.event_handler.on_error(e)
+                    raise
 
         full_response = "".join(response_parts)
 
-        # Step 7: Notify handler of completion
+        # Step 7: Notify handler of completion (once, after all batches)
         await self.event_handler.on_complete(full_response)
 
         logger.info(
-            "%s Response complete | session=%s | parts=%d | length=%d",
-            self.log_prefix, self.session_id, len(response_parts), len(full_response),
+            "%s All batches complete | session=%s | batches=%d | response_length=%d",
+            self.log_prefix, self.session_id, len(batches), len(full_response),
         )
         return full_response
 

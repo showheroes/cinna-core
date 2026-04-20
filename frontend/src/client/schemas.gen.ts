@@ -11755,6 +11755,17 @@ export const SessionCommandPublicSchema = {
         is_available: {
             type: 'boolean',
             title: 'Is Available'
+        },
+        resolved_command: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolved Command'
         }
     },
     type: 'object',
