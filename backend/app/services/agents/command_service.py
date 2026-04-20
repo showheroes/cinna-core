@@ -7,8 +7,14 @@ require an LLM call. They are executed locally and return markdown responses.
 import logging
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from sqlmodel import Session as DbSession
+
+    from app.models import Session as ChatSession
+    from app.models.sessions.session import SessionCommandPublic
 
 logger = logging.getLogger(__name__)
 
@@ -139,3 +145,91 @@ class CommandService:
                 content=f"Error executing `{name}`: {str(e)}",
                 is_error=True,
             )
+
+    @classmethod
+    async def list_for_session(
+        cls,
+        db: "DbSession",
+        chat_session: "ChatSession",
+    ) -> list["SessionCommandPublic"]:
+        """Build the autocomplete command list for a session.
+
+        Applies display rules:
+        - ``/run`` is hidden (an implementation detail — users discover commands
+          via ``/run-list`` and invoke them via ``/run:<name>``).
+        - ``/run-list`` is shown only when the agent has CLI commands configured.
+        - ``/rebuild-env`` is marked unavailable while any co-tenant session on
+          the same environment is streaming.
+        - Dynamic ``/run:<name>`` entries are appended from the env's CLI
+          commands cache (with ``resolved_command`` populated for the tooltip).
+        """
+        from sqlmodel import select
+
+        from app.models import AgentEnvironment, Session as ChatSessionModel
+        from app.models.sessions.session import SessionCommandPublic
+        from app.services.agents.cli_commands_service import CLICommandsService
+        from app.services.sessions.active_streaming_manager import active_streaming_manager
+
+        # Ensure command handlers are registered before listing them
+        import app.services.agents.commands  # noqa: F401
+
+        # Resolve environment + CLI commands cache once — used for the
+        # /run-list visibility check and for the dynamic /run:<name> entries.
+        cli_commands: list = []
+        if chat_session.environment_id:
+            environment = db.get(AgentEnvironment, chat_session.environment_id)
+            if environment:
+                cli_commands = CLICommandsService.get_cached_commands(environment)
+
+        # Determine /rebuild-env availability — unavailable if any session on
+        # the same environment is actively streaming (mirrors the check in
+        # RebuildEnvCommandHandler).
+        is_rebuild_env_available = True
+        if chat_session.environment_id:
+            try:
+                session_ids = set(
+                    db.exec(
+                        select(ChatSessionModel.id).where(
+                            ChatSessionModel.environment_id == chat_session.environment_id
+                        )
+                    ).all()
+                )
+                if session_ids:
+                    is_rebuild_env_available = not await active_streaming_manager.is_any_session_streaming(
+                        session_ids
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to check streaming status for /rebuild-env availability",
+                    exc_info=True,
+                )
+                is_rebuild_env_available = True
+
+        commands: list[SessionCommandPublic] = []
+        for handler in cls.list_handlers():
+            if handler.name == "/run":
+                continue
+            if handler.name == "/run-list" and not cli_commands:
+                continue
+            is_available = (
+                is_rebuild_env_available if handler.name == "/rebuild-env" else True
+            )
+            commands.append(
+                SessionCommandPublic(
+                    name=handler.name,
+                    description=handler.description,
+                    is_available=is_available,
+                )
+            )
+
+        for cmd in cli_commands:
+            commands.append(
+                SessionCommandPublic(
+                    name=f"/run:{cmd.name}",
+                    description=cmd.description if cmd.description else cmd.command[:80],
+                    is_available=True,
+                    resolved_command=cmd.command,
+                )
+            )
+
+        return commands

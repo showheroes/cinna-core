@@ -130,5 +130,3 @@ AgenticTeams have no `user_workspace_id` column. Teams are visible across all wo
 - **AI-generated connection prompts**: "Generate" button like AgentHandovers
 - **Execution trace**: Real-time visualization of active nodes and message flow
 - **Team templates**: Pre-built structures (IT Support, Content Pipeline, etc.)
-
-See `docs/drafts/agentic-teams-product-vision.md` for the full product roadmap.

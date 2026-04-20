@@ -176,7 +176,7 @@ Manages one shared Docker image per template, tagged by a content hash of the bu
 
 **Image inspection**: uses Docker Python SDK (`docker.from_env().images.get(tag)`) via `asyncio.to_thread`; catches `docker.errors.ImageNotFound` to determine whether a build is needed.
 
-**Build execution**: `asyncio.create_subprocess_exec` with command `docker build --tag <tag> <template_dir>`; build context is the template directory only (`backend/app/env-templates/<env_name>/`).
+**Build execution**: `asyncio.create_subprocess_exec` with command `docker build --tag <tag> <template_dir>`; build context is the template directory only (`backend/app/env-templates/<env_name>/`). <!-- nocheck -->
 
 ### DockerEnvironmentAdapter (`backend/app/services/environments/adapters/docker_adapter.py`)
 

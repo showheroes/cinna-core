@@ -35,9 +35,14 @@ This feature is only active on the authenticated session page (`/session/:sessio
 | `/session-recover` | Always | No conditions |
 | `/session-reset` | Always | No conditions |
 | `/webapp` | Always | No conditions |
+| `/agent-status` | Always | No conditions |
 | `/rebuild-env` | Conditional | Unavailable when any session on the same environment is actively streaming |
+| `/run-list` | Conditional | Hidden from the popup unless the agent has at least one CLI command configured in `docs/CLI_COMMANDS.yaml` | <!-- nocheck -->
+| `/run:<name>` | Dynamic | One entry per command in the agent's `CLI_COMMANDS.yaml` cache — always `is_available=true` |
 
-The availability of `/rebuild-env` mirrors the runtime check in `RebuildEnvCommandHandler.execute()`. The backend recomputes this on every call to the commands endpoint, so the popup reflects real-time state.
+The availability of `/rebuild-env` mirrors the runtime check in `RebuildEnvCommandHandler.execute()`. The backend recomputes it on every call to the commands endpoint, so the popup reflects real-time state. `/run-list` visibility depends on `environment.cli_commands_parsed` being non-empty.
+
+`/run` is registered and invokable (manually typed, or sent by A2A clients as the discovery convention) but is **not surfaced in the popup**. Users discover commands via `/run-list` and execute them via `/run:<name>`. See [CLI Commands](../cli_commands/cli_commands.md) for the full story.
 
 ---
 
@@ -74,9 +79,10 @@ The availability of `/rebuild-env` mirrors the runtime check in `RebuildEnvComma
 - `401 Unauthorized` — no authentication token provided
 
 **Notes**:
-- Commands are returned in registration order (Python dict insertion order, preserved since Python 3.7).
-- The `/rebuild-env` availability check queries the `active_streaming_manager` for all sessions on the same environment. If the check fails due to an exception, `is_available` defaults to `true` to avoid blocking the listing.
-- No database changes are needed — this endpoint is entirely read-only.
+- Commands are returned in registration order (Python dict insertion order, preserved since Python 3.7); dynamic `/run:<name>` entries follow after the static list.
+- The display-rule logic (hide `/run`, conditional `/run-list`, `/rebuild-env` availability, dynamic `/run:<name>` entries with `resolved_command`) lives in `CommandService.list_for_session(db, chat_session)` so the route stays thin.
+- If the `/rebuild-env` check fails due to an exception, `is_available` defaults to `true` to avoid blocking the listing.
+- No database changes — this endpoint is entirely read-only.
 
 ---
 
@@ -157,8 +163,3 @@ filteredCommands = commandsData.commands.filter(cmd => cmd.name.startsWith(messa
 
 This feature adds only new Pydantic response models (`SessionCommandPublic`, `SessionCommandsPublic`) and a new read-only API endpoint. No Alembic migrations are required.
 
----
-
-## Future Enhancements
-
-See `docs/drafts/slash-command-autocomplete_plan.md` for out-of-scope ideas including per-command argument hints, command execution history, custom availability rules per handler, and guest share support.

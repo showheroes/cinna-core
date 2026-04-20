@@ -110,7 +110,12 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
     )
   }
 
-  if (isSystem) {
+  // Command response messages (role=system, metadata.command=true) are rendered
+  // by the command-specific branches further down (isCommandStream / isCommand)
+  // via MarkdownRenderer or the terminal-style block — don't short-circuit here.
+  const isCommandSystemMessage = isSystem && message.message_metadata?.command === true
+
+  if (isSystem && !isCommandSystemMessage) {
     return (
       <>
         <div className="flex justify-center my-4">
@@ -322,36 +327,63 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
                   </div>
 
                   {/* Output area */}
-                  <div
-                    className="bg-slate-950 dark:bg-slate-950 rounded text-xs font-mono overflow-x-auto max-h-[400px] overflow-y-auto"
-                    role="log"
-                    aria-live={streamingInProgress ? "polite" : undefined}
-                  >
-                    {streamingEvents.filter((e: any) => e.type === "tool_result_delta").length > 0 ? (
-                      <pre className="p-3 whitespace-pre-wrap break-all text-slate-100">
-                        {streamingEvents
-                          .filter((e: any) => e.type === "tool_result_delta" && e.content)
-                          .sort((a: any, b: any) => (a.event_seq || 0) - (b.event_seq || 0))
-                          .map((e: any, idx: number) => (
-                            <span
-                              key={e.event_seq ?? idx}
-                              className={e.metadata?.stream === "stderr" ? "text-amber-400" : ""}
-                            >
-                              {e.content}
-                            </span>
-                          ))}
-                        {streamingInProgress && (
-                          <span className="animate-pulse">▋</span>
-                        )}
-                      </pre>
-                    ) : streamingInProgress ? (
-                      <div className="p-3 text-slate-400">
-                        Running<span className="animate-pulse">▋</span>
+                  {(() => {
+                    const outputEvents = streamingEvents
+                      .filter((e: any) => e.type === "tool_result_delta" && e.content)
+                      .sort((a: any, b: any) => (a.event_seq || 0) - (b.event_seq || 0))
+
+                    const hasOutput = outputEvents.length > 0
+
+                    // Streaming: terminal-style live view
+                    if (streamingInProgress) {
+                      return (
+                        <div
+                          className="bg-slate-950 dark:bg-slate-950 rounded text-xs font-mono overflow-x-auto max-h-[400px] overflow-y-auto"
+                          role="log"
+                          aria-live="polite"
+                        >
+                          {hasOutput ? (
+                            <pre className="p-3 whitespace-pre-wrap break-all text-slate-100">
+                              {outputEvents.map((e: any, idx: number) => (
+                                <span
+                                  key={e.event_seq ?? idx}
+                                  className={e.metadata?.stream === "stderr" ? "text-amber-400" : ""}
+                                >
+                                  {e.content}
+                                </span>
+                              ))}
+                              <span className="animate-pulse">▋</span>
+                            </pre>
+                          ) : (
+                            <div className="p-3 text-slate-400">
+                              Running<span className="animate-pulse">▋</span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    }
+
+                    // Completed: markdown-rendered output so scripts that
+                    // emit markdown (tables, lists, headings) render properly.
+                    if (!hasOutput) {
+                      return (
+                        <div className="bg-muted/40 rounded p-3 text-xs text-muted-foreground italic">
+                          Command completed — no output.
+                        </div>
+                      )
+                    }
+
+                    const joinedOutput = outputEvents.map((e: any) => e.content).join("")
+
+                    return (
+                      <div className="bg-muted/40 rounded p-3 overflow-x-auto max-h-[400px] overflow-y-auto">
+                        <MarkdownRenderer
+                          content={joinedOutput}
+                          className="prose dark:prose-invert max-w-none text-sm prose-p:leading-normal prose-p:my-2 prose-ul:my-2 prose-li:my-0 prose-pre:my-2"
+                        />
                       </div>
-                    ) : (
-                      <div className="p-3 text-slate-500 italic">Command completed — no output.</div>
-                    )}
-                  </div>
+                    )
+                  })()}
 
                   {/* Footer */}
                   {!streamingInProgress && (

@@ -2083,6 +2083,49 @@ class MessageService:
 
         await asyncio.to_thread(_finalize)
 
+        # --- Emit post-action event for event-driven handlers ---
+        # (session_interaction_status_changed WS fanout, activity log,
+        # CLI commands / agent status cache refresh, task status sync, etc.)
+        # Order matches stream_message_with_events: emit first, then unregister.
+        from app.models.events.event import EventType
+
+        def _get_session_post_action_info():
+            with get_fresh_db_session() as db:
+                session_db = db.get(ChatSession, session_id)
+                env_db = db.get(AgentEnvironment, environment_id)
+                return (
+                    session_db.user_id if session_db else None,
+                    (session_db.mode or "conversation") if session_db else "conversation",
+                    str(env_db.agent_id) if env_db and env_db.agent_id else None,
+                )
+
+        post_user_id, post_session_mode, post_agent_id = await asyncio.to_thread(
+            _get_session_post_action_info
+        )
+
+        if was_interrupted:
+            post_event_type = EventType.STREAM_INTERRUPTED
+            post_extra: dict = {}
+        elif was_error or exec_timed_out:
+            post_event_type = EventType.STREAM_ERROR
+            post_extra = {
+                "error_type": "CommandTimedOut" if exec_timed_out else "CommandError",
+                "error_message": (
+                    "Command execution timed out"
+                    if exec_timed_out else "Command execution failed"
+                ),
+            }
+        else:
+            post_event_type = EventType.STREAM_COMPLETED
+            post_extra = {"was_interrupted": False}
+
+        await _emit_activity_event(
+            post_event_type, session_id, environment_id,
+            post_session_mode, post_user_id,
+            agent_id=post_agent_id,
+            **post_extra,
+        )
+
         # --- Unregister stream ---
         await active_streaming_manager.unregister_stream(session_id)
 

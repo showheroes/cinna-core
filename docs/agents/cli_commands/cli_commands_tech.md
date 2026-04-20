@@ -13,9 +13,13 @@ The CLI Commands feature is modeled on `AgentStatusService` / `STATUS.md`. The k
                                      handle_post_action_event(event_data)
 
 [GET /api/v1/sessions/{id}/commands]
-  (messages.py: list_session_commands)
-  → static commands from CommandService.list_handlers()
-  → dynamic /run:<name> from CLICommandsService.get_cached_commands(environment)
+  (messages.py: list_session_commands — thin: ownership check + service call)
+  → CommandService.list_for_session(db, chat_session)
+       applies display rules:
+         - hides /run
+         - hides /run-list when cli_commands_parsed is empty
+         - marks /rebuild-env unavailable when co-tenant is streaming
+         - appends dynamic /run:<name> from CLICommandsService.get_cached_commands(environment)
 
 [SlashCommandPopup.tsx]
   → tooltip on dynamic entries via shadcn Tooltip
@@ -176,7 +180,7 @@ Adds four nullable columns to `agent_environment`:
 
 ### Migration 2 — Bulk-mark existing command messages as forwarded
 
-**File:** `backend/app/alembic/versions/<hash>_mark_existing_command_messages_forwarded.py`
+**File:** `backend/app/alembic/versions/d1e2f3a4b5c6_mark_existing_command_messages_forwarded.py`
 
 Bulk-marks all pre-deploy command system messages with `forwarded_to_llm_at` to prevent them flooding the first LLM turn after deployment. See [non_llm_context_bridging_tech.md](../agent_commands/non_llm_context_bridging_tech.md) for the migration SQL.
 
@@ -208,29 +212,23 @@ for _event_type in (
 
 ---
 
-## API Endpoint Extension
+## API Endpoint
 
 **File:** `backend/app/api/routes/messages.py`
 
-`list_session_commands` (GET `/sessions/{session_id}/commands`) appends dynamic entries after the static command list:
+`list_session_commands` (GET `/sessions/{session_id}/commands`) is a thin route that does the HTTP-layer work only — session lookup, ownership check, and delegation to `CommandService.list_for_session`.
 
-```python
-from app.services.agents.cli_commands_service import CLICommandsService
-from app.models import AgentEnvironment
+**File:** `backend/app/services/agents/command_service.py`
 
-if chat_session.environment_id:
-    environment = session.get(AgentEnvironment, chat_session.environment_id)
-    if environment:
-        for cmd in CLICommandsService.get_cached_commands(environment):
-            commands.append(
-                SessionCommandPublic(
-                    name=f"/run:{cmd.name}",
-                    description=cmd.description if cmd.description else cmd.command[:80],
-                    is_available=environment.status == "running",
-                    resolved_command=cmd.command,
-                )
-            )
-```
+`CommandService.list_for_session(db, chat_session)` owns the display-rule logic:
+
+| Rule | Behavior |
+|---|---|
+| `/run` | Always hidden from the popup (still invokable as a message) |
+| `/run-list` | Hidden when `environment.cli_commands_parsed` is empty/null; shown otherwise |
+| `/rebuild-env` | `is_available=false` if any session on the same environment is actively streaming (via `ActiveStreamingManager.is_any_session_streaming`) |
+| Other static handlers | Always `is_available=true` |
+| Dynamic `/run:<name>` | Appended after static handlers; always `is_available=true`; `resolved_command` populated (powers the tooltip) |
 
 Static commands retain `resolved_command=None`. Dynamic entries have `resolved_command=cmd.command`.
 
@@ -284,13 +282,15 @@ The `app_core_base` template includes an "Exposed CLI Commands" section in `core
 
 ---
 
-## Execution and Streaming — `RunCommandHandler`
+## Execution and Streaming — `RunCommandHandler` / `RunListCommandHandler`
 
 **File:** `backend/app/services/agents/commands/run_command.py`
 
-`CommandHandler` subclass with `streams = True` and `include_in_llm_context = True`. Registered in `commands/__init__.py`.
+Two `CommandHandler` subclasses share a helper:
 
-**List mode** (`/run` with no args): reads `AgentEnvironment.cli_commands_parsed` from the DB, triggers a best-effort `CLICommandsService.fetch_commands` refresh, returns a three-column markdown table (Command, Description, Streaming) synchronously. If the cache is empty, returns an inline error.
+- `_list_cli_commands(context)` — module-level async helper that reads `AgentEnvironment.cli_commands_parsed` and returns the markdown-table `CommandResult`. Shared to avoid one handler reaching into the other's privates.
+- `RunCommandHandler` — name `/run`, `streams = True`, `include_in_llm_context = True`. Both list mode (no args) and exec mode (`/run:<name>` / `/run <name>`). Stays registered so existing manual typing and A2A callers keep working; hidden from the autocomplete popup.
+- `RunListCommandHandler` — name `/run-list`, `streams = False`. Delegates to `_list_cli_commands`. Rejects non-empty args with an inline error. Surfaced in the popup only when the agent has CLI commands configured.
 
 **Exec mode** (`/run:<name>` or `/run <name>`): validates the name with `^[a-zA-Z0-9_-]{1,64}$`, looks up the command in the cache (case-insensitive), blocks guest sessions, and returns `CommandResult(routing="command_stream", resolved_command=..., exec_command_short_name=...)`.
 
@@ -344,11 +344,18 @@ Step 5b (after `mark_messages_as_sent`, before streaming): calls `MessageService
 7. Enforces `RUN_COMMAND_MAX_OUTPUT_BYTES` (256 KB).
 8. Finalizes system message with `exec_exit_code`, `exec_duration_seconds`, `exec_timed_out`, `exec_interrupted`, `exec_truncated`, and formatted content.
 9. Emits a `system` done event (command_done=True) at completion.
+10. Emits one of `STREAM_COMPLETED` / `STREAM_INTERRUPTED` / `STREAM_ERROR` on the event bus (via `_emit_activity_event`), matching the LLM streaming path. Subscribers: `session_service.handle_stream_completed` (clears `interaction_status`, emits `session_interaction_status_changed` WS event to the user room), `activity_service.handle_stream_completed` (activity log), `input_task_service.handle_stream_completed` (task status sync), `CLICommandsService.handle_post_action_event` (cache refresh), `AgentStatusService.handle_post_action_event` (cache refresh), `environment_service.handle_stream_completed_event`.
+11. Unregisters the stream from `ActiveStreamingManager` (emit-before-unregister mirrors the LLM path ordering).
 
 **`message.status`** is set to:
 - `""` — normal completion, including non-zero exit codes
 - `"error"` — timed out or infrastructure failure
 - `"user_interrupted"` — user sent interrupt
+
+**Event routing**:
+- `was_interrupted` → `STREAM_INTERRUPTED`
+- `was_error` or `exec_timed_out` → `STREAM_ERROR` (with `error_type` = `CommandTimedOut` / `CommandError`)
+- otherwise → `STREAM_COMPLETED` with `was_interrupted=False`
 
 ### `AgentEnvConnector` additions
 
@@ -397,10 +404,13 @@ class CommandStreamRequest(BaseModel):
 
 **`StreamEventRenderer.tsx`**: `tool_result_delta` case renders stdout (default) and stderr (amber) in monospace `pre` blocks.
 
-**`MessageBubble.tsx`**: system messages with `routing === "command_stream"` render a terminal-style block with:
-- Header: command name, resolved command (truncated at 80 chars), copy button
-- Output area: `tool_result_delta` events, blinking cursor while streaming
-- Footer: exit code badge (green check / red X), timed-out / interrupted / truncated labels
+**`MessageBubble.tsx`**: command response system messages (`message.role === "system"` AND `message_metadata.command === true`) skip the generic centered-notification early-return and reach the command-rendering branches:
+- `routing === "command_stream"` (i.e. `/run:<name>`): terminal-style block.
+  - Header: command name, resolved command (truncated at 80 chars), copy button
+  - While streaming: dark background, monospace `<pre>`, stdout default / stderr amber, blinking cursor
+  - When complete: output rendered via `MarkdownRenderer` (so scripts emitting markdown tables, lists, headings render properly); empty output shows an italic placeholder
+  - Footer: exit code badge (green check / red X), `Timed out` / `Interrupted` / `[truncated]` labels
+- Other command responses (`/run-list`, `/files`, `/agent-status`, etc.): `message.content` rendered via `MarkdownRenderer` with the shared `prose` classes (GFM tables, lists, fenced code blocks supported).
 
 ---
 

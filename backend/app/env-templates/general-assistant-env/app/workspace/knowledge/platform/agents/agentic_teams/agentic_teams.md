@@ -6,7 +6,7 @@ AgenticTeams is a visual org-chart builder where users define named agentic team
 
 Teams are intentionally **workspace-independent**: a team can include agents from any workspace the user owns. Teams are owned directly by the user, not by a workspace, mirroring the same design decision made for Dashboards.
 
-The current phase is the **Blueprint** — the chart is a static structural definition. It does not execute. Future phases will add live execution, human-in-the-loop nodes, and observability (see [product vision](../../drafts/agentic-teams-product-vision.md)).
+The current phase is the **Blueprint** — the chart is a static structural definition. It does not execute. Future phases will add live execution, human-in-the-loop nodes, and observability (see [Future Phases](#future-phases) below).
 
 ---
 
@@ -254,7 +254,7 @@ Mode is local client state (`isEditMode: boolean`) — not persisted. The page a
 
 ## Future Phases
 
-The product vision defines 9 additional phases beyond the current Blueprint:
+Nine additional phases beyond the current Blueprint are planned:
 
 - **Phase 2**: Execution Engine — teams that actually run; execution sessions, real-time trace overlay, parallel/sequential execution
 - **Phase 3**: Human-in-the-Loop — human nodes with channel configuration (email, Slack, WhatsApp), async execution, availability scheduling
@@ -265,5 +265,3 @@ The product vision defines 9 additional phases beyond the current Blueprint:
 - **Phase 8**: Multi-Tenancy — organization layer, role-based access, team-of-teams composition
 - **Phase 9**: Internationalization — multilingual handovers, timezone-aware execution, RTL support
 - **Phase 10**: Safety and Governance — guardrails, budget controls, immutable audit trail, human override
-
-See [product vision](../../drafts/agentic-teams-product-vision.md) for full detail on each phase.

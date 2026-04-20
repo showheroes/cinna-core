@@ -3,7 +3,6 @@ from typing import Any
 import logging
 
 from fastapi import APIRouter, HTTPException
-from sqlmodel import select
 
 from app.api.deps import CurrentUser, CurrentUserOrGuest, GuestShareContext, SessionDep
 from app.models import (
@@ -11,7 +10,6 @@ from app.models import (
     Agent,
     MessageCreate,
     MessagesPublic,
-    SessionCommandPublic,
     SessionCommandsPublic,
     User,
 )
@@ -269,75 +267,20 @@ async def list_session_commands(
     """
     List available slash commands for a session.
 
-    Returns all registered slash commands with name, description, and availability status.
-    The /rebuild-env command is marked unavailable if any session on the same environment
-    is actively streaming.
+    Returns all registered slash commands with name, description, and availability
+    status. Display rules (hiding /run, conditional /run-list, /rebuild-env
+    availability, dynamic /run:<name> entries) are applied by
+    ``CommandService.list_for_session``.
 
-    Authenticated users only; no guest access (command autocomplete is a UX aid for
-    the main chat session page which requires authentication).
+    Authenticated users only; no guest access (command autocomplete is a UX aid
+    for the main chat session page which requires authentication).
     """
-    # Ensure command handlers are registered (lazy import mirrors session_service.py pattern)
-    import app.services.agents.commands  # noqa: F401
-
     chat_session = session.get(Session, session_id)
     if not chat_session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Verify ownership
     if not current_user.is_superuser and chat_session.user_id != current_user.id:
         raise HTTPException(status_code=400, detail="Not enough permissions")
 
-    # Determine /rebuild-env availability: unavailable if any session on the same
-    # environment is actively streaming (mirrors the check in RebuildEnvCommandHandler)
-    is_rebuild_env_available = True
-    if chat_session.environment_id:
-        try:
-            session_ids = set(
-                session.exec(
-                    select(Session.id).where(
-                        Session.environment_id == chat_session.environment_id
-                    )
-                ).all()
-            )
-            if session_ids:
-                is_rebuild_env_available = not await active_streaming_manager.is_any_session_streaming(
-                    session_ids
-                )
-        except Exception:
-            logger.warning(
-                "Failed to check streaming status for /rebuild-env availability",
-                exc_info=True,
-            )
-            is_rebuild_env_available = True  # Default to available on error
-
-    commands = []
-    for handler in CommandService.list_handlers():
-        if handler.name == "/rebuild-env":
-            is_available = is_rebuild_env_available
-        else:
-            is_available = True
-        commands.append(
-            SessionCommandPublic(
-                name=handler.name,
-                description=handler.description,
-                is_available=is_available,
-            )
-        )
-
-    # Append dynamic /run:<name> entries from CLI commands cache
-    from app.services.agents.cli_commands_service import CLICommandsService
-    from app.models import AgentEnvironment
-    if chat_session.environment_id:
-        environment = session.get(AgentEnvironment, chat_session.environment_id)
-        if environment:
-            for cmd in CLICommandsService.get_cached_commands(environment):
-                commands.append(
-                    SessionCommandPublic(
-                        name=f"/run:{cmd.name}",
-                        description=cmd.description if cmd.description else cmd.command[:80],
-                        is_available=True,
-                        resolved_command=cmd.command,
-                    )
-                )
-
+    commands = await CommandService.list_for_session(session, chat_session)
     return SessionCommandsPublic(commands=commands)

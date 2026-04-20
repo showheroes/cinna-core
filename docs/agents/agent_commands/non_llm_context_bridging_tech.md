@@ -187,7 +187,7 @@ Existing keys read (not written) by this feature:
 
 ## Database Migration
 
-**File:** `backend/app/alembic/versions/<hash>_mark_existing_command_messages_forwarded.py`
+**File:** `backend/app/alembic/versions/d1e2f3a4b5c6_mark_existing_command_messages_forwarded.py`
 
 Bulk-marks all pre-deploy command system messages to prevent them flooding the first LLM turn after deployment.
 

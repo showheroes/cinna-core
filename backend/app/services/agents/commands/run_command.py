@@ -16,6 +16,51 @@ logger = logging.getLogger(__name__)
 _NAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
 
 
+async def _list_cli_commands(context: CommandContext) -> CommandResult:
+    """Return a markdown table of CLI commands declared in CLI_COMMANDS.yaml.
+
+    Shared by ``/run`` (no-args list mode) and ``/run-list`` — keeps both
+    entry points in lockstep without one reaching into the other's privates.
+    """
+    from app.core.db import create_session
+    from app.models import AgentEnvironment
+    from app.services.agents.cli_commands_service import CLICommandsService
+
+    with create_session() as db:
+        environment = db.get(AgentEnvironment, context.environment_id)
+        if not environment:
+            return CommandResult(
+                content="Environment not found.",
+                is_error=True,
+            )
+        commands = CLICommandsService.get_cached_commands(environment)
+
+    if not commands:
+        return CommandResult(
+            content=(
+                "No commands configured. "
+                "Create `docs/CLI_COMMANDS.yaml` in your workspace to define commands."
+            ),
+            is_error=True,
+        )
+
+    lines = ["| Name | Command | Description |", "|------|---------|-------------|"]
+    for cmd in commands:
+        desc = cmd.description or ""
+        lines.append(f"| `{cmd.name}` | `{cmd.command[:80]}` | {desc} |")
+
+    return CommandResult(content="\n".join(lines))
+
+
+def _find_command(commands, name: str):
+    """Case-insensitive lookup of a command by name."""
+    name_lower = name.lower()
+    for cmd in commands:
+        if cmd.name.lower() == name_lower:
+            return cmd
+    return None
+
+
 class RunCommandHandler(CommandHandler):
     """Handler for /run — executes named CLI commands from CLI_COMMANDS.yaml."""
 
@@ -43,8 +88,7 @@ class RunCommandHandler(CommandHandler):
         name = args.strip().lstrip(":").strip()
 
         if not name:
-            # List mode — synchronous, no queue
-            return await self._handle_list_mode(context)
+            return await _list_cli_commands(context)
 
         # Validate name format
         if not _NAME_RE.match(name):
@@ -57,37 +101,6 @@ class RunCommandHandler(CommandHandler):
             )
 
         return await self._handle_exec_mode(context, name)
-
-    async def _handle_list_mode(self, context: CommandContext) -> CommandResult:
-        """Return a markdown table of available commands from the cache."""
-        from app.core.db import create_session
-        from app.models import AgentEnvironment
-        from app.services.agents.cli_commands_service import CLICommandsService
-
-        with create_session() as db:
-            environment = db.get(AgentEnvironment, context.environment_id)
-            if not environment:
-                return CommandResult(
-                    content="Environment not found.",
-                    is_error=True,
-                )
-            commands = CLICommandsService.get_cached_commands(environment)
-
-        if not commands:
-            return CommandResult(
-                content=(
-                    "No commands configured. "
-                    "Create `docs/CLI_COMMANDS.yaml` in your workspace to define commands."
-                ),
-                is_error=True,
-            )
-
-        lines = ["| Name | Command | Description |", "|------|---------|-------------|"]
-        for cmd in commands:
-            desc = cmd.description or ""
-            lines.append(f"| `{cmd.name}` | `{cmd.command[:80]}` | {desc} |")
-
-        return CommandResult(content="\n".join(lines))
 
     async def _handle_exec_mode(self, context: CommandContext, name: str) -> CommandResult:
         """Queue a command for streaming execution."""
@@ -151,10 +164,28 @@ class RunCommandHandler(CommandHandler):
         )
 
 
-def _find_command(commands, name: str):
-    """Case-insensitive lookup of a command by name."""
-    name_lower = name.lower()
-    for cmd in commands:
-        if cmd.name.lower() == name_lower:
-            return cmd
-    return None
+class RunListCommandHandler(CommandHandler):
+    """Handler for /run-list — lists CLI commands declared in CLI_COMMANDS.yaml.
+
+    Delegates to the shared ``_list_cli_commands`` helper so the autocomplete
+    popup can surface a dedicated list entry (shown only when the agent has
+    at least one CLI command configured).
+    """
+
+    streams: bool = False
+
+    @property
+    def name(self) -> str:
+        return "/run-list"
+
+    @property
+    def description(self) -> str:
+        return "List CLI commands exposed via docs/CLI_COMMANDS.yaml"
+
+    async def execute(self, context: CommandContext, args: str) -> CommandResult:
+        if args.strip():
+            return CommandResult(
+                content="`/run-list` takes no arguments. Use `/run:<name>` to execute a command.",
+                is_error=True,
+            )
+        return await _list_cli_commands(context)
