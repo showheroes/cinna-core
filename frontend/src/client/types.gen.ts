@@ -545,6 +545,22 @@ export type AddonCounts = {
 };
 
 /**
+ * One credential slot of a catalog skill that is not usable yet.
+ *
+ * ``not_linked``: no credential carrying the slot is linked to the agent.
+ * ``not_configured``: the linked credential is a placeholder still to fill.
+ * ``access_revoked``: the linked credential belongs to someone else, who no
+ * longer shares it with the agent owner.
+ */
+export type AddonCredentialIssuePublic = {
+    slot: string;
+    type: string;
+    reason: 'not_linked' | 'not_configured' | 'access_revoked';
+};
+
+export type reason = 'not_linked' | 'not_configured' | 'access_revoked';
+
+/**
  * One row of the addons list — a plugin, or a skill, never both.
  */
 export type AddonPublic = {
@@ -563,6 +579,7 @@ export type AddonPublic = {
     skills?: Array<SkillEntryPublic>;
     status?: string;
     status_code?: (string | null);
+    credential_issues?: Array<AddonCredentialIssuePublic>;
     orphan?: boolean;
     can_share?: boolean;
     can_manage?: boolean;
@@ -3246,9 +3263,10 @@ export type CredentialCreate = {
  * - ``1`` (direct shares): direct ``CredentialShare`` rows exist but the
  * credential is not PBP in any published bundle. Deletion is allowed with
  * a warning (recipients lose access immediately).
- * - ``2`` (PBP in published bundle with ≥1 active foreign install): deleting
- * breaks other users' installs. Blocked by default (HTTP 409); the owner
- * may force the deletion via ``force=true``.
+ * - ``2`` (PBP in a published bundle, or in a published catalog skill, with
+ * ≥1 active foreign install): deleting breaks other users' installs.
+ * Blocked by default (HTTP 409); the owner may force the deletion via
+ * ``force=true``.
  *
  * ``bundle_usages`` is every bundle whose publisher install links this
  * credential, in any provisioning mode (``publisher``/``template``/``user``).
@@ -3259,6 +3277,12 @@ export type CredentialCreate = {
  * that drives the Tier-2 block and lets the UI deep-link to each affected
  * bundle. ``active_install_count`` is the number of foreign installs
  * (non-publisher) that link the credential.
+ *
+ * ``skill_pbp_usages`` is every catalog skill package of the requester whose
+ * revisions freeze this credential as ``provided_by="publisher"``.
+ * ``active_skill_install_count`` is the number of distinct foreign agents
+ * that link the credential and carry a catalog install of one of those
+ * revisions. Both together drive the skill half of Tier 2.
  */
 export type CredentialDeletionImpact = {
     tier: number;
@@ -3267,6 +3291,8 @@ export type CredentialDeletionImpact = {
     bundle_usages?: Array<CredentialBundleUsage>;
     bundle_pbp_usages?: Array<CredentialBundleUsage>;
     active_install_count?: number;
+    skill_pbp_usages?: Array<CredentialSkillUsage>;
+    active_skill_install_count?: number;
 };
 
 export type CredentialPublic = {
@@ -3325,6 +3351,19 @@ export type CredentialSharePublic = {
 export type CredentialSharesPublic = {
     data: Array<CredentialSharePublic>;
     count: number;
+};
+
+/**
+ * One catalog skill package whose revisions provide this credential.
+ *
+ * ``revision_numbers`` lists the package revisions that freeze the
+ * credential as ``provided_by="publisher"``.
+ */
+export type CredentialSkillUsage = {
+    package_uuid: string;
+    package_id: string;
+    display_name: string;
+    revision_numbers?: Array<(number)>;
 };
 
 /**
@@ -5621,6 +5660,7 @@ export type PluginSyncResponse = {
     plugin_results?: Array<PluginInstallResult>;
     partial_failures?: boolean;
     unsupported_syncs?: number;
+    credential_provisioning?: Array<SkillCredentialProvisionPublic>;
 };
 
 export type PrivateUserCreate = {
@@ -6432,7 +6472,7 @@ export type SetupStatusMissingItem = {
     is_ai?: boolean;
 };
 
-export type reason = 'placeholder_empty' | 'publisher_credential_missing' | 'publisher_credential_unshared';
+export type reason2 = 'placeholder_empty' | 'publisher_credential_missing' | 'publisher_credential_unshared';
 
 /**
  * Response of ``GET /agents/{agent_id}/setup-status``.
@@ -6496,6 +6536,52 @@ export type SkillContentPublic = {
 };
 
 /**
+ * One credential slot a skill declares in its ``SKILL.md`` frontmatter.
+ *
+ * ``slot`` is the ``Credential.service_uri`` a script looks the credential up
+ * by; ``type`` is a credential type. Carries no credential value.
+ */
+export type SkillCredentialDeclarationPublic = {
+    slot: string;
+    type: string;
+    description?: (string | null);
+};
+
+/**
+ * How one credential slot is provisioned on the installing agent.
+ *
+ * ``credential_name`` is filled only for a credential the installer owns or
+ * already holds a share on — never for a publisher credential before its
+ * share exists.
+ */
+export type SkillCredentialProvisionPublic = {
+    slot: string;
+    type: string;
+    description?: (string | null);
+    provided_by?: 'user' | 'publisher' | 'template';
+    outcome: 'already_linked' | 'linked_publisher' | 'linked_existing' | 'template_materialised' | 'placeholder_created' | 'publisher_unavailable';
+    credential_id?: (string | null);
+    credential_name?: (string | null);
+};
+
+export type outcome = 'already_linked' | 'linked_publisher' | 'linked_existing' | 'template_materialised' | 'placeholder_created' | 'publisher_unavailable';
+
+/**
+ * One credential slot a published revision requires.
+ *
+ * Projected from the revision's frozen ``required_credential_specs``. Ids
+ * only — never a template payload, never credential data.
+ */
+export type SkillCredentialRequirementPublic = {
+    slot: string;
+    type: string;
+    description?: (string | null);
+    provided_by?: 'user' | 'publisher' | 'template';
+    publisher_credential_id?: (string | null);
+    producer_agent_id?: (string | null);
+};
+
+/**
  * One skill in the agent's index.
  */
 export type SkillEntryPublic = {
@@ -6512,7 +6598,17 @@ export type SkillEntryPublic = {
     error?: (SkillIssuePublic | null);
     warning?: (SkillIssuePublic | null);
     secret_paths?: Array<(string)>;
+    credentials?: Array<SkillCredentialDeclarationPublic>;
     can_publish?: boolean;
+};
+
+/**
+ * Read-only preview of the credential provisioning an install would run.
+ */
+export type SkillInstallPreview = {
+    package_id: string;
+    revision_number: number;
+    credentials?: Array<SkillCredentialProvisionPublic>;
 };
 
 /**
@@ -6537,7 +6633,8 @@ export type SkillInstallRequest = {
  * Error codes: ``not_a_directory``, ``missing_skill_md``, ``unreadable``,
  * ``invalid_frontmatter``, ``missing_name``, ``invalid_name``,
  * ``name_mismatch``, ``reserved_name``, ``missing_description``,
- * ``description_too_long``, ``budget``, ``projection_error``.
+ * ``description_too_long``, ``invalid_credentials``, ``budget``,
+ * ``projection_error``.
  * Warning codes: ``secrets``, ``shadowed``, ``oversized``.
  */
 export type SkillIssuePublic = {
@@ -6656,6 +6753,7 @@ export type SkillPackageRevisionPublic = {
     release_notes?: (string | null);
     published_by_user_id?: (string | null);
     published_at: string;
+    required_credentials?: Array<SkillCredentialRequirementPublic>;
 };
 
 /**
@@ -6677,6 +6775,23 @@ export type SkillPackageUpdate = {
 };
 
 /**
+ * How publishing now would resolve one declared credential slot.
+ *
+ * ``credential_id`` / ``credential_name`` name the **publisher's own**
+ * matched credential, so the viewer is always its owner.
+ */
+export type SkillPublishCredentialPreview = {
+    slot: string;
+    type: string;
+    description?: (string | null);
+    provided_by?: 'user' | 'publisher' | 'template';
+    credential_id?: (string | null);
+    credential_name?: (string | null);
+    producer_agent_id?: (string | null);
+    reason?: ('no_linked_credential' | 'not_shareable' | 'not_owned' | 'template_would_leak_secret' | null);
+};
+
+/**
  * Response of ``GET /agents/{agent_id}/skills/{name}/publish-preview``.
  *
  * Everything the Share dialog needs to show the publisher what pressing the
@@ -6693,6 +6808,7 @@ export type SkillPublishPreview = {
     package_id_disambiguated?: boolean;
     is_republish?: boolean;
     next_revision_number?: number;
+    credentials?: Array<SkillPublishCredentialPreview>;
 };
 
 /**
@@ -11019,6 +11135,14 @@ export type SkillsRevokeSkillPackageGrantData = {
 };
 
 export type SkillsRevokeSkillPackageGrantResponse = (void);
+
+export type SkillsPreviewAgentSkillInstallData = {
+    agentId: string;
+    packageId: string;
+    revisionNumber?: (number | null);
+};
+
+export type SkillsPreviewAgentSkillInstallResponse = (SkillInstallPreview);
 
 export type SkillsPreviewAgentSkillPublishData = {
     agentId: string;

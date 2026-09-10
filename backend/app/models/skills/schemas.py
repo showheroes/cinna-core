@@ -7,9 +7,96 @@ install count, "which of my agents already have this") that no column backs.
 """
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import field_validator
 from sqlmodel import Field, SQLModel
+
+
+class SkillCredentialRequirementPublic(SQLModel):
+    """One credential slot a published revision requires.
+
+    Projected from the revision's frozen ``required_credential_specs``. Ids
+    only — never a template payload, never credential data.
+    """
+
+    #: The ``Credential.service_uri`` a script finds the credential by.
+    slot: str
+    type: str
+    description: str | None = None
+    #: How an installer receives the credential: the publisher shares theirs
+    #: (``publisher``), a template the installer completes (``template``), or
+    #: the installer brings their own (``user``).
+    provided_by: Literal["user", "publisher", "template"] = "user"
+    publisher_credential_id: uuid.UUID | None = None
+    #: The producer agent an ``agent_api`` slot connects to, when known.
+    producer_agent_id: uuid.UUID | None = None
+
+
+class SkillPublishCredentialPreview(SQLModel):
+    """How publishing now would resolve one declared credential slot.
+
+    ``credential_id`` / ``credential_name`` name the **publisher's own**
+    matched credential, so the viewer is always its owner.
+    """
+
+    slot: str
+    type: str
+    description: str | None = None
+    provided_by: Literal["user", "publisher", "template"] = "user"
+    credential_id: uuid.UUID | None = None
+    credential_name: str | None = None
+    producer_agent_id: uuid.UUID | None = None
+    #: Why a slot resolved to ``user``: no credential with this slot is linked
+    #: to the agent (``no_linked_credential``), the publisher's credential
+    #: allows neither sharing nor template sharing (``not_shareable``), or the
+    #: linked credential belongs to somebody else (``not_owned``). ``None`` for
+    #: ``publisher`` and ``template``.
+    reason: (
+        Literal[
+            "no_linked_credential",
+            "not_shareable",
+            "not_owned",
+            "template_would_leak_secret",
+        ]
+        | None
+    ) = None
+
+
+#: What installing a skill does, or would do, for one credential slot (C4).
+SkillSlotOutcome = Literal[
+    "already_linked",
+    "linked_publisher",
+    "linked_existing",
+    "template_materialised",
+    "placeholder_created",
+    "publisher_unavailable",
+]
+
+
+class SkillCredentialProvisionPublic(SQLModel):
+    """How one credential slot is provisioned on the installing agent.
+
+    ``credential_name`` is filled only for a credential the installer owns or
+    already holds a share on — never for a publisher credential before its
+    share exists.
+    """
+
+    slot: str
+    type: str
+    description: str | None = None
+    provided_by: Literal["user", "publisher", "template"] = "user"
+    outcome: SkillSlotOutcome
+    credential_id: uuid.UUID | None = None
+    credential_name: str | None = None
+
+
+class SkillInstallPreview(SQLModel):
+    """Read-only preview of the credential provisioning an install would run."""
+
+    package_id: uuid.UUID
+    revision_number: int
+    credentials: list[SkillCredentialProvisionPublic] = []
 
 
 class SkillPackageRevisionPublic(SQLModel):
@@ -32,6 +119,10 @@ class SkillPackageRevisionPublic(SQLModel):
     release_notes: str | None = None
     published_by_user_id: uuid.UUID | None = None
     published_at: datetime
+    #: The credential slots this revision requires, frozen at publish. Empty
+    #: for a skill that declares none and for every revision published before
+    #: skills could declare credentials.
+    required_credentials: list[SkillCredentialRequirementPublic] = []
 
 
 class SkillPackagePublic(SQLModel):
@@ -196,6 +287,10 @@ class SkillPublishPreview(SQLModel):
     #: Whether this skill already has a package behind it.
     is_republish: bool = False
     next_revision_number: int = 1
+    #: How each credential slot the skill declares would be provided to
+    #: installers if it were published now. Empty when the skill declares none
+    #: or is invalid (publish refuses an invalid skill anyway).
+    credentials: list[SkillPublishCredentialPreview] = []
 
 
 class SkillInstallRequest(SQLModel):

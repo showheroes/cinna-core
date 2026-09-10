@@ -1,19 +1,31 @@
-"""Typed parser for ``AgentBundleRevision.required_credential_specs`` entries.
+"""The ``required_credential_specs`` entry schema: its single writer and reader.
 
-Spec dicts arrive as JSON-loaded ``list[dict]`` and multiple service-layer
-callers (catalog install context, installer credential setup, template
-materialisation) reach into the same shape with the same defensive
-``isinstance`` / ``or {}`` / ``or []`` coalescing. This module centralises
-that parsing into a single ``ParsedCredentialSpec`` value object so the
-call sites consume typed fields instead of re-validating raw dicts.
+A credential spec is the frozen, non-secret description of one credential a
+published revision needs — ``AgentBundleRevision.required_credential_specs``
+and ``SkillPackageRevision.required_credential_specs`` share the schema.
+
+* :func:`build_spec` is the **single writer**. Bundle publish and skill publish
+  both call it, so the two revision kinds cannot drift apart in key names, key
+  order or how ``provided_by`` maps onto ``publisher_credential_id`` and the
+  template payload.
+* :func:`parse_credential_spec` is the **single reader**. Spec dicts arrive as
+  JSON-loaded ``list[dict]`` and multiple service-layer callers (catalog install
+  context, installer credential setup, template materialisation) reach into the
+  same shape; this centralises the defensive ``isinstance`` / ``or {}`` /
+  ``or []`` coalescing into a ``ParsedCredentialSpec`` value object so the call
+  sites consume typed fields instead of re-validating raw dicts.
 
 The matcher in ``CredentialsService.find_match_for_spec`` keeps its raw
 ``template_data`` + ``template_private_fields`` parameters — the parsed
-type belongs to the bundle-spec consumer side, not the credential matcher.
+type belongs to the spec consumer side, not the credential matcher.
 """
 import uuid
 from dataclasses import dataclass
 from typing import Literal
+
+from sqlmodel import Session
+
+from app.models.credentials.credential import Credential
 
 
 @dataclass(frozen=True)
@@ -26,6 +38,10 @@ class ParsedCredentialSpec:
     template_data: dict
     template_private_fields: list[str]
     service_uri: str | None
+    #: The producer agent an ``agent_api`` slot connects to. Written only by
+    #: skill publish (never by bundle publish), so bundle revisions and old
+    #: revision JSON carry no key → ``None``.
+    producer_agent_id: uuid.UUID | None = None
 
     @property
     def non_private_template_data(self) -> dict:
@@ -37,6 +53,82 @@ class ParsedCredentialSpec:
         """
         private = set(self.template_private_fields)
         return {k: v for k, v in self.template_data.items() if k not in private}
+
+
+def build_spec(
+    session: Session,
+    *,
+    credential: Credential | None,
+    credential_type: str,
+    provided_by: Literal["user", "publisher", "template"],
+    name: str,
+    service_uri: str | None,
+    description: str | None,
+) -> dict:
+    """Build one ``required_credential_specs`` entry.
+
+    Key order is part of the contract (revision JSON is compared byte for byte
+    by bundle consumers): ``name``, ``type``, ``allow_sharing``,
+    ``allow_template_sharing``, ``description``, ``provided_by``,
+    ``publisher_credential_id``, ``service_uri``, then ``template_data`` and
+    ``template_private_fields`` only for ``provided_by="template"``. Callers
+    that add a key (skill publish adds ``producer_agent_id``) append it after.
+
+    ``credential`` is the publisher's credential the spec was resolved from, or
+    ``None`` when there is none to point at (a ``user`` spec). The consent flags
+    are copied from it and default to ``False`` without one.
+
+    Raises:
+        ValueError: when ``provided_by`` needs a credential and none was given,
+            or when a template credential's stored data cannot be decrypted
+            (raised by ``PublishService._template_payload_for``).
+    """
+    if provided_by in ("publisher", "template") and credential is None:
+        raise ValueError(
+            f"A '{provided_by}' credential spec for '{name}' needs the "
+            "credential it is resolved from."
+        )
+
+    spec: dict = {
+        "name": name,
+        "type": credential_type,
+        "allow_sharing": (
+            bool(credential.allow_sharing) if credential is not None else False
+        ),
+        "allow_template_sharing": (
+            bool(getattr(credential, "allow_template_sharing", False))
+            if credential is not None
+            else False
+        ),
+        "description": description,
+        "provided_by": provided_by,
+        "publisher_credential_id": (
+            str(credential.id)
+            if provided_by == "publisher" and credential is not None
+            else None
+        ),
+        "service_uri": service_uri,
+    }
+    if provided_by == "template" and credential is not None:
+        # Lazy: publish_service imports this module at load time.
+        from app.services.bundles.publish_service import PublishService
+
+        template_data, template_private_fields = (
+            PublishService._template_payload_for(session, credential)
+        )
+        spec["template_data"] = template_data
+        spec["template_private_fields"] = template_private_fields
+    return spec
+
+
+def _optional_uuid(raw: object) -> uuid.UUID | None:
+    """Read a stored id tolerantly: absent or malformed → ``None``."""
+    if raw is None:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except (ValueError, TypeError):
+        return None
 
 
 def parse_credential_spec(spec: object) -> ParsedCredentialSpec | None:
@@ -60,15 +152,7 @@ def parse_credential_spec(spec: object) -> ParsedCredentialSpec | None:
     else:
         provided_by = "user"
 
-    publisher_credential_id_raw = spec.get("publisher_credential_id")
-    publisher_credential_id: uuid.UUID | None
-    if publisher_credential_id_raw is None:
-        publisher_credential_id = None
-    else:
-        try:
-            publisher_credential_id = uuid.UUID(str(publisher_credential_id_raw))
-        except (ValueError, TypeError):
-            publisher_credential_id = None
+    publisher_credential_id = _optional_uuid(spec.get("publisher_credential_id"))
 
     template_data_raw = spec.get("template_data") or {}
     template_data = template_data_raw if isinstance(template_data_raw, dict) else {}
@@ -95,4 +179,5 @@ def parse_credential_spec(spec: object) -> ParsedCredentialSpec | None:
         template_data=template_data,
         template_private_fields=template_private_fields,
         service_uri=service_uri,
+        producer_agent_id=_optional_uuid(spec.get("producer_agent_id")),
     )

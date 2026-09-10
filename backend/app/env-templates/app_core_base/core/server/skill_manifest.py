@@ -55,6 +55,18 @@ before widening what a ``SKILL.md`` may contain:
   mangled: a grandchild ``key: value`` is hoisted into the *same* mapping,
   where it can silently overwrite a sibling, and any ``- item`` under a nested
   key is collected into a sequence that replaces the mapping outright.
+* **A block-sequence item can be a flat mapping.** ``- key: value`` starts a
+  mapping item, and each following indented ``key: value`` line (no dash)
+  adds a key to that same item — this is how ``credentials:`` declares one
+  slot per item. The item is recognised only when the colon is followed by
+  whitespace or the end of the line, so ``- http://host/x`` and
+  ``- Bash(git:*)`` stay scalars. Values inside an item are scalars: no flow
+  sequences, no deeper nesting. This changed behaviour: a ``- key: value``
+  item that used to parse as the string ``"key: value"`` now parses as a
+  one-key mapping. Indentation inside a sequence item is not tracked: in an
+  indented sequence, a ``key: value`` line at the dash's own indentation that
+  follows a mapping item attaches to that item, where real YAML would reject
+  it.
 * **Unclassifiable lines are skipped, never raised on.** A malformed line
   simply disappears; only a missing or unterminated fence raises.
 * **Scalar coercion uses a fixed, narrow token set.** ``yes`` / ``no`` are
@@ -165,6 +177,44 @@ SECRET_FILENAMES: tuple[str, ...] = (
 )
 SECRET_GLOBS: tuple[str, ...] = ("*.pem", "*.p12", "*.pfx", "*.key")
 
+#: Shape of a credential slot a skill declares under ``credentials:``. A slot
+#: is a ``Credential.service_uri`` value, so it admits the characters a service
+#: URI or a producer agent name carries, and never whitespace.
+SKILL_CREDENTIAL_SLOT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+\-]*$")
+MAX_SLOT_LENGTH = 255
+MAX_SKILL_CREDENTIALS = 20
+
+#: Credential types a skill may declare a slot for.
+#:
+#: Vendored mirror of ``app.models.credentials.credential.CredentialType``
+#: minus ``mcp_provider`` — an MCP provider is never written to
+#: ``credentials.json``, so no script could ever consume that slot. Mirrored
+#: rather than imported for the same reason the whole module is vendored;
+#: a unit test guards the mirror, so a new credential type fails it until it
+#: is added here too.
+SKILL_CREDENTIAL_TYPES: frozenset[str] = frozenset(
+    {
+        "email_imap",
+        "email_smtp",
+        "odoo",
+        "gmail_oauth",
+        "gmail_oauth_readonly",
+        "gdrive_oauth",
+        "gdrive_oauth_readonly",
+        "gcalendar_oauth",
+        "gcalendar_oauth_readonly",
+        "google_service_account",
+        "api_token",
+        "ssh_key",
+        "agent_api",
+    }
+)
+
+#: Matches the remainder of a ``- key: value`` block-sequence item that starts
+#: a mapping item. The colon must be followed by whitespace or the end of the
+#: line, so ``http://host/x`` and ``Bash(git:*)`` never match.
+_ITEM_KEY_RE = re.compile(r"^([A-Za-z0-9_.\-]+):(?:\s+(.*))?$")
+
 
 # ---------------------------------------------------------------------------
 # Issue vocabulary
@@ -192,6 +242,7 @@ ISSUE_MESSAGES: dict[str, str] = {
     "reserved_name": "This name is reserved by a platform command.",
     "missing_description": "SKILL.md frontmatter has no description.",
     "description_too_long": "The description is longer than 1024 characters.",
+    "invalid_credentials": "The credentials block in SKILL.md is invalid.",
     "budget": "Excluded — the agent is over its skill count or size budget.",
     "projection_error": "This skill could not be copied to the engine.",
     # Warnings — the skill still works.
@@ -309,6 +360,10 @@ class SkillEntry:
     #: predicate. Always present (empty = clean) so a consumer can test the
     #: scan result without having to first work out whether the scan ran.
     secret_paths: list[str] = field(default_factory=list)
+    #: The credential slots the frontmatter's ``credentials:`` block declares,
+    #: normalised by :func:`parse_credential_declarations` to
+    #: ``{"slot", "type", "description"}``. Always present (empty = none).
+    credentials: list[dict[str, Any]] = field(default_factory=list)
     #: The optional ``version`` key of the frontmatter, as a string.
     #:
     #: Optional by the Agent Skills standard and optional here: a skill without
@@ -352,6 +407,7 @@ class SkillEntry:
             "warning": self.warning.to_dict() if self.warning else None,
             "secret_paths": list(self.secret_paths),
             "version": self.version,
+            "credentials": [dict(c) for c in self.credentials],
         }
         if include_frontmatter:
             data["frontmatter"] = self.frontmatter
@@ -508,6 +564,9 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         index += 1
         items: list[Any] = []
         nested: dict[str, Any] = {}
+        # The mapping item a `- key: value` line opened, which the indented
+        # `key: value` lines after it extend. Reset by a scalar item.
+        current_item: dict[str, Any] | None = None
         while index < end_index:
             child = lines[index]
             if not child.strip():
@@ -517,13 +576,23 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
                 break
             child_stripped = child.strip()
             if child_stripped.startswith("- "):
-                items.append(_coerce_scalar(child_stripped[2:]))
+                remainder = child_stripped[2:]
+                item_match = _ITEM_KEY_RE.match(remainder.strip())
+                if item_match is not None:
+                    current_item = {
+                        item_match.group(1): _coerce_scalar(item_match.group(2) or "")
+                    }
+                    items.append(current_item)
+                else:
+                    items.append(_coerce_scalar(remainder))
+                    current_item = None
             else:
                 child_match = re.match(
                     r"^([A-Za-z0-9_.\-]+)\s*:\s*(.*)$", child_stripped
                 )
                 if child_match is not None:
-                    nested[child_match.group(1)] = _coerce_scalar(
+                    target = current_item if current_item is not None else nested
+                    target[child_match.group(1)] = _coerce_scalar(
                         child_match.group(2)
                     )
             index += 1
@@ -535,6 +604,105 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
             mapping[key] = ""
 
     return mapping, body
+
+
+# ---------------------------------------------------------------------------
+# Credential declarations (``credentials:`` frontmatter block)
+# ---------------------------------------------------------------------------
+
+
+def _bounded(value: str, limit: int = 64) -> str:
+    """Echo an author value into a problem sentence without letting it run on."""
+    return value if len(value) <= limit else value[:limit] + "…"
+
+
+def parse_credential_declarations(
+    raw: Any,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Validate and normalise a frontmatter ``credentials:`` block.
+
+    Returns ``(declarations, problem)``. ``declarations`` holds one
+    ``{"slot": str, "type": str, "description": str | None}`` per item;
+    ``problem`` is ``None`` when the block is valid, otherwise a short phrase
+    naming the first problem (no trailing period), and then the list is empty.
+
+    An absent key (``None``) and an empty value (``credentials:`` alone parses
+    to ``""``) are valid and declare nothing. Unknown item keys are ignored, so
+    a later optional key does not invalidate a skill written for this parser.
+    """
+    if raw is None or raw == "":
+        return [], None
+    if not isinstance(raw, list):
+        return [], "it must be a list of entries, each with a slot and a type"
+    if len(raw) > MAX_SKILL_CREDENTIALS:
+        return [], f"it declares more than {MAX_SKILL_CREDENTIALS} credentials"
+
+    declarations: list[dict[str, Any]] = []
+    seen_slots: set[str] = set()
+    for position, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            return [], f"entry {position} is not a mapping with a slot and a type"
+
+        # Values are scalar-coerced before they get here, so an unquoted
+        # ``slot: 8080`` arrives as an int: say so instead of "has no slot".
+        slot = item.get("slot")
+        if "slot" in item and not isinstance(slot, str):
+            return [], f"entry {position}: slot must be text; quote it in SKILL.md"
+        if not isinstance(slot, str) or not slot.strip():
+            return [], f"entry {position} has no slot"
+        slot = slot.strip()
+        if len(slot) > MAX_SLOT_LENGTH:
+            return [], (
+                f"the slot of entry {position} is longer than "
+                f"{MAX_SLOT_LENGTH} characters"
+            )
+        if not SKILL_CREDENTIAL_SLOT_RE.match(slot):
+            return [], (
+                f"the slot '{_bounded(slot)}' is not a valid service URI "
+                "(letters, digits and . _ : / @ + -, no spaces)"
+            )
+        if slot in seen_slots:
+            return [], f"the slot '{_bounded(slot)}' is declared twice"
+
+        credential_type = item.get("type")
+        if "type" in item and not isinstance(credential_type, str):
+            return [], (
+                f"the type of the slot '{_bounded(slot)}' must be text; "
+                "quote it in SKILL.md"
+            )
+        if not isinstance(credential_type, str) or not credential_type.strip():
+            return [], f"the slot '{_bounded(slot)}' has no type"
+        credential_type = credential_type.strip()
+        if credential_type == "mcp_provider":
+            return [], (
+                f"the slot '{_bounded(slot)}' has type 'mcp_provider', which a "
+                "skill cannot declare"
+            )
+        if credential_type not in SKILL_CREDENTIAL_TYPES:
+            return [], (
+                f"the slot '{_bounded(slot)}' has an unknown type "
+                f"'{_bounded(credential_type)}'"
+            )
+
+        description = item.get("description")
+        if description is not None and not isinstance(description, str):
+            return [], (
+                f"the description of the slot '{_bounded(slot)}' must be text; "
+                "quote it in SKILL.md"
+            )
+        if isinstance(description, str):
+            description = description.strip() or None
+        if description is not None and len(description) > MAX_DESCRIPTION_LENGTH:
+            return [], (
+                f"the description of the slot '{_bounded(slot)}' is longer than "
+                f"{MAX_DESCRIPTION_LENGTH} characters"
+            )
+
+        seen_slots.add(slot)
+        declarations.append(
+            {"slot": slot, "type": credential_type, "description": description}
+        )
+    return declarations, None
 
 
 # ---------------------------------------------------------------------------
@@ -678,21 +846,22 @@ def parse_skill_dir(
     never matches on text. Error codes: ``not_a_directory``,
     ``missing_skill_md``, ``unreadable``, ``invalid_frontmatter``,
     ``missing_name``, ``invalid_name``, ``name_mismatch``, ``reserved_name``,
-    ``missing_description``, ``description_too_long``. Warning codes:
-    ``secrets``, ``oversized`` (``shadowed`` is added by the index builder,
-    which is the only layer that can see two sources at once).
+    ``missing_description``, ``description_too_long``,
+    ``invalid_credentials``. Warning codes: ``secrets``, ``oversized``
+    (``shadowed`` is added by the index builder, which is the only layer that
+    can see two sources at once).
     """
     skill_dir = Path(path)
     dir_name = skill_dir.name
     entry_path = rel_path if rel_path is not None else f"skills/{dir_name}"
 
-    def _fail(code: str) -> SkillEntry:
+    def _fail(code: str, message: str = "") -> SkillEntry:
         return SkillEntry(
             name=dir_name,
             source=source,
             plugin_ref=plugin_ref,
             path=entry_path,
-            error=SkillIssue(code),
+            error=SkillIssue(code, message),
         )
 
     if not skill_dir.is_dir() or skill_dir.is_symlink():
@@ -734,6 +903,15 @@ def parse_skill_dir(
     if len(description) > MAX_DESCRIPTION_LENGTH:
         return _fail("description_too_long")
 
+    credentials, credentials_problem = parse_credential_declarations(
+        frontmatter.get("credentials")
+    )
+    if credentials_problem is not None:
+        return _fail(
+            "invalid_credentials",
+            f"The credentials block in SKILL.md is invalid: {credentials_problem}.",
+        )
+
     scripts_dir = skill_dir / "scripts"
     size_bytes, secret_paths = _measure_tree(skill_dir)
     warning = pick_warning(
@@ -759,6 +937,7 @@ def parse_skill_dir(
         error=None,
         warning=warning,
         secret_paths=secret_paths,
+        credentials=credentials,
         version=coerce_version(frontmatter.get("version")),
         frontmatter=frontmatter,
     )

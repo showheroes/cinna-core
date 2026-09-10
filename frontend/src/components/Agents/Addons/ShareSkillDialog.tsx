@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup } from "@/components/ui/toggle-group"
 import { invalidateAddons } from "@/utils/addons"
 import { SKILL_VISIBILITY_OPTIONS } from "@/utils/skillCatalog"
+import { ShareSkillCredentialsSection } from "./ShareSkillCredentialsSection"
 import { ShareSkillSuccessPanel } from "./ShareSkillSuccessPanel"
 
 interface ShareSkillDialogProps {
@@ -260,7 +261,7 @@ export function ShareSkillDialog({
     >
       {/* Capped and scrolling: the body is data-driven (an existing-grants
           list, a people picker) and gained two blocks this round. */}
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md [&>*]:min-w-0">
+      <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden sm:max-w-md [&>*]:min-w-0">
         {published ? (
           <ShareSkillSuccessPanel
             skillName={skill.name}
@@ -405,7 +406,7 @@ export function ShareSkillDialog({
                             key={grant.id}
                             className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground"
                           >
-                            {grant.user_email ?? "Unknown user"}
+                            {grant.user_email || "Unknown user"}
                           </span>
                         ))}
                       </div>
@@ -461,6 +462,17 @@ export function ShareSkillDialog({
                     </Alert>
                   )}
                 </div>
+              )}
+
+              {/* What installers will get for each slot the skill declares.
+                  Hidden when the preview failed: the alert below is the same
+                  query and already names the failure. */}
+              {(skill.credentials?.length ?? 0) > 0 && !previewError && (
+                <ShareSkillCredentialsSection
+                  declarationCount={skill.credentials?.length ?? 0}
+                  isLoading={isPreviewLoading}
+                  items={preview?.credentials}
+                />
               )}
 
               {/* The one Advanced disclosure, holding the one field with a

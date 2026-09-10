@@ -112,6 +112,7 @@ from .credentials.credential import (
     CredentialBundleUsages,
     CredentialAffectedAgent,
     CredentialDeletionImpact,
+    CredentialSkillUsage,
     CredentialType,
     EmailImapData,
     OdooData,
@@ -263,6 +264,7 @@ from .agents.agent_status import (
 )
 from .agents.agent_skills import (
     SkillIssuePublic,
+    SkillCredentialDeclarationPublic,
     SkillEntryPublic,
     AgentSkillsPublic,
     SkillContentPublic,
@@ -271,6 +273,7 @@ from .agents.addons import (
     AddonSkillPublic,
     AddonPublic,
     AddonCounts,
+    AddonCredentialIssuePublic,
     AgentAddonsPublic,
 )
 from .sessions.session import (
@@ -406,6 +409,10 @@ from .skills.skill_package_access_grant import (
     SkillPackageAccessGrant,
 )
 from .skills.schemas import (
+    SkillCredentialRequirementPublic,
+    SkillPublishCredentialPreview,
+    SkillCredentialProvisionPublic,
+    SkillInstallPreview,
     SkillPackagePublic,
     SkillPackageEntry,
     SkillPackagesPublic,
@@ -999,12 +1006,14 @@ __all__ = [
     "UpdateMode",
     # Agent skills
     "SkillIssuePublic",
+    "SkillCredentialDeclarationPublic",
     "SkillEntryPublic",
     "AgentSkillsPublic",
     "SkillContentPublic",
     # Agent addons projection
     "AddonSkillPublic",
     "AddonPublic",
+    "AddonCredentialIssuePublic",
     "AddonCounts",
     "AgentAddonsPublic",
     # Credentials
@@ -1017,6 +1026,7 @@ __all__ = [
     "CredentialBundleUsages",
     "CredentialAffectedAgent",
     "CredentialDeletionImpact",
+    "CredentialSkillUsage",
     "CredentialType",
     "EmailImapData",
     "OdooData",
@@ -1275,6 +1285,10 @@ __all__ = [
     "SkillPackageVisibility",
     "CATALOG_MARKETPLACE_NAME",
     "SkillPackageRevision",
+    "SkillCredentialRequirementPublic",
+    "SkillPublishCredentialPreview",
+    "SkillCredentialProvisionPublic",
+    "SkillInstallPreview",
     "SkillPackagePublic",
     "SkillPackageEntry",
     "SkillPackagesPublic",

@@ -1,14 +1,21 @@
 /**
  * SkillCatalogCard — one published skill package in the catalog grid.
  *
- * Six elements and no more, because the grid is `auto-rows-fr`: the tallest
+ * Seven elements and no more, because the grid is `auto-rows-fr`: the tallest
  * card sets the height of every card in it, so anything whose length is data
  * driven is either clamped (`line-clamp-3`) or truncated. It is a browse tile,
  * not a concern card — the header shape is the sibling `CatalogCard`'s, which
  * is what makes the two sections of the catalog read as one page.
  */
 import { useNavigate } from "@tanstack/react-router"
-import { Download, Globe, GraduationCap, Lock, Users } from "lucide-react"
+import {
+  Download,
+  Globe,
+  GraduationCap,
+  KeyRound,
+  Lock,
+  Users,
+} from "lucide-react"
 import type { MouseEvent } from "react"
 import { useState } from "react"
 
@@ -28,6 +35,7 @@ import {
   skillPackageVersionLabel,
   skillPublisherLabel,
 } from "@/utils/skillCatalog"
+import { requirementsSummary } from "@/utils/skillCredentials"
 import { AddSkillToAgentDialog } from "./AddSkillToAgentDialog"
 
 interface SkillCatalogCardProps {
@@ -40,6 +48,10 @@ export function SkillCatalogCard({ entry }: SkillCatalogCardProps) {
 
   const installedCount = entry.installed_in_agent_ids?.length ?? 0
   const versionLabel = skillPackageVersionLabel(entry)
+  // What the latest revision needs from an installer, or null — then no line.
+  const requirements = requirementsSummary(
+    entry.latest_revision?.required_credentials,
+  )
 
   // One badge, three states — **not** a fourth chip. The tile already carries
   // a version badge and a package-id chip, and a fourth thing to read is a
@@ -146,6 +158,14 @@ export function SkillCatalogCard({ entry }: SkillCatalogCardProps) {
           >
             {entry.package_id}
           </code>
+          {/* A fixed one-line fact, not a control: the whole tile is the
+              button, so a tooltip trigger in here would be a nested control. */}
+          {requirements && (
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <KeyRound className="h-3 w-3 shrink-0" />
+              <span className="truncate">{requirements}</span>
+            </p>
+          )}
           {/* Ids, not names: the list route returns `installed_in_agent_ids`, and
             a grid of cards cannot afford a name lookup per card. */}
           {installedCount > 0 && (

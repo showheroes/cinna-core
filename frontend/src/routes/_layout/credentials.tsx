@@ -192,15 +192,16 @@ function CredentialTabs() {
 
       {shared.error && (
         <p className="text-sm text-destructive">
-          Could not load shared credentials; the Bundle and My Credentials tabs
-          may be incomplete.
+          Could not load shared credentials; the Bundle, Automatic and My
+          Credentials tabs may be incomplete.
         </p>
       )}
 
       {filter === "automatic" && (
         <p className="text-sm text-muted-foreground">
-          Connections created by "Connect Agent API" or "Connect MCP Provider".
-          Manage name, notes, and sharing here.
+          Connections created by "Connect Agent API" or "Connect MCP Provider",
+          and credentials shared with you by skills you installed. Manage name,
+          notes, and sharing here.
         </p>
       )}
 

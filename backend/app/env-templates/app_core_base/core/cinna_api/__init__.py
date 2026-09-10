@@ -18,6 +18,19 @@ Typical usage in ``agent_api/orders.py``::
         # ... call the upstream with cred ...
         return {"orders": [...]}
 
+A workspace or skill script (run with ``uv run python``, ``PYTHONPATH=/app``)
+imports the same accessor through the ``core`` package and finds its credential
+by **slot** — the credential's service URI::
+
+    from core.cinna_api import credentials, CredentialMissing
+
+    try:
+        erp = credentials.agent_api_session("erp-public-api")
+    except CredentialMissing as exc:
+        print(exc)  # names the slot and where to fix it — relay it verbatim
+        raise SystemExit(1)
+    orders = erp.get("/orders").json()
+
 Design rules baked into this SDK:
 
 - ``credentials`` reads ``credentials.json`` **fresh on every access** — the
@@ -44,7 +57,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .caller import Caller, caller
-from .credentials import credentials
+from .credentials import CredentialMissing, credentials
 from .errors import error
 
 # The single shared router the agent decorates. Discovery mounts this onto a
@@ -54,6 +67,7 @@ api = APIRouter()
 __all__ = [
     "api",
     "credentials",
+    "CredentialMissing",
     "caller",
     "Caller",
     "error",

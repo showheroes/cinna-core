@@ -57,6 +57,10 @@ STATUS_BY_CODE: dict[str, int] = {
     "skill_invalid": 422,
     "skill_contains_secrets": 422,
     "skill_too_large": 422,
+    # A credential slot resolved to a template-provided credential whose stored
+    # data could not be decrypted. 409: the request is fine, the publisher's
+    # credential is in a state that has to be fixed (re-saved) first.
+    "credential_template_unreadable": 409,
     # Identity
     "package_id_invalid": 422,
     "package_id_taken": 409,

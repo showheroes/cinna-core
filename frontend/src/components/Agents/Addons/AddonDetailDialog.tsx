@@ -6,6 +6,7 @@ import { useState } from "react"
 import type { AddonPublic, SkillEntryPublic } from "@/client"
 import { SkillsService } from "@/client"
 import { SkillContentBody } from "@/components/Agents/SkillContentBody"
+import { SkillCredentialSlotRow } from "@/components/Catalog/SkillCredentialSlotRow"
 import { ListRow, ListRowGroup, RowInfo } from "@/components/Common/ListRow"
 import { RelativeTime } from "@/components/Common/RelativeTime"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -17,11 +18,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useAgentTabLinkClick } from "@/hooks/useAgentTabLinkClick"
 import useCustomToast from "@/hooks/useCustomToast"
 import {
   addonFormatLabel,
@@ -31,6 +34,7 @@ import {
   addonSourceFlag,
 } from "@/utils/addons"
 import { skillRevisionLabel } from "@/utils/skillCatalog"
+import { ISSUE_REASON_COPY } from "@/utils/skillCredentials"
 import { formatSkillSize, skillKey, skillRowStatus } from "@/utils/skills"
 import { AddonLocalBadge } from "./AddonBadges"
 import { SkillDetailDialog } from "./SkillDetailDialog"
@@ -75,6 +79,10 @@ export function AddonDetailDialog({
   onOpenChange,
 }: AddonDetailDialogProps) {
   const skills = addon.skills ?? []
+  const credentialIssues = addon.credential_issues ?? []
+  // This dialog lives on the agent's own page, so a plain router push to
+  // `#credentials` would not switch the tab.
+  const followCredentialsTab = useAgentTabLinkClick(agentId, "credentials")
   const [openSkillKey, setOpenSkillKey] = useState<string | null>(null)
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -200,6 +208,48 @@ export function AddonDetailDialog({
               )}
             </AlertDescription>
           </Alert>
+        )}
+
+        {/* Which slots are not usable, and why — rows rather than facts: a
+            slot is a user-typed id, and `Fact`'s shrink-0 label cannot hold
+            one. The same row the install dialogs showed for the same slot.
+            Keyed on the issues, not on `status_code`: a link failure
+            (`not_materialized`, `unverified`) outranks `credential_missing`
+            for the row's dot, but the slots are still unusable. */}
+        {credentialIssues.length > 0 && (
+          <div className="space-y-1.5">
+            <Label>Credentials</Label>
+            <ListRowGroup>
+              {credentialIssues.map((issue) => {
+                const copy = ISSUE_REASON_COPY[issue.reason]
+                return (
+                  <SkillCredentialSlotRow
+                    key={`${issue.type}:${issue.slot}`}
+                    slot={issue.slot}
+                    type={issue.type}
+                    status={{
+                      tone: "warning",
+                      label: copy.sentence(issue.slot),
+                    }}
+                    summary={copy.short}
+                  />
+                )
+              })}
+            </ListRowGroup>
+            <Button asChild variant="link" className="h-auto px-0">
+              <Link
+                to="/agent/$agentId"
+                params={{ agentId }}
+                hash="credentials"
+                onClick={(event) => {
+                  followCredentialsTab(event)
+                  onOpenChange(false)
+                }}
+              >
+                Open the agent's Credentials tab
+              </Link>
+            </Button>
+          </div>
         )}
 
         {/* Block 3 — the facts, in the two-column shape the package card uses

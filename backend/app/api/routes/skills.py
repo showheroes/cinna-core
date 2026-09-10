@@ -27,6 +27,7 @@ from app.api.deps import AgentEnvContextDep, CurrentUser, SessionDep
 from app.models import (
     Agent,
     PluginSyncResponse,
+    SkillInstallPreview,
     SkillInstallRequest,
     SkillPackageAccessGrantCreate,
     SkillPackageAccessGrantPublic,
@@ -42,9 +43,13 @@ from app.models import (
     SkillRevisionFilesPublic,
 )
 from app.models.skills.skill_package import SkillPackage
+from app.services.credentials.credentials_service import CredentialsService
 from app.services.plugins.llm_plugin_service import LLMPluginService
 from app.services.skills.exceptions import SkillCatalogError, http_error_for
 from app.services.skills.skill_catalog_service import SkillCatalogService
+from app.services.skills.skill_credential_requirements import (
+    SkillCredentialRequirements,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -464,6 +469,39 @@ def _get_agent(session, agent_id: uuid.UUID, user) -> Agent:
     return LLMPluginService.verify_agent_access(session, agent_id, user)
 
 
+# Declared first among the agent-scoped GETs: a literal two-segment path must
+# never sit behind a ``/{agent_id}/skills/{name}`` pattern that would read
+# ``install-preview`` as a skill name.
+@agent_router.get(
+    "/{agent_id}/skills/install-preview",
+    response_model=SkillInstallPreview,
+)
+def preview_agent_skill_install(
+    agent_id: uuid.UUID,
+    package_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+    revision_number: int | None = None,
+) -> Any:
+    """What adding a catalog skill would do for each credential slot it needs.
+
+    Read-only. Runs the same decision tree as the install, so each slot's
+    ``outcome`` is what the install would report. Same gates as the install:
+    another user's agent and an invisible package both answer 404.
+    """
+    agent = _get_agent(session, agent_id, current_user)
+    try:
+        package = SkillCatalogService.get_package(session, package_id, current_user)
+        revision = SkillCatalogService.resolve_revision(
+            session, package, revision_number
+        )
+        return SkillCatalogService.install_preview(
+            session, agent=agent, package=package, revision=revision
+        )
+    except SkillCatalogError as exc:
+        raise http_error_for(exc)
+
+
 @agent_router.get(
     "/{agent_id}/skills/{name}/publish-preview",
     response_model=SkillPublishPreview,
@@ -545,10 +583,12 @@ async def install_agent_skill(
 ) -> Any:
     """Add a catalog skill to one of the caller's agents.
 
-    Creates the ``source=catalog`` plugin link, then runs the ordinary plugin
-    sync — which wakes a suspended environment and reports per-environment and
-    per-plugin outcomes, so the dialog's copy about suspended targets stays
-    true without any catalog-specific transport.
+    Creates the ``source=catalog`` plugin link and provisions the credential
+    slots its revision requires (never failing the install for a slot), then
+    runs the ordinary plugin sync — which wakes a suspended environment and
+    reports per-environment and per-plugin outcomes, so the dialog's copy
+    about suspended targets stays true without any catalog-specific transport.
+    ``credential_provisioning`` reports what happened to each slot.
     """
     agent = _get_agent(session, agent_id, current_user)
     try:
@@ -558,7 +598,7 @@ async def install_agent_skill(
         revision = SkillCatalogService.resolve_revision(
             session, package, data.revision_number
         )
-        link = SkillCatalogService.install_into_agent(
+        result = SkillCatalogService.install_into_agent(
             session,
             agent=agent,
             package=package,
@@ -569,10 +609,22 @@ async def install_agent_skill(
     except SkillCatalogError as exc:
         raise http_error_for(exc)
 
-    return await LLMPluginService.sync_plugins_to_agent_environments(
+    credential_provisioning = SkillCredentialRequirements.provisions_to_public(
+        session, agent=agent, items=result.provisioning.items
+    )
+    # Plugin sync does not carry credentials: push the shares, links and
+    # placeholders the install created first.
+    if result.provisioning.changed:
+        await CredentialsService.sync_credentials_to_agent_environments(
+            session, agent.id
+        )
+
+    response = await LLMPluginService.sync_plugins_to_agent_environments(
         session=session,
         agent_id=agent.id,
         user_id=current_user.id,
-        plugin_link=link,
+        plugin_link=result.link,
         message_prefix="Skill added.",
     )
+    response.credential_provisioning = credential_provisioning
+    return response

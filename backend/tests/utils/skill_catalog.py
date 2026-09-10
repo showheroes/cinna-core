@@ -156,6 +156,53 @@ def publish_skill(
     return r.json()
 
 
+def write_skill_with_credentials(
+    env_id: str,
+    name: str,
+    credentials: list[dict],
+    *,
+    description: str | None = None,
+    body: str = "Step one.",
+) -> Path:
+    """Write ``skills/<name>/SKILL.md`` declaring a ``credentials:`` block (C1).
+
+    ``credentials`` is a list of ``{"slot": str, "type": str, "description":
+    str | None}`` — the same shape :func:`parse_credential_declarations`
+    normalises to. Renders the YAML block wholesale via ``write_skill``'s
+    ``frontmatter=`` seam (Phase 2 §8.9).
+    """
+    lines: list[str] = []
+    for cred in credentials:
+        lines.append(f"  - slot: {cred['slot']}\n    type: {cred['type']}")
+        if cred.get("description"):
+            lines[-1] += f"\n    description: {cred['description']}"
+    credentials_block = "\n".join(lines) + ("\n" if lines else "")
+    frontmatter = (
+        f"name: {name}\n"
+        f"description: {description or f'Does {name} things.'}\n"
+        f"credentials:\n{credentials_block}"
+    )
+    return write_skill(env_id, name, frontmatter=frontmatter, body=body)
+
+
+def preview_skill_publish(
+    client: TestClient,
+    headers: dict[str, str],
+    agent_id: str,
+    name: str,
+    *,
+    expected_status: int = 200,
+) -> dict:
+    """GET ``/agents/{agent_id}/skills/{name}/publish-preview``."""
+    r = client.get(
+        f"{API}/agents/{agent_id}/skills/{name}/publish-preview", headers=headers
+    )
+    assert r.status_code == expected_status, (
+        f"publish-preview {name}: expected {expected_status}, got {r.status_code}: {r.text}"
+    )
+    return r.json()
+
+
 # ── Catalog reads ──────────────────────────────────────────────────────────
 
 
@@ -287,6 +334,30 @@ def delist_skill_package(
 
 
 # ── Install ────────────────────────────────────────────────────────────────
+
+
+def get_skill_install_preview(
+    client: TestClient,
+    headers: dict[str, str],
+    agent_id: str,
+    package_uuid: str,
+    *,
+    revision_number: int | None = None,
+    expected_status: int = 200,
+) -> dict:
+    """GET ``/agents/{agent_id}/skills/install-preview`` -> ``SkillInstallPreview``."""
+    params: dict = {"package_id": package_uuid}
+    if revision_number is not None:
+        params["revision_number"] = revision_number
+    r = client.get(
+        f"{API}/agents/{agent_id}/skills/install-preview",
+        headers=headers,
+        params=params,
+    )
+    assert r.status_code == expected_status, (
+        f"install preview: expected {expected_status}, got {r.status_code}: {r.text}"
+    )
+    return r.json()
 
 
 def install_skill(

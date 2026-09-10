@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from app.models.credentials.credential import CredentialType
 from app.services.agents import skill_manifest
 
 from core.server import skills_projection
@@ -886,3 +887,335 @@ class TestSkillsChangedIsPerMode:
         asyncio.run(_run())
 
         assert seen == [("building", False)]
+
+
+# ---------------------------------------------------------------------------
+# Block-sequence mapping items (D10) — parse_frontmatter directly
+#
+# ``credentials:`` items are how ``- key: value`` block-sequence entries
+# became mappings. These tests exercise the general parser behaviour that
+# change relies on, independent of the credentials vocabulary itself.
+# ---------------------------------------------------------------------------
+
+
+class TestBlockSequenceMappingItems:
+
+    def test_sequence_of_mapping_items_with_continuation_lines(self):
+        text = (
+            "---\n"
+            "name: x\n"
+            "credentials:\n"
+            "  - slot: erp-public-api\n"
+            "    type: agent_api\n"
+            "    description: Read-only\n"
+            "  - slot: billing\n"
+            "    type: api_token\n"
+            "---\n\nBody.\n"
+        )
+        mapping, _ = skill_manifest.parse_frontmatter(text)
+        assert mapping["credentials"] == [
+            {"slot": "erp-public-api", "type": "agent_api", "description": "Read-only"},
+            {"slot": "billing", "type": "api_token"},
+        ]
+
+    def test_scalar_items_with_a_colon_stay_scalars(self):
+        text = (
+            "---\n"
+            "name: x\n"
+            "allowed-tools:\n"
+            "  - http://host/x\n"
+            "  - Bash(git:*)\n"
+            "---\n\nBody.\n"
+        )
+        mapping, _ = skill_manifest.parse_frontmatter(text)
+        assert mapping["allowed-tools"] == ["http://host/x", "Bash(git:*)"]
+
+    def test_mixed_scalar_and_mapping_items_in_one_sequence(self):
+        text = (
+            "---\n"
+            "name: x\n"
+            "mixed:\n"
+            "  - plain-scalar\n"
+            "  - slot: a\n"
+            "    type: api_token\n"
+            "  - another-scalar\n"
+            "---\n\nBody.\n"
+        )
+        mapping, _ = skill_manifest.parse_frontmatter(text)
+        assert mapping["mixed"] == [
+            "plain-scalar",
+            {"slot": "a", "type": "api_token"},
+            "another-scalar",
+        ]
+
+    def test_existing_nested_mapping_fixture_is_unaffected(self):
+        text = (
+            "---\n"
+            "name: x\n"
+            "nested:\n"
+            "  key1: value1\n"
+            "  key2: value2\n"
+            "---\n\nBody.\n"
+        )
+        mapping, _ = skill_manifest.parse_frontmatter(text)
+        assert mapping["nested"] == {"key1": "value1", "key2": "value2"}
+
+    def test_existing_scalar_list_fixture_is_unaffected(self):
+        text = (
+            "---\n"
+            "name: x\n"
+            "allowed-tools: [Bash, Read]\n"
+            "---\n\nBody.\n"
+        )
+        mapping, _ = skill_manifest.parse_frontmatter(text)
+        assert mapping["allowed-tools"] == ["Bash", "Read"]
+
+
+# ---------------------------------------------------------------------------
+# parse_credential_declarations — direct calls (C1)
+# ---------------------------------------------------------------------------
+
+
+class TestParseCredentialDeclarationsDirect:
+
+    def test_absent_key_is_valid_and_empty(self):
+        assert skill_manifest.parse_credential_declarations(None) == ([], None)
+
+    def test_empty_string_value_is_valid_and_empty(self):
+        assert skill_manifest.parse_credential_declarations("") == ([], None)
+
+    def test_non_list_value_is_invalid(self):
+        declarations, problem = skill_manifest.parse_credential_declarations("nope")
+        assert declarations == []
+        assert problem == "it must be a list of entries, each with a slot and a type"
+
+    def test_scalar_items_are_invalid(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(["a", "b"])
+        assert declarations == []
+        assert problem == "entry 1 is not a mapping with a slot and a type"
+
+    def test_missing_slot_keeps_the_no_slot_wording(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"type": "api_token"}]
+        )
+        assert declarations == []
+        assert problem == "entry 1 has no slot"
+
+    def test_slot_as_bare_number_reports_slot_must_be_text(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": 8080, "type": "api_token"}]
+        )
+        assert declarations == []
+        assert problem == "entry 1: slot must be text; quote it in SKILL.md"
+
+    def test_type_as_bare_number_reports_type_must_be_text(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "x", "type": 5}]
+        )
+        assert declarations == []
+        assert problem == "the type of the slot 'x' must be text; quote it in SKILL.md"
+
+    def test_description_as_bare_number_reports_description_must_be_text(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "x", "type": "api_token", "description": 12}]
+        )
+        assert declarations == []
+        assert problem == (
+            "the description of the slot 'x' must be text; quote it in SKILL.md"
+        )
+
+    def test_description_null_is_valid(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "x", "type": "api_token", "description": None}]
+        )
+        assert problem is None
+        assert declarations == [{"slot": "x", "type": "api_token", "description": None}]
+
+    def test_missing_description_is_valid_and_none(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "x", "type": "api_token"}]
+        )
+        assert problem is None
+        assert declarations == [{"slot": "x", "type": "api_token", "description": None}]
+
+    def test_bad_slot_shape_with_whitespace_is_rejected(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "has space", "type": "api_token"}]
+        )
+        assert declarations == []
+        assert "not a valid service URI" in problem
+
+    def test_slot_too_long_is_rejected(self):
+        long_slot = "a" * (skill_manifest.MAX_SLOT_LENGTH + 1)
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": long_slot, "type": "api_token"}]
+        )
+        assert declarations == []
+        assert "longer than" in problem
+
+    def test_duplicate_slot_is_rejected(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [
+                {"slot": "dup", "type": "api_token"},
+                {"slot": "dup", "type": "odoo"},
+            ]
+        )
+        assert declarations == []
+        assert problem == "the slot 'dup' is declared twice"
+
+    def test_more_than_twenty_items_is_rejected(self):
+        items = [
+            {"slot": f"slot-{i}", "type": "api_token"}
+            for i in range(skill_manifest.MAX_SKILL_CREDENTIALS + 1)
+        ]
+        declarations, problem = skill_manifest.parse_credential_declarations(items)
+        assert declarations == []
+        assert problem == (
+            f"it declares more than {skill_manifest.MAX_SKILL_CREDENTIALS} credentials"
+        )
+
+    def test_unknown_type_is_rejected(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "x", "type": "bogus_type"}]
+        )
+        assert declarations == []
+        assert "unknown type" in problem
+
+    def test_mcp_provider_type_is_rejected(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "x", "type": "mcp_provider"}]
+        )
+        assert declarations == []
+        assert "mcp_provider" in problem
+
+    def test_missing_type_is_rejected(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "x"}]
+        )
+        assert declarations == []
+        assert problem == "the slot 'x' has no type"
+
+    def test_description_over_the_length_cap_is_rejected(self):
+        long_description = "y" * (skill_manifest.MAX_DESCRIPTION_LENGTH + 1)
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [{"slot": "x", "type": "api_token", "description": long_description}]
+        )
+        assert declarations == []
+        assert "longer than" in problem
+
+    def test_valid_multiple_declarations_ignore_unknown_item_keys(self):
+        declarations, problem = skill_manifest.parse_credential_declarations(
+            [
+                {"slot": "erp", "type": "agent_api", "description": "ERP link", "required": False},
+                {"slot": "billing", "type": "api_token"},
+            ]
+        )
+        assert problem is None
+        assert declarations == [
+            {"slot": "erp", "type": "agent_api", "description": "ERP link"},
+            {"slot": "billing", "type": "api_token", "description": None},
+        ]
+
+    def test_skill_credential_types_mirrors_credential_type_minus_mcp_provider(self):
+        assert skill_manifest.SKILL_CREDENTIAL_TYPES == {
+            t.value for t in CredentialType
+        } - {"mcp_provider"}
+
+
+# ---------------------------------------------------------------------------
+# credentials: end to end through parse_skill_dir (real SKILL.md text, so
+# unquoted scalars go through the same coercion a publisher's file would)
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialDeclarationsViaSkillDir:
+
+    def _skill(self, tmp_path: Path, name: str, credentials_block: str) -> Path:
+        frontmatter = f"{_valid(name)}\ncredentials:\n{credentials_block}"
+        return _write_skill(tmp_path, name, frontmatter=frontmatter)
+
+    def test_valid_credentials_block_is_normalised_and_in_to_dict(self, tmp_path: Path):
+        skill_dir = self._skill(
+            tmp_path, "with-creds",
+            "  - slot: erp-public-api\n"
+            "    type: agent_api\n"
+            "    description: Read-only connection\n"
+            "  - slot: billing-api\n"
+            "    type: api_token\n",
+        )
+        entry = skill_manifest.parse_skill_dir(skill_dir)
+
+        assert entry.error is None
+        assert entry.credentials == [
+            {"slot": "erp-public-api", "type": "agent_api", "description": "Read-only connection"},
+            {"slot": "billing-api", "type": "api_token", "description": None},
+        ]
+        assert entry.to_dict()["credentials"] == entry.credentials
+
+    def test_empty_credentials_block_is_empty_list(self, tmp_path: Path):
+        skill_dir = _write_skill(
+            tmp_path, "no-creds", frontmatter=f"{_valid('no-creds')}\ncredentials:"
+        )
+        entry = skill_manifest.parse_skill_dir(skill_dir)
+        assert entry.error is None
+        assert entry.credentials == []
+
+    def test_message_prefix_is_stable_across_every_problem(self, tmp_path: Path):
+        skill_dir = self._skill(tmp_path, "bad-generic", "  - type: api_token\n")
+        entry = skill_manifest.parse_skill_dir(skill_dir)
+        assert entry.error.code == "invalid_credentials"
+        assert entry.error.message.startswith(
+            "The credentials block in SKILL.md is invalid:"
+        )
+
+    def test_missing_slot_keeps_the_no_slot_wording(self, tmp_path: Path):
+        skill_dir = self._skill(tmp_path, "missing-slot", "  - type: api_token\n")
+        entry = skill_manifest.parse_skill_dir(skill_dir)
+        assert entry.error.code == "invalid_credentials"
+        assert entry.error.message == (
+            "The credentials block in SKILL.md is invalid: entry 1 has no slot."
+        )
+
+    def test_slot_as_bare_number_reports_slot_must_be_text(self, tmp_path: Path):
+        skill_dir = self._skill(
+            tmp_path, "bad-slot-type", "  - slot: 8080\n    type: api_token\n"
+        )
+        entry = skill_manifest.parse_skill_dir(skill_dir)
+        assert entry.error.code == "invalid_credentials"
+        assert entry.error.message == (
+            "The credentials block in SKILL.md is invalid: "
+            "entry 1: slot must be text; quote it in SKILL.md."
+        )
+
+    def test_type_as_bare_number_reports_type_must_be_text(self, tmp_path: Path):
+        skill_dir = self._skill(
+            tmp_path, "bad-type-type", "  - slot: x\n    type: 5\n"
+        )
+        entry = skill_manifest.parse_skill_dir(skill_dir)
+        assert entry.error.code == "invalid_credentials"
+        assert "type of the slot 'x' must be text; quote it in SKILL.md" in (
+            entry.error.message
+        )
+
+    def test_description_as_bare_number_reports_description_must_be_text(
+        self, tmp_path: Path
+    ):
+        skill_dir = self._skill(
+            tmp_path, "bad-desc-type",
+            "  - slot: x\n    type: api_token\n    description: 12\n",
+        )
+        entry = skill_manifest.parse_skill_dir(skill_dir)
+        assert entry.error.code == "invalid_credentials"
+        assert (
+            "description of the slot 'x' must be text; quote it in SKILL.md"
+            in entry.error.message
+        )
+
+    def test_description_null_is_valid(self, tmp_path: Path):
+        skill_dir = self._skill(
+            tmp_path, "null-desc",
+            "  - slot: x\n    type: api_token\n    description: null\n",
+        )
+        entry = skill_manifest.parse_skill_dir(skill_dir)
+        assert entry.error is None
+        assert entry.credentials == [{"slot": "x", "type": "api_token", "description": None}]

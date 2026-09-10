@@ -23,6 +23,7 @@ the plugin links plus the environment's cached skill index.
 """
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from sqlmodel import SQLModel
 
@@ -34,6 +35,20 @@ from app.models.plugins.llm_plugin import AgentPluginLinkWithUpdateInfo
 #: rendered inside a plugin, and a second shape would be a second place to keep
 #: the status vocabulary correct.
 AddonSkillPublic = SkillEntryPublic
+
+
+class AddonCredentialIssuePublic(SQLModel):
+    """One credential slot of a catalog skill that is not usable yet.
+
+    ``not_linked``: no credential carrying the slot is linked to the agent.
+    ``not_configured``: the linked credential is a placeholder still to fill.
+    ``access_revoked``: the linked credential belongs to someone else, who no
+    longer shares it with the agent owner.
+    """
+
+    slot: str
+    type: str
+    reason: Literal["not_linked", "not_configured", "access_revoked"]
 
 
 class AddonPublic(SQLModel):
@@ -101,8 +116,13 @@ class AddonPublic(SQLModel):
     status: str = "ok"
     #: Why the status is not ``ok``: the offending skill's issue code, or
     #: ``source_unavailable`` (the catalog package or revision is gone) or
-    #: ``orphan``.
+    #: ``orphan``, or ``credential_missing`` (a warning: a catalog skill's
+    #: credential slot is unlinked, unfilled or no longer shared — see
+    #: ``credential_issues``).
     status_code: str | None = None
+    #: Catalog skill rows only: the credential slots of the installed revision
+    #: that are not usable yet. Empty when every slot is satisfied.
+    credential_issues: list[AddonCredentialIssuePublic] = []
     #: A plugin directory the engine can still load whose link has been
     #: deleted. Read-only — the next environment sync prunes it.
     orphan: bool = False

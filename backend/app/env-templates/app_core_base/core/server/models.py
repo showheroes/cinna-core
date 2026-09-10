@@ -301,6 +301,17 @@ class SkillIssuePublic(BaseModel):
     paths: list[str] = []
 
 
+class SkillCredentialDeclaration(BaseModel):
+    """One credential slot a skill declares in its ``SKILL.md`` frontmatter.
+
+    Non-secret by construction: a slot is a ``Credential.service_uri`` value
+    and a credential type, never a value.
+    """
+    slot: str
+    type: str
+    description: str | None = None
+
+
 class SkillEntry(BaseModel):
     """One row of the agent's skill index, as env-core reports it.
 
@@ -322,6 +333,7 @@ class SkillEntry(BaseModel):
     error: SkillIssuePublic | None = None
     warning: SkillIssuePublic | None = None
     secret_paths: list[str] = []
+    credentials: list[SkillCredentialDeclaration] = []
 
 
 class SkillsIndexResponse(BaseModel):

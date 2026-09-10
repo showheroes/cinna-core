@@ -1,20 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
-import { AlertTriangle, Box, Loader2, Trash2 } from "lucide-react"
+import { AlertTriangle, Trash2 } from "lucide-react"
 import { useState } from "react"
 
 import {
-  type CredentialBundleUsage,
   type CredentialDeletionImpact,
   type CredentialPublic,
   CredentialsService,
 } from "@/client"
 import { ApiError } from "@/client/core/ApiError"
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert"
+import { AgentBadge } from "@/components/Common/AgentBadge"
+import { ListRowGroup } from "@/components/Common/ListRow"
+import { QueryErrorAlert } from "@/components/Common/QueryErrorAlert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,9 +25,14 @@ import {
 } from "@/components/ui/dialog"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { LoadingButton } from "@/components/ui/loading-button"
+import { Skeleton } from "@/components/ui/skeleton"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
-import { AgentBadge } from "@/components/Common/AgentBadge"
+import {
+  bundleImpactSentence,
+  skillImpactSentence,
+} from "@/utils/skillCredentials"
+import { BundleUsageRow, SkillUsageRow } from "./CredentialUsageRows"
 
 interface DeleteCredentialProps {
   credential: CredentialPublic
@@ -38,55 +40,6 @@ interface DeleteCredentialProps {
   isOpen?: boolean
   setIsOpen?: (open: boolean) => void
   children?: React.ReactNode
-}
-
-/** Human-readable label for a usage's provisioning mode. */
-function providedByLabel(providedBy: string): string {
-  switch (providedBy) {
-    case "publisher":
-      return "Shared with installers"
-    case "template":
-      return "Template"
-    case "user":
-      return "User-provided"
-    default:
-      return providedBy
-  }
-}
-
-/** A single bundle row: icon + name + bundle_id + mode badge + deep-link. */
-function BundleUsageRow({ usage }: { usage: CredentialBundleUsage }) {
-  return (
-    <li className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2">
-      <div className="flex items-center gap-2 min-w-0">
-        <Box className="h-4 w-4 text-muted-foreground shrink-0" />
-        <div className="min-w-0">
-          <div className="text-sm font-medium truncate">
-            {usage.display_name}
-          </div>
-          <div className="text-xs text-muted-foreground truncate font-mono">
-            {usage.bundle_id}
-          </div>
-        </div>
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="text-xs text-muted-foreground rounded-md border bg-background px-2 py-1">
-          {providedByLabel(usage.provided_by)}
-        </span>
-        {usage.publisher_install_id && (
-          <Button asChild variant="outline" size="sm">
-            <Link
-              to="/agent/$agentId"
-              params={{ agentId: usage.publisher_install_id }}
-              hash="bundle"
-            >
-              Open
-            </Link>
-          </Button>
-        )}
-      </div>
-    </li>
-  )
 }
 
 /** Extract a CredentialDeletionImpact from a 409 ApiError body, if present. */
@@ -113,10 +66,17 @@ const DeleteCredential = ({
 
   const isOpen = controlledIsOpen ?? uncontrolledIsOpen
   const setIsOpen = controlledSetIsOpen ?? setUncontrolledIsOpen
+  const impactQueryKey = ["credential-deletion-impact", credential.id]
 
   // Fetch the deletion blast-radius once the dialog opens.
-  const { data: impact, isLoading: impactLoading } = useQuery({
-    queryKey: ["credential-deletion-impact", credential.id],
+  const {
+    data: impact,
+    isLoading: impactLoading,
+    isError: isImpactError,
+    error: impactError,
+    refetch: refetchImpact,
+  } = useQuery({
+    queryKey: impactQueryKey,
     queryFn: () =>
       CredentialsService.getCredentialDeletionImpact({ id: credential.id }),
     enabled: isOpen,
@@ -131,14 +91,15 @@ const DeleteCredential = ({
       onSuccess()
     },
     onError: (error) => {
-      // A non-forced delete can race a bundle install and come back 409.
-      // Surface the impact inline rather than a generic error toast.
-      if (impactFromError(error)) {
-        queryClient.invalidateQueries({
-          queryKey: ["credential-deletion-impact", credential.id],
-        })
+      // A non-forced delete can race a bundle or skill install and come back
+      // 409. The 409 body *is* the impact: cache it, so "Review the impact
+      // below" always has something below it and the forced delete is offered
+      // even when the impact read itself had failed.
+      const conflict = impactFromError(error)
+      if (conflict) {
+        queryClient.setQueryData(impactQueryKey, conflict)
         showErrorToast(
-          "This credential is now in use by a published bundle. Review the impact below.",
+          "This credential is now in use by a published bundle or skill. Review the impact below.",
         )
         return
       }
@@ -156,9 +117,34 @@ const DeleteCredential = ({
   const pbpUsages = impact?.bundle_pbp_usages ?? []
   const bundleUsages = impact?.bundle_usages ?? []
   const activeInstallCount = impact?.active_install_count ?? 0
+  const skillUsages = impact?.skill_pbp_usages ?? []
+  const activeSkillInstallCount = impact?.active_skill_install_count ?? 0
+
+  // Tier 2 is reached through bundles, skills, or both, so the alert says only
+  // what is true: each source's sentence appears only when that source has
+  // active installs — a credential at tier 2 because of skills must not read
+  // "bundles with 0 active installs".
+  const bundleTierSentence =
+    pbpUsages.length > 0 && activeInstallCount > 0
+      ? bundleImpactSentence(pbpUsages.length, activeInstallCount, "delete")
+      : null
+  const skillTierSentence =
+    skillUsages.length > 0 && activeSkillInstallCount > 0
+      ? skillImpactSentence(
+          skillUsages.length,
+          activeSkillInstallCount,
+          "delete",
+        )
+      : null
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(next) => {
+        // Escape and outside-click must not close a dialog mid-request.
+        if (!mutation.isPending) setIsOpen(next)
+      }}
+    >
       {children ? (
         <DialogTrigger asChild>{children}</DialogTrigger>
       ) : (
@@ -171,9 +157,11 @@ const DeleteCredential = ({
           Delete Credential
         </DropdownMenuItem>
       )}
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden sm:max-w-md [&>*]:min-w-0">
         <DialogHeader>
-          <DialogTitle>Delete Credential</DialogTitle>
+          <DialogTitle className="break-words">
+            Delete {credential.name}?
+          </DialogTitle>
           <DialogDescription>
             This credential will be permanently deleted. You will not be able to
             undo this action.
@@ -181,10 +169,19 @@ const DeleteCredential = ({
         </DialogHeader>
 
         {impactLoading ? (
-          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Checking impact…
+          <div className="space-y-2 py-1">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-[44px] w-full" />
           </div>
+        ) : isImpactError && !impact ? (
+          // The non-forced Delete stays enabled: a tier-2 credential comes back
+          // 409, and the handler above caches its impact then.
+          <QueryErrorAlert
+            error={impactError}
+            fallback="Couldn't check which bundles and skills use it"
+            onRetry={() => refetchImpact()}
+            compact
+          />
         ) : (
           <div className="space-y-3 py-1">
             {/* Tier 0: list affected own agents */}
@@ -209,41 +206,48 @@ const DeleteCredential = ({
                 <AlertTitle>Warning</AlertTitle>
                 <AlertDescription>
                   {shareCount} user
-                  {shareCount !== 1 ? "s" : ""} will lose access
-                  to this credential immediately.
+                  {shareCount !== 1 ? "s" : ""} will lose access to this
+                  credential immediately.
                 </AlertDescription>
               </Alert>
             )}
 
-            {/* Tier 2: publisher-provided in published bundle(s) with installs */}
-            {isTier2 && (
-              <>
-                <Alert variant="destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>This credential is in use</AlertTitle>
-                  <AlertDescription>
-                    It is provided by the publisher in published bundle
-                    {pbpUsages.length !== 1 ? "s" : ""} with{" "}
-                    {activeInstallCount} active install
-                    {activeInstallCount !== 1 ? "s" : ""}. Deleting it
-                    will break those installs — their owners will be told the
-                    publisher-provided credentials are unavailable. Consider
-                    rotating the credential value instead, or remove it from each
-                    bundle first.
-                  </AlertDescription>
-                </Alert>
-              </>
+            {/* Tier 2: publisher-provided in published bundles or skills with installs */}
+            {isTier2 && (bundleTierSentence || skillTierSentence) && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>This credential is in use</AlertTitle>
+                <AlertDescription>
+                  {[bundleTierSentence, skillTierSentence]
+                    .filter(Boolean)
+                    .join(" ")}
+                </AlertDescription>
+              </Alert>
             )}
 
-            {/* All tiers: the credential is part of one or more bundles */}
+            {/* All tiers: the bundles and skills this credential is part of */}
             {bundleUsages.length > 0 && (
               <div className="space-y-1.5">
                 <h4 className="text-sm font-medium">Used in bundles</h4>
-                <ul className="space-y-1.5">
+                <ListRowGroup>
                   {bundleUsages.map((usage) => (
-                    <BundleUsageRow key={usage.bundle_uuid} usage={usage} />
+                    <BundleUsageRow
+                      key={usage.bundle_uuid}
+                      usage={usage}
+                      showProvidedBy
+                    />
                   ))}
-                </ul>
+                </ListRowGroup>
+              </div>
+            )}
+            {skillUsages.length > 0 && (
+              <div className="space-y-1.5">
+                <h4 className="text-sm font-medium">Used in skills</h4>
+                <ListRowGroup>
+                  {skillUsages.map((usage) => (
+                    <SkillUsageRow key={usage.package_uuid} usage={usage} />
+                  ))}
+                </ListRowGroup>
               </div>
             )}
           </div>
@@ -271,7 +275,7 @@ const DeleteCredential = ({
               disabled={impactLoading}
               onClick={() => mutation.mutate(false)}
             >
-              Delete
+              Delete credential
             </LoadingButton>
           )}
         </DialogFooter>

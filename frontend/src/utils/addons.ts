@@ -35,6 +35,7 @@ import {
   skillPackageVersionLabel,
   skillPublisherLabel,
 } from "@/utils/skillCatalog"
+import { CREDENTIAL_MISSING_LABEL } from "@/utils/skillCredentials"
 
 /** The query key the Addons tab reads. */
 export function addonsQueryKey(agentId: string): readonly unknown[] {
@@ -54,17 +55,26 @@ export function addonsQueryKey(agentId: string): readonly unknown[] {
  * `catalog` additionally refreshes the skills catalog's own
  * `installed_in_agent_ids` / `install_count` — the counters the install and
  * uninstall paths move in opposite directions.
+ *
+ * `credentials` is for a catalog-skill install that provisioned credential
+ * slots: it shares, links or creates credentials, so the agent's Credentials
+ * tab and the Credentials page (owned and shared-with-me reads) are stale too.
  */
 export function invalidateAddons(
   queryClient: QueryClient,
   agentId: string,
-  options?: { catalog?: boolean },
+  options?: { catalog?: boolean; credentials?: boolean },
 ): void {
   queryClient.invalidateQueries({ queryKey: addonsQueryKey(agentId) })
   queryClient.invalidateQueries({ queryKey: ["agent-plugins", agentId] })
   queryClient.invalidateQueries({ queryKey: ["agent", agentId, "skills"] })
   if (options?.catalog) {
     queryClient.invalidateQueries({ queryKey: ["skills-catalog"] })
+  }
+  if (options?.credentials) {
+    queryClient.invalidateQueries({ queryKey: ["agent-credentials", agentId] })
+    queryClient.invalidateQueries({ queryKey: ["credentials"] })
+    queryClient.invalidateQueries({ queryKey: ["credentials-shared-with-me"] })
   }
 }
 
@@ -102,6 +112,10 @@ const LINK_STATUS_COPY: Record<string, string> = {
     "Installed here, but its files never reached the environment — the model can't load it.",
   unverified:
     "Installed here. Whether its files reached the environment couldn't be checked.",
+  // A catalog skill whose declared credential slot is not usable yet. A
+  // warning, never an error: the skill loads, only the scripts that need the
+  // slot fail (plan D1). The per-slot reasons are in the detail dialog.
+  credential_missing: CREDENTIAL_MISSING_LABEL,
 }
 
 /** The sentence a skill contributed to the row's status, if one did. */

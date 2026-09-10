@@ -3398,6 +3398,33 @@ Skills that hang off a plugin row are counted nowhere: they are not rows,
 which is exactly the double listing this projection exists to remove.`
 } as const;
 
+export const AddonCredentialIssuePublicSchema = {
+    properties: {
+        slot: {
+            type: 'string',
+            title: 'Slot'
+        },
+        type: {
+            type: 'string',
+            title: 'Type'
+        },
+        reason: {
+            type: 'string',
+            enum: ['not_linked', 'not_configured', 'access_revoked'],
+            title: 'Reason'
+        }
+    },
+    type: 'object',
+    required: ['slot', 'type', 'reason'],
+    title: 'AddonCredentialIssuePublic',
+    description: `One credential slot of a catalog skill that is not usable yet.
+
+\`\`not_linked\`\`: no credential carrying the slot is linked to the agent.
+\`\`not_configured\`\`: the linked credential is a placeholder still to fill.
+\`\`access_revoked\`\`: the linked credential belongs to someone else, who no
+longer shares it with the agent owner.`
+} as const;
+
 export const AddonPublicSchema = {
     properties: {
         key: {
@@ -3513,6 +3540,14 @@ export const AddonPublicSchema = {
                 }
             ],
             title: 'Status Code'
+        },
+        credential_issues: {
+            items: {
+                '$ref': '#/components/schemas/AddonCredentialIssuePublic'
+            },
+            type: 'array',
+            title: 'Credential Issues',
+            default: []
         },
         orphan: {
             type: 'boolean',
@@ -13678,6 +13713,19 @@ export const CredentialDeletionImpactSchema = {
             type: 'integer',
             title: 'Active Install Count',
             default: 0
+        },
+        skill_pbp_usages: {
+            items: {
+                '$ref': '#/components/schemas/CredentialSkillUsage'
+            },
+            type: 'array',
+            title: 'Skill Pbp Usages',
+            default: []
+        },
+        active_skill_install_count: {
+            type: 'integer',
+            title: 'Active Skill Install Count',
+            default: 0
         }
     },
     type: 'object',
@@ -13693,9 +13741,10 @@ export const CredentialDeletionImpactSchema = {
 - \`\`1\`\` (direct shares): direct \`\`CredentialShare\`\` rows exist but the
   credential is not PBP in any published bundle. Deletion is allowed with
   a warning (recipients lose access immediately).
-- \`\`2\`\` (PBP in published bundle with ≥1 active foreign install): deleting
-  breaks other users' installs. Blocked by default (HTTP 409); the owner
-  may force the deletion via \`\`force=true\`\`.
+- \`\`2\`\` (PBP in a published bundle, or in a published catalog skill, with
+  ≥1 active foreign install): deleting breaks other users' installs.
+  Blocked by default (HTTP 409); the owner may force the deletion via
+  \`\`force=true\`\`.
 
 \`\`bundle_usages\`\` is every bundle whose publisher install links this
 credential, in any provisioning mode (\`\`publisher\`\`/\`\`template\`\`/\`\`user\`\`).
@@ -13705,7 +13754,13 @@ credential is part of a bundle, regardless of tier.
 \`\`bundle_pbp_usages\`\` is the PBP subset (\`\`provided_by == "publisher"\`\`)
 that drives the Tier-2 block and lets the UI deep-link to each affected
 bundle. \`\`active_install_count\`\` is the number of foreign installs
-(non-publisher) that link the credential.`
+(non-publisher) that link the credential.
+
+\`\`skill_pbp_usages\`\` is every catalog skill package of the requester whose
+revisions freeze this credential as \`\`provided_by="publisher"\`\`.
+\`\`active_skill_install_count\`\` is the number of distinct foreign agents
+that link the credential and carry a catalog install of one of those
+revisions. Both together drive the skill half of Tier 2.`
 } as const;
 
 export const CredentialPublicSchema = {
@@ -13980,6 +14035,39 @@ export const CredentialSharesPublicSchema = {
     required: ['data', 'count'],
     title: 'CredentialSharesPublic',
     description: 'Response model for list of credential shares.'
+} as const;
+
+export const CredentialSkillUsageSchema = {
+    properties: {
+        package_uuid: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Package Uuid'
+        },
+        package_id: {
+            type: 'string',
+            title: 'Package Id'
+        },
+        display_name: {
+            type: 'string',
+            title: 'Display Name'
+        },
+        revision_numbers: {
+            items: {
+                type: 'integer'
+            },
+            type: 'array',
+            title: 'Revision Numbers',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['package_uuid', 'package_id', 'display_name'],
+    title: 'CredentialSkillUsage',
+    description: `One catalog skill package whose revisions provide this credential.
+
+\`\`revision_numbers\`\` lists the package revisions that freeze the
+credential as \`\`provided_by="publisher"\`\`.`
 } as const;
 
 export const CredentialSpecDriftSchema = {
@@ -22839,6 +22927,14 @@ export const PluginSyncResponseSchema = {
             type: 'integer',
             title: 'Unsupported Syncs',
             default: 0
+        },
+        credential_provisioning: {
+            items: {
+                '$ref': '#/components/schemas/SkillCredentialProvisionPublic'
+            },
+            type: 'array',
+            title: 'Credential Provisioning',
+            default: []
         }
     },
     type: 'object',
@@ -26788,6 +26884,164 @@ export const SkillContentPublicSchema = {
     description: "The text of one skill's ``SKILL.md``, as the model sees it."
 } as const;
 
+export const SkillCredentialDeclarationPublicSchema = {
+    properties: {
+        slot: {
+            type: 'string',
+            title: 'Slot'
+        },
+        type: {
+            type: 'string',
+            title: 'Type'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        }
+    },
+    type: 'object',
+    required: ['slot', 'type'],
+    title: 'SkillCredentialDeclarationPublic',
+    description: `One credential slot a skill declares in its \`\`SKILL.md\`\` frontmatter.
+
+\`\`slot\`\` is the \`\`Credential.service_uri\`\` a script looks the credential up
+by; \`\`type\`\` is a credential type. Carries no credential value.`
+} as const;
+
+export const SkillCredentialProvisionPublicSchema = {
+    properties: {
+        slot: {
+            type: 'string',
+            title: 'Slot'
+        },
+        type: {
+            type: 'string',
+            title: 'Type'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        provided_by: {
+            type: 'string',
+            enum: ['user', 'publisher', 'template'],
+            title: 'Provided By',
+            default: 'user'
+        },
+        outcome: {
+            type: 'string',
+            enum: ['already_linked', 'linked_publisher', 'linked_existing', 'template_materialised', 'placeholder_created', 'publisher_unavailable'],
+            title: 'Outcome'
+        },
+        credential_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Credential Id'
+        },
+        credential_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Credential Name'
+        }
+    },
+    type: 'object',
+    required: ['slot', 'type', 'outcome'],
+    title: 'SkillCredentialProvisionPublic',
+    description: `How one credential slot is provisioned on the installing agent.
+
+\`\`credential_name\`\` is filled only for a credential the installer owns or
+already holds a share on — never for a publisher credential before its
+share exists.`
+} as const;
+
+export const SkillCredentialRequirementPublicSchema = {
+    properties: {
+        slot: {
+            type: 'string',
+            title: 'Slot'
+        },
+        type: {
+            type: 'string',
+            title: 'Type'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        provided_by: {
+            type: 'string',
+            enum: ['user', 'publisher', 'template'],
+            title: 'Provided By',
+            default: 'user'
+        },
+        publisher_credential_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Publisher Credential Id'
+        },
+        producer_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Producer Agent Id'
+        }
+    },
+    type: 'object',
+    required: ['slot', 'type'],
+    title: 'SkillCredentialRequirementPublic',
+    description: `One credential slot a published revision requires.
+
+Projected from the revision's frozen \`\`required_credential_specs\`\`. Ids
+only — never a template payload, never credential data.`
+} as const;
+
 export const SkillEntryPublicSchema = {
     properties: {
         name: {
@@ -26879,6 +27133,14 @@ export const SkillEntryPublicSchema = {
             title: 'Secret Paths',
             default: []
         },
+        credentials: {
+            items: {
+                '$ref': '#/components/schemas/SkillCredentialDeclarationPublic'
+            },
+            type: 'array',
+            title: 'Credentials',
+            default: []
+        },
         can_publish: {
             type: 'boolean',
             title: 'Can Publish',
@@ -26889,6 +27151,32 @@ export const SkillEntryPublicSchema = {
     required: ['name'],
     title: 'SkillEntryPublic',
     description: "One skill in the agent's index."
+} as const;
+
+export const SkillInstallPreviewSchema = {
+    properties: {
+        package_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Package Id'
+        },
+        revision_number: {
+            type: 'integer',
+            title: 'Revision Number'
+        },
+        credentials: {
+            items: {
+                '$ref': '#/components/schemas/SkillCredentialProvisionPublic'
+            },
+            type: 'array',
+            title: 'Credentials',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['package_id', 'revision_number'],
+    title: 'SkillInstallPreview',
+    description: 'Read-only preview of the credential provisioning an install would run.'
 } as const;
 
 export const SkillInstallRequestSchema = {
@@ -26960,7 +27248,8 @@ attempted rather than after it is refused.
 Error codes: \`\`not_a_directory\`\`, \`\`missing_skill_md\`\`, \`\`unreadable\`\`,
 \`\`invalid_frontmatter\`\`, \`\`missing_name\`\`, \`\`invalid_name\`\`,
 \`\`name_mismatch\`\`, \`\`reserved_name\`\`, \`\`missing_description\`\`,
-\`\`description_too_long\`\`, \`\`budget\`\`, \`\`projection_error\`\`.
+\`\`description_too_long\`\`, \`\`invalid_credentials\`\`, \`\`budget\`\`,
+\`\`projection_error\`\`.
 Warning codes: \`\`secrets\`\`, \`\`shadowed\`\`, \`\`oversized\`\`.`
 } as const;
 
@@ -27479,6 +27768,14 @@ export const SkillPackageRevisionPublicSchema = {
             type: 'string',
             format: 'date-time',
             title: 'Published At'
+        },
+        required_credentials: {
+            items: {
+                '$ref': '#/components/schemas/SkillCredentialRequirementPublic'
+            },
+            type: 'array',
+            title: 'Required Credentials',
+            default: []
         }
     },
     type: 'object',
@@ -27567,6 +27864,90 @@ export const SkillPackagesPublicSchema = {
     description: 'List response for the skills catalog.'
 } as const;
 
+export const SkillPublishCredentialPreviewSchema = {
+    properties: {
+        slot: {
+            type: 'string',
+            title: 'Slot'
+        },
+        type: {
+            type: 'string',
+            title: 'Type'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        provided_by: {
+            type: 'string',
+            enum: ['user', 'publisher', 'template'],
+            title: 'Provided By',
+            default: 'user'
+        },
+        credential_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Credential Id'
+        },
+        credential_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Credential Name'
+        },
+        producer_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Producer Agent Id'
+        },
+        reason: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['no_linked_credential', 'not_shareable', 'not_owned', 'template_would_leak_secret']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reason'
+        }
+    },
+    type: 'object',
+    required: ['slot', 'type'],
+    title: 'SkillPublishCredentialPreview',
+    description: `How publishing now would resolve one declared credential slot.
+
+\`\`credential_id\`\` / \`\`credential_name\`\` name the **publisher's own**
+matched credential, so the viewer is always its owner.`
+} as const;
+
 export const SkillPublishPreviewSchema = {
     properties: {
         version: {
@@ -27613,6 +27994,14 @@ export const SkillPublishPreviewSchema = {
             type: 'integer',
             title: 'Next Revision Number',
             default: 1
+        },
+        credentials: {
+            items: {
+                '$ref': '#/components/schemas/SkillPublishCredentialPreview'
+            },
+            type: 'array',
+            title: 'Credentials',
+            default: []
         }
     },
     type: 'object',

@@ -78,6 +78,16 @@ class SkillPackageRevision(SQLModel, table=True):
 
     size_bytes: int = Field(default=0, nullable=False)
 
+    # The credential slots the skill declares, resolved at publish into the same
+    # spec schema as ``AgentBundleRevision.required_credential_specs`` (written
+    # by ``credential_spec.build_spec``, read by ``parse_credential_spec``):
+    # names, types, provisioning mode; never secret values (template private
+    # fields are stripped at publish). Written once, at insert.
+    required_credential_specs: list = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False, server_default=text("'[]'::json")),
+    )
+
     release_notes: str | None = Field(
         default=None, sa_column=Column(Text, nullable=True)
     )

@@ -6,6 +6,7 @@ import {
   Files,
   GraduationCap,
   History,
+  KeyRound,
   Loader2,
   Pencil,
 } from "lucide-react"
@@ -58,9 +59,11 @@ import {
   skillPublisherLabel,
   skillRevisionLabel,
 } from "@/utils/skillCatalog"
+import { requirementsSummary } from "@/utils/skillCredentials"
 import { AddSkillToAgentDialog } from "./AddSkillToAgentDialog"
 import { AllSkillRevisionsSheet } from "./AllSkillRevisionsSheet"
 import { EditSkillPackageDialog } from "./EditSkillPackageDialog"
+import { SkillRevisionCredentialsSheet } from "./SkillRevisionCredentialsSheet"
 import { SkillRevisionFilesSheet } from "./SkillRevisionFilesSheet"
 
 interface SkillPackageCardProps {
@@ -106,6 +109,7 @@ export function SkillPackageCard({
   const [addOpen, setAddOpen] = useState(false)
   const [revisionsOpen, setRevisionsOpen] = useState(false)
   const [filesOpen, setFilesOpen] = useState(false)
+  const [credentialsOpen, setCredentialsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [delistOpen, setDelistOpen] = useState(false)
 
@@ -196,9 +200,13 @@ export function SkillPackageCard({
   // one per person however many agents they use it in; `installed_in_agent_ids`
   // is the viewer's own agents. A publisher who has just installed their own
   // skill in three of their agents is 0 and 3 — true, and unreadable as a
-  // single number, which is why there is not one.
+  // single number, which is why there is not one. Each value carries its unit
+  // ("0 people", "3 agents"), which is what reconciles the two (§2 Fact labels).
   const catalogInstalls = pkg.install_count ?? 0
   const myInstalls = pkg.installed_in_agent_ids?.length ?? 0
+  // What installing the *shown* revision needs — the pinned one, not the latest.
+  const shownRequirements = shownRevision?.required_credentials ?? []
+  const credentialsSummary = requirementsSummary(shownRequirements)
   const fileCount = files?.count ?? 0
   const fileCountLabel = `${fileCount} file${fileCount === 1 ? "" : "s"}`
   // The whole archive, built server-side by its own endpoint — it does not walk
@@ -363,24 +371,44 @@ export function SkillPackageCard({
               )}
             </div>
           )}
+          {/* What installing the shown revision needs. A door to the slot list
+              like Version and Content — it costs no height — and, when the
+              revision declares nothing, the absence is written: a fact list is
+              where that answer belongs (§2 Absent facts). */}
+          {shownRevision &&
+            (credentialsSummary ? (
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-xs text-muted-foreground shrink-0">
+                  Credentials
+                </span>
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-label={`${credentialsSummary}. Show every credential`}
+                  onClick={() => setCredentialsOpen(true)}
+                  className="flex min-w-0 items-center gap-1.5 rounded-sm text-sm font-medium underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                  <span className="truncate">{credentialsSummary}</span>
+                  <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                </button>
+              </div>
+            ) : (
+              <Fact label="Credentials" value="None declared" />
+            ))}
           {/* People, not agents, and never the publisher — so a publisher
               dogfooding their skill does not read this as adoption. */}
-          <Fact label="Catalog installs" value={String(catalogInstalls)} />
+          <Fact
+            label="Catalog installs"
+            value={`${catalogInstalls} ${catalogInstalls === 1 ? "person" : "people"}`}
+          />
           {myInstalls > 0 && (
-            <Fact label="Used in my agents" value={String(myInstalls)} />
+            <Fact
+              label="My agents"
+              value={`${myInstalls} ${myInstalls === 1 ? "agent" : "agents"}`}
+            />
           )}
           <Fact label="Visibility" value={visibilityLabel} />
         </div>
-
-        {/* Only for the publisher, and only when the two numbers disagree:
-            "Installs 0" beside "In your agents 3" is a contradiction until
-            somebody says which agents each one counts. */}
-        {pkg.can_manage && myInstalls > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Catalog installs counts other people, one each — your own agents are
-            never counted, so dogfooding cannot inflate it.
-          </p>
-        )}
 
         <CopyableValue label="Package id" value={pkg.package_id} />
 
@@ -410,6 +438,13 @@ export function SkillPackageCard({
         revisionLabel={shownRevision ? shownVersionLabel : null}
         open={filesOpen}
         onOpenChange={setFilesOpen}
+      />
+
+      <SkillRevisionCredentialsSheet
+        requirements={shownRequirements}
+        revisionLabel={shownVersionLabel}
+        open={credentialsOpen}
+        onOpenChange={setCredentialsOpen}
       />
 
       <AllSkillRevisionsSheet

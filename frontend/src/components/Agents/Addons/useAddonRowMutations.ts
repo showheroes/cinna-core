@@ -48,6 +48,15 @@ export function useAddonRowMutations(
       catalog: addon.source === "catalog",
     })
 
+  // Upgrading a catalog skill provisions the slots its new revision adds, and
+  // uninstalling one releases its placeholders, so both also leave the
+  // credential reads stale.
+  const settleInstallSet = () =>
+    invalidateAddons(queryClient, agentId, {
+      catalog: addon.source === "catalog",
+      credentials: addon.source === "catalog",
+    })
+
   const settleSync = (
     result: PluginSyncResponse,
     title: string,
@@ -103,7 +112,7 @@ export function useAddonRowMutations(
       ),
     onError: (err) =>
       showErrorToast(getErrorMessage(err, `Failed to update the ${noun}`)),
-    onSettled: settle,
+    onSettled: settleInstallSet,
   })
 
   const uninstall = useMutation({
@@ -115,7 +124,7 @@ export function useAddonRowMutations(
     },
     onError: (err) =>
       showErrorToast(getErrorMessage(err, `Failed to uninstall the ${noun}`)),
-    onSettled: settle,
+    onSettled: settleInstallSet,
   })
 
   return {

@@ -107,7 +107,9 @@ export function ApiTokenFields({ control, watch }: ApiTokenFieldsProps) {
                   />
                 </FormControl>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Use {"{TOKEN}"} as placeholder. Example: "Authorization: Bearer {"{TOKEN}"}" or "X-API-Key: {"{TOKEN}"}"
+                  Use {"{TOKEN}"} as placeholder. Example: "Authorization: Bearer {"{TOKEN}"}" or "X-API-Key: {"{TOKEN}"}".
+                  Never type the token itself here. This field is not secret:
+                  template sharing copies it as written.
                 </p>
                 <FormMessage />
               </FormItem>

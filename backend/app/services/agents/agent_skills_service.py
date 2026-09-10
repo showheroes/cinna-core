@@ -36,6 +36,10 @@ from uuid import UUID
 from app.core.config import settings
 from app.models.environments.environment import AgentEnvironment
 from app.services.agents.skill_manifest import (
+    MAX_DESCRIPTION_LENGTH,
+    MAX_SKILL_CREDENTIALS,
+    MAX_SLOT_LENGTH,
+    SKILL_CREDENTIAL_TYPES,
     SKILL_NAME_RE,
     SkillEntry,
     coerce_version,
@@ -294,10 +298,51 @@ class AgentSkillsService:
                     secret_paths=[
                         p for p in (row.get("secret_paths") or []) if isinstance(p, str)
                     ],
+                    credentials=cls._normalise_credential_declarations(
+                        row.get("credentials")
+                    ),
                     version=coerce_version(row.get("version")),
                 )
             )
         return entries
+
+    @staticmethod
+    def _normalise_credential_declarations(raw: Any) -> list[dict[str, Any]]:
+        """Coerce a reported ``credentials`` list into ``{slot, type, description}``.
+
+        Tolerant rather than validating: the parser inside the container already
+        refused an invalid block (the skill carries ``invalid_credentials``), so
+        this only guards the cache against a payload it cannot type. A row from a
+        container built before skills declared credentials has no key → ``[]``.
+
+        The payload comes from a container that agent code controls, so it is
+        bounded here with the parser's own limits: at most
+        ``MAX_SKILL_CREDENTIALS`` items; an item with an over-long slot (a
+        truncated slot would be a different slot) or an unknown type is
+        dropped; a description is truncated.
+        """
+        if not isinstance(raw, list):
+            return []
+        declarations: list[dict[str, Any]] = []
+        for item in raw[:MAX_SKILL_CREDENTIALS]:
+            if not isinstance(item, dict):
+                continue
+            slot, credential_type = item.get("slot"), item.get("type")
+            if not isinstance(slot, str) or not isinstance(credential_type, str):
+                continue
+            if len(slot) > MAX_SLOT_LENGTH or credential_type not in SKILL_CREDENTIAL_TYPES:
+                continue
+            description = item.get("description")
+            declarations.append(
+                {
+                    "slot": slot,
+                    "type": credential_type,
+                    "description": description[:MAX_DESCRIPTION_LENGTH]
+                    if isinstance(description, str)
+                    else None,
+                }
+            )
+        return declarations
 
     @staticmethod
     def issue_to_public(issue) -> "SkillIssuePublic | None":
@@ -326,7 +371,10 @@ class AgentSkillsService:
         and a second copy of this mapping is how one of them would end up
         offering a verb the other refuses.
         """
-        from app.models.agents.agent_skills import SkillEntryPublic
+        from app.models.agents.agent_skills import (
+            SkillCredentialDeclarationPublic,
+            SkillEntryPublic,
+        )
 
         return SkillEntryPublic(
             name=entry.name,
@@ -342,6 +390,14 @@ class AgentSkillsService:
             error=cls.issue_to_public(entry.error),
             warning=cls.issue_to_public(entry.warning),
             secret_paths=list(entry.secret_paths),
+            credentials=[
+                SkillCredentialDeclarationPublic(
+                    slot=declaration["slot"],
+                    type=declaration["type"],
+                    description=declaration.get("description"),
+                )
+                for declaration in entry.credentials
+            ],
             can_publish=(
                 can_publish and entry.source == "local" and entry.is_publishable
             ),
@@ -655,6 +711,12 @@ class AgentSkillsService:
                     # such an environment reports rows without the key and must
                     # cache `None` rather than fail the whole index.
                     "version": coerce_version(item.get("version")),
+                    # Absent from every container built before skills could
+                    # declare credentials; normalised to `[]` for the same
+                    # reason as `version` above.
+                    "credentials": cls._normalise_credential_declarations(
+                        item.get("credentials")
+                    ),
                 }
             )
         return entries

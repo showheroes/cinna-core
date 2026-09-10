@@ -27,8 +27,10 @@ from app.models.plugins.llm_plugin import (
     AgentPluginLinkCreate,
     AgentPluginLinkUpdate,
     AgentPluginLinksPublic,
+    PluginSource,
     PluginSyncResponse,
 )
+from app.services.credentials.credentials_service import CredentialsService
 from app.services.plugins.llm_plugin_service import (
     LLMPluginService,
     MarketplaceFormatError,
@@ -380,13 +382,20 @@ async def uninstall_agent_plugin(
     """
     LLMPluginService.verify_agent_access(session, agent_id, current_user)
 
-    deleted = LLMPluginService.uninstall_plugin_from_agent(
+    result = LLMPluginService.uninstall_plugin_link(
         session=session,
         agent_id=agent_id,
         link_id=link_id,
     )
-    if not deleted:
+    if not result.deleted:
         raise HTTPException(status_code=404, detail="Plugin link not found")
+
+    # A catalog skill's released placeholders leave the agent: plugin sync
+    # does not carry credentials, so push them first.
+    if result.credentials_changed:
+        await CredentialsService.sync_credentials_to_agent_environments(
+            session, agent_id
+        )
 
     # Sync to running/suspended environments
     return await LLMPluginService.sync_plugins_to_agent_environments(
@@ -464,6 +473,13 @@ async def upgrade_agent_plugin(
         raise http_error_for(exc)
     if not link:
         raise HTTPException(status_code=404, detail="Plugin link not found")
+
+    # A catalog re-pin may provision the credential slots the new revision
+    # adds. Plugin sync does not carry credentials, so push them first.
+    if link.source == PluginSource.catalog:
+        await CredentialsService.sync_credentials_to_agent_environments(
+            session, agent_id
+        )
 
     # Sync to running/suspended environments
     return await LLMPluginService.sync_plugins_to_agent_environments(

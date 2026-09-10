@@ -657,6 +657,73 @@ agent's page:
 Optional frontmatter keys from the open Agent Skills standard (`allowed-tools`, `argument-hint`,
 `disable-model-invocation`, `user-invocable`, `model`, …) are passed through untouched.
 
+### Skills that need a credential
+
+When a skill's scripts call a service, declare each credential they need as a **slot** in the frontmatter:
+
+```markdown
+---
+name: erp-public-data
+description: Query public ERP data via the erp-public-api agent. Use when the user asks for orders or stock.
+credentials:
+  - slot: erp-public-api
+    type: agent_api
+    description: Read-only connection to the erp-public-api producer agent
+---
+```
+
+Rules — a block that breaks one makes the skill **invalid** (excluded, and refused at publish):
+
+- `credentials` is a list; each item has `slot`, `type` and an optional `description` (at most 1024 characters)
+- `slot` **is the credential's service URI** — the value in the *Service URI* field of the credential the
+  skill uses. Letters, digits and `. _ : / @ + -`, starting with a letter or digit, no spaces, at most 255
+  characters. Each slot appears once
+- `type` is one of `api_token`, `agent_api`, `odoo`, `email_imap`, `email_smtp`, `gmail_oauth`,
+  `gmail_oauth_readonly`, `gdrive_oauth`, `gdrive_oauth_readonly`, `gcalendar_oauth`,
+  `gcalendar_oauth_readonly`, `google_service_account`, `ssh_key`. **`mcp_provider` cannot be declared** — it
+  never reaches `credentials.json`, so no script could use it
+- At most 20 slots per skill
+
+**Tokens never go in the skill folder.** The block names a slot, never a value. The credential itself
+lives on the platform and reaches the container through `credentials/credentials.json`.
+
+Scripts look the credential up by slot. Run them with `uv run python …`; import the helpers through the
+`core` package (it is on `PYTHONPATH`):
+
+```python
+from core.cinna_api import credentials, CredentialMissing
+
+try:
+    # Any credential type: the entry, with its `credential_data`
+    erp_key = credentials.require_slot("erp-api-key")["credential_data"]
+
+    # An agent_api slot: a ready requests.Session (Bearer token + caller identity header)
+    erp = credentials.agent_api_session("erp-public-api")
+except CredentialMissing as exc:
+    print(exc)  # names the slot and where to fix it
+    raise SystemExit(1)
+
+orders = erp.get("/orders", params={"limit": 20}).json()  # relative to the connection's base URL
+```
+
+`credentials.by_slot("<slot>")` returns the entry or `None` without raising. `CredentialMissing` means no
+credential with that slot is linked (`reason="not_linked"`), or it is linked but not filled in yet
+(`reason="not_configured"`).
+
+Put this line in the SKILL.md body of every skill that declares a credential:
+
+> If a script fails with `credential_missing`, stop and relay its message to the user verbatim — it names
+> the slot and where to fix it. Do not guess another credential.
+
+What publishing does with each slot, decided from the credential linked to **this** agent with that service
+URI:
+
+- **Owned by the agent's owner, with sharing on** — installers receive that credential, shared to them.
+- **Owned by the owner, with template sharing on** — installers get a copy of the non-private fields and
+  fill in the rest.
+- **Otherwise** (not linked, not shareable, or owned by someone else) — installers bring their own
+  credential with the same service URI.
+
 ### Referring to skills from the workflow prompt
 
 `docs/WORKFLOW_PROMPT.md` stays the orchestration narrative. Refer to a skill by name — do **not** paste its

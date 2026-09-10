@@ -345,6 +345,19 @@ class CredentialBundleUsages(SQLModel):
     count: int
 
 
+class CredentialSkillUsage(SQLModel):
+    """One catalog skill package whose revisions provide this credential.
+
+    ``revision_numbers`` lists the package revisions that freeze the
+    credential as ``provided_by="publisher"``.
+    """
+
+    package_uuid: uuid.UUID
+    package_id: str
+    display_name: str
+    revision_numbers: list[int] = []
+
+
 class CredentialAffectedAgent(SQLModel):
     """An agent owned by the requester that links the credential."""
 
@@ -364,9 +377,10 @@ class CredentialDeletionImpact(SQLModel):
     - ``1`` (direct shares): direct ``CredentialShare`` rows exist but the
       credential is not PBP in any published bundle. Deletion is allowed with
       a warning (recipients lose access immediately).
-    - ``2`` (PBP in published bundle with ≥1 active foreign install): deleting
-      breaks other users' installs. Blocked by default (HTTP 409); the owner
-      may force the deletion via ``force=true``.
+    - ``2`` (PBP in a published bundle, or in a published catalog skill, with
+      ≥1 active foreign install): deleting breaks other users' installs.
+      Blocked by default (HTTP 409); the owner may force the deletion via
+      ``force=true``.
 
     ``bundle_usages`` is every bundle whose publisher install links this
     credential, in any provisioning mode (``publisher``/``template``/``user``).
@@ -377,6 +391,12 @@ class CredentialDeletionImpact(SQLModel):
     that drives the Tier-2 block and lets the UI deep-link to each affected
     bundle. ``active_install_count`` is the number of foreign installs
     (non-publisher) that link the credential.
+
+    ``skill_pbp_usages`` is every catalog skill package of the requester whose
+    revisions freeze this credential as ``provided_by="publisher"``.
+    ``active_skill_install_count`` is the number of distinct foreign agents
+    that link the credential and carry a catalog install of one of those
+    revisions. Both together drive the skill half of Tier 2.
     """
 
     tier: int
@@ -385,3 +405,5 @@ class CredentialDeletionImpact(SQLModel):
     bundle_usages: list[CredentialBundleUsage] = []
     bundle_pbp_usages: list[CredentialBundleUsage] = []
     active_install_count: int = 0
+    skill_pbp_usages: list[CredentialSkillUsage] = []
+    active_skill_install_count: int = 0

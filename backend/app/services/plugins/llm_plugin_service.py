@@ -16,6 +16,7 @@ import re
 import shutil
 import tempfile
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
@@ -122,6 +123,16 @@ class MarketplaceCatalogError(MarketplaceFormatError):
     """
 
     code = "marketplace_catalog_unreadable"
+
+
+@dataclass(frozen=True)
+class PluginUninstallResult:
+    """Outcome of :meth:`LLMPluginService.uninstall_plugin_link`."""
+
+    deleted: bool
+    #: A catalog skill's credential slots were released (links removed,
+    #: orphan placeholders deleted): environments need a credential sync.
+    credentials_changed: bool = False
 
 
 class LLMPluginService:
@@ -1847,6 +1858,24 @@ class LLMPluginService:
         Returns:
             True if uninstalled, False if not found
         """
+        return LLMPluginService.uninstall_plugin_link(
+            session, agent_id, link_id
+        ).deleted
+
+    @staticmethod
+    def uninstall_plugin_link(
+        session: Session,
+        agent_id: uuid.UUID,
+        link_id: uuid.UUID,
+    ) -> PluginUninstallResult:
+        """Delete a plugin link, releasing a catalog skill's credential slots.
+
+        For a ``source=catalog`` link, the skill placeholders of slots that no
+        other catalog skill on the agent still declares are unlinked (and
+        deleted once nothing links them) before the link row goes, all in one
+        commit. Real and shared credentials are never touched. The caller syncs
+        credentials to environments when ``credentials_changed``.
+        """
         link = session.exec(
             select(AgentPluginLink).where(
                 AgentPluginLink.id == link_id,
@@ -1855,13 +1884,47 @@ class LLMPluginService:
         ).first()
 
         if not link:
-            return False
+            return PluginUninstallResult(deleted=False)
 
-        session.delete(link)
-        session.commit()
+        credentials_changed = False
+        try:
+            agent = (
+                session.get(Agent, agent_id)
+                if link.source == PluginSource.catalog
+                and link.skill_package_revision_id is not None
+                else None
+            )
+            if agent is not None:
+                from app.services.credentials.credential_provisioner import (
+                    CredentialProvisioner,
+                )
+                from app.services.skills.skill_credential_requirements import (
+                    SkillSlotIndex,
+                )
 
-        logger.info(f"Uninstalled plugin link {link_id} from agent {agent_id}")
-        return True
+                slot_index = SkillSlotIndex.build_for_agent(session, agent)
+                credentials_changed = CredentialProvisioner.release_skill_slots(
+                    session,
+                    agent=agent,
+                    released=slot_index.specs_for_link(link.id),
+                    retained=slot_index.specs_except_link(link.id),
+                )
+
+            session.delete(link)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+        logger.info(
+            "Uninstalled plugin link %s from agent %s (credentials_changed=%s)",
+            link_id,
+            agent_id,
+            credentials_changed,
+        )
+        return PluginUninstallResult(
+            deleted=True, credentials_changed=credentials_changed
+        )
 
     @staticmethod
     def get_agent_plugins(

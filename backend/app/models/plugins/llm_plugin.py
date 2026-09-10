@@ -16,6 +16,8 @@ import sqlalchemy as sa
 from sqlalchemy import Column, Index, JSON
 from sqlmodel import Field, Relationship, SQLModel
 
+from app.models.skills.schemas import SkillCredentialProvisionPublic
+
 #: Repository formats this platform knows how to parse. Each value names a
 #: catalog layout and a parser:
 #:
@@ -545,3 +547,6 @@ class PluginSyncResponse(SQLModel):
     # only remedy that works (rebuild) instead of the one that never could
     # (restart) — and so it can say the link write itself was fine.
     unsupported_syncs: int = 0
+    # Catalog skill install only: what happened to each credential slot the
+    # installed revision requires. Empty for every other plugin operation.
+    credential_provisioning: list[SkillCredentialProvisionPublic] = []

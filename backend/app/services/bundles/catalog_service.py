@@ -294,7 +294,7 @@ class CatalogService:
 
             # A publisher-marked-private service_uri is treated as not-shared:
             # it is neither used for matching nor shown to the installer,
-            # mirroring _materialise_template_credential's gating. Only PBT
+            # mirroring CredentialProvisioner._materialise_template's gating. Only PBT
             # specs ever populate template_private_fields, so PBU/publisher
             # specs keep their full service_uri (empty list → unchanged).
             effective_service_uri = (

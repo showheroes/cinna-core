@@ -97,7 +97,10 @@ class CredentialsService:
         # service_uri is a non-secret audience/slot identifier (a Credential column,
         # not a credential_data field). It is injected into the api_token data in
         # get_agent_credentials_with_data so scripts can read the slot id alongside
-        # the ready-to-use header pair.
+        # the ready-to-use header pair. Every entry, whatever its type, also
+        # carries a TOP-LEVEL service_uri (and is_placeholder) outside
+        # credential_data, which this whitelist never filters; this in-data copy
+        # stays for scripts written against it.
         "api_token": ["http_header_name", "http_header_value", "service_uri"],
         "google_service_account": ["file_path", "project_id", "client_email"],
 
@@ -196,10 +199,19 @@ class CredentialsService:
                     "name": "Gmail Account",
                     "type": "gmail_oauth",
                     "notes": "Personal email",
+                    "service_uri": "erp-public-api" | None,
+                    "is_placeholder": False,
                     "credential_data": {...}  # Decrypted
                 },
                 ...
             ]
+
+        ``service_uri`` (the slot a skill finds its credential by) and
+        ``is_placeholder`` (linked but not filled in yet) are top-level,
+        type-agnostic and non-secret. They sit outside ``credential_data`` on
+        purpose, so the ``AGENT_ENV_ALLOWED_FIELDS`` whitelist and the
+        ``SENSITIVE_FIELDS`` redaction — both of which act on
+        ``credential_data`` only — can never drop or mask them.
         """
         # Get credentials for agent
         credentials = CredentialsService.get_agent_credentials(session=session, agent_id=agent_id)
@@ -223,6 +235,8 @@ class CredentialsService:
                 "name": cred.name,
                 "type": cred.type.value,
                 "notes": cred.notes,
+                "service_uri": cred.service_uri,
+                "is_placeholder": bool(cred.is_placeholder),
                 "credential_data": credential_data
             })
 
@@ -851,14 +865,21 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
                 cred["credential_data"]
             )
 
-            # Build credential object matching JSON structure
-            credentials_for_display.append({
+            # Build credential object matching JSON structure. Synthetic
+            # entries (current_user, owner_identity_token) carry no slot keys,
+            # so they are rendered without them rather than with invented ones.
+            display_entry = {
                 "id": cred["id"],
                 "name": cred["name"],
                 "type": cred["type"],
                 "notes": cred["notes"],
-                "credential_data": redacted_credential_data
-            })
+            }
+            if "service_uri" in cred:
+                display_entry["service_uri"] = cred["service_uri"]
+            if "is_placeholder" in cred:
+                display_entry["is_placeholder"] = cred["is_placeholder"]
+            display_entry["credential_data"] = redacted_credential_data
+            credentials_for_display.append(display_entry)
 
         # Show the full structure as JSON array (matching credentials.json format)
         lines.append("The credentials file (`credentials/credentials.json`) contains:")
@@ -868,6 +889,24 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         lines.append("```")
         lines.append("")
         lines.append("**Note**: Sensitive fields (passwords, tokens) are shown as `***REDACTED***` if they contain values.")
+        lines.append("")
+        lines.append("## Slots (service_uri)")
+        lines.append("")
+        lines.append(
+            "A credential's `service_uri` is its **slot**: a non-secret id a skill "
+            "uses to find the credential it needs, whatever its type."
+        )
+        lines.append("")
+        lines.append(
+            "Look a credential up by slot with "
+            "`from core.cinna_api import credentials` and "
+            "`credentials.require_slot(\"<slot>\")`."
+        )
+        lines.append("")
+        lines.append(
+            "`is_placeholder: true` means the credential is linked to this agent "
+            "but not filled in yet."
+        )
         lines.append("")
         lines.append("---")
         lines.append("")
@@ -1849,15 +1888,19 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
     ) -> "CredentialDeletionImpact":
         """Classify the blast radius of deleting a credential.
 
-        Composes three existing signals — affected agents
-        (:meth:`get_affected_agents`), direct ``CredentialShare`` count, and
+        Composes four existing signals — affected agents
+        (:meth:`get_affected_agents`), direct ``CredentialShare`` count,
         bundle PBP usages (:meth:`list_bundle_usages` filtered to
-        ``provided_by == "publisher"``) — into a graduated tier:
+        ``provided_by == "publisher"``) and catalog skill PBP usages
+        (``SkillCredentialRequirements.publisher_usages_of_credential``) — into
+        a graduated tier:
 
         - Tier 0 (self-only): only own agents; no shares; no PBP published-bundle
-          usage.
-        - Tier 1 (direct shares): shares exist but no PBP published-bundle usage.
-        - Tier 2 (PBP in published bundle with ≥1 active foreign install).
+          or published-skill usage with a foreign install.
+        - Tier 1 (direct shares): shares exist but no Tier-2 condition.
+        - Tier 2 (PBP in a published bundle with ≥1 active foreign install, or
+          PBP in a published catalog skill with ≥1 distinct foreign agent that
+          links the credential and installs one of those revisions).
 
         Owner-only: raises ``ValueError("Credential not found")`` when the
         credential does not exist OR the requester is not the owner — matching
@@ -1935,7 +1978,47 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
                 )
             ).one()
 
-        if bundle_pbp_usages and active_install_count > 0:
+        # The same block for catalog skills: the requester's packages whose
+        # revisions freeze this credential as publisher-provided, and the
+        # distinct foreign agents that link it through an install of one of
+        # those revisions. Scoped by revision for the same reason as above —
+        # a direct-share recipient linking the credential is not an install.
+        from app.models.plugins.llm_plugin import AgentPluginLink, PluginSource
+        from app.services.skills.skill_credential_requirements import (
+            SkillCredentialRequirements,
+        )
+
+        skill_pbp_usages, skill_revision_ids = (
+            SkillCredentialRequirements.publisher_usages_of_credential(
+                session,
+                credential_id=credential_id,
+                publisher_user_id=requester_id,
+            )
+        )
+        active_skill_install_count = 0
+        if skill_revision_ids:
+            active_skill_install_count = session.exec(
+                select(func_sql.count(func_sql.distinct(Agent.id)))
+                .select_from(AgentCredentialLink)
+                .join(Agent, Agent.id == AgentCredentialLink.agent_id)
+                .where(
+                    AgentCredentialLink.credential_id == credential_id,
+                    Agent.owner_id != requester_id,
+                    select(AgentPluginLink.id)
+                    .where(
+                        AgentPluginLink.agent_id == Agent.id,
+                        AgentPluginLink.source == PluginSource.catalog,
+                        AgentPluginLink.skill_package_revision_id.in_(
+                            skill_revision_ids
+                        ),
+                    )
+                    .exists(),
+                )
+            ).one()
+
+        if (bundle_pbp_usages and active_install_count > 0) or (
+            skill_pbp_usages and active_skill_install_count > 0
+        ):
             tier = 2
         elif direct_share_count > 0:
             tier = 1
@@ -1949,6 +2032,8 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
             bundle_usages=all_usages,
             bundle_pbp_usages=bundle_pbp_usages,
             active_install_count=active_install_count,
+            skill_pbp_usages=skill_pbp_usages,
+            active_skill_install_count=active_skill_install_count,
         )
 
     @staticmethod
@@ -2137,6 +2222,59 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         }
 
     @staticmethod
+    def find_slot_match(
+        session: Session,
+        *,
+        user_id: uuid.UUID,
+        credential_type: CredentialType,
+        service_uri: str,
+    ) -> Credential | None:
+        """Find the user's credential that carries a slot (``service_uri``).
+
+        Owned credentials first, then credentials shared with the user
+        through ``CredentialShare``; within each tier the newest (descending
+        ``id``) wins. Placeholders are candidates on purpose: a slot
+        placeholder left by an earlier install is reused instead of
+        duplicated (I9). An empty ``service_uri`` never matches.
+
+        This is tier 0 of :meth:`find_match_for_spec`, and the only tier
+        ``CredentialProvisioner`` auto-links through (D3) — the name and
+        type-only tiers stay suggestion-only.
+        """
+        from app.models.credentials.credential_share import CredentialShare
+
+        if not service_uri:
+            return None
+
+        owned_uri_stmt = (
+            select(Credential)
+            .where(
+                Credential.owner_id == user_id,
+                Credential.type == credential_type,
+                Credential.service_uri == service_uri,
+            )
+            .order_by(Credential.id.desc())
+        )
+        owned_uri_match = session.exec(owned_uri_stmt).first()
+        if owned_uri_match is not None:
+            return owned_uri_match
+
+        shared_uri_stmt = (
+            select(Credential)
+            .join(
+                CredentialShare,
+                CredentialShare.credential_id == Credential.id,
+            )
+            .where(
+                CredentialShare.shared_with_user_id == user_id,
+                Credential.type == credential_type,
+                Credential.service_uri == service_uri,
+            )
+            .order_by(Credential.id.desc())
+        )
+        return session.exec(shared_uri_stmt).first()
+
+    @staticmethod
     def find_match_for_spec(
         session: Session,
         user_id: uuid.UUID,
@@ -2161,6 +2299,7 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
               newest by descending ``id``.
           0b. ``service_uri`` tier — shared: same predicate joined through
               ``CredentialShare`` (``shared_with_user_id == user_id``).
+          Both 0a and 0b are delegated to :meth:`find_slot_match`.
 
           The ``service_uri`` tier runs FIRST and short-circuits — even on
           the PBT path (``template_data is not None``). A slot-id match wins
@@ -2217,35 +2356,14 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         # engaged when service_uri is a non-empty string; otherwise the
         # legacy tiers below run unchanged (I5).
         if service_uri:
-            owned_uri_stmt = (
-                select(Credential)
-                .where(
-                    Credential.owner_id == user_id,
-                    Credential.type == type_enum,
-                    Credential.service_uri == service_uri,
-                )
-                .order_by(Credential.id.desc())
+            slot_match = CredentialsService.find_slot_match(
+                session,
+                user_id=user_id,
+                credential_type=type_enum,
+                service_uri=service_uri,
             )
-            owned_uri_match = session.exec(owned_uri_stmt).first()
-            if owned_uri_match is not None:
-                return owned_uri_match
-
-            shared_uri_stmt = (
-                select(Credential)
-                .join(
-                    CredentialShare,
-                    CredentialShare.credential_id == Credential.id,
-                )
-                .where(
-                    CredentialShare.shared_with_user_id == user_id,
-                    Credential.type == type_enum,
-                    Credential.service_uri == service_uri,
-                )
-                .order_by(Credential.id.desc())
-            )
-            shared_uri_match = session.exec(shared_uri_stmt).first()
-            if shared_uri_match is not None:
-                return shared_uri_match
+            if slot_match is not None:
+                return slot_match
             # No service_uri match → fall through to the legacy tiers.
 
         pbt_strict = template_data is not None
@@ -2918,8 +3036,14 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
              managed, so it is "mine", not auto-managed.)
           3. Owned + any other type                             → "mine".
           4. Shared + share_source == "bundle_install"          → "bundle".
+          4b. Shared + share_source == "skill_install"          → "automatic".
+             (D6, deliberate exception: the share was created for the
+             installer by adding a catalog skill, not by any hand action, so it
+             sits with the other connection records the platform created.)
           5. Shared + share_source ∈ {"direct", None}           → "mine".
              (NULL = legacy = direct.)
+
+        A shared credential's type never matters: only its provenance does.
 
         Returns: "mine" | "automatic" | "bundle".
         """
@@ -2937,9 +3061,13 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
                 # manually-added external MCP server is an ordinary credential.
                 return "automatic" if mcp_auth_mode == "agent2agent" else "mine"
             return "mine"
-        # Shared (not owned) credentials are never "automatic".
+        # Shared (not owned): the category follows the share's provenance
+        # alone, never the type.
         if share_source == "bundle_install":
             return "bundle"
+        if share_source == "skill_install":
+            # D6: shared for the installer by adding a catalog skill.
+            return "automatic"
         return "mine"
 
     @staticmethod

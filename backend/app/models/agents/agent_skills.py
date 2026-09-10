@@ -24,13 +24,26 @@ class SkillIssuePublic(SQLModel):
     Error codes: ``not_a_directory``, ``missing_skill_md``, ``unreadable``,
     ``invalid_frontmatter``, ``missing_name``, ``invalid_name``,
     ``name_mismatch``, ``reserved_name``, ``missing_description``,
-    ``description_too_long``, ``budget``, ``projection_error``.
+    ``description_too_long``, ``invalid_credentials``, ``budget``,
+    ``projection_error``.
     Warning codes: ``secrets``, ``shadowed``, ``oversized``.
     """
 
     code: str
     message: str = ""
     paths: list[str] = []
+
+
+class SkillCredentialDeclarationPublic(SQLModel):
+    """One credential slot a skill declares in its ``SKILL.md`` frontmatter.
+
+    ``slot`` is the ``Credential.service_uri`` a script looks the credential up
+    by; ``type`` is a credential type. Carries no credential value.
+    """
+
+    slot: str
+    type: str
+    description: str | None = None
 
 
 class SkillEntryPublic(SQLModel):
@@ -56,6 +69,10 @@ class SkillEntryPublic(SQLModel):
     #: Structured secret-scan result: paths inside the skill that look like key
     #: material. Empty means the scan ran and found nothing.
     secret_paths: list[str] = []
+    #: The credential slots the skill's ``SKILL.md`` declares. Empty for a
+    #: skill that declares none and for one reported by a container built
+    #: before skills could declare credentials.
+    credentials: list[SkillCredentialDeclarationPublic] = []
     #: Whether **this** entry could be published to the skills catalog by the
     #: caller right now: the caller holds the capability (see
     #: ``AgentSkillsPublic.can_publish``) **and** the skill is clean — no

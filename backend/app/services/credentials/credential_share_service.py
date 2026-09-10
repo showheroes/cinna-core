@@ -243,9 +243,10 @@ class CredentialShareService:
         for share, credential in resolved:
             owner = session.get(User, credential.owner_id)
             # `agent_api_kind` is deliberately omitted: this projection is for
-            # credentials shared WITH the caller, and a shared row is never
-            # "automatic" regardless of type (the is_owned=False branch decides
-            # bundle-vs-mine on share_source alone). An external key can never
+            # credentials shared WITH the caller, and a shared row's category
+            # never depends on its type (the is_owned=False branch decides on
+            # share_source alone: "bundle_install" → bundle, "skill_install" →
+            # automatic, anything else → mine). An external key can never
             # reach here anyway — sharing one is refused at the write boundary
             # (`assert_sharing_allowed`).
             category = CredentialsService.classify_credential_category(

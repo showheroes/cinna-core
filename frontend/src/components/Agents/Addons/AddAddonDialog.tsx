@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 
 import type { AddonPublic, PluginSyncResponse } from "@/client"
 import { LlmPluginsService, SkillsService } from "@/client"
+import { SkillInstallSetupPanel } from "@/components/Catalog/SkillInstallSetupPanel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,6 +24,7 @@ import {
   invalidateAddons,
   isAddonResultBlocked,
 } from "@/utils/addons"
+import { countSlotsNeedingSetup } from "@/utils/skillCredentials"
 import { AddAddonChooseStep } from "./AddAddonChooseStep"
 import { AddAddonModesStep } from "./AddAddonModesStep"
 import type { SyncReporter } from "./AddonRow"
@@ -31,6 +33,22 @@ import type { SyncReporter } from "./AddonRow"
 const RESULT_LIMIT = 50
 
 type Step = "choose" | "modes"
+
+/**
+ * A partial failure is not a success with a footnote: it goes to the tab's
+ * sync-issues dialog rather than to a toast that claims the install worked
+ * everywhere. An *unsupported* sync counts here too: the link write succeeded,
+ * so `success` stays true and the count never reaches `failed_syncs` — but the
+ * environment did not take the change, and that dialog is the only surface that
+ * renders the backend's explanation.
+ */
+function isPartialSync(result: PluginSyncResponse): boolean {
+  return (
+    (result.failed_syncs ?? 0) > 0 ||
+    (result.unsupported_syncs ?? 0) > 0 ||
+    !!result.partial_failures
+  )
+}
 
 interface AddAddonDialogProps {
   agentId: string
@@ -58,6 +76,11 @@ interface AddAddonDialogProps {
  * This component keeps the state, the two searches, the install mutation and
  * the stepper; each step's markup is its own file, and the fold that merges the
  * two sources is `buildAddonResults` in `utils/addons.ts`, which is pure.
+ *
+ * A catalog skill whose install leaves credential slots to fill in swaps the
+ * whole dialog for `SkillInstallSetupPanel` (shared with the catalog's Add skill
+ * to agent dialog) instead of closing. A partial sync is still reported, but
+ * only once that panel closes — chained, not nested.
  */
 export function AddAddonDialog({
   agentId,
@@ -70,7 +93,7 @@ export function AddAddonDialog({
   onOpenChange,
 }: AddAddonDialogProps) {
   const queryClient = useQueryClient()
-  const { showSuccessToast } = useCustomToast()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
 
   const [step, setStep] = useState<Step>("choose")
   const [query, setQuery] = useState("")
@@ -83,6 +106,12 @@ export function AddAddonDialog({
   const [conversationMode, setConversationMode] = useState(true)
   const [buildingMode, setBuildingMode] = useState(true)
   const [revisionNumber, setRevisionNumber] = useState("latest")
+  // An install whose credential slots still need the user, held until the
+  // setup panel it opened is closed.
+  const [setup, setSetup] = useState<{
+    name: string
+    result: PluginSyncResponse
+  } | null>(null)
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query.trim()), 300)
@@ -143,23 +172,50 @@ export function AddAddonDialog({
   const isCapped = selectable.length > RESULT_LIMIT
 
   const settleSync = (result: PluginSyncResponse, name: string) => {
-    if (
-      (result.failed_syncs && result.failed_syncs > 0) ||
-      (result.unsupported_syncs && result.unsupported_syncs > 0) ||
-      result.partial_failures
-    ) {
-      // A partial failure is not a success with a footnote: it goes to the
-      // tab's sync-issues dialog rather than to a toast that claims the install
-      // worked everywhere. An *unsupported* sync counts here too: the link
-      // write succeeded, so `success` stays true and the count never reaches
-      // `failed_syncs` — but the environment did not take the change, and that
-      // dialog is the only surface that renders the backend's explanation.
+    if (isPartialSync(result)) {
       onSyncResult(`${name} installed`, result)
     } else {
       showSuccessToast(`${name} installed`)
     }
-    invalidateAddons(queryClient, agentId, { catalog: true })
+    invalidateAddons(queryClient, agentId, {
+      catalog: true,
+      credentials: (result.credential_provisioning ?? []).length > 0,
+    })
     onOpenChange(false)
+  }
+
+  const handleInstalled = (result: PluginSyncResponse, name: string) => {
+    if (countSlotsNeedingSetup(result.credential_provisioning ?? []) === 0) {
+      settleSync(result, name)
+      return
+    }
+    // Invalidate before the swap, so the Credentials tab the panel links to
+    // is fresh when the user gets there.
+    invalidateAddons(queryClient, agentId, { catalog: true, credentials: true })
+    setSetup({ name, result })
+  }
+
+  // Done, the Credentials link, or Escape: close first, then report a partial
+  // sync — a dialog that closes and then opens another is chained, not nested.
+  const finishSetup = () => {
+    if (!setup) return
+    onOpenChange(false)
+    if (isPartialSync(setup.result)) {
+      onSyncResult(`${setup.name} installed`, setup.result)
+    }
+  }
+
+  // The Credentials link switches this page to another tab, which unmounts the
+  // Addons tab that owns the sync-issues dialog — a report handed to it would
+  // never be seen. So on this path a partial sync is a toast instead.
+  const openCredentialsFromSetup = () => {
+    if (!setup) return
+    onOpenChange(false)
+    if (isPartialSync(setup.result)) {
+      showErrorToast(
+        `${setup.name} installed, but it didn't reach every environment — check the Addons tab`,
+      )
+    }
   }
 
   const installMutation = useMutation({
@@ -190,7 +246,8 @@ export function AddAddonDialog({
         },
       })
     },
-    onSuccess: (result) => settleSync(result, selected?.name ?? "The addon"),
+    onSuccess: (result) =>
+      handleInstalled(result, selected?.name ?? "The addon"),
     // No `onError`: both refusals are coded and belong in the dialog, where the
     // choice that caused them still is. A toast would take it off screen.
   })
@@ -229,172 +286,195 @@ export function AddAddonDialog({
       open={open}
       onOpenChange={(next) => {
         // Escape and outside-click must not close a dialog mid-request.
-        if (!isPending) onOpenChange(next)
+        if (isPending) return
+        if (!next && setup) {
+          finishSetup()
+          return
+        }
+        onOpenChange(next)
       }}
     >
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          {/* The stepper P6 asks for: two panes with no stepper give no sense
-              of how far along the user is, or that there is a second step. */}
-          <p className="text-xs text-muted-foreground">
-            <span
-              className={
-                step === "choose" ? "font-medium text-foreground" : undefined
-              }
-            >
-              1 Choose
-            </span>
-            {" · "}
-            <span
-              className={
-                step === "modes" ? "font-medium text-foreground" : undefined
-              }
-            >
-              2 Modes
-            </span>
-          </p>
-          {/* Step 2 is titled by the thing being installed — its name, linked
-              to where it lives, its version — with its description under it.
-              The modes are the body's question; the header says what they are
-              being chosen for. */}
-          {step === "choose" || !selected ? (
-            <>
-              <DialogTitle>Add addon</DialogTitle>
-              <DialogDescription>
-                Search the plugin marketplaces and the skills catalog together.
-              </DialogDescription>
-            </>
-          ) : (
-            <>
-              <DialogTitle className="flex min-w-0 items-center gap-2">
-                {selected.source === "catalog" ? (
-                  <Link
-                    to="/catalog/skills/$packageId"
-                    params={{ packageId: selected.id }}
-                    target="_blank"
-                    className="truncate hover:underline"
-                  >
-                    {selected.name}
-                  </Link>
-                ) : selected.plugin?.repository_url ? (
-                  <a
-                    href={selected.plugin.repository_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="truncate hover:underline"
-                  >
-                    {selected.name}
-                  </a>
-                ) : (
-                  <span className="truncate">{selected.name}</span>
-                )}
-                {selected.version && (
-                  <Badge variant="secondary" className="h-5 shrink-0">
-                    v{selected.version}
-                  </Badge>
-                )}
-              </DialogTitle>
-              <DialogDescription className="line-clamp-2">
-                {selected.description ||
-                  selected.origin ||
-                  (selected.source === "catalog"
-                    ? "From the skills catalog"
-                    : "From a marketplace")}
-              </DialogDescription>
-            </>
-          )}
-        </DialogHeader>
-
-        {step === "choose" ? (
-          <AddAddonChooseStep
-            query={query}
-            onQueryChange={setQuery}
-            debouncedQuery={debouncedQuery}
-            kind={kind}
-            onKindChange={setKind}
-            results={cappedResults}
-            isCapped={isCapped}
-            resultLimit={RESULT_LIMIT}
-            selectedKey={selected?.key ?? null}
-            onSelect={(result) => {
-              setSelected(result)
-              // The revision belongs to the package that was chosen, so
-              // choosing a different one must not carry it over — otherwise
-              // step 2 can post a revision number the new package has never
-              // heard of, with nothing on screen showing it.
-              setRevisionNumber("latest")
-              // So does the refusal: React Query holds `error` until the next
-              // `mutate()`, so without this, a 409 on entry A survives Back →
-              // pick B → Next and step 2 shows B's name above A's refusal,
-              // naming a defect B does not have.
-              installMutation.reset()
-            }}
-            isLoading={isLoadingResults}
-            disabled={isPending}
-            addonsUnavailable={addonsUnavailable}
-            addonsError={addonsError}
-            onRetryAddons={onRetryAddons}
-            bothFailed={bothFailed}
-            halfFailedMessage={halfFailedMessage}
-            searchError={pluginsError ?? catalogError}
-            onRetrySearch={retrySearch}
+      {/* Capped and scrolling: step 2 grew a data-driven credentials block. */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden sm:max-w-2xl [&>*]:min-w-0">
+        {setup ? (
+          <SkillInstallSetupPanel
+            skillName={setup.name}
+            agentId={agentId}
+            items={setup.result.credential_provisioning ?? []}
+            onClose={finishSetup}
+            onOpenCredentials={openCredentialsFromSetup}
           />
         ) : (
-          selected && (
-            <AddAddonModesStep
-              selected={selected}
-              conversationMode={conversationMode}
-              onConversationModeChange={setConversationMode}
-              buildingMode={buildingMode}
-              onBuildingModeChange={setBuildingMode}
-              revisionNumber={revisionNumber}
-              onRevisionNumberChange={setRevisionNumber}
-              disabled={isPending}
-              installError={installMutation.error}
-              isInstallError={installMutation.isError}
-            />
-          )
-        )}
+          <>
+            <DialogHeader>
+              {/* The stepper P6 asks for: two panes with no stepper give no
+                  sense of how far along the user is, or that there is a second
+                  step. */}
+              <p className="text-xs text-muted-foreground">
+                <span
+                  className={
+                    step === "choose"
+                      ? "font-medium text-foreground"
+                      : undefined
+                  }
+                >
+                  1 Choose
+                </span>
+                {" · "}
+                <span
+                  className={
+                    step === "modes" ? "font-medium text-foreground" : undefined
+                  }
+                >
+                  2 Modes
+                </span>
+              </p>
+              {/* Step 2 is titled by the thing being installed — its name,
+                  linked to where it lives, its version — with its description
+                  under it. The modes are the body's question; the header says
+                  what they are being chosen for. */}
+              {step === "choose" || !selected ? (
+                <>
+                  <DialogTitle>Add addon</DialogTitle>
+                  <DialogDescription>
+                    Search the plugin marketplaces and the skills catalog
+                    together.
+                  </DialogDescription>
+                </>
+              ) : (
+                <>
+                  <DialogTitle className="flex min-w-0 items-center gap-2">
+                    {selected.source === "catalog" ? (
+                      <Link
+                        to="/catalog/skills/$packageId"
+                        params={{ packageId: selected.id }}
+                        target="_blank"
+                        className="truncate hover:underline"
+                      >
+                        {selected.name}
+                      </Link>
+                    ) : selected.plugin?.repository_url ? (
+                      <a
+                        href={selected.plugin.repository_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="truncate hover:underline"
+                      >
+                        {selected.name}
+                      </a>
+                    ) : (
+                      <span className="truncate">{selected.name}</span>
+                    )}
+                    {selected.version && (
+                      <Badge variant="secondary" className="h-5 shrink-0">
+                        v{selected.version}
+                      </Badge>
+                    )}
+                  </DialogTitle>
+                  <DialogDescription className="line-clamp-2">
+                    {selected.description ||
+                      selected.origin ||
+                      (selected.source === "catalog"
+                        ? "From the skills catalog"
+                        : "From a marketplace")}
+                  </DialogDescription>
+                </>
+              )}
+            </DialogHeader>
 
-        <DialogFooter>
-          {step === "choose" ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                disabled={!selected}
-                onClick={() => setStep("modes")}
-              >
-                Next
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                type="button"
-                variant="outline"
+            {step === "choose" ? (
+              <AddAddonChooseStep
+                query={query}
+                onQueryChange={setQuery}
+                debouncedQuery={debouncedQuery}
+                kind={kind}
+                onKindChange={setKind}
+                results={cappedResults}
+                isCapped={isCapped}
+                resultLimit={RESULT_LIMIT}
+                selectedKey={selected?.key ?? null}
+                onSelect={(result) => {
+                  setSelected(result)
+                  // The revision belongs to the package that was chosen, so
+                  // choosing a different one must not carry it over — otherwise
+                  // step 2 can post a revision number the new package has never
+                  // heard of, with nothing on screen showing it.
+                  setRevisionNumber("latest")
+                  // So does the refusal: React Query holds `error` until the
+                  // next `mutate()`, so without this, a 409 on entry A survives
+                  // Back → pick B → Next and step 2 shows B's name above A's
+                  // refusal, naming a defect B does not have.
+                  installMutation.reset()
+                }}
+                isLoading={isLoadingResults}
                 disabled={isPending}
-                onClick={() => setStep("choose")}
-              >
-                Back
-              </Button>
-              <LoadingButton
-                type="button"
-                loading={isPending}
-                disabled={!selected || (!conversationMode && !buildingMode)}
-                onClick={() => installMutation.mutate()}
-              >
-                Install
-              </LoadingButton>
-            </>
-          )}
-        </DialogFooter>
+                addonsUnavailable={addonsUnavailable}
+                addonsError={addonsError}
+                onRetryAddons={onRetryAddons}
+                bothFailed={bothFailed}
+                halfFailedMessage={halfFailedMessage}
+                searchError={pluginsError ?? catalogError}
+                onRetrySearch={retrySearch}
+              />
+            ) : (
+              selected && (
+                <AddAddonModesStep
+                  agentId={agentId}
+                  selected={selected}
+                  conversationMode={conversationMode}
+                  onConversationModeChange={setConversationMode}
+                  buildingMode={buildingMode}
+                  onBuildingModeChange={setBuildingMode}
+                  revisionNumber={revisionNumber}
+                  onRevisionNumberChange={setRevisionNumber}
+                  disabled={isPending}
+                  installError={installMutation.error}
+                  isInstallError={installMutation.isError}
+                />
+              )
+            )}
+
+            <DialogFooter>
+              {step === "choose" ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => onOpenChange(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!selected}
+                    onClick={() => setStep("modes")}
+                  >
+                    Next
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isPending}
+                    onClick={() => setStep("choose")}
+                  >
+                    Back
+                  </Button>
+                  <LoadingButton
+                    type="button"
+                    loading={isPending}
+                    disabled={!selected || (!conversationMode && !buildingMode)}
+                    onClick={() => installMutation.mutate()}
+                  >
+                    Install
+                  </LoadingButton>
+                </>
+              )}
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   )

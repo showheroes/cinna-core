@@ -41,6 +41,7 @@ from sqlmodel import Session, select
 
 from app.models.agents.addons import (
     AddonCounts,
+    AddonCredentialIssuePublic,
     AddonPublic,
     AgentAddonsPublic,
 )
@@ -62,6 +63,7 @@ from app.services.agents.agent_skills_service import AgentSkillsService
 from app.services.agents.agent_status_service import AgentStatusService
 from app.services.agents.skill_manifest import SkillEntry
 from app.services.plugins.llm_plugin_service import LLMPluginService
+from app.services.skills.skill_credential_requirements import SkillSlotIndex
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +154,14 @@ class AddonsService:
 
         plugin_facts, unfetchable = AddonsService._plugin_facts(session, links)
         package_publishers = AddonsService._package_publishers(session, links)
+        # Credential slots of catalog skills: one read model, built once and
+        # only when a catalog link exists, so the credential half costs a
+        # constant number of queries (I11).
+        slot_index = (
+            SkillSlotIndex.build_for_agent(session, agent)
+            if any(link.source == PluginSource.catalog for link in links)
+            else None
+        )
 
         rows: list[AddonPublic] = []
         #: plugin_ref → the row its skills belong to.
@@ -173,6 +183,13 @@ class AddonsService:
                     else AddonsService._snapshot_repository_url(link)
                 ),
             )
+            if slot_index is not None and link.source == PluginSource.catalog:
+                row.credential_issues = [
+                    AddonCredentialIssuePublic(
+                        slot=issue.slot, type=issue.type, reason=issue.reason
+                    )
+                    for issue in slot_index.issues_for_link(link.id)
+                ]
             rows.append(row)
             ref = AddonsService._link_ref(link)
             if ref:
@@ -514,6 +531,14 @@ class AddonsService:
                 row.status = STATUS_WARNING
                 row.status_code = "unverified"
                 return
+
+        # A catalog skill whose credential slot is unlinked, unfilled or no
+        # longer shared still loads, so this is a warning, not an error: the
+        # skill's scripts fail with a message naming the slot (D1).
+        if row.credential_issues:
+            row.status = STATUS_WARNING
+            row.status_code = "credential_missing"
+            return
 
         for skill in row.skills:
             if skill.warning is not None:

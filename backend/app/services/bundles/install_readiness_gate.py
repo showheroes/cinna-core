@@ -14,6 +14,14 @@ Returns a :class:`GateResult` describing one of three states:
   missing / unshared. The publisher must fix this; the installer can
   optionally provide their own override credential via the setup page.
 
+**Catalog skill credentials never block (D1).** A credential linked because a
+catalog skill on the agent requires it — and not also claimed by the agent's
+bundle revision — is dropped from the missing list. A skill is one capability
+among many on an agent, unlike a bundle whose specs are its contract, so an
+unfilled skill slot is a warning on the skill's Addons row, in the install
+response and in the container SDK, not a refusal on every channel. Bundle
+verdicts are unchanged (I10). See ``_drop_skill_provisioned``.
+
 A publisher credential that *cannot* be shared is deliberately none of these.
 The install links the installer's own AI credential in its place and runs, so
 nothing is missing and the gate stays out of the way — see the note at the
@@ -61,6 +69,10 @@ class GateMissingItem:
     spec_type: str
     reason: GateMissingReason
     is_ai: bool = False
+    #: The linked credential behind a service-credential item. Internal only:
+    #: the dispatcher payload and the setup-status response list their keys
+    #: explicitly and never serialise it.
+    credential_id: uuid.UUID | None = None
 
 
 @dataclass
@@ -158,6 +170,7 @@ class InstallReadinessGate:
                     spec_type=spec_type,
                     reason="publisher_credential_missing",
                     is_ai=False,
+                    credential_id=link.credential_id,
                 ))
                 continue
 
@@ -177,6 +190,7 @@ class InstallReadinessGate:
                         spec_type=spec_type,
                         reason="placeholder_empty",
                         is_ai=False,
+                        credential_id=link.credential_id,
                     ))
                 continue
 
@@ -189,6 +203,7 @@ class InstallReadinessGate:
                     spec_type=spec_type,
                     reason="publisher_credential_unshared",
                     is_ai=False,
+                    credential_id=link.credential_id,
                 ))
                 continue
 
@@ -204,8 +219,40 @@ class InstallReadinessGate:
                     spec_type=spec_type,
                     reason="publisher_credential_unshared",
                     is_ai=False,
+                    credential_id=link.credential_id,
                 ))
+        if items:
+            items = InstallReadinessGate._drop_skill_provisioned(
+                session, install, items
+            )
         return items
+
+    @staticmethod
+    def _drop_skill_provisioned(
+        session: Session, install: Agent, items: list[GateMissingItem]
+    ) -> list[GateMissingItem]:
+        """D1: a catalog skill's credential never blocks the agent.
+
+        Drops the items whose credential is linked because a catalog skill on
+        the agent requires it, unless the agent's bundle revision claims that
+        credential too — bundle verdicts are unchanged (I10). The skill's
+        missing credential surfaces as a warning on its Addons row, in the
+        install response and in the container SDK instead. Called only with a
+        non-empty list, so a ready agent pays no extra query.
+        """
+        # Lazy: the skills domain sits above bundles in the import graph.
+        from app.services.skills.skill_credential_requirements import (
+            SkillSlotIndex,
+        )
+
+        skill_credential_ids = SkillSlotIndex.build_for_agent(
+            session, install
+        ).skill_provisioned_credential_ids()
+        if not skill_credential_ids:
+            return items
+        return [
+            item for item in items if item.credential_id not in skill_credential_ids
+        ]
 
     # ── AI-credential scanner ─────────────────────────────────────
 

@@ -10,6 +10,7 @@ import { useState } from "react"
 
 import { SkillsService } from "@/client"
 import { SkillCatalogErrorAlert } from "@/components/Catalog/SkillCatalogErrorAlert"
+import { SkillInstallCredentialsSection } from "@/components/Catalog/SkillInstallCredentialsSection"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -25,6 +26,8 @@ import type { AddAddonResult } from "@/utils/addons"
 import { skillRevisionLabel } from "@/utils/skillCatalog"
 
 interface AddAddonModesStepProps {
+  /** The agent being installed into — the credential preview resolves for it. */
+  agentId: string
   /** The choice from step 1, held in the dialog's state — not re-derived. */
   selected: AddAddonResult
   conversationMode: boolean
@@ -49,6 +52,7 @@ interface AddAddonModesStepProps {
  * and appears only for a catalog package that actually has a choice to make.
  */
 export function AddAddonModesStep({
+  agentId,
   selected,
   conversationMode,
   onConversationModeChange,
@@ -134,6 +138,19 @@ export function AddAddonModesStep({
           </AlertDescription>
         </Alert>
       </div>
+
+      {/* The same block the catalog's Add skill to agent dialog shows, so the
+          two install entry points read alike. Catalog packages only: a
+          marketplace entry declares no credential slots. */}
+      {isCatalogPackage && (
+        <SkillInstallCredentialsSection
+          agentId={agentId}
+          packageId={selected.id}
+          revisionNumber={
+            revisionNumber === "latest" ? null : Number(revisionNumber)
+          }
+        />
+      )}
 
       {isCatalogPackage && revisions.length > 1 && (
         <div>

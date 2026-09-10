@@ -41,6 +41,7 @@ import re
 import shutil
 import tarfile
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -53,6 +54,7 @@ from app.core.config import settings
 from app.models.agents.agent import Agent
 from app.models.plugins.llm_plugin import AgentPluginLink, PluginSource
 from app.models.skills.schemas import (
+    SkillInstallPreview,
     SkillPackageAccessGrantPublic,
     SkillPackageDetailPublic,
     SkillPackageEntry,
@@ -79,14 +81,39 @@ from app.services.agents.skill_manifest import (
     parse_skill_dir,
 )
 from app.services.bundles.bundle_id_service import BUNDLE_ID_REGEX, BundleIdService
+from app.services.bundles.credential_spec import ParsedCredentialSpec
 from app.services.bundles.publish_service import PublishService
+from app.services.credentials.credential_provisioner import (
+    SKILL_INSTALL_POLICY,
+    CredentialProvisioner,
+    ProvisionReport,
+    PublisherBoundary,
+    spec_slot,
+)
 from app.services.environments.workspace_classification import (
     WORKSPACE_ROOT_REL,
     safe_copytree,
 )
 from app.services.skills.exceptions import SkillCatalogError
+from app.services.skills.skill_credential_requirements import (
+    SkillCredentialRequirements,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SkillInstallResult:
+    """A new catalog link and what provisioning did for its credential slots."""
+
+    link: AgentPluginLink
+    provisioning: ProvisionReport
+
+
+def _outcome_counts(report: ProvisionReport) -> str:
+    """``outcome:count`` pairs for a log line. Ids and names only, no secrets."""
+    counts = Counter(item.outcome for item in report.items)
+    return ",".join(f"{outcome}:{count}" for outcome, count in sorted(counts.items())) or "none"
 
 #: Hard cap on one published skill package (§4), measured over the
 #: UNCOMPRESSED tree. Same number as the per-agent projection budget, read from
@@ -371,6 +398,23 @@ class SkillCatalogService:
                         "or publish without the email addresses.",
                     )
 
+            # 6. Resolve the credential slots the skill declares into the specs
+            #    the revision freezes. Read-only, and still ahead of
+            #    ``_resolve_package`` below, which commits: a template-provided
+            #    credential whose data cannot be decrypted is a refusal like
+            #    every other one above, not a half-written package.
+            credential_resolutions = SkillCredentialRequirements.resolve_for_publish(
+                session, agent=agent, publisher=user, declarations=entry.credentials
+            )
+            try:
+                credential_specs = SkillCredentialRequirements.build_specs(
+                    session, credential_resolutions
+                )
+            except ValueError as exc:
+                raise SkillCatalogError(
+                    "credential_template_unreadable", str(exc)
+                ) from exc
+
             package, created = SkillCatalogService._resolve_package(
                 session,
                 user=user,
@@ -447,6 +491,7 @@ class SkillCatalogService:
                 size_bytes=size_bytes,
                 release_notes=release_notes or None,
                 published_by_user_id=user.id,
+                required_credential_specs=credential_specs,
             )
             session.add(revision)
             session.commit()
@@ -579,7 +624,24 @@ class SkillCatalogService:
             )
             next_number, published_versions, latest_version = 1, set(), None
 
+        # Resolved by the same code publish runs, so the dialog shows what the
+        # revision would freeze. An invalid skill declares nothing usable (its
+        # block may be the very reason it is invalid) and is refused at publish.
+        credentials = (
+            SkillCredentialRequirements.to_publish_preview(
+                SkillCredentialRequirements.resolve_for_publish(
+                    session,
+                    agent=agent,
+                    publisher=user,
+                    declarations=entry.credentials,
+                )
+            )
+            if entry.error is None
+            else []
+        )
+
         return SkillPublishPreview(
+            credentials=credentials,
             version=SkillCatalogService.resolve_version(
                 requested=None,
                 frontmatter_version=entry.version,
@@ -1409,6 +1471,9 @@ class SkillCatalogService:
             release_notes=revision.release_notes,
             published_by_user_id=revision.published_by_user_id,
             published_at=revision.published_at,
+            required_credentials=SkillCredentialRequirements.specs_to_public(
+                revision.required_credential_specs
+            ),
         )
 
     @staticmethod
@@ -1864,8 +1929,15 @@ class SkillCatalogService:
         revision: SkillPackageRevision,
         conversation_mode: bool = True,
         building_mode: bool = True,
-    ) -> AgentPluginLink:
-        """Create the ``source=catalog`` link. The caller syncs environments.
+    ) -> SkillInstallResult:
+        """Create the ``source=catalog`` link and provision its credential slots.
+
+        The caller syncs credentials (when provisioning changed anything) and
+        plugins to environments.
+
+        The link and the provisioning commit in one transaction (I8): a
+        per-slot problem only degrades the report, an unexpected error rolls
+        both back.
 
         The revision must belong to the package: a link pinned to another
         package's content would install the wrong files under the right name,
@@ -1928,13 +2000,68 @@ class SkillCatalogService:
             building_mode=building_mode,
         )
         session.add(link)
-        session.commit()
+        try:
+            session.flush()
+            provisioning = CredentialProvisioner.provision(
+                session,
+                agent=agent,
+                specs=SkillCredentialRequirements.parse_specs(
+                    revision.required_credential_specs
+                ),
+                publisher=PublisherBoundary(package.publisher_user_id),
+                policy=SKILL_INSTALL_POLICY,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
         session.refresh(link)
         logger.info(
-            "skill_installed package_id=%s revision=%s agent_id=%s",
-            package.package_id, revision.revision_number, agent.id,
+            "skill_installed package_id=%s revision=%s agent_id=%s "
+            "credentials=%s degraded=%s",
+            package.package_id,
+            revision.revision_number,
+            agent.id,
+            _outcome_counts(provisioning),
+            provisioning.degraded,
         )
-        return link
+        return SkillInstallResult(link=link, provisioning=provisioning)
+
+    @staticmethod
+    def install_preview(
+        session: Session,
+        *,
+        agent: Agent,
+        package: SkillPackage,
+        revision: SkillPackageRevision,
+    ) -> SkillInstallPreview:
+        """What installing ``revision`` into ``agent`` would do per credential slot.
+
+        Read-only: the same decision tree as :meth:`install_into_agent`, with
+        the same publisher boundary, so each ``outcome`` is what the install
+        would report now.
+        """
+        if revision.package_id != package.id:
+            raise SkillCatalogError(
+                "revision_not_found",
+                "That revision does not belong to this package.",
+            )
+        items = CredentialProvisioner.preview(
+            session,
+            agent=agent,
+            specs=SkillCredentialRequirements.parse_specs(
+                revision.required_credential_specs
+            ),
+            publisher=PublisherBoundary(package.publisher_user_id),
+            policy=SKILL_INSTALL_POLICY,
+        )
+        return SkillInstallPreview(
+            package_id=package.id,
+            revision_number=revision.revision_number,
+            credentials=SkillCredentialRequirements.provisions_to_public(
+                session, agent=agent, items=items
+            ),
+        )
 
     @staticmethod
     def upgrade_link(
@@ -1945,6 +2072,12 @@ class SkillCatalogService:
         Idempotent: a link already on the latest revision is returned
         unchanged, so the generic upgrade route can call this without first
         asking whether there is anything to do.
+
+        A re-pin provisions only the credential slots the latest revision
+        **adds** — a (type, slot) the previous revision did not declare — in
+        the same transaction. A slot required before was provisioned at
+        install, and one the user unlinked since must stay unlinked. The
+        caller syncs credentials to environments.
         """
         if link.source != PluginSource.catalog:
             raise SkillCatalogError(
@@ -1963,6 +2096,14 @@ class SkillCatalogService:
                 "The catalog entry behind this skill is no longer available.",
             )
         if link.skill_package_revision_id != latest.id:
+            previous = (
+                session.get(SkillPackageRevision, link.skill_package_revision_id)
+                if link.skill_package_revision_id is not None
+                else None
+            )
+            added_specs = SkillCatalogService._credential_specs_added(
+                previous, latest
+            )
             link.skill_package_revision_id = latest.id
             link.installed_version = latest.version
             link.snapshot_config = {
@@ -1972,16 +2113,58 @@ class SkillCatalogService:
             }
             link.updated_at = datetime.now(UTC)
             session.add(link)
-            session.commit()
+            try:
+                agent = session.get(Agent, link.agent_id) if added_specs else None
+                if agent is not None:
+                    provisioning = CredentialProvisioner.provision(
+                        session,
+                        agent=agent,
+                        specs=added_specs,
+                        publisher=PublisherBoundary(package.publisher_user_id),
+                        policy=SKILL_INSTALL_POLICY,
+                    )
+                    logger.info(
+                        "skill_upgraded package_id=%s revision=%s agent_id=%s "
+                        "credentials=%s degraded=%s",
+                        package.package_id,
+                        latest.revision_number,
+                        agent.id,
+                        _outcome_counts(provisioning),
+                        provisioning.degraded,
+                    )
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
             session.refresh(link)
         return link
 
+    @staticmethod
+    def _credential_specs_added(
+        previous: SkillPackageRevision | None, latest: SkillPackageRevision
+    ) -> list[ParsedCredentialSpec]:
+        """Specs of ``latest`` whose (type, slot) ``previous`` does not declare."""
+        before = {
+            (parsed.type, spec_slot(parsed))
+            for parsed in SkillCredentialRequirements.parse_specs(
+                previous.required_credential_specs if previous is not None else None
+            )
+        }
+        return [
+            parsed
+            for parsed in SkillCredentialRequirements.parse_specs(
+                latest.required_credential_specs
+            )
+            if (parsed.type, spec_slot(parsed)) not in before
+        ]
+
     # Uninstall is deliberately NOT a verb here. Removing a catalog skill is
     # `DELETE /llm-plugins/agents/{agent_id}/plugins/{link_id}` like every other
-    # plugin: the row delete is source-agnostic and the container's prune step
-    # removes the directory of anything missing from the manifest, so a second
-    # entry point would only be a second thing to keep correct (plan §5.3,
-    # "reuse LLMPluginService.uninstall_plugin_from_agent").
+    # plugin: the container's prune step removes the directory of anything
+    # missing from the manifest, so a second entry point would only be a second
+    # thing to keep correct (plan §5.3). The one catalog-specific step —
+    # releasing the skill's credential slots — lives in
+    # `LLMPluginService.uninstall_plugin_link`, which that route calls.
 
     @staticmethod
     def package_of_link(

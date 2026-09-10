@@ -26,7 +26,6 @@ Key flows:
 """
 import asyncio
 import copy
-import json
 import logging
 import uuid
 from contextlib import contextmanager
@@ -38,7 +37,6 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.core.db import leader_session
-from app.core.security import encrypt_field
 from app.models.agents.agent import Agent
 from app.models.bundles.agent_bundle import AgentBundle, BundleInstallMode
 from app.models.bundles.agent_bundle_revision import AgentBundleRevision
@@ -58,9 +56,12 @@ from app.models.environments.environment import (
 )
 from app.models.events.event import EventType
 from app.models.users.user import User
-from app.services.bundles.credential_spec import (
-    ParsedCredentialSpec,
-    parse_credential_spec,
+from app.services.bundles.credential_spec import parse_credential_spec
+from app.services.credentials.credential_provisioner import (
+    BUNDLE_INSTALL_POLICY,
+    CredentialProvisioner,
+    ProvisioningSelectionError,
+    PublisherBoundary,
 )
 from app.services.environments.sdk_constants import DEFAULT_SDK
 from app.utils import as_utc
@@ -730,6 +731,10 @@ class InstallService:
     ) -> None:
         """Create placeholders / link selections for the install's credentials.
 
+        The per-spec loop lives in :meth:`CredentialProvisioner.provision`
+        (``BUNDLE_INSTALL_POLICY``); this method owns the transaction and
+        maps a ``ProvisioningSelectionError`` to the HTTP 422.
+
         ``required_credential_specs`` lives on the revision; for each spec
         we either link a foreign publisher-shared credential (when the
         spec is ``provided_by="publisher"``) or create a placeholder /
@@ -762,328 +767,43 @@ class InstallService:
         will surface this to the user; Phase 2+ just keeps the install
         from aborting.
         """
-        from app.models.credentials.credential import Credential, CredentialType
-        from app.models.credentials.link_models import AgentCredentialLink
-
-        degraded = False
-        for raw_spec in revision.required_credential_specs or []:
-            parsed = parse_credential_spec(raw_spec)
-            if parsed is None:
-                continue
-
-            user_selection = (
-                user_provided_data.get(parsed.name) if user_provided_data else None
+        bundle = (
+            session.get(AgentBundle, install.bundle_uuid)
+            if install.bundle_uuid
+            else None
+        )
+        specs = [
+            parsed
+            for parsed in (
+                parse_credential_spec(raw_spec)
+                for raw_spec in revision.required_credential_specs or []
             )
-
-            # ── Template-provided branch ─────────────────────────────────
-            # The publisher chose to ship non-private fields as template
-            # defaults; the installer only needs to fill in the private
-            # ones. We materialise a fresh Credential row owned by the
-            # installer with the template_data pre-filled and
-            # is_placeholder=True so the runtime gate keeps the install
-            # in needs_setup until the private fields are supplied.
-            #
-            # If the installer explicitly opted to link an existing
-            # credential of theirs (``mode="use_existing"``) we honour
-            # that and skip the template materialisation — a fully-set-up
-            # credential they already own beats a half-filled template.
-            if parsed.provided_by == "template":
-                wants_existing = (
-                    isinstance(user_selection, dict)
-                    and user_selection.get("mode") == "use_existing"
-                    and user_selection.get("credential_id")
-                )
-                if not wants_existing:
-                    if InstallService._materialise_template_credential(
-                        session=session,
-                        install=install,
-                        parsed=parsed,
-                    ):
-                        continue
-                    # Bad spec data falls through to a regular placeholder so
-                    # the install still completes and the runtime gate guides
-                    # the installer. Mark the install as degraded so the
-                    # publisher can see template materialisation didn't take.
-                    degraded = True
-                    logger.warning(
-                        "Failed to materialise template credential for spec '%s' "
-                        "on install %s — falling back to placeholder",
-                        parsed.name, install.id,
-                    )
-
-            # ── Publisher-provided branch ─────────────────────────────────
-            if (
-                parsed.provided_by == "publisher"
-                and parsed.publisher_credential_id is not None
-            ):
-                # Validate: explicit user_existing override on a publisher
-                # spec is not permitted.
-                if (
-                    isinstance(user_selection, dict)
-                    and user_selection.get("mode") == "use_existing"
-                ):
-                    raise HTTPException(
-                        status_code=422,
-                        detail=(
-                            f"Spec '{parsed.name}' is provided by the publisher and "
-                            "cannot be overridden with a personal credential. "
-                            "Re-submit with mode='publisher_provides' or omit "
-                            "the entry."
-                        ),
-                    )
-                linked = InstallService._try_link_publisher_credential(
-                    session=session,
-                    install=install,
-                    publisher_credential_id_raw=str(parsed.publisher_credential_id),
-                    spec_name=parsed.name,
-                )
-                if linked:
-                    continue
-                # Fall through to placeholder; record degradation.
-                degraded = True
-                logger.warning(
-                    "Falling back to placeholder for spec '%s' on install %s "
-                    "(publisher credential %s unusable)",
-                    parsed.name, install.id, parsed.publisher_credential_id,
-                )
-
-            # ── User-provided branch (default) ────────────────────────────
-            mode: str = "placeholder"
-            selected_credential_id: uuid.UUID | None = None
-            if isinstance(user_selection, dict):
-                mode = user_selection.get("mode") or "placeholder"
-                cred_id_raw = user_selection.get("credential_id")
-                if cred_id_raw:
-                    try:
-                        selected_credential_id = uuid.UUID(str(cred_id_raw))
-                    except (ValueError, TypeError):
-                        selected_credential_id = None
-
-            # Treat publisher_provides on a user-spec as a no-op echo —
-            # the user-branch fall-through creates the placeholder.
-            if mode == "use_existing" and selected_credential_id:
-                selected = session.get(Credential, selected_credential_id)
-                # Accept the credential when the installer owns it OR when it has
-                # been explicitly shared with them (CredentialShare row exists).
-                # The latter covers the per-user-scoped second-token flow where
-                # the publisher pre-shares a slot-tagged credential before install.
-                if selected:
-                    installer_owns = selected.owner_id == install.owner_id
-                    installer_has_share = False
-                    if not installer_owns:
-                        from app.models.credentials.credential_share import CredentialShare
-                        installer_has_share = session.exec(
-                            select(CredentialShare).where(
-                                CredentialShare.credential_id == selected.id,
-                                CredentialShare.shared_with_user_id == install.owner_id,
-                            )
-                        ).first() is not None
-                    if installer_owns or installer_has_share:
-                        session.add(AgentCredentialLink(
-                            agent_id=install.id,
-                            credential_id=selected.id,
-                        ))
-                        continue
-                logger.warning(
-                    "Credential %s not owned by or shared with install owner %s "
-                    "— falling back to placeholder",
-                    selected_credential_id, install.owner_id,
-                )
-
-            try:
-                cred_type = CredentialType(parsed.type)
-            except ValueError:
-                logger.warning(
-                    "Unknown credential type '%s' for spec '%s' — skipping",
-                    parsed.type, parsed.name,
-                )
-                continue
-
-            placeholder = Credential(
-                owner_id=install.owner_id,
-                name=f"{parsed.name} (placeholder)",
-                type=cred_type,
-                notes="Placeholder for required bundle credential.",
-                encrypted_data=encrypt_field(json.dumps({})),
-                is_placeholder=True,
-                allow_sharing=False,
+            if parsed is not None
+        ]
+        try:
+            report = CredentialProvisioner.provision(
+                session,
+                agent=install,
+                specs=specs,
+                # No bundle row → no trust check. With a row, the check
+                # compares against ``publisher_user_id`` even when it is NULL.
+                publisher=(
+                    PublisherBoundary(bundle.publisher_user_id)
+                    if bundle is not None
+                    else None
+                ),
+                policy=BUNDLE_INSTALL_POLICY,
+                user_selections=user_provided_data,
             )
-            session.add(placeholder)
-            session.flush()
-            session.add(AgentCredentialLink(
-                agent_id=install.id,
-                credential_id=placeholder.id,
-            ))
+        except ProvisioningSelectionError as e:
+            raise HTTPException(status_code=422, detail=e.message) from e
         session.commit()
 
-        if degraded:
+        if report.degraded:
             install.last_update_status = "degraded"
             session.add(install)
             session.commit()
             session.refresh(install)
-
-    @staticmethod
-    def _materialise_template_credential(
-        *,
-        session: Session,
-        install: Agent,
-        parsed: ParsedCredentialSpec,
-    ) -> bool:
-        """Create a placeholder Credential seeded from a template spec.
-
-        Reads ``template_data`` (publisher's non-private values) and
-        ``template_private_fields`` (the field names the installer must
-        supply). Persists a Credential row owned by the installer with:
-
-          - ``encrypted_data`` initialised from ``template_data``
-          - ``is_placeholder=True`` so the runtime gate keeps the install
-            in needs_setup until the private fields are filled in
-          - ``allow_sharing=False`` and ``allow_template_sharing=False``
-            (the installer's row is private to them; downstream re-sharing
-            requires an explicit toggle)
-          - ``template_private_fields`` mirrored onto the installer's row
-            so the setup page can highlight which fields are still empty
-          - ``service_uri`` (a non-secret slot id) copied from the spec like
-            a non-private template field, unless the publisher marked it
-            private via ``template_private_fields``
-
-        Returns ``True`` on success; ``False`` if the spec lacks a usable
-        type so the caller falls back to the regular placeholder path.
-        """
-        from app.models.credentials.credential import CredentialType
-
-        name = parsed.name or "template credential"
-        try:
-            cred_type = CredentialType(parsed.type)
-        except ValueError:
-            return False
-
-        # service_uri is a non-secret slot id, not a credential_data field.
-        # Copy it as a shared template default unless the publisher listed
-        # "service_uri" in template_private_fields (installer provides),
-        # mirroring how non_private_template_data strips private fields.
-        service_uri = (
-            None
-            if "service_uri" in parsed.template_private_fields
-            else parsed.service_uri
-        )
-
-        cred = Credential(
-            owner_id=install.owner_id,
-            name=name,
-            type=cred_type,
-            notes=parsed.description or "Created from bundle template.",
-            encrypted_data=encrypt_field(json.dumps(parsed.non_private_template_data)),
-            is_placeholder=True,
-            allow_sharing=False,
-            allow_template_sharing=False,
-            template_private_fields=parsed.template_private_fields,
-            service_uri=service_uri,
-        )
-        session.add(cred)
-        session.flush()
-        session.add(AgentCredentialLink(
-            agent_id=install.id,
-            credential_id=cred.id,
-        ))
-        return True
-
-    @staticmethod
-    def _try_link_publisher_credential(
-        *,
-        session: Session,
-        install: Agent,
-        publisher_credential_id_raw: str,
-        spec_name: str,
-    ) -> bool:
-        """Best-effort link of a publisher-shared service credential.
-
-        Returns True on success, False on any validation failure (caller
-        falls through to the placeholder path).
-
-        Steps:
-          1. Resolve the publisher's ``Credential`` row by id.
-          2. Verify ownership matches the bundle publisher and the row
-             still has ``allow_sharing=True`` (a publisher-revoked share
-             is the most common breakage at this point).
-          3. Ensure a ``CredentialShare`` exists from publisher to
-             installer (idempotent — keys on credential_id +
-             shared_with_user_id).
-          4. Insert the ``AgentCredentialLink`` for the install.
-        """
-        from app.models.credentials.credential import Credential
-        from app.models.credentials.credential_share import CredentialShare
-        from app.models.credentials.link_models import AgentCredentialLink
-
-        try:
-            publisher_credential_id = uuid.UUID(str(publisher_credential_id_raw))
-        except (ValueError, TypeError):
-            logger.warning(
-                "Invalid publisher_credential_id %r on spec '%s'",
-                publisher_credential_id_raw, spec_name,
-            )
-            return False
-
-        publisher_cred = session.get(Credential, publisher_credential_id)
-        if publisher_cred is None:
-            logger.warning(
-                "Publisher credential %s missing for spec '%s' on install %s",
-                publisher_credential_id, spec_name, install.id,
-            )
-            return False
-        if not publisher_cred.allow_sharing:
-            logger.warning(
-                "Publisher credential %s no longer allows sharing for spec '%s' on install %s",
-                publisher_credential_id, spec_name, install.id,
-            )
-            return False
-
-        # Bundle publisher == credential owner is the trust boundary.
-        bundle = session.get(AgentBundle, install.bundle_uuid) if install.bundle_uuid else None
-        if bundle is not None and publisher_cred.owner_id != bundle.publisher_user_id:
-            logger.warning(
-                "Publisher credential %s not owned by bundle publisher %s "
-                "(actual owner %s) — falling through for spec '%s'",
-                publisher_credential_id, bundle.publisher_user_id,
-                publisher_cred.owner_id, spec_name,
-            )
-            return False
-
-        # Installer-as-publisher (publisher install) doesn't need a share.
-        if publisher_cred.owner_id != install.owner_id:
-            existing_share = session.exec(
-                select(CredentialShare).where(
-                    CredentialShare.credential_id == publisher_credential_id,
-                    CredentialShare.shared_with_user_id == install.owner_id,
-                )
-            ).first()
-            if existing_share is None:
-                # First-writer-wins: stamp provenance only on insert. A
-                # pre-existing direct share (source="direct") is left untouched,
-                # so the credential stays under "My Credentials" rather than
-                # being flipped to "bundle_install".
-                session.add(CredentialShare(
-                    credential_id=publisher_credential_id,
-                    shared_with_user_id=install.owner_id,
-                    shared_by_user_id=publisher_cred.owner_id,
-                    access_level="read",
-                    source="bundle_install",
-                ))
-                session.flush()
-
-        # Idempotent link insertion (re-install hits this path again).
-        existing_link = session.exec(
-            select(AgentCredentialLink).where(
-                AgentCredentialLink.agent_id == install.id,
-                AgentCredentialLink.credential_id == publisher_credential_id,
-            )
-        ).first()
-        if existing_link is None:
-            session.add(AgentCredentialLink(
-                agent_id=install.id,
-                credential_id=publisher_credential_id,
-            ))
-        return True
 
     @staticmethod
     async def _link_publisher_ai_credential(

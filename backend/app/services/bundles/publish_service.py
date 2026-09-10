@@ -50,6 +50,7 @@ from app.models.events.event import EventType
 from app.models.credentials.credential import Credential
 from app.models.credentials.link_models import AgentCredentialLink
 from app.services.bundles.bundle_service import BundleService
+from app.services.bundles.credential_spec import build_spec
 from app.services.bundles.revision_format import RevisionFormat
 from app.services.credentials.credentials_service import CredentialsService
 from app.services.environments.workspace_classification import (
@@ -751,7 +752,9 @@ class PublishService:
         Emits the evolved per-spec shape with ``provided_by``,
         ``publisher_credential_id`` and (for templates) ``template_data``
         + ``template_private_fields``. ``provided_by`` is resolved by
-        :meth:`resolve_provided_by`.
+        :meth:`resolve_provided_by`; the dict itself is written by
+        :func:`~app.services.bundles.credential_spec.build_spec`, the single
+        writer skill publish shares.
 
         ``_validate_publisher_provides`` (run before this) guarantees that
         every ``provided_by="publisher"`` spec references a credential
@@ -767,32 +770,21 @@ class PublishService:
             cred = session.get(Credential, link.credential_id)
             if not cred:
                 continue
-            allow_sharing = bool(cred.allow_sharing)
-            allow_template_sharing = bool(getattr(cred, "allow_template_sharing", False))
-            provided_by = PublishService.resolve_provided_by(cred, install)
-
-            publisher_credential_id = cred.id if provided_by == "publisher" else None
-            spec: dict = {
-                "name": cred.name,
-                "type": cred.type.value if hasattr(cred.type, "value") else str(cred.type),
-                "allow_sharing": allow_sharing,
-                "allow_template_sharing": allow_template_sharing,
-                "description": cred.notes or None,
-                "provided_by": provided_by,
-                "publisher_credential_id": (
-                    str(publisher_credential_id)
-                    if publisher_credential_id is not None
-                    else None
-                ),
-                "service_uri": cred.service_uri,
-            }
-            if provided_by == "template":
-                template_data, template_private_fields = (
-                    PublishService._template_payload_for(session, cred)
+            specs.append(
+                build_spec(
+                    session,
+                    credential=cred,
+                    credential_type=(
+                        cred.type.value
+                        if hasattr(cred.type, "value")
+                        else str(cred.type)
+                    ),
+                    provided_by=PublishService.resolve_provided_by(cred, install),
+                    name=cred.name,
+                    service_uri=cred.service_uri,
+                    description=cred.notes or None,
                 )
-                spec["template_data"] = template_data
-                spec["template_private_fields"] = template_private_fields
-            specs.append(spec)
+            )
         return specs
 
     @staticmethod

@@ -1,10 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
-import { Box, Share2, AlertTriangle } from "lucide-react"
+import { AlertTriangle, Share2 } from "lucide-react"
 import { useEffect, useState } from "react"
-
-import { CredentialsService } from "@/client"
 import type { CredentialPublic } from "@/client"
+import { CredentialsService } from "@/client"
+import { ListRowGroup } from "@/components/Common/ListRow"
+import { PreviewList } from "@/components/Common/PreviewList"
+import { QueryErrorAlert } from "@/components/Common/QueryErrorAlert"
+import {
+  UserAllowlistPicker,
+  type UserAllowlistSelectedItem,
+} from "@/components/Common/UserAllowlistPicker"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -21,18 +27,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert"
-import {
-  UserAllowlistPicker,
-  type UserAllowlistSelectedItem,
-} from "@/components/Common/UserAllowlistPicker"
+import { LoadingButton } from "@/components/ui/loading-button"
+import { Skeleton } from "@/components/ui/skeleton"
 import useCustomToast from "@/hooks/useCustomToast"
 import useRole from "@/hooks/useRole"
 import { handleError } from "@/utils"
+import {
+  bundleImpactSentence,
+  skillImpactSentence,
+} from "@/utils/skillCredentials"
+import { CredentialBundleUsagesSheet } from "./CredentialBundleUsagesSheet"
+import { BundleUsageRow, SkillUsageRow } from "./CredentialUsageRows"
 
 interface CredentialSharingProps {
   credential: CredentialPublic
@@ -43,7 +48,10 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { isAgentUser } = useRole()
   const [isDisableDialogOpen, setIsDisableDialogOpen] = useState(false)
-  const [allowSharing, setAllowSharing] = useState(credential.allow_sharing ?? false)
+  const [allBundlesOpen, setAllBundlesOpen] = useState(false)
+  const [allowSharing, setAllowSharing] = useState(
+    credential.allow_sharing ?? false,
+  )
 
   // Sync local state when prop changes (e.g., after query refetch)
   useEffect(() => {
@@ -52,24 +60,38 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
 
   const { data: sharesData } = useQuery({
     queryKey: ["credential-shares", credential.id],
-    queryFn: () => CredentialsService.getCredentialShares({ credentialId: credential.id }),
+    queryFn: () =>
+      CredentialsService.getCredentialShares({ credentialId: credential.id }),
     enabled: allowSharing,
   })
 
   // Bundles whose publisher install has this credential linked. Shown
   // on the sharing card so the owner can see at a glance where their
   // credential is in use across the bundles they publish.
-  const { data: bundleUsages } = useQuery({
+  const {
+    data: bundleUsages,
+    isLoading: isBundleUsagesLoading,
+    isError: isBundleUsagesError,
+    error: bundleUsagesError,
+    refetch: refetchBundleUsages,
+  } = useQuery({
     queryKey: ["credential-bundle-usages", credential.id],
     queryFn: () =>
       CredentialsService.listCredentialBundleUsages({ id: credential.id }),
   })
 
   // Deletion-impact also covers the disable-sharing blast radius: when this
-  // credential is publisher-provided (PBP) in published bundles, disabling
-  // sharing revokes the publisher shares and breaks those installs — the same
-  // class of impact as a delete. Surfaced in the disable-sharing dialog.
-  const { data: deletionImpact } = useQuery({
+  // credential is publisher-provided (PBP) in published bundles or catalog
+  // skills, disabling sharing revokes the publisher shares and breaks those
+  // installs — the same class of impact as a delete. Surfaced in the
+  // disable-sharing dialog.
+  const {
+    data: deletionImpact,
+    isLoading: isImpactLoading,
+    isError: isImpactError,
+    error: impactError,
+    refetch: refetchImpact,
+  } = useQuery({
     queryKey: ["credential-deletion-impact", credential.id],
     queryFn: () =>
       CredentialsService.getCredentialDeletionImpact({ id: credential.id }),
@@ -81,10 +103,14 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
   // Invalidate every cache that carries this credential's share_count so the
   // "Shared with N users" header and card badge update immediately.
   const invalidateShareCaches = () => {
-    queryClient.invalidateQueries({ queryKey: ["credential-shares", credential.id] })
+    queryClient.invalidateQueries({
+      queryKey: ["credential-shares", credential.id],
+    })
     queryClient.invalidateQueries({ queryKey: ["credentials"] })
     queryClient.invalidateQueries({ queryKey: ["credential", credential.id] })
-    queryClient.invalidateQueries({ queryKey: ["credential-with-data", credential.id] })
+    queryClient.invalidateQueries({
+      queryKey: ["credential-with-data", credential.id],
+    })
   }
 
   const shareMutation = useMutation({
@@ -124,7 +150,7 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
       showSuccessToast(
         newAllowSharing
           ? "Sharing enabled for this credential"
-          : "Sharing disabled. All shares have been revoked."
+          : "Sharing disabled. All shares have been revoked.",
       )
       setIsDisableDialogOpen(false)
       invalidateShareCaches()
@@ -134,6 +160,7 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
 
   const shares = sharesData?.data ?? []
   const shareCount = credential.share_count ?? 0
+  const isDisabling = toggleSharingMutation.isPending
 
   // Map existing shares into the shared picker's selected-pill model.
   const selectedShares: UserAllowlistSelectedItem[] = shares.map((s) => ({
@@ -141,6 +168,37 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
     userId: s.shared_with_user_id,
     fallbackLabel: s.shared_with_email,
   }))
+
+  const sharedBundleUsages = (bundleUsages?.data ?? []).filter(
+    (u) => u.provided_by === "publisher",
+  )
+  // "Down" is an error with nothing cached: a failed background refetch keeps
+  // the rows it already had.
+  const bundleUsagesDown = isBundleUsagesError && !bundleUsages
+  // The section is hidden only once it is known to be empty; while loading or
+  // failed it shows, so a failure never reads as "used in no bundles".
+  const showBundleUsages =
+    isBundleUsagesLoading || bundleUsagesDown || sharedBundleUsages.length > 0
+
+  // What disabling sharing breaks, composed per source: a sentence only for a
+  // source whose published packages have active installs (nothing breaks
+  // otherwise), one alert for both, and one list of those sources' rows.
+  const pbpBundleUsages = deletionImpact?.bundle_pbp_usages ?? []
+  const pbpSkillUsages = deletionImpact?.skill_pbp_usages ?? []
+  const activeBundleInstalls = deletionImpact?.active_install_count ?? 0
+  const activeSkillInstalls = deletionImpact?.active_skill_install_count ?? 0
+  const bundlesBreak = pbpBundleUsages.length > 0 && activeBundleInstalls > 0
+  const skillsBreak = pbpSkillUsages.length > 0 && activeSkillInstalls > 0
+  const bundleImpact = bundlesBreak
+    ? bundleImpactSentence(
+        pbpBundleUsages.length,
+        activeBundleInstalls,
+        "disable",
+      )
+    : null
+  const skillImpact = skillsBreak
+    ? skillImpactSentence(pbpSkillUsages.length, activeSkillInstalls, "disable")
+    : null
 
   if (isAgentUser) {
     return null
@@ -181,7 +239,9 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
               />
               <div
                 className={`block h-6 w-11 rounded-full transition-colors ${
-                  allowSharing ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"
+                  allowSharing
+                    ? "bg-emerald-500"
+                    : "bg-gray-300 dark:bg-gray-600"
                 }`}
               />
               <div
@@ -216,140 +276,120 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
           </div>
         )}
 
-        {(() => {
-          const sharedUsages = (bundleUsages?.data ?? []).filter(
-            (u) => u.provided_by === "publisher",
-          )
-          if (sharedUsages.length === 0) return null
-          return (
-            <div className="space-y-2 pt-2">
-              <h4 className="text-sm font-medium">Used in Bundles</h4>
-              <p className="text-xs text-muted-foreground">
-                Bundles that ship this credential as a fully shared
-                publisher credential.
-              </p>
-              <ul className="space-y-1.5">
-                {sharedUsages.map((usage) => (
-                  <li
-                    key={usage.bundle_uuid}
-                    className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Box className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {usage.display_name}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate font-mono">
-                          {usage.bundle_id}
-                        </div>
-                      </div>
-                    </div>
-                    {usage.publisher_install_id && (
-                      <Button asChild variant="outline" size="sm">
-                        <Link
-                          to="/agent/$agentId"
-                          params={{
-                            agentId: usage.publisher_install_id,
-                          }}
-                          hash="bundle"
-                        >
-                          Open
-                        </Link>
-                      </Button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )
-        })()}
+        {showBundleUsages && (
+          <div className="space-y-2 pt-2">
+            <h4 className="text-sm font-medium">Used in Bundles</h4>
+            <p className="text-xs text-muted-foreground">
+              Bundles that ship this credential as a fully shared publisher
+              credential.
+            </p>
+            {/* P5: capped at the house five, the rest in a Sheet. */}
+            <PreviewList
+              items={sharedBundleUsages}
+              getKey={(usage) => usage.bundle_uuid}
+              renderItem={(usage) => <BundleUsageRow usage={usage} />}
+              isLoading={isBundleUsagesLoading}
+              isError={bundleUsagesDown}
+              error={bundleUsagesError}
+              onRetry={() => refetchBundleUsages()}
+              errorFallback="Couldn't load the bundles that use this credential"
+              empty={null}
+              skeletonRows={1}
+              skeletonClassName="h-[44px] w-full rounded-md"
+              onShowAll={() => setAllBundlesOpen(true)}
+            />
+          </div>
+        )}
 
-        {/* Disable Sharing Confirmation Dialog */}
-        <Dialog open={isDisableDialogOpen} onOpenChange={setIsDisableDialogOpen}>
-          <DialogContent>
+        <CredentialBundleUsagesSheet
+          usages={sharedBundleUsages}
+          open={allBundlesOpen}
+          onOpenChange={setAllBundlesOpen}
+        />
+
+        {/* Disable-sharing confirm. A `Dialog` rather than an `AlertDialog`
+            because it carries fetched impact data (§2 Confirmation). */}
+        <Dialog
+          open={isDisableDialogOpen}
+          onOpenChange={(next) => {
+            // Escape and outside-click must not close a dialog mid-request.
+            if (!isDisabling) setIsDisableDialogOpen(next)
+          }}
+        >
+          <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden sm:max-w-md [&>*]:min-w-0">
             <DialogHeader>
-              <DialogTitle>Disable Sharing?</DialogTitle>
+              <DialogTitle className="break-words">
+                Disable sharing for {credential.name}?
+              </DialogTitle>
               <DialogDescription>
-                This will revoke access for all users this credential is currently shared with.
+                This will revoke access for all users this credential is
+                currently shared with.
               </DialogDescription>
             </DialogHeader>
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>Warning</AlertTitle>
               <AlertDescription>
-                {shareCount} user{shareCount !== 1 ? "s" : ""} will lose access to this credential
-                immediately. This action cannot be undone.
+                {shareCount} user{shareCount !== 1 ? "s" : ""} will lose access
+                to this credential immediately. This action cannot be undone.
               </AlertDescription>
             </Alert>
-            {(() => {
-              const pbpUsages = (deletionImpact?.bundle_pbp_usages ?? [])
-              const activeInstalls = deletionImpact?.active_install_count ?? 0
-              if (pbpUsages.length === 0) return null
-              return (
-                <div className="space-y-2 pt-1">
+            {isImpactLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-[44px] w-full" />
+                <Skeleton className="h-[44px] w-full" />
+              </div>
+            ) : isImpactError && !deletionImpact ? (
+              // Revoking access must not be blocked by a failed read, so the
+              // confirm below stays enabled.
+              <QueryErrorAlert
+                error={impactError}
+                fallback="Couldn't check which bundles and skills use it"
+                onRetry={() => refetchImpact()}
+                compact
+              />
+            ) : (
+              (bundleImpact || skillImpact) && (
+                <div className="space-y-2">
                   <Alert variant="destructive">
-                    <Box className="h-4 w-4" />
-                    <AlertTitle>This breaks published bundles</AlertTitle>
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>
+                      Published installs lose this credential
+                    </AlertTitle>
                     <AlertDescription>
-                      This credential is provided by the publisher in{" "}
-                      {pbpUsages.length} published bundle
-                      {pbpUsages.length !== 1 ? "s" : ""}
-                      {activeInstalls > 0 && (
-                        <>
-                          {" "}with {activeInstalls} active install
-                          {activeInstalls !== 1 ? "s" : ""}
-                        </>
-                      )}
-                      . Disabling sharing will leave those installs without their
-                      publisher-provided credentials.
+                      {[bundleImpact, skillImpact].filter(Boolean).join(" ")}
                     </AlertDescription>
                   </Alert>
-                  <ul className="space-y-1.5">
-                    {pbpUsages.map((usage) => (
-                      <li
-                        key={usage.bundle_uuid}
-                        className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Box className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">
-                              {usage.display_name}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate font-mono">
-                              {usage.bundle_id}
-                            </div>
-                          </div>
-                        </div>
-                        {usage.publisher_install_id && (
-                          <Button asChild variant="outline" size="sm">
-                            <Link
-                              to="/agent/$agentId"
-                              params={{ agentId: usage.publisher_install_id }}
-                              hash="bundle"
-                            >
-                              Open
-                            </Link>
-                          </Button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  <ListRowGroup>
+                    {bundlesBreak &&
+                      pbpBundleUsages.map((usage) => (
+                        <BundleUsageRow key={usage.bundle_uuid} usage={usage} />
+                      ))}
+                    {skillsBreak &&
+                      pbpSkillUsages.map((usage) => (
+                        <SkillUsageRow key={usage.package_uuid} usage={usage} />
+                      ))}
+                  </ListRowGroup>
                 </div>
               )
-            })()}
+            )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDisableDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setIsDisableDialogOpen(false)}
+                disabled={isDisabling}
+              >
                 Cancel
               </Button>
-              <Button
+              <LoadingButton
                 variant="destructive"
+                loading={isDisabling}
+                // Nobody confirms blind while the impact is still loading.
+                disabled={isImpactLoading}
                 onClick={() => toggleSharingMutation.mutate(false)}
-                disabled={toggleSharingMutation.isPending}
               >
-                Disable Sharing
-              </Button>
+                Disable sharing
+              </LoadingButton>
             </DialogFooter>
           </DialogContent>
         </Dialog>

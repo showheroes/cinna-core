@@ -6,6 +6,7 @@ import type { CredentialPublic } from "@/client"
 import { Button } from "@/components/ui/button"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { cn } from "@/lib/utils"
+import { credentialTypeLabel } from "@/utils/skillCredentials"
 import { CredentialActionsMenu } from "./CredentialActionsMenu"
 
 function CopyId({ id }: { id: string }) {
@@ -30,23 +31,6 @@ function CopyId({ id }: { id: string }) {
       </Button>
     </div>
   )
-}
-
-const credentialTypeLabels: Record<string, string> = {
-  email_imap: "Email (IMAP)",
-  email_smtp: "Email (SMTP)",
-  odoo: "Odoo",
-  gmail_oauth: "Gmail OAuth",
-  gmail_oauth_readonly: "Gmail OAuth (Read-Only)",
-  gdrive_oauth: "Google Drive OAuth",
-  gdrive_oauth_readonly: "Google Drive OAuth (Read-Only)",
-  gcalendar_oauth: "Google Calendar OAuth",
-  gcalendar_oauth_readonly: "Google Calendar OAuth (Read-Only)",
-  google_service_account: "Google Service Account",
-  api_token: "API Token",
-  ssh_key: "SSH Key",
-  agent_api: "Agent REST API",
-  mcp_provider: "MCP Provider",
 }
 
 export const columns: ColumnDef<CredentialPublic>[] = [
@@ -75,7 +59,7 @@ export const columns: ColumnDef<CredentialPublic>[] = [
       const type = row.original.type
       return (
         <span className="text-sm">
-          {credentialTypeLabels[type] || type}
+          {credentialTypeLabel(type)}
         </span>
       )
     },
