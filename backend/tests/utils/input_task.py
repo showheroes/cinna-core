@@ -24,6 +24,7 @@ def create_task(
     assigned_node_id: str | None = None,
     parent_task_id: str | None = None,
     auto_execute: bool | None = None,
+    external_ref: str | None = None,
 ) -> dict:
     """POST /tasks/ — asserts 200 and returns body."""
     payload: dict = {"original_message": original_message, "priority": priority}
@@ -39,6 +40,8 @@ def create_task(
         payload["parent_task_id"] = parent_task_id
     if auto_execute is not None:
         payload["auto_execute"] = auto_execute
+    if external_ref is not None:
+        payload["external_ref"] = external_ref
     r = client.post(_BASE + "/", headers=headers, json=payload)
     assert r.status_code == 200, f"Task creation failed: {r.text}"
     return r.json()
@@ -232,6 +235,29 @@ def execute_task(
         json={"mode": mode},
     )
     assert r.status_code == 200, f"Execute task failed: {r.text}"
+    return r.json()
+
+
+def set_task_status(
+    client: TestClient,
+    headers: dict,
+    task_id: str,
+    status: str,
+    reason: str | None = None,
+) -> dict:
+    """POST /tasks/{task_id}/status — asserts 200 and returns body."""
+    payload: dict = {"status": status}
+    if reason is not None:
+        payload["reason"] = reason
+    r = client.post(f"{_BASE}/{task_id}/status", headers=headers, json=payload)
+    assert r.status_code == 200, f"Set task status failed: {r.text}"
+    return r.json()
+
+
+def list_tasks(client: TestClient, headers: dict, **params) -> dict:
+    """GET /tasks/ — asserts 200 and returns the full body (data + count)."""
+    r = client.get(_BASE + "/", headers=headers, params=params)
+    assert r.status_code == 200, f"List tasks failed: {r.text}"
     return r.json()
 
 

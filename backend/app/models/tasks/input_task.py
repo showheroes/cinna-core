@@ -8,7 +8,7 @@ system: short-code IDs, hierarchy, team assignment, priority.
 import uuid
 from datetime import datetime, UTC
 from sqlmodel import Field, SQLModel, Column
-from sqlalchemy import JSON, Index
+from sqlalchemy import JSON, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.files.file_upload import FileUploadPublic
@@ -73,6 +73,16 @@ class InputTask(InputTaskBase, table=True):
         Index("ix_input_task_parent_task_id", "parent_task_id"),
         Index("ix_input_task_team_id", "team_id"),
         Index("ix_input_task_assigned_node_id", "assigned_node_id"),
+        # Item B: incremental-sync cursor for external clients polling GET /tasks/
+        Index("ix_input_task_owner_updated", "owner_id", "updated_at"),
+        # Item C: idempotency key, unique per owner only where one was supplied
+        Index(
+            "ix_input_task_owner_external_ref",
+            "owner_id",
+            "external_ref",
+            unique=True,
+            postgresql_where=text("external_ref IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -134,6 +144,11 @@ class InputTask(InputTaskBase, table=True):
         default=None, foreign_key="agentic_team_node.id", ondelete="SET NULL"
     )
 
+    # Caller-supplied idempotency key, scoped to the owner. An external client
+    # (the desktop app) sends its own local task id here so a retried create
+    # returns the first task instead of making a second one.
+    external_ref: str | None = Field(default=None, max_length=64)
+
 
 # Create schema
 class InputTaskCreate(SQLModel):
@@ -152,6 +167,9 @@ class InputTaskCreate(SQLModel):
     team_id: uuid.UUID | None = None
     assigned_node_id: uuid.UUID | None = None
     parent_task_id: uuid.UUID | None = None
+    # Idempotency key. Re-creating with a ref this owner already used returns
+    # the existing task rather than a duplicate.
+    external_ref: str | None = Field(default=None, max_length=64)
 
 
 # Update schema
@@ -195,6 +213,7 @@ class InputTaskPublic(SQLModel):
     team_id: uuid.UUID | None = None
     assigned_node_id: uuid.UUID | None = None
     created_by_node_id: uuid.UUID | None = None
+    external_ref: str | None = None
     # Computed counts (populated by service layer)
     subtask_count: int = 0
     subtask_completed_count: int = 0
@@ -261,6 +280,22 @@ class ExecuteTaskResponse(SQLModel):
     session_id: uuid.UUID | None = None
     error: str | None = None
     file_ids: list[str] | None = None
+
+
+class InputTaskStatusUpdate(SQLModel):
+    """User request to set a task's status.
+
+    Deliberately separate from ``InputTaskUpdate``: a status change carries a
+    reason, writes an audit row and is checked against the transition table,
+    none of which the field-patch route does. Deliberately separate from
+    ``AgentTaskStatusUpdate`` too — that one's allowed set and its consumers
+    belong to the container-side agent API.
+    """
+    status: str
+    # Uncapped, like AgentTaskStatusUpdate.reason and the TaskStatusHistory
+    # column it lands in — the docstring promises one refusal vocabulary for
+    # both callers, and a length limit only one of them has would break it.
+    reason: str | None = None
 
 
 # Agent-facing request/response models (for MCP tools and internal agent API)

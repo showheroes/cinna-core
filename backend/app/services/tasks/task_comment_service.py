@@ -19,6 +19,7 @@ from app.models.agents.agent import Agent
 from app.models.events.event import EventType
 from app.services.events.event_service import event_service
 from app.utils import create_task_with_error_logging
+from app.services.tasks.task_touch import touch_task
 
 
 @dataclass
@@ -185,6 +186,7 @@ class TaskCommentService:
             author_user_id=author_user_id,
         )
         db_session.add(comment)
+        touch_task(db_session, task_id)
         db_session.commit()
         db_session.refresh(comment)
 
@@ -326,6 +328,7 @@ class TaskCommentService:
             comment_meta=comment_meta,
         )
         db_session.add(comment)
+        touch_task(db_session, task_id)
         db_session.commit()
         db_session.refresh(comment)
 
@@ -391,6 +394,10 @@ class TaskCommentService:
         if not task or task.owner_id != user_id:
             return False
 
+        # Read the task id before the delete — after it, the attribute is only
+        # readable by accident of the identity map.
+        task_id = comment.task_id
         db_session.delete(comment)
+        touch_task(db_session, task_id)
         db_session.commit()
         return True

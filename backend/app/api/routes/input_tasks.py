@@ -5,6 +5,7 @@ Provides CRUD operations for input task management, plus collaboration endpoints
 for comments, attachments, subtasks, and short-code access.
 """
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
@@ -19,6 +20,7 @@ from app.models import (
     InputTaskDetailPublic,
     InputTasksPublicExtended,
     InputTaskStatus,
+    InputTaskStatusUpdate,
     RefineTaskRequest,
     RefineTaskResponse,
     ExecuteTaskRequest,
@@ -92,12 +94,18 @@ async def create_task(
                 user_id=current_user.id,
             )
 
-        task = InputTaskService.create_task(
+        task, created = InputTaskService.create_task_idempotent(
             db_session=session, user_id=current_user.id, data=task_in
         )
 
-        # Auto-execute if requested and agent is assigned
-        if task.auto_execute and task.selected_agent_id:
+        # Auto-execute if requested and agent is assigned.
+        #
+        # Gated on `created`. When an external_ref matched an existing task this
+        # call is a retry of one already handled, and re-firing execution would
+        # put a second agent session on the same task — duplicate work, duplicate
+        # spend, duplicate results. Deduplicating the row while repeating its
+        # side effect is worse than the duplicate row the key exists to prevent.
+        if created and task.auto_execute and task.selected_agent_id:
             create_task_with_error_logging(
                 InputTaskService._auto_execute_task(task),
                 task_name=f"auto_execute_task_{task.id}"
@@ -119,6 +127,7 @@ def list_tasks(
     root_only: bool = False,
     team_id: uuid.UUID | None = None,
     priority: str | None = None,
+    updated_since: datetime | None = None,
 ) -> Any:
     """
     List user's input tasks.
@@ -139,6 +148,20 @@ def list_tasks(
         root_only: If true, only return root tasks (parent_task_id IS NULL)
         team_id: Filter by team UUID
         priority: Filter by priority (low, normal, high, urgent)
+        updated_since: Incremental-sync cursor — return only tasks changed
+            strictly after this timestamp, ordered by (updated_at, id) ascending.
+
+            Task activity counts: adding or deleting a comment, and uploading,
+            attaching or deleting a file, all bump ``input_task.updated_at`` in
+            the same transaction as the write, so they appear in a delta.
+
+            One limit remains: deletes are not reported. A deleted task simply
+            stops appearing; a client that needs to notice removals reconciles
+            with a full list.
+
+            Page by advancing the cursor, not by ``skip``: the sort key is
+            mutable, so offset paging over it can skip unread rows. Take the
+            last row's ``updated_at`` as the next cursor.
     """
     try:
         data, count = InputTaskService.list_tasks_extended(
@@ -151,6 +174,7 @@ def list_tasks(
             root_only=root_only,
             team_id=team_id,
             priority=priority,
+            updated_since=updated_since,
         )
         return InputTasksPublicExtended(data=data, count=count)
     except InputTaskError as e:
@@ -335,6 +359,44 @@ async def execute_task(
         return ExecuteTaskResponse(
             success=True,
             session_id=new_session.id,
+        )
+    except InputTaskError as e:
+        _handle_service_error(e)
+
+
+@router.post("/{id}/status", response_model=InputTaskPublic)
+async def update_task_status(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    status_in: InputTaskStatusUpdate,
+) -> Any:
+    """
+    Set a task's status, attributed to the calling user.
+
+    For work a user-authenticated client executes outside cinna (the desktop
+    app running a task locally), so the web view mirrors what is actually
+    happening. The change is validated against the transition table, written to
+    the status history and posted to the comment feed.
+
+    It records; it does not act — no session is started, resumed or interrupted.
+    For a task cinna is itself executing, the session-driven recompute still
+    has the last word.
+
+    Allowed targets: open, in_progress, blocked, completed, error, cancelled.
+    Use POST /{id}/archive to archive.
+
+    ``async def`` like its sibling status routes: the point of this route is
+    that the web view mirrors what is happening, so the TASK_STATUS_CHANGED
+    emit is load-bearing. From a sync worker thread that emit is scheduled
+    best-effort and dropped silently if scheduling fails.
+    """
+    try:
+        return InputTaskService.update_task_status_from_user(
+            db_session=session,
+            task_id=id,
+            user_id=current_user.id,
+            data=status_in,
         )
     except InputTaskError as e:
         _handle_service_error(e)
@@ -743,13 +805,21 @@ def create_subtask(
     id: uuid.UUID,
     subtask_in: InputTaskCreate,
 ) -> Any:
-    """Create a subtask under a parent task (user-initiated)."""
+    """Create a subtask under a parent task (user-initiated).
+
+    ``external_ref`` is not honoured here. It is an idempotency key for
+    ``POST /tasks/``, and matching one on this route would return a task with a
+    different parent than the caller asked for while reporting 200 — a silently
+    wrong answer. It is ignored rather than rejected so a client that fills the
+    field uniformly still gets a real subtask.
+    """
     try:
         InputTaskService.get_task_with_ownership_check(
             db_session=session, task_id=id, user_id=current_user.id
         )
         # Set parent_task_id on the create data
         subtask_in.parent_task_id = id
+        subtask_in.external_ref = None
         task = InputTaskService.create_task(
             db_session=session,
             user_id=current_user.id,

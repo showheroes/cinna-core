@@ -13,7 +13,7 @@
 - `backend/app/models/__init__.py` — exports
 
 **Routes:**
-- `backend/app/api/routes/input_tasks.py` — CRUD, refinement, execution, collaboration endpoints (comments, attachments, subtasks, short-code access); note: `archive_task` is `async def` (requires event loop for real-time event emission)
+- `backend/app/api/routes/input_tasks.py` — CRUD, refinement, execution, collaboration endpoints (comments, attachments, subtasks, short-code access); note: `archive_task` and `update_task_status` are `async def` (they need a running event loop to emit the real-time event; from a sync worker thread that emit is scheduled best-effort and dropped silently on failure)
 - `backend/app/api/routes/task_agent_api.py` — internal agent API endpoints (called by MCP tools)
 - `backend/app/api/main.py` — router registration
 
@@ -45,6 +45,7 @@
 - `backend/app/alembic/versions/p6k7l8m9n0o1_add_todo_progress_to_session.py` — todo_progress
 - `backend/app/alembic/versions/u1p2q3r4s5t6_add_session_state_and_task_feedback.py` — result_state, result_summary, auto_feedback, feedback_delivered
 - `backend/app/alembic/versions/i6d5e7f8g9h0_add_input_task_id_to_activity.py` — input_task_id FK on activity
+- `backend/app/alembic/versions/8f3a1d7c04e2_add_input_task_external_ref_and_sync_index.py` — `external_ref` column, its partial unique index, and the `(owner_id, updated_at)` sync index
 
 **App Startup:**
 - `backend/app/main.py` — event handler registration
@@ -109,7 +110,12 @@ New collaboration fields:
 - `assigned_node_id` (UUID FK → agentic_team_node.id SET NULL, nullable)
 - `created_by_node_id` (UUID FK → agentic_team_node.id SET NULL, nullable)
 
-Indexes: `ix_input_task_owner_status`, `ix_input_task_parent_task_id`, `ix_input_task_team_id`, `ix_input_task_assigned_node_id`
+External-client fields:
+- `external_ref` (VARCHAR(64), nullable) — caller-supplied idempotency key, unique per owner where present. Normalised on write: blank or whitespace-only becomes `NULL`, because `''` **IS NOT NULL** and would therefore be covered by the partial unique index, turning a second create with an empty field into a constraint violation
+
+Indexes: `ix_input_task_owner_status`, `ix_input_task_parent_task_id`, `ix_input_task_team_id`, `ix_input_task_assigned_node_id`, `ix_input_task_owner_updated` (`(owner_id, updated_at)` — backs the `updated_since` cursor), `ix_input_task_owner_external_ref` (`(owner_id, external_ref)` UNIQUE `WHERE external_ref IS NOT NULL` — partial so the overwhelming majority of tasks, which carry no ref, do not collide with each other)
+
+**Migration `8f3a1d7c04e2`** (`add_input_task_external_ref_and_sync_index`) adds the column and both indexes.
 
 **`InputTaskStatus` values:**
 
@@ -186,11 +192,12 @@ Index: `ix_task_status_history_task_id`
 **`backend/app/models/tasks/input_task.py`:**
 - `InputTaskBase` — `original_message`, `current_description`
 - `InputTask` — DB table (all columns above)
-- `InputTaskCreate` — includes: `title?`, `priority?`, `team_id?`, `assigned_node_id?`, `parent_task_id?`, `auto_execute?` (bool, default `False`; set to `True` by `CreateTaskDialog` when Execute switch is on)
+- `InputTaskCreate` — includes: `title?`, `priority?`, `team_id?`, `assigned_node_id?`, `parent_task_id?`, `auto_execute?` (bool, default `False`; set to `True` by `CreateTaskDialog` when Execute switch is on), `external_ref?` (str ≤ 64 — idempotency key; cleared by `POST /{id}/subtasks/` before the service sees it)
 - `InputTaskUpdate` — includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?` (team can be changed after creation)
-- `InputTaskPublic` — includes new: `short_code`, `title`, `priority`, `parent_task_id`, `team_id`, `assigned_node_id`, `created_by_node_id`, `subtask_count`, `subtask_completed_count`
+- `InputTaskPublic` — includes new: `short_code`, `title`, `priority`, `parent_task_id`, `team_id`, `assigned_node_id`, `created_by_node_id`, `external_ref`, `subtask_count`, `subtask_completed_count`
 - `InputTaskPublicExtended` — extends Public with: `agent_name`, `refinement_history`, `todo_progress`, `sessions_count`, `latest_session_id`, `attached_files`, `assigned_node_name`, `team_name`, `parent_short_code` (resolved by service layer via DB lookup), `root_short_code` (walks up hierarchy to root; set only when task has a parent)
 - `InputTaskDetailPublic` — extends Extended with: `comments: list[TaskCommentPublic]`, `attachments: list[TaskAttachmentPublic]`, `subtasks: list[InputTaskPublic]`, `status_history: list[TaskStatusHistoryPublic]`
+- `InputTaskStatusUpdate` — user-side status write (`status`, `reason?`). Deliberately separate from `InputTaskUpdate` (a status change carries a reason, an audit row and a transition check, none of which the field-patch route does) and from `AgentTaskStatusUpdate` (whose allowed set and consumers belong to the container-side agent API). `reason` is uncapped, matching `AgentTaskStatusUpdate.reason` and the `TaskStatusHistory.reason` column — a length limit only one caller had would break the shared refusal vocabulary
 - `AgentTaskStatusUpdate` — agent edge-case status update (`status`, `reason?`, `task?` short code)
 - `AgentSubtaskCreate` — agent subtask creation (`title`, `description?`, `assigned_to?`, `priority?`, `task?` short code, `source_session_id?`)
 - `AgentTaskCreate` — agent standalone task creation (`title`, `description?`, `assigned_to?`, `priority?`, `source_session_id?`)
@@ -201,8 +208,8 @@ Index: `ix_task_status_history_task_id`
 ### File: `backend/app/api/routes/input_tasks.py`
 
 **Task CRUD:**
-- `POST /api/v1/tasks/` — create task; auto-generates `short_code` and `title`; if `auto_execute=True` and `selected_agent_id` is set, schedules `_auto_execute_task` as a background asyncio task immediately after creation (creates a session and sends the task description as the initial message)
-- `GET /api/v1/tasks/` — list tasks; new query params: `root_only` (exclude subtasks), `team_id`, `priority`
+- `POST /api/v1/tasks/` — create task; auto-generates `short_code` and `title`; calls `create_task_idempotent` and receives `(task, created)`. If `created` **and** `auto_execute=True` **and** `selected_agent_id` is set, schedules `_auto_execute_task` as a background asyncio task (creates a session and sends the task description as the initial message). The `created` gate is what makes an `external_ref` retry harmless: a matched task is returned without a second execution being scheduled on it
+- `GET /api/v1/tasks/` — list tasks; query params: `root_only` (exclude subtasks), `team_id`, `priority`, `updated_since` (incremental-sync cursor — `updated_at >`, and switches the ordering to `(updated_at asc, id asc)` *only when present*; the route docstring carries the deletion limit and the cursor-not-`skip` paging rule so they reach the generated OpenAPI client)
 - `GET /api/v1/tasks/{id}` — get task (`InputTaskPublicExtended`)
 - `PATCH /api/v1/tasks/{id}` — update task
 - `DELETE /api/v1/tasks/{id}` — delete task (emits ACTIVITY_DELETED for linked activities)
@@ -210,6 +217,7 @@ Index: `ix_task_status_history_task_id`
 **Task Actions:**
 - `POST /api/v1/tasks/{id}/refine` — AI-assisted refinement
 - `POST /api/v1/tasks/{id}/execute` — execute task (creates session)
+- `POST /api/v1/tasks/{id}/status` — set status as the calling user (`InputTaskStatusUpdate` → `InputTaskPublic`); `async def`; delegates to `InputTaskService.update_task_status_from_user`. Allowed targets: `open`, `in_progress`, `blocked`, `completed`, `error`, `cancelled`. `400` for a disallowed target, an invalid transition, or a task owned by someone else; `404` only for a task that does not exist. No session side effects. No web UI calls it — the desktop client is its only consumer today
 - `POST /api/v1/tasks/{id}/archive` — archive task
 - `GET /api/v1/tasks/{id}/sessions` — list all sessions for a task
 - `GET /api/v1/tasks/by-source-session/{session_id}` — list tasks created by a source session
@@ -235,7 +243,7 @@ Index: `ix_task_status_history_task_id`
 
 **Subtasks:**
 - `GET /api/v1/tasks/{id}/subtasks/` — list direct subtasks (`InputTasksPublicExtended`); used by `SubtaskProgressChip` popover via `TasksService.listSubtasks`
-- `POST /api/v1/tasks/{id}/subtasks/` — create subtask (user-initiated; sets `parent_task_id` automatically)
+- `POST /api/v1/tasks/{id}/subtasks/` — create subtask (user-initiated; sets `parent_task_id` automatically). Clears `subtask_in.external_ref` before calling the service: an idempotency key matching some unrelated root task would return that task while the `parent_task_id` just set is silently dropped — a 200 for a subtask that does not exist. It is cleared rather than rejected so a client that fills the field uniformly still gets a real subtask
 
 **Legacy file attachment (pre-collaboration):**
 - `POST /api/v1/tasks/{id}/files/{file_id}` — attach pre-uploaded FileUpload to task
@@ -275,14 +283,16 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 - `list_tasks_extended()` — same enrichment with `parent_short_code` batch-resolved in a single query for all tasks in the result set
 
 **CRUD:**
-- `create_task()` — generates `short_code` via `_generate_short_code()`, sets `title` from first line of `original_message`; if `team_id` is set but neither `selected_agent_id` nor `assigned_node_id` is provided, queries `AgenticTeamNode` for the lead node (`is_lead=True`) and auto-assigns both `selected_agent_id` and `assigned_node_id`; if `data.user_workspace_id` is `None` and a `selected_agent_id` is set (explicit or team-lead-resolved), loads the `Agent` and inherits its `user_workspace_id` onto the task
+- `create_task_idempotent(db_session, user_id, data) -> tuple[InputTask, bool]` — the real create. Normalises `external_ref` once at the top (`(... or '').strip() or None`) so blank and whitespace-only refs never reach the column; if a ref is present, looks up `(owner_id, external_ref)` first and returns `(existing, False)` on a hit. On insert it catches `IntegrityError`, and **only** when the failing constraint is `ix_input_task_owner_external_ref` (matched by `exc.orig.diag.constraint_name`, falling back to the index name in the message) rolls back, re-reads by `(owner_id, external_ref)` and returns the row that won the race; any other constraint failure is re-raised with its own shape. Both the lookup guard and the fallback guard test `is not None`, so they cannot disagree about what counts as "has a ref". The rollback is safe for the caller: everything before this call on both reachable routes is read-only, so it unwinds only the INSERT and the short-code counter increment — and un-burning that short code is desirable
+- `create_task()` — thin wrapper returning only the task, for the seven callers that do not care whether a row was created or matched. **Any caller with a side effect on the new task — scheduling execution, notifying a parent — must use `create_task_idempotent` and gate that effect on `created`.** Generates `short_code` via `_generate_short_code()`, sets `title` from first line of `original_message`; if `team_id` is set but neither `selected_agent_id` nor `assigned_node_id` is provided, queries `AgenticTeamNode` for the lead node (`is_lead=True`) and auto-assigns both `selected_agent_id` and `assigned_node_id`; if `data.user_workspace_id` is `None` and a `selected_agent_id` is set (explicit or team-lead-resolved), loads the `Agent` and inherits its `user_workspace_id` onto the task
 - `_auto_execute_task(task_ref: InputTask) -> None` — static async method; opens its own DB session (independent of the request lifecycle); calls `execute_task()` to create a session and send the task description as the initial message; used for both user-created tasks with `auto_execute=True` and agent-created subtasks; no-ops silently if `selected_agent_id` is not set or the task record is missing; previously named `_auto_execute_subtask` (dropped the unused `db_session` parameter in the same rename)
 - `execute_task()` routes through `ChannelIngestionService.ingest_inbound_message` with `SessionSender.from_task_execution(...)` (`kind="task_executor"`) — see [channel ingestion](../agent_sessions/channel_ingestion.md) / [tech](../agent_sessions/channel_ingestion_tech.md). The executing human's `user_id` is carried as `sender.platform_user_id` and the service runs a real owner-match access check (NOT a system-trigger fast-path)
 - `_generate_short_code(session, owner_id, team_id=None) -> tuple[str, int]` — atomic counter increment; prefix from team or default "TASK"
 - `get_task_by_short_code(session, short_code, user_id)` — lookup by `(short_code, owner_id)`
 - `get_task_detail(session, task_id, user_id) -> InputTaskDetailPublic` — full detail with comments (inline attachments), standalone attachments, subtasks, status history
 - `get_task_tree(session, task_id, user_id)` — recursive subtask tree
-- `list_tasks_extended()` — supports new filters: `root_only`, `team_id`, `priority`
+- `list_tasks_extended()` — supports filters: `root_only`, `team_id`, `priority`, `updated_since` (passed straight through to `list_tasks`)
+- `list_tasks(..., updated_since=None)` — applies `InputTask.updated_at > updated_since` and, when the param is present, replaces the ordering with `(updated_at asc, id asc)`. The `id` tiebreak makes the sort total — `updated_at` is not unique, and two rows written in the same transaction would otherwise page in an order that can change between requests. The switch is **conditional on purpose**: making it unconditional would silently reorder the task list for every user on the web. `count_statement` is taken before any `order_by`, so the count is unaffected
 - `update_task()`, `delete_task()`, `update_status()`, `append_to_refinement_history()`
 - `link_session()` — set session_id, status to in_progress
 - `reset_task_if_no_sessions()` — reset to NEW if all linked sessions deleted
@@ -290,6 +300,7 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 **Status and collaboration:**
 - `update_task_status(session, task_id, new_status, changed_by_agent_id=None, changed_by_user_id=None, changed_by_system=False, reason=None)` — validates transition, creates `TaskStatusHistory`, creates system comment, emits `TASK_STATUS_CHANGED`
 - `update_task_status_from_agent(session, task_id, agent_id, data: AgentTaskStatusUpdate)` — verifies agent is assigned; delegates to `update_task_status()`
+- `update_task_status_from_user(session, task_id, user_id, data: InputTaskStatusUpdate)` — the mirror of `update_task_status_from_agent` for a user-authenticated client reporting work executed outside cinna. Ownership via `get_task_with_ownership_check`, then a narrower allowed set (`open`, `in_progress`, `blocked`, `completed`, `error`, `cancelled`; refusal message `"User can only set status to: ..."`), then delegates to the auditing `update_task_status()` with `changed_by_user_id` — **not** the bare `update_status()` the session handlers call, which skips the transition table, the history row and the comment. Never touches sessions
 - `create_task_from_agent(session, user_id, data: AgentTaskCreate) -> (InputTask, resolved_name)` — resolves session context, agent name (team node or agent fallback), team inheritance; creates and optionally auto-executes task; posts system message to source session
 - `create_subtask(session, parent_task_id, creating_agent_id, data: AgentSubtaskCreate)` — validates team membership, connection topology, creates child task, auto-executes if assigned, posts system comment on parent
 - `list_agent_tasks(session, user_id, status=None, scope="assigned")` — scope: assigned / created / team
@@ -357,6 +368,95 @@ The enrichment runs inside a `try/except` block — failures are logged as warni
 **Storage path pattern:** `uploads/{owner_id}/task_attachments/{attachment_id}/{filename}`
 Base path resolved from `settings.UPLOAD_BASE_PATH`. Path traversal protection applied before serving.
 
+## External Client Sync Surface
+
+Three additions to the ordinary user-scoped task API let a user-authenticated
+client outside cinna (Cinna Desktop) mirror tasks it runs itself. They are not on
+the `/api/v1/external/` surface and need no new token type — an ordinary user JWT
+is the right identity.
+
+### The two-route split
+
+`POST /api/v1/tasks/{id}/status` (user) and `POST /api/v1/agent/tasks/{task_id}/status`
+(container) exist as two routes precisely because **each refuses the other's
+token**: `AgentEnvContextDep` rejects a user token, and `get_current_user` rejects
+an `aud="agent_env"` token. That invariant is pinned in both directions by
+`test_user_route_and_agent_route_do_not_accept_each_others_tokens`. The two
+handlers then converge on the same auditing `update_task_status()`, so a status
+change from either caller is indistinguishable downstream: same transition table,
+same `TaskStatusHistory` row, same `status_change` comment, same
+`TASK_STATUS_CHANGED` event.
+
+### Contention with the session-driven recompute
+
+`update_task_status_from_user` writes through the validated path;
+`compute_status_from_sessions` / `sync_task_status_from_sessions` write through
+the bare `update_status()`, which never consults `VALID_TRANSITIONS`. The
+consequence, pinned by test: a user writing `blocked` mid-flight on a task cinna
+*is* executing lands, and is then overridden by the recompute on the next session
+event — to `completed`, a transition `VALID_TRANSITIONS["blocked"]` would have
+refused the user. **The server overrides the client on a transition the client
+itself cannot make.** In practice nothing contends, because an externally-executed
+task has no session and `sync_task_status_from_sessions` returns `None` for it.
+
+Known and deliberately left as-is: `update_task_status` sets `executed_at` on a
+`→ in_progress` transition, so a client reporting local execution stamps an
+`executed_at` for a run cinna never performed. Harmless today; it wants an
+explicit "executed elsewhere" marker before it is worth changing.
+
+### `updated_since` — scope of the cursor
+
+The cursor reads `input_task.updated_at` and nothing else, so every write that
+changes a task's *activity* has to bump that column even though it writes to a
+different table. `app/services/tasks/task_touch.py` holds the one-line helper
+(`touch_task`) and the reasoning; it is called from eight write paths:
+
+| Service | Paths |
+|---|---|
+| `TaskCommentService` | `add_comment`, `add_system_comment`, `delete_comment` |
+| `TaskAttachmentService` | upload, `attach_from_workspace`, `delete_attachment` |
+| `InputTaskService` | `attach_files_to_task`, `detach_file_from_task` (via `InputTaskService._touch`) |
+
+`touch_task` never commits. It must land in the **same transaction** as the
+comment or attachment it describes — a cursor that can observe the bump without
+the comment, or the comment without the bump, is worse than no cursor. Callers
+invoke it immediately before their own `commit()`.
+
+Pinned by `test_updated_since_reports_comment_and_attachment_changes`, which
+walks comment → attachment → comment-deletion, advancing the cursor between
+phases and asserting the cursor is caught up before each one (so no phase can
+pass on a previous phase's bump).
+
+**Interaction with `status_repair_tasks`.** That sweep uses `updated_at` as an
+optimistic lock — it reads a candidate, then re-verifies `updated_at` before
+repairing, to avoid repairing a row somebody touched in between. Comment writes
+now count as that touch, which makes the sweep *more* conservative in exactly
+the right direction: a task whose agent is actively posting comments is alive,
+not stranded, so skipping it for the next tick is the correct answer. The
+sweep's own docstring already describes `updated_at` as "what tells a row
+somebody has touched since we looked from one nobody has".
+
+**Still unreported: deletions.** A deleted task simply stops appearing — there
+is no tombstone table, and one was judged not worth a table's worth of
+machinery. Clients reconcile with a full pull.
+
+### 400 vs 404
+
+`get_task_with_ownership_check` raises `PermissionDeniedError`, which carries
+`status_code=400`; only `TaskNotFoundError` is a 404. Every route in
+`input_tasks.py` therefore answers 400 for "exists but is not yours" — the new
+status route included, for consistency with its fourteen neighbours. A caller can
+consequently distinguish "not yours" from "not there", i.e. the file leaks task
+existence. That is pre-existing and file-wide; tightening only this route would
+make it the odd one out, and the tests use the established
+`assert r.status_code in (400, 404)` shape. Clients should treat the two
+identically on these routes.
+
+### Tests
+
+- `backend/tests/api/input_tasks/test_task_status_transitions.py` — the user status route: happy path with history row and comment, invalid transition, disallowed target (`refining` is the case that truly proves the allowed-set gate, since `new → refining` is a *valid* transition and can only be refused by the set), non-owner, the mid-flight recompute override, and the two-token refusal
+- `backend/tests/api/input_tasks/test_task_external_sync.py` — `updated_since` filtering and ordering, the conditional sort, the comment-only gap, the non-report of deletions, and `external_ref` create / retry / per-owner scoping / blank-ref normalisation / the subtask route ignoring it / no-re-execute-on-retry
+
 ## Event Handler Registration
 
 **File:** `backend/app/main.py`
@@ -410,6 +510,8 @@ These events are matched by `meta.source_task_id` or by `meta.session_id` / `eve
 - `frontend/src/components/Tasks/TaskSessionsModal.tsx` — lists all sessions for a task; opened from the Sessions tab "View all" link
 - `frontend/src/components/Chat/SubTasksPanel.tsx` — slide-out subtask list for current chat session; subscribes to `SESSION_STATE_UPDATED`
 
+**No frontend surface** exists for `POST /tasks/{id}/status`, `updated_since` or `external_ref`. They land in the generated client (`TasksService`, `frontend/src/client/`) because the client is generated from the OpenAPI spec, but the web UI calls none of them: the web executes tasks with sessions, and the session lifecycle drives status for those.
+
 ## Security
 
 - All task endpoints restricted to owner via `CurrentUser` (JWT required)
@@ -420,5 +522,9 @@ These events are matched by `meta.source_task_id` or by `meta.session_id` / `eve
 - `status_history` append-only, write-only from the API (never deleted)
 - Attachment download: ownership verified against `task.owner_id`; path traversal protection applied before serving files
 - Agent workspace attach: file content fetched from agent-env HTTP API using per-environment Bearer token; stored in backend — agent env access not required for subsequent user downloads
-- Status transitions validated against `InputTaskStatus.VALID_TRANSITIONS` map
+- Status transitions validated against `InputTaskStatus.VALID_TRANSITIONS` map (for every writer except the session-driven recompute, which goes through the bare `update_status()`)
+- `POST /tasks/{id}/status` is user-scoped and owner-gated; the status it can set is restricted to a six-value subset, so `refining` and `archived` cannot be reached sideways and `archived_at` stays owned by `POST /{id}/archive`. It has no session side effects — a client cannot start, resume or interrupt agent work through it
+- The user status route and the agent status route reject each other's tokens (`get_current_user` refuses an `aud="agent_env"` token; `AgentEnvContextDep` refuses a user token) — see [External Client Sync Surface](#the-two-route-split)
+- `external_ref` is scoped per owner by a partial unique index, so one user's key can never match or reveal another user's task
+- "Exists but not yours" answers `400` (`PermissionDeniedError`), only "does not exist" answers `404`, across all of `input_tasks.py`. Task existence is therefore distinguishable by an authenticated non-owner — pre-existing and file-wide, not specific to the newer routes
 - `task_prefix` validated: 1–10 uppercase alphanumeric characters (team settings)

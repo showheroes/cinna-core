@@ -17305,6 +17305,18 @@ export const InputTaskCreateSchema = {
                 }
             ],
             title: 'Parent Task Id'
+        },
+        external_ref: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Ref'
         }
     },
     type: 'object',
@@ -17538,6 +17550,17 @@ export const InputTaskDetailPublicSchema = {
                 }
             ],
             title: 'Created By Node Id'
+        },
+        external_ref: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Ref'
         },
         subtask_count: {
             type: 'integer',
@@ -17899,6 +17922,17 @@ export const InputTaskPublicSchema = {
             ],
             title: 'Created By Node Id'
         },
+        external_ref: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Ref'
+        },
         subtask_count: {
             type: 'integer',
             title: 'Subtask Count',
@@ -18142,6 +18176,17 @@ export const InputTaskPublicExtendedSchema = {
             ],
             title: 'Created By Node Id'
         },
+        external_ref: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Ref'
+        },
         subtask_count: {
             type: 'integer',
             title: 'Subtask Count',
@@ -18253,6 +18298,36 @@ export const InputTaskPublicExtendedSchema = {
     required: ['id', 'owner_id', 'original_message', 'current_description', 'status', 'selected_agent_id', 'session_id', 'user_workspace_id', 'agent_initiated', 'auto_execute', 'source_session_id', 'auto_feedback', 'error_message', 'created_at', 'updated_at', 'executed_at', 'completed_at', 'archived_at'],
     title: 'InputTaskPublicExtended',
     description: 'Extended response with agent name, sessions count, and collaboration data'
+} as const;
+
+export const InputTaskStatusUpdateSchema = {
+    properties: {
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        reason: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reason'
+        }
+    },
+    type: 'object',
+    required: ['status'],
+    title: 'InputTaskStatusUpdate',
+    description: `User request to set a task's status.
+
+Deliberately separate from \`\`InputTaskUpdate\`\`: a status change carries a
+reason, writes an audit row and is checked against the transition table,
+none of which the field-patch route does. Deliberately separate from
+\`\`AgentTaskStatusUpdate\`\` too — that one's allowed set and its consumers
+belong to the container-side agent API.`
 } as const;
 
 export const InputTaskUpdateSchema = {

@@ -28,6 +28,7 @@ from app.models.environments.environment import AgentEnvironment
 from app.models.events.event import EventType
 from app.services.events.event_service import event_service
 from app.utils import create_task_with_error_logging
+from app.services.tasks.task_touch import touch_task
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,7 @@ class TaskAttachmentService:
             uploaded_by_user_id=uploaded_by_user_id,
         )
         db_session.add(attachment)
+        touch_task(db_session, task_id)
         db_session.commit()
         db_session.refresh(attachment)
 
@@ -258,6 +260,7 @@ class TaskAttachmentService:
                     source_workspace_path=workspace_path,
                 )
                 db_session.add(attachment)
+                touch_task(db_session, task_id)
                 db_session.commit()
                 db_session.refresh(attachment)
 
@@ -410,6 +413,10 @@ class TaskAttachmentService:
         except Exception as e:
             logger.warning(f"Failed to delete attachment file {attachment.file_path}: {e}")
 
+        # Read the task id before the delete — after it, the attribute is only
+        # readable by accident of the identity map.
+        task_id = attachment.task_id
         db_session.delete(attachment)
+        touch_task(db_session, task_id)
         db_session.commit()
         return True

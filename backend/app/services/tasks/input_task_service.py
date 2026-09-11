@@ -8,6 +8,7 @@ import logging
 from typing import Any, Optional
 from sqlmodel import Session as DBSession, select
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.exc import IntegrityError
 
 from app.models import (
     InputTask,
@@ -284,6 +285,7 @@ class InputTaskService:
         root_only: bool = False,
         team_id: UUID | None = None,
         priority: str | None = None,
+        updated_since: datetime | None = None,
     ) -> tuple[list[InputTaskPublicExtended], int]:
         """
         List user's tasks with extended info.
@@ -295,6 +297,7 @@ class InputTaskService:
             user_workspace_id: Workspace filter string
             skip: Number of records to skip
             limit: Number of records to return
+            updated_since: Incremental-sync cursor (see ``list_tasks``)
 
         Returns:
             Tuple of (list of extended tasks, total count)
@@ -318,6 +321,7 @@ class InputTaskService:
             root_only=root_only,
             team_id=team_id,
             priority=priority,
+            updated_since=updated_since,
         )
 
         # Batch-resolve parent short codes
@@ -459,6 +463,8 @@ class InputTaskService:
         short_code = f"{prefix}-{counter}"
         return short_code, counter
 
+    _EXTERNAL_REF_INDEX = "ix_input_task_owner_external_ref"
+
     @staticmethod
     def create_task(
         db_session: DBSession,
@@ -468,11 +474,64 @@ class InputTaskService:
         """
         Create a new input task with auto-generated short code.
 
+        Thin wrapper over ``create_task_idempotent`` for the callers that do not
+        care whether a row was created or matched. Any caller that performs a
+        **side effect** on the new task — scheduling execution, notifying a
+        parent — must use ``create_task_idempotent`` instead and gate that side
+        effect on ``created``: deduplicating the row while re-firing the effect
+        is worse than the duplicate the key exists to prevent.
+
         Args:
             db_session: Database session
             user_id: User ID creating the task
             data: Task creation data (including agent_initiated, auto_execute, source_session_id, file_ids)
         """
+        task, _created = InputTaskService.create_task_idempotent(
+            db_session=db_session,
+            user_id=user_id,
+            data=data,
+        )
+        return task
+
+    @staticmethod
+    def create_task_idempotent(
+        db_session: DBSession,
+        user_id: UUID,
+        data: InputTaskCreate,
+    ) -> tuple[InputTask, bool]:
+        """
+        Create a task, or return the one this owner already created under the
+        same ``external_ref``.
+
+        Returns:
+            ``(task, created)``. ``created`` is False when an existing row was
+            matched by ``external_ref`` — the caller must then skip anything it
+            would have done *because* the task is new. A retry after a lost
+            response has to be indistinguishable from the first call on the
+            wire **and** in its effects.
+
+        Raises:
+            IntegrityError: propagated for any constraint failure other than
+                the external_ref collision this method handles.
+        """
+        # An empty or whitespace-only ref is "no ref". It must not reach the
+        # database: '' IS NOT NULL, so the partial unique index covers it, and
+        # a second create under '' would be a constraint violation rather than
+        # an ordinary unconstrained create.
+        external_ref = (getattr(data, 'external_ref', None) or '').strip() or None
+
+        # Idempotency: a caller that supplies an external_ref it already used
+        # gets its first task back, not a second one.
+        if external_ref is not None:
+            existing = db_session.exec(
+                select(InputTask).where(
+                    InputTask.owner_id == user_id,
+                    InputTask.external_ref == external_ref,
+                )
+            ).first()
+            if existing:
+                return existing, False
+
         # Generate short code
         short_code, sequence_number = InputTaskService._generate_short_code(
             db_session=db_session,
@@ -526,9 +585,31 @@ class InputTaskService:
             team_id=team_id,
             assigned_node_id=assigned_node_id,
             parent_task_id=getattr(data, 'parent_task_id', None),
+            external_ref=external_ref,
         )
         db_session.add(task)
-        db_session.commit()
+        try:
+            db_session.commit()
+        except IntegrityError as exc:
+            # Two concurrent retries of the same create raced past the lookup
+            # above. The unique index settled it; return whichever row won.
+            #
+            # Narrowed to *this* index on purpose: any other constraint failure
+            # (a short_code collision, say) must keep its own shape rather than
+            # be unwound here and re-raised as something else.
+            if not InputTaskService._is_external_ref_collision(exc):
+                raise
+            db_session.rollback()
+            if external_ref is not None:
+                winner = db_session.exec(
+                    select(InputTask).where(
+                        InputTask.owner_id == user_id,
+                        InputTask.external_ref == external_ref,
+                    )
+                ).first()
+                if winner:
+                    return winner, False
+            raise
         db_session.refresh(task)
 
         # Attach files if provided
@@ -540,7 +621,28 @@ class InputTaskService:
                 user_id=user_id,
             )
 
-        return task
+        return task, True
+
+    @staticmethod
+    def _touch(db_session: DBSession, task_id: UUID) -> None:
+        """Bump the task's ``updated_at`` for an activity write on a side table.
+
+        See ``app/services/tasks/task_touch.py`` for why this exists and why it
+        must ride the caller's transaction rather than commit its own.
+        """
+        from app.services.tasks.task_touch import touch_task
+        touch_task(db_session, task_id)
+
+    @staticmethod
+    def _is_external_ref_collision(exc: IntegrityError) -> bool:
+        """True if this IntegrityError is the external_ref unique index firing."""
+        orig = getattr(exc, "orig", None)
+        constraint = getattr(getattr(orig, "diag", None), "constraint_name", None)
+        if constraint:
+            return constraint == InputTaskService._EXTERNAL_REF_INDEX
+        # No structured diagnostics (older driver, wrapped error) — fall back
+        # to the index name in the message rather than swallowing everything.
+        return InputTaskService._EXTERNAL_REF_INDEX in str(orig or exc)
 
     @staticmethod
     def create_task_with_auto_refine(
@@ -909,6 +1011,7 @@ class InputTaskService:
         root_only: bool = False,
         team_id: UUID | None = None,
         priority: str | None = None,
+        updated_since: datetime | None = None,
     ) -> tuple[list[tuple[InputTask, str | None]], int]:
         """
         List user's tasks with agent names.
@@ -922,6 +1025,18 @@ class InputTaskService:
             skip: Number of records to skip
             limit: Number of records to return
             order_desc: Order by created_at descending
+            updated_since: Incremental-sync cursor — only tasks whose updated_at
+                is strictly newer. Switches the ordering to
+                ``(updated_at asc, id asc)``, because a cursor needs a stable
+                ascending order to page through; without the param the existing
+                ``created_at`` list order stands.
+
+                Paging: advance the cursor, do not use ``skip``. The sort key is
+                mutable, so a row already returned that is updated again moves to
+                the tail and shifts an unread row back into the consumed window —
+                offset paging would skip it entirely. Read a page, take the last
+                row's ``updated_at`` as the next cursor, and repeat until a page
+                comes back short.
 
         Returns:
             Tuple of (list of (task, agent_name) tuples, total count)
@@ -948,12 +1063,22 @@ class InputTaskService:
             statement = statement.where(InputTask.team_id == team_id)
         if priority:
             statement = statement.where(InputTask.priority == priority)
+        if updated_since is not None:
+            statement = statement.where(InputTask.updated_at > updated_since)
 
         # Get count before pagination
         count_statement = statement.with_only_columns(InputTask.id)
 
         # Add ordering
-        if order_desc:
+        if updated_since is not None:
+            # Sync order, not list order: ascending by the cursor column, with
+            # id as a tiebreak so the sort is total — updated_at is not unique,
+            # and two rows written in the same transaction would otherwise page
+            # in an arbitrary order that can change between requests.
+            statement = statement.order_by(
+                InputTask.updated_at.asc(), InputTask.id.asc()
+            )
+        elif order_desc:
             statement = statement.order_by(InputTask.created_at.desc())
         else:
             statement = statement.order_by(InputTask.created_at.asc())
@@ -1768,6 +1893,7 @@ class InputTaskService:
             created_links.append(link)
 
         if created_links:
+            InputTaskService._touch(db_session, task_id)
             db_session.commit()
             for link in created_links:
                 db_session.refresh(link)
@@ -1860,6 +1986,7 @@ class InputTaskService:
                 file.marked_for_deletion_at = datetime.now(UTC)
                 db_session.add(file)
 
+        InputTaskService._touch(db_session, task_id)
         db_session.commit()
         return True
 
@@ -2593,6 +2720,64 @@ class InputTaskService:
             task_id=task_id,
             new_status=data.status,
             changed_by_agent_id=agent_id,
+            reason=data.reason,
+        )
+
+    @staticmethod
+    def update_task_status_from_user(
+        db_session: DBSession,
+        task_id: UUID,
+        user_id: UUID,
+        data,  # InputTaskStatusUpdate
+    ) -> InputTask:
+        """
+        User (or a user-authenticated client) explicitly updates task status.
+
+        The mirror of ``update_task_status_from_agent``: ownership is checked,
+        the caller's allowed target set is narrower than the full status
+        vocabulary, and the change is then written through the auditing
+        ``update_task_status`` so it lands in the history and the comment feed
+        attributed to the user.
+
+        This exists for work executed *outside* cinna — a desktop client running
+        the task locally reports progress here. It records what the client says;
+        it never touches sessions. Where cinna is itself executing the task, the
+        session-driven recompute (``sync_task_status_from_sessions``) keeps the
+        last word.
+
+        Args:
+            db_session: Database session
+            task_id: Task UUID
+            user_id: User requesting the change (must own the task)
+            data: InputTaskStatusUpdate with status and optional reason
+
+        Returns:
+            Updated InputTask
+
+        Raises:
+            TaskNotFoundError, PermissionDeniedError, ValidationError
+        """
+        InputTaskService.get_task_with_ownership_check(
+            db_session=db_session,
+            task_id=task_id,
+            user_id=user_id,
+        )
+
+        # ``new`` is the create state, ``refining`` belongs to the refine flow,
+        # and ``archived`` has its own route (which owns ``archived_at``).
+        allowed_user_statuses = {
+            "open", "in_progress", "blocked", "completed", "error", "cancelled",
+        }
+        if data.status not in allowed_user_statuses:
+            raise ValidationError(
+                f"User can only set status to: {sorted(allowed_user_statuses)}"
+            )
+
+        return InputTaskService.update_task_status(
+            db_session=db_session,
+            task_id=task_id,
+            new_status=data.status,
+            changed_by_user_id=user_id,
             reason=data.reason,
         )
 

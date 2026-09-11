@@ -4171,6 +4171,7 @@ export type InputTaskCreate = {
     team_id?: (string | null);
     assigned_node_id?: (string | null);
     parent_task_id?: (string | null);
+    external_ref?: (string | null);
 };
 
 /**
@@ -4203,6 +4204,7 @@ export type InputTaskDetailPublic = {
     team_id?: (string | null);
     assigned_node_id?: (string | null);
     created_by_node_id?: (string | null);
+    external_ref?: (string | null);
     subtask_count?: number;
     subtask_completed_count?: number;
     agent_name?: (string | null);
@@ -4248,6 +4250,7 @@ export type InputTaskPublic = {
     team_id?: (string | null);
     assigned_node_id?: (string | null);
     created_by_node_id?: (string | null);
+    external_ref?: (string | null);
     subtask_count?: number;
     subtask_completed_count?: number;
 };
@@ -4282,6 +4285,7 @@ export type InputTaskPublicExtended = {
     team_id?: (string | null);
     assigned_node_id?: (string | null);
     created_by_node_id?: (string | null);
+    external_ref?: (string | null);
     subtask_count?: number;
     subtask_completed_count?: number;
     agent_name?: (string | null);
@@ -4299,6 +4303,20 @@ export type InputTaskPublicExtended = {
 export type InputTasksPublicExtended = {
     data: Array<InputTaskPublicExtended>;
     count: number;
+};
+
+/**
+ * User request to set a task's status.
+ *
+ * Deliberately separate from ``InputTaskUpdate``: a status change carries a
+ * reason, writes an audit row and is checked against the transition table,
+ * none of which the field-patch route does. Deliberately separate from
+ * ``AgentTaskStatusUpdate`` too — that one's allowed set and its consumers
+ * belong to the container-side agent API.
+ */
+export type InputTaskStatusUpdate = {
+    status: string;
+    reason?: (string | null);
 };
 
 export type InputTaskUpdate = {
@@ -11218,6 +11236,7 @@ export type TasksListTasksData = {
     skip?: number;
     status?: (string | null);
     teamId?: (string | null);
+    updatedSince?: (string | null);
     userWorkspaceId?: (string | null);
 };
 
@@ -11255,6 +11274,13 @@ export type TasksExecuteTaskData = {
 };
 
 export type TasksExecuteTaskResponse = (ExecuteTaskResponse);
+
+export type TasksUpdateTaskStatusData = {
+    id: string;
+    requestBody: InputTaskStatusUpdate;
+};
+
+export type TasksUpdateTaskStatusResponse = (InputTaskPublic);
 
 export type TasksArchiveTaskData = {
     id: string;
