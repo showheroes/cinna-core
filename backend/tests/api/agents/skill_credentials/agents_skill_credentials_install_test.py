@@ -25,10 +25,9 @@ Scenarios (plan §8.9):
      placeholder carrying its non-private fields, never the live secret.
   6. Publisher unavailable at install (sharing turned off before install):
      ``publisher_unavailable``, a placeholder, and a warning row.
-  7. Access revoked after install: turning sharing off unlinks the recipient's
-     agents (so the value leaves their containers) and the row's reason becomes
-     ``not_linked``; the generic update path, which leaves the link behind,
-     still reads ``access_revoked``. Setup-status stays ready either way (D1).
+  7. Access revoked after install: either sharing-disable path unlinks the
+     recipient's agents (so the value leaves their containers) and the row's
+     reason becomes ``not_linked``. Setup-status stays ready (D1).
   8. Upgrade provisions only the slot the new revision adds; a slot the user
      unlinked earlier is not re-linked.
   9. Uninstall release semantics: an orphaned placeholder is unlinked and
@@ -192,12 +191,16 @@ def test_publisher_provided_credential_end_to_end(
     preview = get_skill_install_preview(client, con_headers, con_agent, package_uuid)
     assert preview["credentials"][0]["slot"] == "slot-pub"
     assert preview["credentials"][0]["outcome"] == "linked_publisher"
+    assert preview["credentials"][0]["needs_setup"] is False
+    assert preview["credentials"][0]["credential_id"] is None
+    assert preview["credentials"][0]["credential_name"] is None
 
     # ── Install ────────────────────────────────────────────────────────
     result = install_skill(client, con_headers, con_agent, package_uuid)
     provisioning = result["credential_provisioning"]
     assert len(provisioning) == 1
     assert provisioning[0]["outcome"] == "linked_publisher"
+    assert provisioning[0]["needs_setup"] is False
     assert provisioning[0]["credential_id"] == pub_cred["id"]
 
     con_creds = get_agent_credentials(client, con_headers, con_agent)["data"]
@@ -346,6 +349,7 @@ def test_user_provided_no_match_placeholder_then_fill(
     result = install_skill(client, b_headers, b_agent, package_uuid)
     prov = result["credential_provisioning"][0]
     assert prov["outcome"] == "placeholder_created"
+    assert prov["needs_setup"] is True
     placeholder_id = prov["credential_id"]
 
     placeholder = get_credential(client, b_headers, placeholder_id)
@@ -366,10 +370,29 @@ def test_user_provided_no_match_placeholder_then_fill(
 
     # A second install (another of B's agents) reuses the SAME credential (I9).
     b_agent_2, _ = make_agent_with_env(client, b_headers, "NoMatch-B2")
+    preview = get_skill_install_preview(client, b_headers, b_agent_2, package_uuid)
+    assert preview["credentials"][0]["outcome"] == "linked_existing"
+    assert preview["credentials"][0]["needs_setup"] is True
     result2 = install_skill(client, b_headers, b_agent_2, package_uuid)
     prov2 = result2["credential_provisioning"][0]
     assert prov2["outcome"] == "linked_existing"
     assert prov2["credential_id"] == placeholder_id
+    assert prov2["needs_setup"] is True
+
+    # A different skill reusing that slot on the same agent also needs setup.
+    write_skill_with_credentials(
+        pub_env, "same-slot-skill", [{"slot": "slot-empty", "type": "api_token"}],
+    )
+    other_revision = publish_skill(
+        client, pub_headers, pub_agent, "same-slot-skill", visibility="public",
+    )
+    other_package = other_revision["package_id"]
+    preview = get_skill_install_preview(client, b_headers, b_agent_2, other_package)
+    assert preview["credentials"][0]["outcome"] == "already_linked"
+    assert preview["credentials"][0]["needs_setup"] is True
+    reused = install_skill(client, b_headers, b_agent_2, other_package)
+    assert reused["credential_provisioning"][0]["outcome"] == "already_linked"
+    assert reused["credential_provisioning"][0]["needs_setup"] is True
 
     # Fill the placeholder -> the row becomes ok.
     update_credential(
@@ -386,6 +409,8 @@ def test_user_provided_no_match_placeholder_then_fill(
     row2 = _addon_row_for_skill(client, b_headers, b_agent, adapter, "no-match-skill")
     assert row2["status"] == "ok"
     assert row2["credential_issues"] == []
+    preview = get_skill_install_preview(client, b_headers, b_agent_2, other_package)
+    assert preview["credentials"][0]["needs_setup"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -568,17 +593,12 @@ def test_access_revoked_after_install(
     assert setup["status"] == "ready"
 
 
-def test_sharing_off_through_the_generic_update_reads_access_revoked(
+def test_sharing_off_through_the_generic_update_revokes_access(
     client: TestClient,
     superuser_token_headers: dict[str, str],
     patch_environment_adapter,
 ) -> None:
-    """``PUT /credentials/{id}`` turning sharing off keeps share and link.
-
-    Only ``PATCH /credentials/{id}/sharing`` revokes (and now unlinks). The
-    generic update just flips the flag, which is what leaves a linked-but-
-    unusable credential behind -- the state ``access_revoked`` describes.
-    """
+    """``PUT /credentials/{id}`` disables sharing with full revocation semantics."""
     pub, pub_headers = make_developer(client, superuser_token_headers)
     pub_agent, pub_env = make_agent_with_env(client, pub_headers, "Flag-Publisher")
     pub_cred = create_random_credential(client, pub_headers, credential_type="api_token")
@@ -601,13 +621,13 @@ def test_sharing_off_through_the_generic_update_reads_access_revoked(
 
     update_credential(client, pub_headers, pub_cred["id"], allow_sharing=False)
 
-    assert pub_cred["id"] in {
+    assert pub_cred["id"] not in {
         cred["id"]
         for cred in get_agent_credentials(client, b_headers, b_agent)["data"]
     }
     row = _addon_row_for_skill(client, b_headers, b_agent, adapter, "flag-skill")
     assert row["credential_issues"] == [
-        {"slot": "slot-flag", "type": "api_token", "reason": "access_revoked"}
+        {"slot": "slot-flag", "type": "api_token", "reason": "not_linked"}
     ]
     assert _setup_status(client, b_headers, b_agent)["status"] == "ready"
 

@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   PROVIDED_BY_COPY,
-  SLOT_OUTCOME_COPY,
   type SlotPhase,
+  slotOutcomeCopy,
   slotOutcomeStatus,
   slotOutcomeSummary,
   slotProvidedBy,
@@ -45,7 +45,7 @@ interface SkillProvisionRowProps {
 
 /** One slot of an install, before it (preview) or after it (report). */
 export function SkillProvisionRow({ item, phase }: SkillProvisionRowProps) {
-  const copy = SLOT_OUTCOME_COPY[item.outcome]
+  const copy = slotOutcomeCopy(item)
   return (
     <SkillCredentialSlotRow
       slot={item.slot}

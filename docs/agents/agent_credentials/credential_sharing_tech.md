@@ -119,7 +119,7 @@ Each entry the publish flow emits:
 - `get_shares_by_credential()` - List shares with resolved user emails
 - `get_credentials_shared_with_me()` - Query shares where user is recipient; enriched to compute `category` via `classify_credential_category(is_owned=False, ...)` from `share.source`, populate `agent_usage_count` via batched `get_agent_usage_counts` (recipient-scoped), and carry `source` on `SharedCredentialPublic`.
 - `get_share_count_for_credential()` - Count shares for a credential
-- `update_credential_sharing()` - Async. Toggles allow_sharing; auto-revokes all shares when disabled, then unlinks every recipient the same way. Note the divergence: the generic `PUT /credentials/{id}` also writes `allow_sharing`, but it neither deletes shares nor unlinks — a credential turned unshareable that way stays linked and reads `access_revoked` on the skill Addons row
+- `update_credential_sharing()` - Async. Toggles allow_sharing; auto-revokes all shares when disabled, then unlinks every recipient the same way. `CredentialsService.update_credential()` gives an explicit `allow_sharing=false` in the generic `PUT /credentials/{id}` the identical revocation semantics, so no update path can leave a usable shared credential linked in a recipient environment.
 - `can_user_access_credential()` - Check if user owns OR has share
 - `delete_all_shares_for_credential()` - Bulk delete for credential deletion
 

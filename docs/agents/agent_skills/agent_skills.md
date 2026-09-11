@@ -316,6 +316,10 @@ install dialog says what happened to each slot. The same resolution is available
 before the press: the dialog previews each slot through the same decision tree,
 so what it shows is what the install will report.
 
+Reusing a credential does not necessarily mean it is ready: if that credential
+is still an unfilled placeholder, both the preview and the install result keep
+the setup warning and the link to the agent's Credentials tab.
+
 A user who has filled a slot once never fills it twice: the slot match is by
 `service_uri`, so a second skill declaring `erp-public-api` links the credential
 the first one brought.
@@ -433,10 +437,9 @@ blocks it. Instead:
 - the skill's Addons row turns amber with `credential_missing` and names the
   slots, each with a reason — `not_linked` (nothing carries the slot),
   `not_configured` (a placeholder nobody filled in) or `access_revoked` (the
-  credential is linked but no longer usable — sharing was turned off through the
-  generic credential update, which leaves the link in place). Revoking the share
-  itself, or turning sharing off from the Sharing card, unlinks the credential
-  from the installer's agents as well, so that reads `not_linked`;
+  credential is linked but no longer usable). Revoking a share or disabling
+  sharing through either credential update path unlinks the credential from the
+  installer's agents as well, so that normally reads `not_linked`;
 - the install response says the same thing at the moment of installing;
 - the script fails with a message naming the slot and the fix, which the agent
   can relay to the user verbatim.

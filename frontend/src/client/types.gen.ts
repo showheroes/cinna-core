@@ -6580,6 +6580,7 @@ export type SkillCredentialProvisionPublic = {
     description?: (string | null);
     provided_by?: 'user' | 'publisher' | 'template';
     outcome: 'already_linked' | 'linked_publisher' | 'linked_existing' | 'template_materialised' | 'placeholder_created' | 'publisher_unavailable';
+    needs_setup?: boolean;
     credential_id?: (string | null);
     credential_name?: (string | null);
 };

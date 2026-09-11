@@ -110,6 +110,8 @@ class SlotProvision:
     description: str | None
     outcome: SlotOutcome
     credential_id: uuid.UUID | None
+    #: Preview hides an unshared publisher id, but can expose configuration state.
+    is_placeholder: bool | None = None
 
 
 @dataclass
@@ -311,6 +313,11 @@ class CredentialProvisioner:
                     slot=spec_slot(parsed),
                     outcome=decision.outcome,
                     credential_id=credential_id,
+                    is_placeholder=(
+                        decision.credential.is_placeholder
+                        if decision.credential is not None
+                        else None
+                    ),
                 )
             )
         return items
@@ -995,6 +1002,7 @@ class CredentialProvisioner:
         slot: str | None,
         outcome: SlotOutcome,
         credential_id: uuid.UUID | None,
+        is_placeholder: bool | None = None,
     ) -> SlotProvision:
         return SlotProvision(
             spec_name=parsed.name,
@@ -1004,4 +1012,5 @@ class CredentialProvisioner:
             description=parsed.description,
             outcome=outcome,
             credential_id=credential_id,
+            is_placeholder=is_placeholder,
         )

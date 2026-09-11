@@ -20,6 +20,7 @@ from app.core.ssh_key_utils import (
     validate_key_pair,
 )
 from app.models import Credential, Agent, AgentApiTokenKind, AgentEnvironment, AgentCredentialLink, CredentialCreate, CredentialUpdate, CredentialType, User
+from app.models.credentials.credential_share import CredentialShare
 
 logger = logging.getLogger(__name__)
 
@@ -1781,8 +1782,29 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         if credential.owner_id != owner_id:
             raise ValueError("Not enough permissions")
 
-        # Update credential
+        # Turning sharing off is revocation, whatever endpoint carries the
+        # update.  Leaving existing shares and agent links in place makes the
+        # credential page say access is gone while recipient containers keep a
+        # usable secret (materialisation follows links, not share rows).
+        # Capture and delete the shares in the same write as the flag change;
+        # links are removed and environments re-synced after the commit below.
         update_dict = credential_in.model_dump(exclude_unset=True)
+        revoked_recipient_ids: list[uuid.UUID] = []
+        if update_dict.get("allow_sharing") is False:
+            shares = session.exec(
+                select(CredentialShare).where(
+                    CredentialShare.credential_id == credential_id
+                )
+            ).all()
+            revoked_recipient_ids = [share.shared_with_user_id for share in shares]
+            for share in shares:
+                session.delete(share)
+            logger.info(
+                "Disabled sharing for credential %s through its generic update; "
+                "deleted %s share(s)",
+                credential_id,
+                len(shares),
+            )
         if update_dict.get("allow_sharing") or update_dict.get(
             "allow_template_sharing"
         ):
@@ -1840,6 +1862,12 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         session.add(credential)
         session.commit()
         session.refresh(credential)
+
+        await CredentialsService.unlink_credential_from_revoked_recipients(
+            session=session,
+            credential_id=credential_id,
+            recipient_user_ids=revoked_recipient_ids,
+        )
 
         # Trigger sync to affected agent environments
         await CredentialsService.event_credential_updated(

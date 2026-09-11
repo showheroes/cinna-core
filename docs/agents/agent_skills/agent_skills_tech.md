@@ -421,6 +421,18 @@ A skill declares its credentials in `SKILL.md` frontmatter
 | `publisher_usages_of_credential(...)` | Which published skills a given credential backs — feeds credential deletion impact. Returns the usages plus **every** revision id of the packages they name, not only the providing revisions (see `credential_sharing_tech.md`) |
 | `SkillCredentialResolution` | `slot`, `type`, `description`, `provided_by`, `credential`, `reason`, `producer_agent_id`, `producer_agent_name`. `credential` names the publisher's **own** matched row even for a refused resolution, so the preview can say *which* credential was rejected rather than just that something was |
 
+`SkillCredentialProvisionPublic.needs_setup` reports usability independently of
+the provisioning outcome. In particular, `linked_existing` and `already_linked`
+can reuse an unfilled placeholder. `provisions_to_public` computes the flag from
+the same bounded credential/share reads used for name visibility; a previewed
+`linked_publisher` is ready if the forthcoming share will make it usable. Both
+install dialogs use this flag for their warning rows, setup panel and success-close
+decision. Clients reading older responses fall back to the outcome's default.
+Before sharing, the preview hides the publisher credential's id as well as its
+name. Its internal `SlotProvision.is_placeholder` carries just configuration
+state through that redaction, so an intentionally hidden id does not become a
+false setup warning. The install response still reads the actual linked row.
+
 **Resolution uses only the credential's own consent flags, and requires the
 publisher to *own* it for `publisher` / `template`.** A share the publisher
 merely *received* cannot be re-shared, and install later only shares a
@@ -471,12 +483,12 @@ reports rows without credentials at all — plus the agent's linked credentials.
 
 **A slot is satisfied** when one of its candidates is owned by the agent owner
 and filled in, **or** is foreign, still `allow_sharing`, **and** shared with
-the agent owner. *A share row alone is not enough* — turning sharing off through
-the generic `PUT /credentials/{id}` leaves the row behind, which is why both
-conditions are checked (the Sharing card's `PATCH …/sharing` deletes the shares
-**and** the recipient's links, so that path lands on `not_linked`). Otherwise
-`CredentialIssueReason` is `not_linked` (no candidate), `not_configured` (an
-owned placeholder) or `access_revoked`.
+the agent owner. *A share row alone is not enough* — it is a defence against
+stale or manually-corrupted state. Both sharing-disable paths (`PUT
+/credentials/{id}` and `PATCH …/sharing`) delete shares **and** recipient links,
+so their normal result is `not_linked`. Otherwise `CredentialIssueReason` is
+`not_linked` (no candidate), `not_configured` (an owned placeholder) or
+`access_revoked`.
 
 **Why the readiness gate subtracts bundle-claimed ids.** An unfilled *skill*
 slot is a warning, not a block — a bundle's specs are the agent's contract, a

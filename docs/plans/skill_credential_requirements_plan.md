@@ -1,6 +1,6 @@
 # Skill Credential Requirements — Implementation Plan
 
-Status: Phases 1–3 committed as `793782a3`. Phase 4 (§10) done except the manual dev-stack scenario — seam review answered, D17 fixed, docs swept, full suite green (4616/0). Current state, test counts and Phase 4 notes: **§15**.
+Status: Complete. Phases 1–3 landed in `793782a3`; Phase 4, including the manual two-user dev-stack scenario, landed through `cdb42afe`. Seam review answered and D17 fixed. The final readiness audit, follow-up fixes, current test counts and Phase 4 notes are recorded in **§15**.
 Date: 2026-09-10
 Input: `docs/plans/skill_credential_requirements_design.md` (the architecture brief)
 Feature name: `skill-credential-requirements`
@@ -259,7 +259,7 @@ appended by the skill caller (D9)].
 - `SkillPublishCredentialPreview { slot, type, description, provided_by, credential_id: UUID | None, credential_name: str | None, producer_agent_id: UUID | None, reason: str | None }`.
   `reason` explains a `user` resolution: `no_linked_credential` | `not_shareable` | `not_owned` | `template_would_leak_secret` (D12).
   `credential_*` refers to the **publisher's own** matched credential.
-- `SkillCredentialProvisionPublic { slot, type, description, provided_by, outcome: SlotOutcome, credential_id: UUID | None, credential_name: str | None }`.
+- `SkillCredentialProvisionPublic { slot, type, description, provided_by, outcome: SlotOutcome, needs_setup: bool, credential_id: UUID | None, credential_name: str | None }`. Readiness is independent of the outcome: reusing a placeholder still requires setup.
   `credential_name` is filled only for credentials the installer owns or already has a share on. It
   is never filled for a publisher credential before the share exists.
 - `AddonCredentialIssuePublic { slot: str, type: str, reason: "not_linked" | "not_configured" | "access_revoked" }`
@@ -269,7 +269,7 @@ appended by the skill caller (D9)].
 
 | Value | Meaning |
 |---|---|
-| `already_linked` | This agent already links a credential that satisfies the slot. Nothing to do. |
+| `already_linked` | This agent already links a credential matching the slot. No new link is needed; an unfilled placeholder still has `needs_setup=true`. |
 | `linked_publisher` | The publisher's credential is shared (`skill_install`, or no share when installer == publisher) and linked. |
 | `linked_existing` | A credential the installer owns, or has a share on, carries this slot and is linked (D3). It may itself be a placeholder from an earlier install. |
 | `template_materialised` | A placeholder is created from the publisher's template and linked. |
@@ -961,7 +961,7 @@ Add helpers to `backend/tests/utils/skill_catalog.py`:
 6. **Publisher unavailable at install.** The publisher disables sharing after publish → preview and
    install `publisher_unavailable`, a placeholder is created, the row shows a warning.
 7. **Access revoked after install.** The publisher disables sharing → B's row reason
-   `access_revoked`; `setup-status` still `ready` (D1).
+   `not_linked`; `setup-status` still `ready` (D1).
 8. **Upgrade adds a slot.**
    - Republish with a second declaration.
    - `POST …/plugins/{link_id}/upgrade` provisions only the new slot.
@@ -1498,7 +1498,7 @@ Then run the target scenario manually in a dev stack (brief §6), with rebuilt e
 4. A second user installs it into their agent. The script calls
    `credentials.agent_api_session("erp-public-api")`. The producer sees `X-Cinna-Caller-*` for the
    second user.
-5. The producer owner disables sharing: the consumer row turns amber (`access_revoked`), the script
+5. The producer owner disables sharing: the consumer row turns amber (`not_linked`), the script
    raises `credential_missing` with the fix text, and the delete of the connection is Tier 2.
 
 Full suite: `make test-backend` (use `ps` in the container before dispatching, per the known
@@ -1546,7 +1546,7 @@ run `make check-docs` (green).
 | Declared slot type unknown to the backend (a container newer than the backend) | Host parse at publish refuses (`skill_invalid`). The provisioner skips unknown types (logged). |
 | Publisher deleted (`SkillPackage.publisher_user_id` SET NULL) | `PublisherBoundary(None)` → every publisher spec fails the owner check → `publisher_unavailable` (placeholder). |
 | Publisher credential deleted | `AgentCredentialLink` cascades. New installs → `publisher_unavailable`. Existing installs → row `not_linked`. Deletion was gated at Tier 2. |
-| Sharing disabled after publish | Shares deleted (existing behaviour). Rows `access_revoked`. New installs `publisher_unavailable`. Re-enabling does not re-share existing installs automatically. Reinstall or upgrade to a revision adding the slot does. Documented (drift detection is out of scope). |
+| Sharing disabled after publish | Shares and recipient links are deleted. Existing rows read `not_linked`; new installs read `publisher_unavailable`. Re-enabling does not re-share existing installs automatically. Reinstall or upgrade to a revision adding the slot does. Documented (drift detection is out of scope). |
 | Template payload undecryptable at publish | Publish refused `credential_template_unreadable` (409) before any write. |
 | Two skills declare the same slot | Both resolve to the same credential (desired). Uninstalling one keeps it (retained set). |
 | User manually unlinks a skill credential | The row shows `not_linked`. Upgrade does not re-link existing slots, only added ones. Reinstall does. |
@@ -1630,7 +1630,7 @@ run `make check-docs` (green).
 - [x] Deletion impact Tier 2 via skills (API)
 - [x] Bundle, credentials, agent_api and sessions suites green with no test edits
 - [x] Phase 4 seam review + docs sweep + `make check-docs` + full backend suite
-- [ ] Phase 4 manual end-to-end scenario (needs a dev stack: two users, a producer agent, a rebuilt env)
+- [x] Phase 4 manual end-to-end scenario (two users, a producer agent, rebuilt environments; see §15)
 
 ---
 
@@ -1760,7 +1760,7 @@ authored with the `credentials:` block and a script that calls
 | Script through the slot | `/whoami` → `anonymous: false`, `user_id`/`email` of the **second** user; `/customers` → `called_by: "erp-consumer@example.com"` |
 | Producer scopes, live | granting `erp.read` to the second user shows up on the **next call** with no re-sync |
 | Addons row | `status: "ok"` |
-| Sharing off (`PATCH /credentials/{id}/sharing`) | share deleted; addons row `warning` / `credential_missing` / `reason: "access_revoked"`; `GET /setup-status` stays `ready` (D1) |
+| Sharing off (`PATCH /credentials/{id}/sharing`, initial run before the fixes below) | share deleted; addons row `warning` / `credential_missing` / `reason: "access_revoked"`; `GET /setup-status` stays `ready` (D1) |
 | Deletion impact | `tier: 2`, `skill_pbp_usages` names the package + revision, `active_skill_install_count: 1`; `DELETE` → 409 with the same body, `?force=true` → 200 |
 | After the delete | the consumer env re-synced; `credentials.json` keeps only `current_user`; the script exits 1 with `no credential for slot 'erp-public-api' is linked to this agent. Fix: open the agent's Credentials tab and link a credential whose service URI (slot) is 'erp-public-api'.`; addons row reason flips to `not_linked` |
 
@@ -1805,10 +1805,10 @@ deletes every link to the credential on agents owned by a revoked recipient and 
 `DELETE /credentials/{id}/shares/{share_id}` and `PATCH /credentials/{id}/sharing` — and both service
 methods and their routes became async. The owner's own links are untouched. Consequences to know: a
 recipient whose share is restored must re-link (a reinstall or an upgrade does it for them), and
-`access_revoked` now describes only the generic `PUT /credentials/{id}` path, which still leaves share
-and link in place; the `PATCH` path lands on `not_linked`. Covered by
-`tests/api/credentials/test_credential_share_revocation.py` (2), the rewritten scenario 7 and a new
-`PUT`-path case in `agents_skill_credentials_install_test.py` — all four fail with the fix disabled.
+`access_revoked` remains a defensive state for a linked foreign credential with no usable share; both
+normal sharing-disable paths land on `not_linked`. Covered by
+`tests/api/credentials/test_credential_share_revocation.py`, scenario 7 and the
+`PUT`-path case in `agents_skill_credentials_install_test.py`.
 
 **The bundle half of that fix (I10).** The readiness gate walked `AgentCredentialLink` rows only, so
 deleting the link on revocation silently took a bundle install's `publisher_broken` verdict with it —
@@ -1839,10 +1839,78 @@ unchanged). Covered by scenario 3 in `agents_skill_credentials_gate_test.py`.
 the chat path). `make check-docs` green, platform knowledge re-synced, client regenerated — the only
 API-surface change is the `PATCH …/sharing` description.
 
-Confirmed live and already known: the generic `PUT /credentials/{id}` turning `allow_sharing` off
-leaves the shares in place (only `PATCH /credentials/{id}/sharing` deletes them) — the stale-share
-trap Phase 2 guarded around. Note that once the flag has been flipped by `PUT`, the `PATCH` path can
-no longer purge, because it only deletes shares when the flag was still true.
+**Follow-up, 2026-09-11: generic sharing disable now revokes too.** An explicit
+`PUT /credentials/{id}` with `allow_sharing=false` now deletes every share, unlinks recipient
+agents, and re-syncs their environments just like `PATCH /credentials/{id}/sharing`. The PATCH
+and PUT paths also purge any legacy shares even if the flag was already false, repairing the stale state
+that earlier generic updates could create. Covered by the generic-path regression in
+`test_credential_share_revocation.py` and the skill install scenario.
+
+**Follow-up verification:** 129 tests passed across `tests/api/credentials`,
+`tests/api/agents/skill_credentials` and the bundle install readiness test module.
+This includes the restored SSH revocation assertions proving the next environment payload
+contains neither its key nor its credential entry. Two additional isolated tests in
+`tests/unit/test_credential_revocation_legacy.py` verify that both disable paths clean up
+shares left behind when the stored flag is already false. Client regenerated, platform
+knowledge re-synced, and `make check-docs` passed. The full-suite counts above are historical;
+the follow-up did not rerun the entire backend suite.
+
+### Final readiness audit (2026-09-11)
+
+The current tree has been checked against the complete Phase 1–4 contract. This
+audit distinguishes the original manual scenario above from checks repeated after
+the generic-update revocation fix.
+
+**Reused-placeholder follow-up.** The audit found that both install dialogs treated
+`linked_existing` and `already_linked` as ready even when they reused a placeholder.
+The public provisioning projection now adds `needs_setup`, computed without extra
+queries. Both dialogs use it to retain warning rows, the setup panel and the
+Credentials-tab remedy. API regressions cover second-agent and same-agent reuse,
+then filling the shared placeholder; frontend helper tests cover all linked
+outcomes, new placeholders/templates, mixed readiness and older API responses.
+The first affected-API rerun exposed a false warning on the publisher preview:
+that preview intentionally hides the credential id before sharing. The fix
+carries only `is_placeholder` on the internal provisioning item through the
+redaction; the public id/name stay hidden. All 29 focused install/projection
+checks then passed, including the publisher privacy assertions.
+
+| Requirement | Current evidence |
+|---|---|
+| Declaration validation and projection (C1, I3) | `parse_credential_declarations` and the block-mapping parser in `skill_manifest.py`; host/env copies compared byte-identical. `test_skill_manifest.py` covers slot/type/description validation, duplicates, limits, scalar compatibility and projection. |
+| Immutable revision specs and public projections (C2/C3, I6/I12) | `SkillCredentialRequirements.build_specs`, `specs_to_public`, and `publish_from_agent`; publish API tests cover consent, foreign ownership, placeholders, secret-field stripping, invalid declarations and immutable republish. Public schemas omit template payloads. |
+| Schema deployment | Local `alembic current` and `alembic heads` both return the single head `8f3a1d7c04e2`, which includes `562ac5a89f04`. The feature column remains non-null JSON with an empty-list server default. |
+| Bundle compatibility (I1/I2/I5) | Bundle collector delegates to `build_spec` with the original key order and values; the slot matcher remains the extracted Tier 0; bundle policy keeps its original branch order, placeholder names and fallback notes. Existing bundle tests retain their assertions; the earlier revocation fix added an unlink assertion to the readiness test. |
+| Provisioning, preview, upgrade, uninstall (I7–I9) | Both preview and provision use `_decide_slot`; install/upgrade commit provisioning with the plugin link, and routes sync after commit. The passing skill API suite covers publisher/self/existing/template/placeholder/unavailable modes, idempotency, added slots and retained placeholders. |
+| Warning and gate semantics (D1/D15, I10/I11) | `SkillSlotIndex` is loaded once per Addons build with bounded queries; `credential_missing` follows materialization checks. The passing gate tests cover skill-only warnings, bundle blockers and retained-placeholder copy. |
+| Credential impact and categorization | Passing credential tests cover Automatic categorization and Tier 2 skill impact, including installers upgraded past the providing revision. Sharing and deletion UI both render skill usage. |
+| Environment payload and SDK (C6/C7, I4) | Passing API payload tests verify type-independent slot/placeholder fields; SDK tests cover missing/unfilled slots, identity headers, origins and redirects. The prior consumer's SDK file matches the current template byte-for-byte. |
+| Frontend S1–S7 | Share preview, both install dialogs, setup panel, catalog requirements, Addons warnings, impact dialogs and Automatic copy are wired to generated schemas. `npm run build` passed after the setup-flag change (TypeScript and Vite production build; existing chunk-size warnings only). All 8 `npm run test:skill-credentials` regressions passed. |
+| Original complete scenario | The earlier two-user publish/install/scopes/revocation/deletion run is recorded above. The current follow-up additionally exercised real environments as described below. |
+| Documentation and generated client | Client regenerated from current OpenAPI; platform documentation re-synced; `make check-docs` and `git diff --check` passed. |
+| Full regression gate | Full backend baseline: **4625 passed, 10 skipped**, exit 0, in 2072.54s. It includes generic-update revocation but started before the reused-placeholder change. Final-tree affected API suites plus all unit tests: **2369 passed, 10 skipped**, exit 0, in 294.66s, including the publisher-preview privacy correction. |
+
+**Final-tree regression command:** `python -m pytest tests/api/credentials
+tests/api/agents/skill_credentials tests/api/agents/bundles
+tests/api/agents/bundles_install tests/unit -q --tb=short`, run inside the backend
+container. The result comprises 264 API tests and 2105 unit tests, with 10 unit
+tests skipped. Frontend: all 8 `npm run test:skill-credentials` checks passed;
+`npm run build`, focused Biome checks, `make check-docs` and `git diff --check`
+passed. Generated API client and platform knowledge are synchronized. The
+planned Phase 1–4 scope is ready; the explicit non-goals in §13 remain out of scope.
+
+**Live revocation follow-up: PASS.** Temporarily started the existing
+`erp-public-api` producer and `plain-agent` consumer owned by
+`erp-consumer@example.com`. Created a disposable Agent API connection with a unique
+slot, provisioned it through `CredentialProvisioner` with `SKILL_INSTALL_POLICY`,
+and synchronized the consumer. An actual container call through
+`credentials.agent_api_session(slot)` reached `/whoami`: `anonymous=false`, the
+consumer's user id/email, and scope `erp.read`. An authenticated
+`PUT /credentials/{id}` with `allow_sharing=false` then removed that slot from the
+running consumer's credentials; `require_slot` raised `CredentialMissing` with
+reason `not_linked` and the Credentials-tab remedy. Deleted the disposable
+connection (including its token) and restored both containers to their original
+stopped state. This follow-up exercises provisioning/runtime/revocation; the
+original scenario remains the evidence for catalog publish/install UI steps.
 
 ### Item 6 — the small gaps, worked 2026-09-11
 

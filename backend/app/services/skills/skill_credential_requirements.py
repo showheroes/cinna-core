@@ -461,10 +461,13 @@ class SkillCredentialRequirements:
             item.credential_id for item in items if item.credential_id is not None
         }
         visible_names: dict[uuid.UUID, str] = {}
+        credentials_by_id: dict[uuid.UUID, Credential] = {}
+        shared_ids: set[uuid.UUID] = set()
         if credential_ids:
             credentials = session.exec(
                 select(Credential).where(col(Credential.id).in_(credential_ids))
             ).all()
+            credentials_by_id = {credential.id: credential for credential in credentials}
             foreign_ids = [
                 credential.id
                 for credential in credentials
@@ -479,6 +482,33 @@ class SkillCredentialRequirements:
                 if credential.owner_id == agent.owner_id
                 or credential.id in shared_ids
             }
+
+        def needs_setup(item: SlotProvision) -> bool:
+            if item.outcome == "linked_publisher" and item.credential_id is None:
+                # Preview deliberately redacts the id before sharing. Its
+                # decision already checked consent; only configuration remains.
+                return item.is_placeholder is not False
+            if item.outcome in (
+                "template_materialised",
+                "placeholder_created",
+                "publisher_unavailable",
+            ):
+                return True
+            credential = (
+                credentials_by_id.get(item.credential_id)
+                if item.credential_id is not None
+                else None
+            )
+            if credential is None or credential.is_placeholder:
+                return True
+            if credential.owner_id == agent.owner_id:
+                return False
+            # A previewed publisher share does not exist yet. Other linked
+            # outcomes must already have access, as in SkillSlotIndex.
+            return not credential.allow_sharing or (
+                item.outcome != "linked_publisher" and credential.id not in shared_ids
+            )
+
         return [
             SkillCredentialProvisionPublic(
                 slot=item.slot or item.spec_name,
@@ -486,6 +516,7 @@ class SkillCredentialRequirements:
                 description=item.description,
                 provided_by=item.provided_by,
                 outcome=item.outcome,
+                needs_setup=needs_setup(item),
                 credential_id=item.credential_id,
                 credential_name=(
                     visible_names.get(item.credential_id)
@@ -629,8 +660,8 @@ class SkillSlotIndex:
 
     A spec is satisfied when one of its candidates is owned by the agent owner
     and filled in, or is foreign, still ``allow_sharing`` **and** shared with
-    the agent owner. A share row alone is not enough: turning sharing off
-    leaves the row behind. Otherwise the reason is ``not_linked`` (no
+    the agent owner. A share row alone is not enough: older sharing-disable
+    paths could leave it behind. Otherwise the reason is ``not_linked`` (no
     candidate), ``not_configured`` (an owned placeholder) or
     ``access_revoked``.
     """

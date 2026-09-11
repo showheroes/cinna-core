@@ -27024,6 +27024,11 @@ export const SkillCredentialProvisionPublicSchema = {
             enum: ['already_linked', 'linked_publisher', 'linked_existing', 'template_materialised', 'placeholder_created', 'publisher_unavailable'],
             title: 'Outcome'
         },
+        needs_setup: {
+            type: 'boolean',
+            title: 'Needs Setup',
+            default: false
+        },
         credential_id: {
             anyOf: [
                 {

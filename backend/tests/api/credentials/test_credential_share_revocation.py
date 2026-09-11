@@ -9,14 +9,18 @@ page while the recipient's container went on holding a working secret — found
 by running the skill-credential scenario end to end on a dev stack
 (docs/plans/skill_credential_requirements_plan.md §15, "Manual scenario run").
 
-Both revocation entry points now delete the recipient's links and sync their
+All revocation entry points now delete the recipient's links and sync their
 environments:
   1. ``DELETE /credentials/{id}/shares/{share_id}`` — one recipient.
   2. ``PATCH /credentials/{id}/sharing`` with ``allow_sharing=false`` — all of
      them, while the owner's own links stay untouched.
+  3. ``PUT /credentials/{id}`` with ``allow_sharing=false`` — the generic
+     update path has the same revocation semantics as the dedicated control.
 
 The env assertions use the adapter-capture pattern of
 ``test_credential_service_uri_env_sync.py``.
+Legacy shares surviving an already-disabled flag are covered in
+``tests/unit/test_credential_revocation_legacy.py``.
 """
 from fastapi.testclient import TestClient
 
@@ -138,3 +142,35 @@ def test_disabling_sharing_unlinks_every_recipient_but_not_the_owner(
         "the owner's own link is not a share and must survive"
     )
     assert cred["id"] in _synced_credential_ids(owner_adapter)
+
+
+def test_generic_update_disabling_sharing_unlinks_and_resyncs_recipients(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    patch_environment_adapter,
+) -> None:
+    """The generic update cannot leave a stale, usable shared credential."""
+    owner, owner_headers = make_developer(client, superuser_token_headers)
+    recipient, recipient_headers = make_developer(client, superuser_token_headers)
+
+    cred = _shareable_credential(client, owner_headers)
+    share_credential_via_api(
+        client, owner_headers, cred["id"], recipient["email"],
+    )
+    recipient_agent, recipient_adapter = _agent_with_adapter(
+        client, recipient_headers, patch_environment_adapter, "Generic-Revocation-Consumer",
+    )
+    link_credential_to_agent(client, recipient_headers, recipient_agent, cred["id"])
+    drain_tasks()
+    assert cred["id"] in _synced_credential_ids(recipient_adapter)
+
+    update_credential(client, owner_headers, cred["id"], allow_sharing=False)
+    drain_tasks()
+
+    assert _linked_credential_ids(client, recipient_headers, recipient_agent) == set()
+    assert cred["id"] not in _synced_credential_ids(recipient_adapter)
+    shares = client.get(
+        f"{API}/credentials/{cred['id']}/shares", headers=owner_headers,
+    )
+    assert shares.status_code == 200, shares.text
+    assert shares.json()["count"] == 0

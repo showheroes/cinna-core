@@ -330,9 +330,12 @@ class CredentialShareService:
             # keys — identity-bound). Same guard the generic update path applies.
             CredentialsService.assert_sharing_allowed(session, credential)
 
-        # If disabling sharing, delete all existing shares
+        # If disabling sharing, delete all existing shares.  Do not condition
+        # this on the stored flag: an older generic PUT could already have
+        # flipped it while leaving its shares behind, and PATCH must repair
+        # that stale state as well.
         revoked_recipient_ids: list[UUID] = []
-        if not allow_sharing and credential.allow_sharing:
+        if not allow_sharing:
             statement = select(CredentialShare).where(
                 CredentialShare.credential_id == credential_id
             )

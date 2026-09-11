@@ -362,7 +362,9 @@ async def update_credential(
     Update a credential.
 
     This will trigger automatic sync to all running environments of agents
-    that have this credential linked.
+    that have this credential linked. Setting ``allow_sharing`` to false also
+    revokes every existing share, unlinks recipient agents, and re-syncs them
+    so the credential leaves their environments immediately.
     """
     try:
         # Type-specific validation on update (only if credential_data is supplied).

@@ -163,7 +163,7 @@ an empty placeholder — and the row reports whichever slots are not usable yet 
 |----------|---------------|--------------------|
 | `not_linked` | No credential carrying that slot is linked to the agent | Link or create one on the Credentials tab |
 | `not_configured` | A placeholder is linked but nobody filled it in | Open it and fill it in |
-| `access_revoked` | The publisher's credential is gone, or its owner turned sharing off | Provide your own, or ask the publisher |
+| `access_revoked` | A linked foreign credential has no usable share (a defensive stale-state result) | Provide your own, or ask the publisher |
 
 **It is a warning, not an error, and it never blocks the agent.** The skill still
 loads and every other capability on the agent still works; only the scripts that

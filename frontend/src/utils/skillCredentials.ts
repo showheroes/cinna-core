@@ -263,15 +263,36 @@ export const SLOT_OUTCOME_COPY: Record<SlotOutcome, SlotOutcomeCopy> = {
 
 type ProvisionItem = Pick<
   SkillCredentialProvisionPublic,
-  "slot" | "outcome" | "credential_name"
+  "slot" | "outcome" | "credential_name" | "needs_setup"
 >
+
+type ProvisionState = Pick<
+  SkillCredentialProvisionPublic,
+  "outcome" | "needs_setup"
+>
+
+/** Reusing an existing credential may still require setup (e.g. a placeholder). */
+export function slotOutcomeCopy(item: ProvisionState): SlotOutcomeCopy {
+  const copy = SLOT_OUTCOME_COPY[item.outcome]
+  const needsSetup = item.needs_setup ?? copy.needsSetup
+  if (needsSetup && !copy.needsSetup) {
+    return {
+      needsSetup,
+      short: (p) => `${copy.short(p)} — needs setup`,
+      preview: (p) =>
+        `${copy.preview(p)}. Complete its setup on the Credentials tab.`,
+      installed: (p) =>
+        `${copy.installed(p)}. Complete its setup on the Credentials tab.`,
+    }
+  }
+  return { ...copy, needsSetup }
+}
 
 /** How many slots of an install still need the user before the skill works. */
 export function countSlotsNeedingSetup(
-  items: ReadonlyArray<Pick<SkillCredentialProvisionPublic, "outcome">>,
+  items: ReadonlyArray<ProvisionState>,
 ): number {
-  return items.filter((item) => SLOT_OUTCOME_COPY[item.outcome].needsSetup)
-    .length
+  return items.filter((item) => slotOutcomeCopy(item).needsSetup).length
 }
 
 /** The row's dot: ready is `on`; anything the user must fill in is `warning`. */
@@ -279,7 +300,7 @@ export function slotOutcomeStatus(
   item: ProvisionItem,
   phase: SlotPhase,
 ): RowStatus {
-  const copy = SLOT_OUTCOME_COPY[item.outcome]
+  const copy = slotOutcomeCopy(item)
   const params = { slot: item.slot, credentialName: item.credential_name }
   return {
     tone: copy.needsSetup ? "warning" : "on",
@@ -289,15 +310,15 @@ export function slotOutcomeStatus(
 
 /** The line under an install's slot list. */
 export function slotOutcomeSummary(
-  items: ReadonlyArray<Pick<SkillCredentialProvisionPublic, "outcome">>,
+  items: ReadonlyArray<ProvisionState>,
   phase: SlotPhase,
 ): string {
   const count = countSlotsNeedingSetup(items)
   if (count === 0) return "Ready to use on this agent."
   if (phase === "preview") {
-    return `${count} ${plural(count, "needs", "need")} filling in after install.`
+    return `${count} ${plural(count, "needs", "need")} setup after install.`
   }
-  return `${count} ${plural(count, "credential needs", "credentials need")} filling in before the skill can use ${plural(count, "it", "them")}.`
+  return `${count} ${plural(count, "credential needs", "credentials need")} setup before the skill can use ${plural(count, "it", "them")}.`
 }
 
 /** The Addons row's dot label for `status_code === "credential_missing"`. */

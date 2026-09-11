@@ -416,34 +416,7 @@ def test_ssh_key_sharing_and_revocation(
     assert r.status_code == 400, (
         f"Revoked share: recipient must not be able to read credential, got {r.status_code}"
     )
-
-    # NOTE — known implementation gap (BUG): revoke_credential_share() in
-    # credential_share_service.py does NOT call
-    # sync_credentials_to_agent_environments() for the recipient's running
-    # environments.  The ssh_keys file therefore remains on disk until the next
-    # scheduled sync or env restart.  The env-sync assertion is intentionally
-    # omitted here; it will become valid once the developer adds that call.
-    # See the bug note at the bottom of this module.
-
-
-# ---------------------------------------------------------------------------
-# BUG REPORT (surfaced by this test suite)
-# ---------------------------------------------------------------------------
-# File:    backend/app/services/credentials/credential_share_service.py
-# Method:  CredentialShareService.revoke_credential_share()
-#
-# Problem: After deleting the CredentialShare row, the method does not call
-#          CredentialsService.sync_credentials_to_agent_environments() for the
-#          recipient user's agents.  This means the private key file at
-#          ~/.ssh/id_<credential_id> persists inside the recipient's running
-#          container until the next credential sync (e.g., triggered by an
-#          unrelated credential update or env restart).
-#
-# Expected fix: after `session.commit()`, iterate over agents that had the
-#   revoked credential linked and fire sync_credentials_to_agent_environments()
-#   for each, mirroring the pattern used in update_credential() and
-#   delete_credential().
-#
-# Similarly, update_credential_sharing() (the PATCH /sharing endpoint) should
-# trigger the same sweep for all recipient agents when allow_sharing is toggled
-# to False and all shares are bulk-revoked.
+    drain_tasks()
+    assert recipient_adapter.credentials_set is not None
+    assert recipient_adapter.credentials_set.get("ssh_keys", []) == []
+    assert real_credentials_json(recipient_adapter.credentials_set) == []

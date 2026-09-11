@@ -92,6 +92,8 @@ class SkillCredentialProvisionPublic(SQLModel):
     description: str | None = None
     provided_by: Literal["user", "publisher", "template"] = "user"
     outcome: SkillSlotOutcome
+    #: Provisioning can reuse a placeholder: linked does not imply configured.
+    needs_setup: bool = False
     credential_id: uuid.UUID | None = None
     credential_name: str | None = None
 
