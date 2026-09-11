@@ -79,6 +79,12 @@ The architecture separates OAuth into two distinct roles:
 
 ---
 
+## Related client protocol
+
+[ACP integration](../acp_integration/acp_integration.md) exposes conversation creation, history loading, streamed prompts, and cancellation over a separate authenticated WebSocket endpoint. Owners manage ACP connectors alongside MCP; ACP tokens have independent scope and cannot authenticate to MCP. Existing MCP tool-server behavior is unchanged.
+
+---
+
 ## Core Concepts
 
 ### MCP Connector

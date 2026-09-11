@@ -9,6 +9,7 @@ Each file below documents one API domain.
 | Dashboards | [Dashboards.md](./Dashboards.md) | 17 |
 | A2A | [a2a.md](./a2a.md) | 9 |
 | Access Tokens | [access_tokens.md](./access_tokens.md) | 5 |
+| Acp Connectors | [acp_connectors.md](./acp_connectors.md) | 9 |
 | Activities | [activities.md](./activities.md) | 8 |
 | Admin Ai Keys | [admin_ai_keys.md](./admin_ai_keys.md) | 5 |
 | Admin Ai Providers | [admin_ai_providers.md](./admin_ai_providers.md) | 9 |

@@ -1,7 +1,7 @@
 ---
 feature: flow_message_ingress
 domain: flows
-one_liner: "Follows one inbound message from any entry point — web chat, server channels, A2A, App MCP, webhooks or triggers — into a turn in an agent session and the reply back out."
+one_liner: "Follows one inbound message from any entry point — web chat, server channels, A2A, ACP, App MCP, webhooks or triggers — into a turn in an agent session and the reply back out."
 primary_label: flow
 ---
 # Message Ingress
@@ -10,7 +10,7 @@ primary_label: flow
 
 Something arrives with text in it, and an agent has to answer. The "something" is a person typing in
 the web chat, a Google Chat message, an email in a polled mailbox, an A2A JSON-RPC call from another
-agent, a Cinna Desktop request, an `send_message` tool call on the App MCP server, an HTTP webhook, a
+agent, a Cinna Desktop request, an `send_message` tool call on the App MCP server, an ACP prompt from an external client, an HTTP webhook, a
 cron-fired schedule, or a task the user pressed *Execute* on. This flow follows that message from the
 moment it hits the process to the moment the agent's reply is standing in the surface it came from —
 across a dozen features that each own one slice of the path.
@@ -21,7 +21,7 @@ its own admission policy, and then almost all of them converge on `ChannelIngest
 `Session` row, and on `SessionService.send_session_message` /
 `SessionService.initiate_stream`, which turn a message into a stream against the agent's container.
 Outbound is deliberately *not* unified: the reply leaves through Socket.IO, an SSE frame, an A2A
-`Task`, an MCP tool result, a Google Chat message patch, or an SMTP queue row, and each of those
+`Task`, an MCP tool result, an ACP session update, a Google Chat message patch, or an SMTP queue row, and each of those
 lives in its own module. Agent selection is treated here as one stage — its internals are in
 [Routing & identity chain](routing_identity_chain.md).
 
@@ -37,6 +37,7 @@ lives in its own module. Agent selection is treated here as one stage — its in
 | [email_sessions](../application/email_integration/email_sessions.md) | Threading key and the durable outbound queue | `backend/app/services/email/sending_service.py` |
 | [a2a_protocol](../application/a2a_integration/a2a_protocol/a2a_protocol.md) | JSON-RPC door, token scopes, event→A2A mapping | `backend/app/services/a2a/a2a_request_handler.py` |
 | [external_agent_access](../application/external_agent_access/external_agent_access.md), [desktop_auth](../application/desktop_auth/desktop_auth.md) | Native-client door on a user JWT, `agent` vs `identity` targets | `backend/app/services/external/external_a2a_request_handler.py` |
+| [acp_integration](../application/acp_integration/acp_integration.md) | Authenticated WebSocket conversation lifecycle and text streaming | `backend/app/acp/agent.py`, `backend/app/acp/server.py` |
 | [app_mcp_server](../application/app_mcp_server/app_mcp_server.md) | One `send_message` tool per user, streamed as MCP notifications | `backend/app/services/app_mcp/app_mcp_request_handler.py` |
 | [identity_routing](../application/identity_routing/identity_routing.md) | The one case where the session is created in someone else's space | `backend/app/services/identity/identity_service.py` |
 | [agent_webhooks](../agents/agent_webhooks/agent_webhooks.md) | Unauthenticated-by-JWT HTTP trigger, session or script | `backend/app/services/agents/agent_webhook_service.py` |
@@ -98,6 +99,8 @@ Each door proves the sender differently, and the trust tiers are not equal (stat
   and stamps `last_used_at`. A plain user JWT is the fallback.
 * External A2A — plain `CurrentUser` JWT plus `CurrentClientClaims` (`backend/app/api/deps.py`); no
   A2A access tokens on this surface at all.
+* ACP — connector-scoped hashed bearer token, checked by `ACPConnectorService.authenticate` in
+  `backend/app/services/acp/connector_service.py`; persistent session metadata also binds the issuing token.
 * App MCP — `AppMCPToken` bearer, `token_hash` + `expires_at` + `is_revoked`.
 * Guest share / webapp — a short-lived share JWT minted by
   `backend/app/services/sharing/agent_guest_share_service.py`, resolved by `deps.py` into a
@@ -180,7 +183,7 @@ messages.
 3. `SessionService.send_session_message(..., initiate_streaming=True)`.
 
 The `integration_type` written at create is the marker every later stage reads:
-`channel_<type>` for server channels, `a2a`, `app_mcp`, `identity_mcp`, `external`, `task`,
+`channel_<type>` for server channels, `a2a`, `acp`, `app_mcp`, `identity_mcp`, `external`, `task`,
 `schedule`, `webhook`, or `None` for web-UI, guest-share and webapp sessions.
 
 Three doors deliberately do **not** run all of step 1–3: `message/stream` on A2A uses
@@ -189,6 +192,8 @@ because `SessionStreamProcessor` owns the stream kick; App MCP does the same and
 `MessageService.create_message`, because `ingest_inbound_message`'s stream kick conflicts with
 `stream_and_collect_response`'s session lock; and `POST /api/v1/sessions/` calls only
 `resolve_or_create_session`, because there is no message body yet.
+
+ACP is another explicit exception: `backend/app/acp/agent.py` creates an owner-held session with a connector/token binding, persists text through `MessageService.create_message`, and invokes `SessionStreamProcessor` directly under the shared session lock and an ACP advisory lease. It checks the install gate before execution, reuses environment activation, and translates output to ACP updates. It does not invoke the web UI slash-command parser or expose client filesystem/MCP tools.
 
 ### 7. Message row, environment readiness, commands
 
@@ -253,6 +258,7 @@ message in the session".
 | Web chat, guest share, webapp | Socket.IO `stream_event` into room `session_{id}_stream`; the POST returns only a handshake from `MessageService.build_stream_response` |
 | A2A `message/send` | A2A `Task` built by `DatabaseTaskStore` (`backend/app/services/a2a/a2a_task_store.py`), polled until terminal |
 | A2A / External A2A `message/stream` | SSE frames, one JSON-RPC-wrapped A2A event each, mapped by `backend/app/services/a2a/a2a_event_mapper.py`; attachments become `FilePart`s with 1-hour signed backend URLs from `AgentWorkspaceTokenService.create_file_download_token` |
+| ACP | WebSocket `session/update` notifications followed by the `session/prompt` result; cancellations interrupt the existing environment stream |
 | App MCP | a JSON string `{"response", "context_id", "agent_name"}`; increments go out as MCP progress/log notifications, not as a stream of the answer |
 | Google Chat | live: `ChannelStreamRelay` patches one message every ~3 s and *seals* a slice when the draft outgrows the transport limit. Final: `ChannelOutboundService.handle_stream_completed` |
 | Email | `EmailChannelAdapter.send_message` enqueues an `OutgoingEmailQueue` row; `EmailSendingService.send_pending_emails` drains it every 2 minutes, `MAX_RETRIES = 3`, no backoff |

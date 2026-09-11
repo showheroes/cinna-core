@@ -26,7 +26,7 @@ A session is a persistent chat conversation between a user (or external system) 
 - **Interaction Status** — Real-time streaming state: `""` (idle), `"running"` (stream active), `"pending_stream"` (waiting for environment to activate)
 - **Result State** — Agent-declared outcome set via `update_session_state` tool: `completed`, `needs_input`, `error`. Auto-reset to `null` when user sends the next message
 - **Result Summary** — Agent-provided description accompanying the result state (question, error message, completion note)
-- **Integration Type** — How the session was initiated: `null` (manual), `"a2a"`, `"mcp"` (tracked via `mcp_connector_id`), `"app_mcp"` / `"identity_mcp"`, `"schedule"`, `"webhook"`, `"external"`, or `"channel_<type>"` (e.g. `"channel_google_chat"`, `"channel_email"`) for every [Server Channel](../server_channels/server_channels.md)-originated session, including email — since Phase 4 of the channels & identity unification refactor, plain `"email"` is never stamped any more (it predates email becoming a channel transport)
+- **Integration Type** — How the session was initiated: `null` (manual), `"a2a"`, `"mcp"` (tracked via `mcp_connector_id`), `"acp"` (connector/token scope in session metadata), `"app_mcp"` / `"identity_mcp"`, `"schedule"`, `"webhook"`, `"external"`, or `"channel_<type>"` (e.g. `"channel_google_chat"`, `"channel_email"`) for every [Server Channel](../server_channels/server_channels.md)-originated session, including email — since Phase 4 of the channels & identity unification refactor, plain `"email"` is never stamped any more (it predates email becoming a channel transport)
 - **Source Task** — Input task that spawned this session, tracked via `source_task_id` backlink
 - **Todo Progress** — Real-time task completion progress captured from agent's TodoWrite tool calls
 - **External Session ID** — SDK-level session identifier stored in `session_metadata`, used to resume conversation context across messages
@@ -80,6 +80,10 @@ originating channel.
 2. System creates session with `mcp_connector_id` and `MCPSessionMeta` record
 3. Session is isolated per `context_id` (platform session UUID) echoed back by the LLM
 4. Multiple MCP clients can maintain independent conversations on the same connector
+
+### ACP conversations
+
+[ACP connectors](../acp_integration/acp_integration.md) create owner-held sessions with `integration_type="acp"`. Each session is bound to its connector and issuing token; clients can reload its history after reconnecting with that same token. ACP prompts use the existing environment and streaming pipeline, and client cancellation interrupts the running agent. Changing connector mode prevents loading sessions created under its previous mode; deleting a connector preserves owner-visible history while revoking external access.
 
 ### Flow 6: Guest Session
 
