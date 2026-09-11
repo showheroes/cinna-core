@@ -137,17 +137,25 @@ class EventServiceClass {
   private reconnectDelay = 1000 // Start with 1 second
   private statusListeners: Set<ConnectionStatusListener> = new Set()
   private currentStatus: ConnectionStatus = "disconnected"
-  // Remember the last userId used so ensureConnected() (and window-event
+  // Remember the token provider so ensureConnected() (and window-event
   // recovery nudges) can re-create the socket if it was torn down.
-  private lastUserId: string | null = null
+  private tokenProvider: (() => string | null) | null = null
   // Guard so window listeners are only registered once.
   private windowListenersBound = false
 
   /**
-   * Initialize the WebSocket connection
+   * Initialize the WebSocket connection.
+   *
+   * @param getToken - Returns the JWT to authenticate the socket with. The
+   *   server derives the identity from this token alone (it ignores any
+   *   client-supplied user id), so it must be a real signed token: the user's
+   *   `access_token`, or a webapp-viewer share token. It is a *function*, not
+   *   a string, because socket.io re-invokes `auth` on every reconnect — a
+   *   captured string would keep replaying a token that has since been
+   *   refreshed or expired.
    */
-  connect(userId: string): void {
-    this.lastUserId = userId
+  connect(getToken: () => string | null): void {
+    this.tokenProvider = getToken
     this.bindWindowListeners()
 
     if (this.socket?.connected || this.isConnecting) {
@@ -173,8 +181,8 @@ class EventServiceClass {
     this.socket = io(apiUrl, {
       path: "/ws",
       transports: ["websocket", "polling"],
-      auth: {
-        user_id: userId,
+      auth: (cb: (data: Record<string, unknown>) => void) => {
+        cb({ token: getToken() ?? "" })
       },
       reconnection: true,
       // Retry forever — after a backend deploy the client must keep trying so
@@ -269,7 +277,7 @@ class EventServiceClass {
    *
    * - Connected/connecting: no-op.
    * - Socket exists but disconnected: reconnect the existing socket.
-   * - No socket but a userId was previously used: re-create the connection.
+   * - No socket but a token provider was previously registered: re-create it.
    */
   ensureConnected(): void {
     if (this.socket?.connected || this.isConnecting) {
@@ -282,9 +290,9 @@ class EventServiceClass {
       this.socket.connect()
       return
     }
-    if (this.lastUserId) {
+    if (this.tokenProvider) {
       console.log("[EventService] ensureConnected: re-creating connection")
-      this.connect(this.lastUserId)
+      this.connect(this.tokenProvider)
     }
   }
 

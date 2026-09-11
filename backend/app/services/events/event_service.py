@@ -7,7 +7,9 @@ from typing import Any, Callable, Awaitable
 from uuid import UUID
 import concurrent.futures
 
+from app.core.db import create_session
 from app.models.events.event import EventPublic, EventBroadcast
+from app.services.events import socket_auth
 from app.services.events.socketio_connector import socketio_connector
 from app.utils import create_task_with_error_logging
 
@@ -45,30 +47,39 @@ class EventService:
 
         @self.sio.event
         async def connect(sid, environ, auth):
-            """Handle client connection."""
+            """Handle client connection.
+
+            The socket app is mounted publicly at ``/ws``, so this is the only
+            authentication gate on the event stream. Identity comes from the
+            signed ``auth["token"]`` and nothing else — a client-supplied user
+            id is ignored. See ``events/socket_auth.py``.
+            """
             logger.info(f"Client connecting: {sid}")
 
-            # Extract user_id from auth data
-            user_id = auth.get("user_id") if auth else None
+            with create_session() as db_session:
+                principal = socket_auth.resolve_principal(db_session, auth)
 
-            if not user_id:
-                logger.warning(f"Connection {sid} rejected: no user_id in auth")
+            if principal is None:
+                logger.warning(f"Connection {sid} rejected: no valid token in auth")
                 return False  # Reject connection
 
             # Store connection info
             self.connections[sid] = {
                 "sid": sid,
-                "user_id": UUID(user_id),
+                "principal": principal,
+                "user_id": principal.id,
                 "connected_at": datetime.now(UTC),
                 "rooms": [],
             }
 
-            # Join user-specific room
-            user_room = f"user_{user_id}"
-            await self.sio.enter_room(sid, user_room)
-            self.connections[sid]["rooms"].append(user_room)
+            # Join the principal's own room
+            await self.sio.enter_room(sid, principal.room)
+            self.connections[sid]["rooms"].append(principal.room)
 
-            logger.info(f"Client {sid} connected for user {user_id}, joined room: {user_room}")
+            logger.info(
+                f"Client {sid} connected as {principal.kind} {principal.id}, "
+                f"joined room: {principal.room}"
+            )
             return True
 
         @self.sio.event
@@ -92,14 +103,28 @@ class EventService:
                 logger.warning(f"Subscribe request from unknown connection: {sid}")
                 return {"status": "error", "message": "Not authenticated"}
 
-            room = data.get("room")
-            if room:
-                await self.sio.enter_room(sid, room)
-                self.connections[sid]["rooms"].append(room)
-                logger.info(f"Client {sid} subscribed to room: {room}")
-                return {"status": "success", "room": room}
+            room = data.get("room") if isinstance(data, dict) else None
+            if not room:
+                return {"status": "error", "message": "No room specified"}
 
-            return {"status": "error", "message": "No room specified"}
+            # A room is joined only if it belongs to this connection's
+            # principal. Without this, any authenticated client could enter any
+            # session's stream room by name.
+            principal = self.connections[sid]["principal"]
+            with create_session() as db_session:
+                allowed = socket_auth.can_join_room(db_session, principal, room)
+
+            if not allowed:
+                logger.warning(
+                    f"Client {sid} ({principal.kind} {principal.id}) refused "
+                    f"room: {room}"
+                )
+                return {"status": "error", "message": "Not authorized for room"}
+
+            await self.sio.enter_room(sid, room)
+            self.connections[sid]["rooms"].append(room)
+            logger.info(f"Client {sid} subscribed to room: {room}")
+            return {"status": "success", "room": room}
 
         @self.sio.event
         async def unsubscribe(sid, data):
@@ -147,7 +172,16 @@ class EventService:
                 logger.warning(f"agent_usage_intent from unknown connection: {sid}")
                 return {"status": "error", "message": "Not authenticated"}
 
-            user_id = self.connections[sid]["user_id"]
+            principal = self.connections[sid]["principal"]
+            if principal.kind != "user":
+                # A webapp viewer holds a share id, not a user id — handing it
+                # to a user-scoped service would be a category error.
+                logger.warning(
+                    f"agent_usage_intent refused for {principal.kind} {principal.id}"
+                )
+                return {"status": "error", "message": "Not authorized"}
+
+            user_id = principal.id
             environment_id = data.get("environment_id")
 
             if not environment_id:
@@ -277,9 +311,22 @@ class EventService:
             room=broadcast.room,
         )
 
+    def _user_connections(self) -> list[dict[str, Any]]:
+        """Connections held by a real user.
+
+        A public webapp viewer also holds a connection, but its principal id is
+        an ``AgentWebappShare`` id, not a user id — so it must not count towards
+        "is this user online".
+        """
+        return [
+            conn
+            for conn in self.connections.values()
+            if conn["principal"].kind == "user"
+        ]
+
     def get_connected_users(self) -> list[UUID]:
         """Get list of currently connected user IDs."""
-        return list({conn["user_id"] for conn in self.connections.values()})
+        return list({conn["user_id"] for conn in self._user_connections()})
 
     def is_user_online(self, user_id: UUID) -> bool:
         """
@@ -291,7 +338,7 @@ class EventService:
         Returns:
             True if user has at least one active connection
         """
-        return any(conn["user_id"] == user_id for conn in self.connections.values())
+        return any(conn["user_id"] == user_id for conn in self._user_connections())
 
     def is_user_connected(self, user_id: UUID) -> bool:
         """Check if a specific user is connected (alias for is_user_online)."""

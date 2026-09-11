@@ -24,6 +24,10 @@ from app.models.sessions.session_sender import SessionSender
 from app.services.sessions.channel_ingestion_service import ChannelIngestionService
 from app.services.sessions.session_service import SessionService
 from app.services.sharing.agent_guest_share_service import AgentGuestShareService
+from app.services.sessions.session_access import (
+    guest_can_access_session,
+    user_can_access_session,
+)
 from app.services.users.role_service import RoleService
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -46,22 +50,14 @@ def _verify_session_access(
     """
     if isinstance(caller, GuestShareContext):
         # Anonymous guest can only access sessions linked to their guest share
-        if chat_session.guest_share_id != caller.guest_share_id:
+        if not guest_can_access_session(caller.guest_share_id, chat_session):
             raise HTTPException(status_code=403, detail="Not enough permissions")
-    else:
-        current_user: User = caller
-        if current_user.is_superuser:
-            return
-        # Owner of the session
-        if chat_session.user_id == current_user.id:
-            return
-        # User with grant for this session's guest share
-        if chat_session.guest_share_id:
-            has_grant = AgentGuestShareService.check_grant(
-                db_session, current_user.id, chat_session.guest_share_id
-            )
-            if has_grant:
-                return
+        return
+
+    # The decision itself lives in the service so the Socket.IO stream-room
+    # check (``events/socket_auth.py``) answers it identically; only the two
+    # status codes are the route's own.
+    if not user_can_access_session(db_session, caller, chat_session):
         raise HTTPException(status_code=400, detail="Not enough permissions")
 
 

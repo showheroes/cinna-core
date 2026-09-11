@@ -46,17 +46,31 @@ def test_gate_publisher_broken_when_pbp_credential_missing() -> None:
     stub_link.agent_id = install_id
     stub_link.credential_id = missing_cred_id
 
-    # Mock DB session: exec returns link list; get(Credential) returns None.
+    # Mock DB session: get(Credential) returns None so the link dangles.
     mock_db = MagicMock()
 
     class _ExecResult:
+        def __init__(self, rows):
+            self._rows = rows
+
         def all(self):
-            return [stub_link]
+            return self._rows
 
         def first(self):
-            return None
+            return self._rows[0] if self._rows else None
 
-    mock_db.exec.return_value = _ExecResult()
+    # A blanket ``exec.return_value`` would answer EVERY query with the link
+    # list, including the ones behind it. That is not a hypothetical: the gate
+    # later grew a skill-slot scan whose query selects ``(id, revision_id)``
+    # tuples, and the shared stub fed it ``stub_link`` — which is not a tuple,
+    # so the unpack blew up inside code this test is not about. Only the first
+    # query (``_scan_service_credentials``'s link lookup) sees the link;
+    # everything after it correctly sees nothing, because this install has no
+    # catalog skills.
+    exec_results = iter([_ExecResult([stub_link])])
+    mock_db.exec.side_effect = lambda *_a, **_k: next(
+        exec_results, _ExecResult([])
+    )
     mock_db.get.return_value = None  # credential row doesn't exist
 
     result = InstallReadinessGate.check(mock_db, stub_install)

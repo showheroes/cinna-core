@@ -71,6 +71,13 @@ CREATE_SESSION_TARGETS_BASE = [
     # domain that only patches BASE would otherwise let a real provider call
     # escape onto the real engine from ``tests/api/users/``.
     "app.services.credentials.key_provisioning_service.create_session",
+    # The Socket.IO ``connect`` / ``subscribe`` handlers resolve the caller's
+    # token and the requested room's ownership on a session of their own (there
+    # is no request to borrow one from). BASE rather than AGENT because any
+    # domain can open a socket, and an unpatched handler would authenticate
+    # against the real database while the test's user exists only in the
+    # rolled-back transaction.
+    "app.services.events.event_service.create_session",
 ]
 
 CREATE_SESSION_TARGETS_AGENT = CREATE_SESSION_TARGETS_BASE + [

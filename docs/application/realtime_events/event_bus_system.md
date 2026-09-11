@@ -83,7 +83,7 @@ Frontend Components                    Backend Services
 
 **Dual room emission**: Each handler emits this event to two destinations:
 1. `user_{owner_id}` room — for authenticated owner sessions in the regular app UI
-2. `session_{session_id}_stream` room — for webapp chat viewers who connect using their `webapp_share_id` as their Socket.IO user identifier and are therefore never in the owner's user room
+2. `session_{session_id}_stream` room — for webapp chat viewers, whose socket principal is their `AgentWebappShare` id and who are therefore never in the owner's user room
 
 This dual emission is required because webapp viewers cannot receive events from the owner's user room. The session stream room is the only shared channel between the owner's streaming pipeline and the webapp viewer's Socket.IO connection.
 
@@ -113,6 +113,7 @@ This ensures any sessions waiting for the environment (with `pending_stream` sta
 ### Backend
 - **`backend/app/models/events/event.py`** - Event models (`EventType`, `EventBase`, `EventPublic`, `EventBroadcast`)
 - **`backend/app/services/events/event_service.py`** - `EventService` class (connection management, event emission)
+- **`backend/app/services/events/socket_auth.py`** - resolves a connection's principal from its signed token and decides which rooms that principal may join; see **Security** below
 - **`backend/app/services/events/socketio_connector.py`** - `SocketIOConnector`, an injectable wrapper that owns the `socketio.AsyncServer` instance and its outbound `emit()` / ASGI-mount surface, following the same dependency-injection pattern as `smtp_connector` / `imap_connector`; `EventService` calls into the module-level `socketio_connector` instance, and tests patch that instance with a stub instead of touching a real Socket.IO server
 - **`backend/app/api/routes/events.py`** - Event API routes (`/broadcast`, `/stats`, `/test`)
 - **`backend/app/main.py`** - Socket.IO mount at `/ws` path
@@ -636,7 +637,38 @@ To extend this system:
 
 ## Security
 
-- Connections require authentication (user_id in auth data)
-- Users can only broadcast to themselves (unless superuser)
-- Each user auto-joins room `user_{user_id}`
-- CORS restricted to configured origins
+The Socket.IO app is mounted **publicly** at `/ws` with `cors_allowed_origins="*"`, so `connect` is
+the only gate between the open internet and a user's live event stream. Two rules carry that weight,
+and both are pinned by `backend/tests/api/events/socket_connection_auth_test.py`:
+
+- **Identity comes from a signed token, never from the client's claim.** `connect` reads
+  `auth["token"]` and resolves it through the *same* functions the REST API uses
+  (`deps.get_current_user` / `deps.get_webapp_chat_user`), not a second decode written for the
+  socket — so the socket inherits the HTTP surface's rules for free, including the decode-time
+  `aud` gate that stops an agent-environment token resolving to the full owner, and the
+  desktop-client revocation check. A client-supplied `user_id` is ignored outright.
+- **A room is joined only if it belongs to the connection's principal.** `subscribe` checks
+  ownership before entering a room: the principal's own `user_{id}`, or the
+  `session_{id}_stream` room of a session the principal can already read over HTTP (same decision
+  function as the REST route — `services/sessions/session_access.py`). Everything else is refused
+  with `{"status": "error", "message": "Not authorized for room"}`.
+
+Two principal kinds can hold a socket, matching the two front ends that open one:
+
+| Kind | Token | `sub` | Own room | Stream rooms it may join |
+|---|---|---|---|---|
+| `user` | the user's `access_token` (including desktop-issued ones) | user id | `user_{user_id}` | sessions it owns, has a guest-share grant for, or any session if superuser |
+| `webapp_share` | the webapp-viewer JWT from `POST /webapp-share/{token}/auth` | `AgentWebappShare` id | `user_{share_id}` | only sessions created through that same share |
+
+Every other token type — guest-share, CLI, agent-environment, agent-API identity — is refused.
+Nothing opens a socket with those today; the place to widen it is `resolve_principal` in
+`backend/app/services/events/socket_auth.py`.
+
+**Before 2026-09-11 none of this was true.** `connect` took `user_id` straight from the
+client-supplied `auth` dict and joined that client to `user_{user_id}` with no verification at all,
+and `subscribe` entered any room by name. Membership of a user's event room — session streams, task
+status changes, activities — was self-asserted by anyone who could reach the port and guess a user
+id. No data was ever *written* through this path and the REST API was unaffected, so it was an
+event-stream confidentiality hole rather than account takeover. The backend and frontend halves of
+the fix ship together on purpose: a transition window that accepted either `{user_id}` or `{token}`
+would have re-opened the hole for exactly as long as it lasted.

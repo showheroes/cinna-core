@@ -208,8 +208,10 @@ function WebappPage() {
     const claims = parseWebappJwt(jwt)
     if (!claims) return
 
-    // Connect using webapp_share_id (from JWT sub) as user identifier
-    eventService.connect(claims.sub)
+    // The server verifies this token and derives the webapp_share_id from its
+    // `sub` itself — the claims are only parsed here to check there is a usable
+    // token before opening a socket.
+    eventService.connect(() => localStorage.getItem(WEBAPP_TOKEN_KEY))
 
     return () => {
       eventService.disconnect()

@@ -121,6 +121,7 @@ def _reported(**overrides) -> dict:
         "warning": None,
         "secret_paths": [],
         "version": None,
+        "credentials": [],
     }
     entry.update(overrides)
     return entry
@@ -148,6 +149,17 @@ class TestNormaliseEntries:
         assert rows[0]["source"] == "local"
         assert rows[0]["size_bytes"] == 0
         assert rows[0]["secret_paths"] == []
+
+    def test_an_entry_from_a_pre_credentials_container_normalises_to_empty(self):
+        """A container built before skills could declare credentials reports no
+        ``credentials`` key at all. That must cache as ``[]`` rather than fail
+        the whole index — the same rule ``version`` follows."""
+        entry = _reported()
+        del entry["credentials"]
+
+        rows = AgentSkillsService._normalise_entries([entry])
+
+        assert rows[0]["credentials"] == []
 
     def test_issue_shapes_are_preserved(self):
         rows = AgentSkillsService._normalise_entries(

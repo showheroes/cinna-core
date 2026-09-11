@@ -22,7 +22,9 @@ export function useEventBusConnection() {
   useEffect(() => {
     if (user && 'id' in user && !hasInitialized.current) {
       console.log("[useEventBusConnection] Initializing event bus for user:", user.id)
-      eventService.connect(user.id as string)
+      // The socket authenticates with the signed token, not the user id — see
+      // eventService.connect(). Read lazily so reconnects pick up a refreshed one.
+      eventService.connect(() => localStorage.getItem("access_token"))
       hasInitialized.current = true
     }
 
