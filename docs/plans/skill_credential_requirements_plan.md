@@ -1527,8 +1527,10 @@ run `make check-docs` (green).
 
 ### Definition of done (Phase 4)
 - [x] Seam checklist answered (§15). One blocking finding (D17) fixed, with a unit guard and an API
-      regression case. The manual scenario has **not** been run — it needs a dev stack with a rebuilt
-      environment and two users.
+      regression case.
+- [x] The manual scenario ran end to end on the local dev stack on 2026-09-11 (two users, three fresh
+      environments carrying the new SDK). Results, the D15 verdict and two findings that need a
+      decision: §15 "Manual scenario run".
 - [x] Full backend suite green: **4616 passed, 10 skipped, 0 failed** (26 min) — the first full-suite
       run of this feature. Re-run after the D17 fix over `tests/unit` + `skill_credentials` +
       `credentials` + `bundles` + `bundles_install`: 2343 passed, 10 skipped.
@@ -1644,7 +1646,7 @@ two `make check-docs` "undocumented module" failures the feature shipped with, d
 | 1 (§7) | Done | 483 tests green. Migration `562ac5a89f04` applied, single head. |
 | 2 (§8) | Done; code review clean after 2 rounds | Part A gate before part B: `bundles/` + `bundles_install/` 154/0, no fixes, no test edits. Final regression re-run on the finished tree (after D16): **618/0**. unit (secret-field coverage, manifest, SDK slots) 118 · `skill_credentials/` 20 · `credentials/` 84 · `bundles/` 76 · `bundles_install/` 78 · `agents/core/` 123 · `agent_api/` 75 · `sessions/` 44. No new migration. Client regenerated: `SkillsService.previewAgentSkillInstall({agentId, packageId, revisionNumber?})`. **The full backend suite has not been run.** |
 | 3 (§9) | Done; `cinna-core.ui.review` PASS (every surface 10) and code review CLEAN, each after 2 rounds | Full `tsc --noEmit` exit 0. No backend or client change. Biome is clean on 21 of 24 touched files. `ApiTokenFields.tsx`, `columns.tsx` and `routes/_layout/credentials.tsx` have the same format/import findings as at HEAD and were left alone. |
-| 4 (§10) | Seam review done (§10.1 checklist answered below); one blocking finding fixed (D17); docs sweep done (§10.2, `make check-docs` green, platform knowledge re-synced) | **Full suite 4616/0** (10 skipped, 26 min) — the first full run of this feature. Post-D17 re-run of unit + `skill_credentials` + `credentials` + `bundles` + `bundles_install`: 2343/0. The manual dev-stack scenario is still outstanding |
+| 4 (§10) | Seam review done (§10.1 checklist answered below); one blocking finding fixed (D17); docs sweep done (§10.2, `make check-docs` green, platform knowledge re-synced) | **Full suite 4616/0** (10 skipped, 26 min) — the first full run of this feature. Post-D17 re-run of unit + `skill_credentials` + `credentials` + `bundles` + `bundles_install`: 2343/0. Manual dev-stack scenario run on 2026-09-11 (§15) |
 
 Phase 2 test additions:
 - `skill_credentials/`: install test 10, gate test 2 (including the D15 over-claim case), publish test +1 (the D16 leak regression).
@@ -1729,3 +1731,80 @@ Also removed: `SkillSlotIndex.bundle_claimed_ids`, a property with no reader out
   - re-check R4/R10 when fixing a list you touch;
   - an info tooltip must not repeat the meta line;
   - a block under a status Alert with varying text needs its own label.
+
+### Manual scenario run — §10.1, local dev stack, 2026-09-11
+
+Two users (`admin@example.com`, publisher/producer owner; `erp-consumer@example.com`, a fresh
+`agent-developer`), five agents and five environments created for the run. Every environment was
+created after the feature commits, so all of them carry the new `cinna_api.credentials` helpers
+(the template image hash covers `Dockerfile`/`pyproject.toml`/`uv.lock` only — `app/core` is
+bind-mounted per instance, so a fresh env *is* the rebuild).
+
+**Setup.** Producer `erp-public-api` (agent `4f60f4f1`) with `agent_api/erp.py` (`/whoami`,
+`/customers`, both taking the SDK `caller`) and a `policy.yaml` declaring `read_only`, a
+`120/min` rate limit and an `erp.read` scope catalog; `agent_api_enabled` +
+`agent_api_identity_enabled` on. Builder `erp-skill-builder` connected to it; the connection
+credential stamped `service_uri=erp-public-api` with sharing on. `skills/erp-public-data/`
+authored with the `credentials:` block and a script that calls
+`credentials.agent_api_session("erp-public-api")`.
+
+| Step | Result |
+|---|---|
+| Declaration parses in the container | `POST /skills/refresh` returns `credentials: [{slot, type, description}]`, `can_publish: true`, no error |
+| Publish preview | `provided_by: "publisher"`, `credential_name: "ERP Public API"`, `producer_agent_id` set |
+| Publish (`visibility=public`) | revision 1 `required_credentials[0].provided_by == "publisher"` with `publisher_credential_id` |
+| Second user's catalog | package visible, `required_credentials` rendered on the entry |
+| Install preview / install | `linked_publisher`; share created with `source="skill_install"`; `shared-with-me` shows `category: "automatic"` |
+| Consumer `credentials.json` | one entry with top-level `service_uri: "erp-public-api"`, `is_placeholder: false`, plus the synthetic `current_user` and `owner_identity` entries |
+| Script through the slot | `/whoami` → `anonymous: false`, `user_id`/`email` of the **second** user; `/customers` → `called_by: "erp-consumer@example.com"` |
+| Producer scopes, live | granting `erp.read` to the second user shows up on the **next call** with no re-sync |
+| Addons row | `status: "ok"` |
+| Sharing off (`PATCH /credentials/{id}/sharing`) | share deleted; addons row `warning` / `credential_missing` / `reason: "access_revoked"`; `GET /setup-status` stays `ready` (D1) |
+| Deletion impact | `tier: 2`, `skill_pbp_usages` names the package + revision, `active_skill_install_count: 1`; `DELETE` → 409 with the same body, `?force=true` → 200 |
+| After the delete | the consumer env re-synced; `credentials.json` keeps only `current_user`; the script exits 1 with `no credential for slot 'erp-public-api' is linked to this agent. Fix: open the agent's Credentials tab and link a credential whose service URI (slot) is 'erp-public-api'.`; addons row reason flips to `not_linked` |
+
+**D15 over-claim, end to end — confirmed, and the copy is the problem, not the rule.**
+Reproduced with a published bundle carrying one `agent_api` spec (`provided_by: "user"`,
+`service_uri: null`) that the installer answered with an `use_existing` pick — the case rule (c)
+exists for. On that bundle agent:
+
+- installing the skill created the placeholder `erp-public-api` (`publisher_unavailable`, because
+  sharing was already off) and `GET /setup-status` returned **`needs_setup`** — the placeholder is
+  claimed by the bundle's unaccounted `agent_api` spec, so the D1 exclusion does not drop it;
+- the **same** placeholder row, linked into a second, non-bundle agent of the same user
+  (`linked_existing`, I9), leaves that agent `ready`. One credential, two verdicts;
+- uninstalling the skill kept the link (claimed), exactly as D15 says.
+
+Where it stops reading acceptably is *after* that uninstall. The bundle agent is still blocked, and
+the chat gate says:
+
+> Setup needed before this agent can run. Open the agent's Credentials tab and fill in the missing
+> values one by one.
+> - erp-public-api (agent_api)
+
+with `GET /setup-credentials` still describing the row as *"Required by an installed skill. Fill it
+in on the agent's Credentials tab."* — while the Addons tab is empty. Nothing on screen explains the
+block, and the one sentence that tries to is now false. While the skill **is** installed the same
+block reads fine: the slot name matches the amber Addons row and the setup page's sentence is true.
+
+**Finding needing a decision (1): a revoked share does not reach the container.** Turning sharing off
+deletes the `CredentialShare` and turns the Addons row amber, but `AgentCredentialLink` survives and
+env materialisation is link-based (`get_agent_credentials` joins the link table only, never
+re-checking access), and nothing re-syncs on revocation. The consumer container kept a working token:
+after the revoke — and after an env restart — the script still called the producer successfully, and
+the platform kept minting a fresh `owner_identity_token` for the revoked user on every sync. Only
+deleting the credential (or unlinking it) cut the container off. This is the generic sharing path, so
+`bundle_install` shares behave the same; it is not introduced by this feature. It does contradict
+`credential_sharing.md` ("Revoking a direct share immediately removes the recipient's access",
+"Immediate access removal") and softens the skill docs' revocation story, so either the code gains a
+revoke-time unlink + re-sync, or the docs stop promising immediacy.
+
+**Finding needing a decision (2): the post-uninstall blocked bundle agent**, above. Options: release a
+claimed placeholder when the claim comes only from rule (c) and no skill on the agent declares the
+slot; or leave the rule alone and make the copy honest (name the slot's origin, and say "no longer
+required by anything" once the skill is gone).
+
+Confirmed live and already known: the generic `PUT /credentials/{id}` turning `allow_sharing` off
+leaves the shares in place (only `PATCH /credentials/{id}/sharing` deletes them) — the stale-share
+trap Phase 2 guarded around. Note that once the flag has been flipped by `PUT`, the `PATCH` path can
+no longer purge, because it only deletes shares when the flag was still true.
