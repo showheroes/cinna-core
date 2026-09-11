@@ -39,6 +39,7 @@ dependencies = [
     "webauthn>=2.3.0",
     "pyotp>=2.9.0",
     "qrcode[pil]>=7.4.2",
+    "agent-client-protocol[http]==0.12.1",
 ]
 
 [tool.uv]

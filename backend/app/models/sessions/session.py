@@ -56,7 +56,7 @@ class Session(SQLModel, table=True):
     email_thread_id: str | None = None  # Email Message-ID for threading
     # How this session was opened. Written today as one of "channel_<type>"
     # (server channels — "channel_email", "channel_google_chat", ...), "a2a",
-    # "app_mcp", "identity_mcp", "mcp", "task", "webhook", "schedule",
+    # "app_mcp", "identity_mcp", "mcp", "acp", "task", "webhook", "schedule",
     # "external", or NULL for web-UI sessions. Historical rows may also carry
     # "email" from the deleted per-agent email integration — readers must still
     # tolerate it (see `_build_session_context`), but no producer emits it any

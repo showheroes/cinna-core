@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from starlette.middleware.cors import CORSMiddleware
 
+from app.acp.server import router as acp_router, acp_runtime
 from app.api.main import api_router
 from app.api.routes.agent_hooks import router as agent_hooks_router
 from app.api.routes.cli import setup_router as cli_setup_router
@@ -429,7 +430,10 @@ async def lifespan(app: FastAPI):
     # Its run() context creates a parent anyio task group; each connector's
     # session_manager.run() is started within it on first request.
     async with mcp_registry.run():
-        yield
+        try:
+            yield
+        finally:
+            await acp_runtime.shutdown()
 
     # --- Shutdown ---
     if not settings.TESTING:
@@ -514,6 +518,7 @@ app.include_router(mcp_oauth_router, prefix="/mcp/oauth")
 app.include_router(mcp_upload_router)
 
 # Per-connector MCP server mount (must be after /mcp/oauth routes)
+app.include_router(acp_router)
 app.mount("/mcp", mcp_registry)
 
 # Mount the Socket.IO ASGI app at /ws

@@ -49,7 +49,7 @@ class SessionService:
             integration_type: How this session was opened. Written today as one
                 of "channel_<type>" (server channels — "channel_email",
                 "channel_google_chat", ...), "a2a", "app_mcp", "identity_mcp",
-                "mcp", "task", "webhook", "schedule", "external", or None for
+                "mcp", "acp", "task", "webhook", "schedule", "external", or None for
                 web-UI sessions. Historical rows may also carry "email" from
                 the deleted per-agent email integration — readers must still
                 tolerate it, but no producer emits it any more.

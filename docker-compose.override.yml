@@ -21,6 +21,7 @@ services:
       - ./backend/alembic.ini:/app/alembic.ini
       - ./backend/app:/app/app
       - ./backend/tests:/app/tests
+      - ./backend/clients:/app/clients
     environment:
       SMTP_HOST: "mailcatcher"
       SMTP_PORT: "1025"
