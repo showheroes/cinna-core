@@ -117,6 +117,20 @@ Auto-generated from OpenAPI spec. Tag: `skills`
 
 ---
 
+## GET `/api/v1/agents/{agent_id}/skills/install-preview`
+**Preview Agent Skill Install**
+
+**Path parameters:**
+- `agent_id`: uuid
+
+**Query parameters:**
+- `package_id`: uuid (required)
+- `revision_number`: integer | null
+
+**Response:** `SkillInstallPreview`
+
+---
+
 ## GET `/api/v1/agents/{agent_id}/skills/{name}/publish-preview`
 **Preview Agent Skill Publish**
 

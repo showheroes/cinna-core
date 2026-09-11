@@ -168,14 +168,19 @@ For full technical details (tag parsing, mid-stream scanning, WebSocket event st
 Webapp viewers connect to Socket.IO independently from authenticated users. The connection is established in `$webappToken.tsx` via a `useEffect` that fires once `authState === "ready"` and `chatMode` is non-null:
 
 ```typescript
-// Connect using webapp_share_id (from JWT sub) as user identifier
-eventService.connect(claims.sub)
+// The server verifies this token and derives the webapp_share_id from its `sub`
+// itself — the claims are only parsed here to check there is a usable token.
+eventService.connect(() => localStorage.getItem(WEBAPP_TOKEN_KEY))
 ```
 
-**Important**: The `sub` claim in the webapp-viewer JWT holds the `webapp_share_id` UUID (not the owner's user_id). This means:
-- The viewer joins Socket.IO room `user_{webapp_share_id}` — not the owner's user room
-- The viewer subscribes to `session_{session_id}_stream` room when a chat session starts to receive streaming events
+`connect()` takes a token *provider*, not a token: socket.io re-invokes `auth` on every reconnect, and a captured string would replay a token that may since have expired (a webapp-viewer JWT lives at most 24 h).
+
+**Important**: The `sub` claim in the webapp-viewer JWT holds the `webapp_share_id` UUID (not the owner's user_id). The server reads it from the *verified* token — the client no longer asserts an identity — and the webapp viewer is a socket principal kind of its own (`webapp_share`), not a user. This means:
+- The viewer joins Socket.IO room `user_{webapp_share_id}` — not the owner's user room. The `user_` prefix is a room-naming convention here, not a claim that the id is a user id
+- The viewer subscribes to `session_{session_id}_stream` when a chat session starts. The server authorizes that room against `Session.webapp_share_id`, so a viewer reaches **only sessions its own share created** — the same rule `WebappChatService.verify_session_access` enforces on the HTTP side
 - `session_interaction_status_changed` events for the viewer must be broadcast to the session stream room, not the owner's user room
+
+A webapp-viewer token authenticates the socket and nothing more: it cannot join the agent owner's user room, nor the stream room of any session the owner opened elsewhere. See the Security section of [Event Bus System](../../application/realtime_events/event_bus_system.md) for the full principal table.
 
 The connection is torn down (`eventService.disconnect()`) when the page component unmounts.
 

@@ -32,6 +32,9 @@ The task system also serves as the primary **collaboration surface** for agent w
 - **Auto-Execute**: Flag that triggers immediate task execution after creation without requiring the user to manually press Execute. Can be set by users from the Create Task dialog (Execute switch) or by agents via `mcp__agent_task__create_task`.
 - **Source Session**: The agent session that created a task via handover; used for delegation tracking.
 - **Todo Progress**: Real-time task completion progress from agent's TodoWrite tool calls.
+- **External Ref**: Caller-supplied idempotency key on task creation (`external_ref`, max 64 chars), unique per owner. An external client sends its own local task id so a retried create returns the first task instead of making a second one.
+- **Sync Cursor**: The `updated_since` query param on the task list — an incremental-pull cursor for clients that poll for what changed, instead of re-reading the whole list.
+- **Externally-Executed Task**: A task a user-authenticated client runs *outside* cinna (Cinna Desktop running it on a local agent). There is no cinna session; the client mirrors status back through the user status route so the web view reflects reality.
 
 ## User Stories / Flows
 
@@ -88,6 +91,24 @@ The task system also serves as the primary **collaboration surface** for agent w
 10. Lead agent's session completes; parent task transitions to `completed`
 11. User sees the full task tree with all subtask work at a glance
 
+### Flow 5: Task Executed Outside cinna (External Client Mirror)
+
+A user-authenticated client — today, the Cinna Desktop app — can run a task on a
+local agent of its own and keep the cinna copy in step. cinna never executes such
+a task and never opens a session for it; it holds the mirror (title, description,
+priority, comments, attachments, short code) and the status the client reports.
+
+1. The client creates the task with `POST /api/v1/tasks/`, sending its own local task id as `external_ref`. If the response is lost and the client retries, the same call returns the same task — no duplicate, and no second execution
+2. The client runs the work locally and reports progress with `POST /api/v1/tasks/{id}/status` (`open`, `in_progress`, `blocked`, `completed`, `error`, `cancelled`)
+3. Each report is validated against the transition table, written to the status history attributed to the *user*, and posted to the comment feed as a `status_change` comment — identical in shape to a status change made anywhere else, so the web task page shows the real state instead of a permanent `new`
+4. The client posts its handoff notes and deliverables through the ordinary comment and attachment endpoints
+5. The client polls `GET /api/v1/tasks/?updated_since=<cursor>` to pick up changes made on the web (a priority change, a re-assignment, an archive), advancing the cursor by the last row's `updated_at`
+6. After a reinstall or a re-link, the client re-binds its local tasks to their cinna counterparts by `external_ref`, which is returned on every task, instead of matching on title
+
+Nothing in the web UI writes through this path — the web executes tasks with
+sessions, and the session lifecycle drives status for those. See
+[User-Reported Status](#user-reported-status-work-executed-outside-cinna).
+
 ## Business Rules
 
 ### Task Status Lifecycle
@@ -98,7 +119,7 @@ The task system also serves as the primary **collaboration surface** for agent w
 | `refining` | User actively refining with AI | — |
 | `open` | Refined and assigned, ready for execution | — |
 | `in_progress` | Agent actively working | Yes — session start |
-| `blocked` | Agent waiting for external input or dependency | Agent tool only |
+| `blocked` | Agent waiting for external input or dependency | Agent tool, or an external client via the user status route |
 | `completed` | Task finished successfully | Yes — session completion |
 | `error` | Task failed | Yes — session error |
 | `cancelled` | Cancelled by user or agent | — |
@@ -107,6 +128,13 @@ The task system also serves as the primary **collaboration surface** for agent w
 **Archival**: Users can archive a task from any non-archived status. Archived tasks are excluded from subtask progress counts.
 
 **Automatic status management**: The backend infers status from the session lifecycle. Agents should not call `mcp__agent_task__update_status` for normal completion — only for edge cases (`blocked`, explicit `cancelled`, or early `completed` before the session ends).
+
+**Explicit status writes** come from two places, and only two: an agent inside its
+environment (`mcp__agent_task__update_status` → `/api/v1/agent/tasks/*`), and a
+user-authenticated client reporting on work cinna is not running
+(`POST /api/v1/tasks/{id}/status`). Both go through the same auditing path, so
+every change — automatic or explicit — leaves a status-history row and a
+`status_change` comment. See [User-Reported Status](#user-reported-status-work-executed-outside-cinna).
 
 **Removed statuses (migrated)**:
 - `running` — migrated to `in_progress`
@@ -121,6 +149,59 @@ The task system also serves as the primary **collaboration surface** for agent w
 - Idle active sessions (no streaming, no pending input) do not block task completion — only actively running or pending sessions count
 - Incomplete subtasks (non-archived, non-completed) block task completion — even if all sessions are done, the task remains `in_progress` until every subtask reaches `completed` or `archived`
 - On task completion or error, if `source_session_id` is set and `auto_feedback` is enabled, a feedback message is delivered to the source session (e.g., `[Sub-task completed] HR-2 completed by Agent Name`). If the source session is idle, streaming is auto-triggered so the parent agent processes the notification immediately
+
+### User-Reported Status (work executed outside cinna)
+
+`POST /api/v1/tasks/{id}/status` is the user-authenticated mirror of the agent
+status tool. It exists because every other *explicit* status write lives behind
+the scoped environment token on `/api/v1/agent/tasks/*`, which by design refuses a
+user token — so a client running a task on its own machine had no way to say so, and
+the task read as `new` on the web for ever while its comments described work that
+had finished.
+
+- **Allowed targets**: `open`, `in_progress`, `blocked`, `completed`, `error`, `cancelled`. Anything else is refused with the same shape an agent's out-of-set request gets — a 400 naming the allowed set (`User can only set status to: ...`). `new` is the create state, `refining` belongs to the refine flow, and `archived` has its own route (`POST /{id}/archive`, which owns `archived_at`)
+- **Transitions are validated** against the same table every other writer uses. `completed → in_progress` is refused. A client that keeps a local copy of the table and sends the *path* rather than the destination (`new → in_progress → completed`, not `new → completed`) never trips this
+- **Attribution is the user**, never "the system". The status history is an audit trail, and recording a human's client as the platform would be a lie in it
+- **It records; it does not act.** No session is started, resumed or interrupted. The route's only effects are the status field, the history row, the `status_change` comment and the real-time event
+- **The server wins where the server is doing the work.** For a task cinna is executing, the session-driven recompute runs on the next session event and overrides whatever a client wrote. This is not a conflict in practice — an externally-executed task has no session, so nothing contends — but it is the rule if a client writes to a task it does not own the execution of
+- **Ownership failures answer `400`, not `404`.** Every route in the task API reports "not yours" as a permission error, which carries a 400; only a genuinely absent task is a 404. Clients should treat the two identically on this route — unbind, do not retry
+
+### Idempotent Creation (`external_ref`)
+
+`POST /api/v1/tasks/` accepts an optional `external_ref` (≤ 64 chars): the
+caller's own identifier for the task. It is unique per owner, so two users may
+independently use the same string.
+
+- A create with an `external_ref` this owner has already used **returns the existing task**, not a duplicate and not a conflict. A retry after a lost response is meant to be indistinguishable from the first call
+- **A matched create does not re-fire `auto_execute`.** Deduplicating the row while repeating its side effect would be worse than the duplicate row the key exists to prevent: same task, second agent session, duplicate work and duplicate result comments
+- Blank and whitespace-only refs normalise to "no ref" and are stored as null, so they never collide with each other
+- `external_ref` is **ignored on `POST /{id}/subtasks/`**. A ref there could match an unrelated root task, and the route would return that task while silently dropping the parent the caller asked for. The field is cleared rather than rejected, so a client that fills it uniformly still gets a real subtask
+- The ref is returned on every task, so a client that lost its local database can re-bind by ref instead of guessing from titles
+
+### Incremental Sync (`updated_since`)
+
+`GET /api/v1/tasks/?updated_since=<timestamp>` returns only tasks whose
+`updated_at` is strictly newer, ordered `(updated_at asc, id asc)`. It is a
+polling cursor for external clients; without the param the list keeps its normal
+`created_at desc` order, so the web task list is untouched.
+
+**Task activity counts as a change to the task.** Comments and attachments live
+in their own tables, so writing one leaves the task row untouched unless
+something bumps it deliberately — and it does. Adding a comment, uploading or
+attaching a file, and removing either all bump `input_task.updated_at` in the
+same transaction as the write itself. Without that, the sharpest case would be
+silent: an agent posting a `blocked` question as a comment, on a task whose
+status does not change, would produce no delta row at all, and a client driving
+its inbox from the cursor would never surface it.
+
+One limit remains, and it is deliberate:
+
+- **Deletions are not reported.** A deleted task simply stops appearing; there is no tombstone table. A client that needs to notice removals reconciles with a full list on start and periodically
+
+**Page by advancing the cursor, not by `skip`.** The sort key is mutable: a row
+already returned that is updated again moves to the tail and pushes an unread row
+back into the window `skip` has already consumed. Read a page, take the last row's
+`updated_at` as the next cursor, repeat until a page comes back short.
 
 ### Short Code Generation
 
@@ -248,3 +329,4 @@ Parent Task ──create_subtask──> Subtask ──auto_execute──> Target
 - ~~**Email Integration**~~: Incoming email can no longer create tasks — the email-originated task flow (and the "Send Answer" AI reply) was removed when email became a [Server Channel](../server_channels/server_channels.md) (Phase 4 of the channels & identity unification); see [Email Integration — Capabilities removed](../email_integration/email_integration.md#capabilities-removed-in-this-refactor)
 - **File Management**: Task attachments use the same storage infrastructure as agent file management — see [Agent File Management](../../agents/agent_file_management/agent_file_management.md)
 - **Real-time Events**: `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`, `SUBTASK_COMPLETED` events notify the frontend — see [Real-time Events](../realtime_events/event_bus_system.md)
+- **Native Clients (Cinna Desktop)**: A signed-in desktop client mirrors tasks it executes locally through the ordinary user-scoped task API — `external_ref` on create, `POST /{id}/status` to report progress, `updated_since` to poll. It authenticates with an ordinary user token from the desktop OAuth flow (see [Desktop Auth](../desktop_auth/desktop_auth.md)); no task-specific token type exists, and these routes are *not* part of the `/api/v1/external/` surface used for agent discovery and chat — see [External Agent Access](../external_agent_access/external_agent_access.md)

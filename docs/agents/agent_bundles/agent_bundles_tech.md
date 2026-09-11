@@ -363,6 +363,32 @@ The suspension-time hook in `environment_suspension_scheduler.py` only applies a
 | `_bundle_to_entry(session, bundle, user)` | Resolves a `CatalogEntryPublic` from a bundle row: reads latest revision for `latest_version` / `latest_revision_number`; reads publisher `User` row for `publisher_name` and `publisher_email`; checks the calling user's **consumer** install row (`is_publisher_install=False`) for `is_installed` / `user_install_id` / `user_install_pending_update` (derived from the consumer install's `Agent.pending_update`). The publisher's own working copy is excluded — publishers see their own bundle as installable until they perform a separate consumer install |
 | `build_install_context(session, bundle, user) -> CatalogInstallContext` | NEW (Phase 3). Runs the auto-prefill matcher per spec (see below), passing `service_uri=parsed.service_uri` into both the PBU and PBT matcher calls so Tier 0a/0b are applied when the spec has a slot id. Resolves publisher AI credential name+type summaries (no secret values), and returns `CatalogInstallContext`. Called by `GET /catalog/{bundle_id}/install-context` |
 
+### `CredentialProvisioner` (`backend/app/services/credentials/credential_provisioner.py`)
+
+**The one writer of install-time credential shares, links and placeholder rows.** Bundle install and catalog-skill install both turn a revision's `required_credential_specs` into rows for the installing agent — a `CredentialShare` from the publisher, `AgentCredentialLink` rows, and installer-owned placeholder `Credential` rows. They differ in *policy*, not in mechanism, so one provisioner runs both and `ProvisionPolicy` carries every behavioural difference. It is synchronous, **flushes but never commits** — the caller owns the transaction, which is what lets an install's link and its provisioning land or roll back together.
+
+| Type | Notes |
+|------|-------|
+| `ProvisionPolicy` | Frozen dataclass holding every bundle-vs-skill difference: `share_source` (`"bundle_install"` / `"skill_install"` — what lands in `CredentialShare.source`), `auto_link_by_slot`, `placeholder_name_mode`, `placeholder_notes`, `placeholder_stamps_slot`, `template_notes_fallback`, `honour_user_selections`. Two module constants instantiate it: `BUNDLE_INSTALL_POLICY` and `SKILL_INSTALL_POLICY` |
+| `PublisherBoundary` | The package publisher a `provided_by="publisher"` credential must belong to. **Not a bare `uuid.UUID \| None`, deliberately**: passing `None` *skips* the ownership check (a bundle install whose bundle row is gone), while a boundary whose `user_id` is `None` still *runs* the check and therefore rejects every publisher credential. A plain optional UUID cannot express both |
+| `SlotProvision` / `ProvisionReport` | Per-spec outcome (`spec_name`, `spec_type`, `slot`, `provided_by`, `description`, `outcome`, `credential_id`) and the roll-up. `ProvisionReport.degraded` means a publisher or template spec could not be honoured as published; `changed` means a row was written |
+| `ProvisioningSelectionError` | An install-form selection the spec does not allow. Raised **only** under a policy with `honour_user_selections=True` (bundles) |
+| `SkillSlotOutcome` (`app/models/skills/schemas.py`) | `already_linked`, `linked_publisher`, `linked_existing`, `template_materialised`, `placeholder_created`, `publisher_unavailable` |
+
+| Method | Notes |
+|--------|-------|
+| `provision(session, *, agent, specs, publisher, policy, user_selections=None)` → `ProvisionReport` | Share, link or create a credential for every spec. Dispatches on `policy.auto_link_by_slot`: the bundle loop (template → publisher → user, honouring install-form selections, raising `ProvisioningSelectionError` on a forbidden one) or the skill decision tree |
+| `preview(session, *, agent, specs, publisher, policy)` → `list[SlotProvision]` | What `provision` would do, without writing. **Raises `ValueError` for a policy without slot matching — bundles have no preview.** Mirrors `provision`'s own bookkeeping: a credential it *would* link counts as linked for the specs after it, so a two-slot preview cannot claim to link the same row twice |
+| `release_skill_slots(session, *, agent, released, retained)` → `bool` | Uninstall's half. Unlinks installer-owned placeholders carrying a released `(type, slot)` that no retained spec also declares; a released placeholder no agent links any more is deleted. **Bundle-claimed credentials are skipped, and real or shared credentials are never touched** |
+| `spec_slot(parsed)` / `bundle_claimed_credential_ids(...)` | Module-level helpers. A slot is `parsed.service_uri or parsed.name`; the second is what keeps the readiness gate from dropping a credential the agent's bundle also claims |
+
+**The two policies, and why each is shaped that way:**
+
+- **Bundle policy** reproduces the historical `InstallService` loop exactly — placeholders named `"<name> (placeholder)"`, no slot stamping, user selections honoured, and a forbidden selection fails the install. A bundle's specs are the agent's *contract*, so a spec that cannot be satisfied as published is a real failure.
+- **Skill policy** never fails an install for a per-slot reason, and is idempotent: a credential that already carries the slot is linked before any placeholder is created, and `_ensure_link` is the single link-insert path. A skill is one capability among many, so an unfilled slot is a warning, not a block.
+
+Callers: `InstallService._setup_install_credentials` (bundles), `SkillCatalogService` install/upgrade and its preview endpoint (skills), and `llm_plugin_service` on skill uninstall via `release_skill_slots`. See [Agent Skills](../agent_skills/agent_skills_tech.md) for the slot declarations this consumes.
+
 ### `InstallReadinessGate` (Phase 4)
 
 Stateless service in `backend/app/services/bundles/install_readiness_gate.py`. All methods are `@staticmethod`. Called at every user-message-to-LLM dispatch boundary; never mutates state.

@@ -380,6 +380,87 @@ never exception text.
 
 ---
 
+## Credential slots — `backend/app/services/skills/skill_credential_requirements.py`
+
+A skill's scripts are useless without the credential they call. This module is
+both halves of tying the two together: **what publish freezes**, and **how an
+installed agent's slots stand afterwards**.
+
+A skill declares its credentials in `SKILL.md` frontmatter
+(`credentials: [{slot, type, description}]`, validated by
+`skill_manifest.parse_credential_declarations`). **A slot is a
+`Credential.service_uri` value** — that is the whole binding, and
+`spec_slot(parsed)` (`credential_provisioner.py`) reads it as
+`parsed.service_uri or parsed.name`.
+
+### Publish — `SkillCredentialRequirements`
+
+| Member | Notes |
+|--------|-------|
+| `resolve_for_publish(session, *, agent, publisher, declarations)` → `list[SkillCredentialResolution]` | Read-only. Resolves each declaration against the credentials **linked to the publishing agent** — one query loads them all; candidates for a slot are the linked credentials of the declared type carrying it |
+| `build_specs(...)` | Freezes the resolutions onto `SkillPackageRevision.required_credential_specs`, using **the same spec schema as a bundle revision** — written by `credential_spec.build_spec`, read back by `credential_spec.parse_credential_spec` |
+| `to_publish_preview(...)` / `specs_to_public(...)` / `provisions_to_public(...)` | Read projections for the publish preview, the catalog detail payload and the install response |
+| `parse_specs(raw_specs)` | Tolerant read of the frozen JSON |
+| `publisher_usages_of_credential(...)` | Which published skills a given credential backs — feeds credential deletion impact |
+| `SkillCredentialResolution` | `slot`, `type`, `description`, `provided_by`, `credential`, `reason`, `producer_agent_id`. `credential` names the publisher's **own** matched row even for a refused resolution, so the preview can say *which* credential was rejected rather than just that something was |
+
+**Resolution uses only the credential's own consent flags, and requires the
+publisher to *own* it for `publisher` / `template`.** A share the publisher
+merely *received* cannot be re-shared, and install later only shares a
+credential whose owner is the package publisher. Bundle-only
+`publish_settings.credential_overrides` never apply here. When a slot cannot
+resolve to `publisher` or `template` it falls back to `provided_by="user"` and
+records why: `no_linked_credential`, `not_shareable`, `not_owned`, or
+`template_would_leak_secret`.
+
+**The secret-leak guard is the load-bearing one.** A `template` spec is frozen
+into an immutable revision **every catalog viewer can read**, and copied into
+every installer's credential — so `_template_leaking_secret_fields` decides,
+**on field names alone with no decryption**, whether a template of this
+credential would still carry a secret, by mirroring exactly what
+`PublishService._template_payload_for` strips. It unions the env-shaped
+`CredentialsService.SENSITIVE_FIELDS[type]` with the stored `credential_data`
+keys `_STORED_SECRET_FIELDS_BY_TYPE[type]` — `SENSITIVE_FIELDS` alone let an
+`api_token` credential marked private only on `http_header_value` freeze its
+raw `api_token`. It **fails closed**: a type that is neither force-private nor
+classified by either map is treated as leaking. Bundle
+`_template_payload_for` has the same gap and is deliberately left unchanged.
+
+### After install — `SkillSlotIndex`
+
+The one read model of how an agent's catalog-skill slots stand. Built from the
+frozen specs of the revisions the agent's `source=catalog` links pin —
+**never from the environment's skill index**, because a pre-feature container
+reports rows without credentials at all — plus the agent's linked credentials.
+
+| Member | Notes |
+|--------|-------|
+| `build_for_agent(session, agent)` | Loads with a constant number of queries: the agent's catalog links, their revisions' specs, the agent's linked credentials, the share rows of the foreign ones, and (only for an agent with an installed bundle revision) that revision. The last three are skipped when no link declares a slot |
+| `issues_for_link(link_id)` → `list[CredentialIssue]` | Drives the Addons row status |
+| `skill_provisioned_credential_ids()` | The readiness gate's exclusion: every candidate of every catalog spec, **minus** the credentials the agent's bundle revision claims |
+| `specs_for_link` / `specs_except_link` | Uninstall's released/retained split, handed to `CredentialProvisioner.release_skill_slots` |
+| `bundle_claimed_ids()` | Linked credentials the agent's bundle revision claims |
+
+**A slot is satisfied** when one of its candidates is owned by the agent owner
+and filled in, **or** is foreign, still `allow_sharing`, **and** shared with
+the agent owner. *A share row alone is not enough* — turning sharing off leaves
+the row behind, which is why both conditions are checked. Otherwise
+`CredentialIssueReason` is `not_linked` (no candidate), `not_configured` (an
+owned placeholder) or `access_revoked`.
+
+**Why the readiness gate subtracts bundle-claimed ids.** An unfilled *skill*
+slot is a warning, not a block — a bundle's specs are the agent's contract, a
+skill is one capability among many. But claiming errs **wide**: a credential of
+a bundle spec's type that no recorded pick answers counts as the bundle's,
+because under-claiming would unblock an agent its bundle says is not ready.
+
+Consumers: `addons_service` (row status), `InstallReadinessGate._drop_skill_provisioned`
+(lazy import — the skills domain sits above bundles in the import graph),
+`llm_plugin_service` (uninstall), `skill_catalog_service` (publish and install),
+`routes/skills.py` (install response). The rows themselves are written by
+`CredentialProvisioner` under `SKILL_INSTALL_POLICY` — see
+[Agent Bundles](../agent_bundles/agent_bundles_tech.md).
+
 ## Backend: `AgentSkillsService`
 
 ### Cache columns on `AgentEnvironment`

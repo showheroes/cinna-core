@@ -93,7 +93,7 @@ On message refetch (every 2s):
 
 **Frontend** (`useSessionStreaming.ts:sendMessage`):
 - Optimistically inserts the user message into the React Query cache first (before any WS/network call)
-- Fires `subscribeToRoom("session_{session_id}_stream")` as **fire-and-forget** — not awaited; a dead/disconnected socket resolves the promise immediately (room is tracked in `activeRooms` and re-subscribed on reconnect)
+- Fires `subscribeToRoom("session_{session_id}_stream")` as **fire-and-forget** — not awaited; a dead/disconnected socket resolves the promise immediately (room is tracked in `activeRooms` and re-subscribed on reconnect). The server authorizes the room against the session's owner, so this succeeds only for a session the caller can already read over HTTP
 - Sends POST to `/api/v1/sessions/{session_id}/messages/stream` **unconditionally** — WebSocket state never gates the REST call
 - Invalidates session query after 200ms to detect `interaction_status` change
 - On error: removes optimistic message, resets the send guard (allows retry), and re-throws so the caller can restore the message text and preserve URL params
@@ -334,14 +334,14 @@ This ensures the frontend reacts within milliseconds of streaming state changes,
 
 **Event Service** (`event_service.py:EventService`):
 - Global singleton instance manages Socket.IO server
-- Handles client connections with user authentication
-- Manages room subscriptions via `subscribe/unsubscribe` Socket.IO events
+- Authenticates every client connection against a signed token (`socket_auth.py`)
+- Manages room subscriptions via `subscribe/unsubscribe` Socket.IO events, refusing any room the connection's principal does not own
 - Emits stream events via `emit_stream_event()` method
 
 **Connection Management**:
 - User-specific room: `user_{user_id}` (auto-joined on connect)
 - Session streaming rooms: `session_{session_id}_stream` (subscribed on-demand)
-- Authentication via Socket.IO auth parameter with user_id
+- **Authentication via the Socket.IO `auth` parameter carrying `{ token }`** — a signed platform JWT, resolved through the same `deps.get_current_user` the REST API uses. A client-supplied `user_id` is ignored; see the Security section of [Event Bus System](event_bus_system.md) for the principal kinds and the room rules.
 
 ### Background Task Execution
 
@@ -689,11 +689,11 @@ Same mechanism as page refresh - derived state from session query handles everyt
 **Problem**: Socket.IO may reconnect (transport upgrade, network blip, or backend deploy) and get a new socket ID.
 
 **Solution** (`eventService.ts`):
-1. `subscribeToRoom()` adds room to `activeRooms` set (persists intent); a failed/timed-out ack resolves (never rejects) — the room stays tracked
+1. `subscribeToRoom()` adds room to `activeRooms` set (persists intent); a failed/timed-out ack resolves (never rejects) — the room stays tracked. Note a `subscribe` ack can now legitimately come back `{"status": "error"}`: the server refuses a room the connection's principal does not own. That is a permanent refusal, not a transient one, so re-subscribing on reconnect will keep failing — a room that never succeeds means the caller is asking for someone else's stream, not that the socket is flaky
 2. On Socket.IO `connect` event: re-emits `subscribe` for all tracked rooms
 3. Any events missed during disconnection are recovered via message query refetch
 4. `reconnectionAttempts: Infinity` — the client retries forever (no 5-attempt hard stop); `reconnectionDelayMax: 30000` caps the backoff at 30 seconds
-5. `ensureConnected()` method — best-effort recovery nudge: reconnects an existing disconnected socket, or re-creates the connection if the socket was torn down (uses `lastUserId` stored on first `connect()`)
+5. `ensureConnected()` method — best-effort recovery nudge: reconnects an existing disconnected socket, or re-creates the connection if the socket was torn down (replays the token *provider* registered on first `connect()`, so every reconnect re-reads the current token rather than replaying a captured one that may since have been refreshed or expired)
 6. Window event listeners (registered once, guarded): `online`, `focus`, and `visibilitychange` (when tab becomes visible) all call `ensureConnected()`
 
 **User Experience**: WS reconnects and room subscription restored automatically. Missed events filled by next message query poll (within 2s). No user-visible interruption. After a permanent disconnect (≥3 s), the `ConnectionBanner` overlay appears (see File Reference).

@@ -239,7 +239,7 @@ Message Flow:
 
 - **[Agent Environment Core](../../agents/agent_environment_core/agent_environment_core.md)** — Server running inside Docker containers that processes messages via SDK adapters and streams responses
 - **[Streaming Architecture](../realtime_events/frontend_backend_agentenv_streaming.md)** — WebSocket (frontend ↔ backend) and SSE (backend ↔ agent env) streaming pipeline, event sequencing, deduplication
-- **[Input Tasks](../input_tasks/input_tasks.md)** — Tasks that execute by creating sessions with `source_task_id`; session result states sync back to task status
+- **[Input Tasks](../input_tasks/input_tasks.md)** — Tasks that execute by creating sessions with `source_task_id`; session result states sync back to task status. Where a task has sessions, this recompute is authoritative and overrides a status an external client reported for it — a client only mirrors status for tasks cinna is *not* executing
 - **[Server Channels / Channel Ingestion](channel_ingestion.md)** — the shared inbound pipeline every channel session (Google Chat, Email) is created through
 - **[Email Integration / Email Sessions](../email_integration/email_sessions.md)** — what remains specific to the email channel transport: threading by root Message-ID and the durable outgoing queue
 - **[A2A Protocol](../a2a_integration/a2a_protocol/a2a_protocol.md)** — External A2A clients create and manage sessions via JSON-RPC; session maps 1:1 to A2A Task concept

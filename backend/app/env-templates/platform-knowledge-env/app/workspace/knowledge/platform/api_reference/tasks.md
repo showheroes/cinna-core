@@ -28,6 +28,7 @@ Auto-generated from OpenAPI spec. Tag: `tasks`
   - `team_id`: string | null
   - `assigned_node_id`: string | null
   - `parent_task_id`: string | null
+  - `external_ref`: string | null
 
 **Response:** `InputTaskPublic`
 
@@ -44,6 +45,7 @@ Auto-generated from OpenAPI spec. Tag: `tasks`
 - `root_only`: boolean, default: `False`
 - `team_id`: string | null
 - `priority`: string | null
+- `updated_since`: string | null
 
 **Response:** `InputTasksPublicExtended`
 
@@ -111,6 +113,20 @@ Auto-generated from OpenAPI spec. Tag: `tasks`
   - `mode`: string
 
 **Response:** `ExecuteTaskResponse`
+
+---
+
+## POST `/api/v1/tasks/{id}/status`
+**Update Task Status**
+
+**Path parameters:**
+- `id`: uuid
+
+**Request body** (`InputTaskStatusUpdate`):
+  - `status`: string (required)
+  - `reason`: string | null
+
+**Response:** `InputTaskPublic`
 
 ---
 
@@ -309,6 +325,7 @@ Auto-generated from OpenAPI spec. Tag: `tasks`
   - `team_id`: string | null
   - `assigned_node_id`: string | null
   - `parent_task_id`: string | null
+  - `external_ref`: string | null
 
 **Response:** `InputTaskPublic`
 
