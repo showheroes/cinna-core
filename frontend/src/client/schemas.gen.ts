@@ -17188,6 +17188,18 @@ export const ImprovementRequestsPublicSchema = {
 
 export const InputTaskCreateSchema = {
     properties: {
+        external_executor: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 100
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Executor'
+        },
         original_message: {
             type: 'string',
             maxLength: 10000,
@@ -17564,6 +17576,17 @@ export const InputTaskDetailPublicSchema = {
             ],
             title: 'External Ref'
         },
+        external_executor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Executor'
+        },
         subtask_count: {
             type: 'integer',
             title: 'Subtask Count',
@@ -17584,6 +17607,28 @@ export const InputTaskDetailPublicSchema = {
                 }
             ],
             title: 'Agent Name'
+        },
+        result_state: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result State'
+        },
+        result_summary: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result Summary'
         },
         refinement_history: {
             items: {},
@@ -17935,6 +17980,17 @@ export const InputTaskPublicSchema = {
             ],
             title: 'External Ref'
         },
+        external_executor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Executor'
+        },
         subtask_count: {
             type: 'integer',
             title: 'Subtask Count',
@@ -18189,6 +18245,17 @@ export const InputTaskPublicExtendedSchema = {
             ],
             title: 'External Ref'
         },
+        external_executor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Executor'
+        },
         subtask_count: {
             type: 'integer',
             title: 'Subtask Count',
@@ -18209,6 +18276,28 @@ export const InputTaskPublicExtendedSchema = {
                 }
             ],
             title: 'Agent Name'
+        },
+        result_state: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result State'
+        },
+        result_summary: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result Summary'
         },
         refinement_history: {
             items: {},
@@ -18334,6 +18423,18 @@ belong to the container-side agent API.`
 
 export const InputTaskUpdateSchema = {
     properties: {
+        external_executor: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 100
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'External Executor'
+        },
         current_description: {
             anyOf: [
                 {

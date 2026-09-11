@@ -70,6 +70,7 @@ class EventType:
     TASK_TODO_UPDATED = "task_todo_updated"      # Task-level to-do update (propagated from session)
 
     # Task lifecycle events
+    TASK_UPDATED = "task_updated"
     TASK_CREATED = "task_created"
     TASK_STATUS_UPDATED = "task_status_changed"
 

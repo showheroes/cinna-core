@@ -25,6 +25,8 @@ def create_task(
     parent_task_id: str | None = None,
     auto_execute: bool | None = None,
     external_ref: str | None = None,
+    external_executor: str | None = None,
+    source_session_id: str | None = None,
 ) -> dict:
     """POST /tasks/ — asserts 200 and returns body."""
     payload: dict = {"original_message": original_message, "priority": priority}
@@ -42,6 +44,10 @@ def create_task(
         payload["auto_execute"] = auto_execute
     if external_ref is not None:
         payload["external_ref"] = external_ref
+    if external_executor is not None:
+        payload["external_executor"] = external_executor
+    if source_session_id is not None:
+        payload["source_session_id"] = source_session_id
     r = client.post(_BASE + "/", headers=headers, json=payload)
     assert r.status_code == 200, f"Task creation failed: {r.text}"
     return r.json()

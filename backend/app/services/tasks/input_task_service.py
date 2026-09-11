@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import logging
 from typing import Any, Optional
 from sqlmodel import Session as DBSession, select
+from sqlalchemy import and_, or_
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
 
@@ -286,6 +287,7 @@ class InputTaskService:
         team_id: UUID | None = None,
         priority: str | None = None,
         updated_since: datetime | None = None,
+        updated_since_id: UUID | None = None,
     ) -> tuple[list[InputTaskPublicExtended], int]:
         """
         List user's tasks with extended info.
@@ -322,6 +324,7 @@ class InputTaskService:
             team_id=team_id,
             priority=priority,
             updated_since=updated_since,
+            updated_since_id=updated_since_id,
         )
 
         # Batch-resolve parent short codes
@@ -574,7 +577,7 @@ class InputTaskService:
             selected_agent_id=selected_agent_id,
             user_workspace_id=user_workspace_id,
             agent_initiated=data.agent_initiated,
-            auto_execute=data.auto_execute,
+            auto_execute=data.auto_execute and not data.external_executor,
             source_session_id=data.source_session_id,
             status=InputTaskStatus.NEW,
             refinement_history=[],
@@ -586,6 +589,7 @@ class InputTaskService:
             assigned_node_id=assigned_node_id,
             parent_task_id=getattr(data, 'parent_task_id', None),
             external_ref=external_ref,
+            external_executor=data.external_executor,
         )
         db_session.add(task)
         try:
@@ -674,6 +678,10 @@ class InputTaskService:
         )
 
         message_to_send = data.original_message
+
+        # External clients own their mirror's description and execution.
+        if task.external_executor:
+            return task, task.current_description
 
         # Auto-refine if agent has refiner_prompt
         if data.selected_agent_id:
@@ -898,6 +906,12 @@ class InputTaskService:
         Returns:
             Tuple of (success, session, error_message)
         """
+        db_session.refresh(task)
+        if task.external_executor:
+            return False, None, (
+                f"Task is executed by {task.external_executor}. "
+                "Finish external work and clear external_executor before executing in cinna."
+            )
         if not task.selected_agent_id:
             return False, None, "Task has no selected agent"
 
@@ -942,6 +956,8 @@ class InputTaskService:
                     "session_metadata_extra": {"task_id": str(task.id)},
                 },
             )
+        except ValidationError as exc:
+            return False, None, exc.message
         except NoActiveEnvironmentError as exc:
             # Mirrors today's "no session created" path: SessionService.create_session
             # returned None when the agent had no active environment.
@@ -1012,6 +1028,7 @@ class InputTaskService:
         team_id: UUID | None = None,
         priority: str | None = None,
         updated_since: datetime | None = None,
+        updated_since_id: UUID | None = None,
     ) -> tuple[list[tuple[InputTask, str | None]], int]:
         """
         List user's tasks with agent names.
@@ -1035,7 +1052,8 @@ class InputTaskService:
                 mutable, so a row already returned that is updated again moves to
                 the tail and shifts an unread row back into the consumed window —
                 offset paging would skip it entirely. Read a page, take the last
-                row's ``updated_at`` as the next cursor, and repeat until a page
+                row's ``updated_at`` and ``id`` as ``updated_since`` and
+                ``updated_since_id`` respectively, and repeat until a page
                 comes back short.
 
         Returns:
@@ -1063,8 +1081,19 @@ class InputTaskService:
             statement = statement.where(InputTask.team_id == team_id)
         if priority:
             statement = statement.where(InputTask.priority == priority)
+        if updated_since_id is not None and updated_since is None:
+            raise ValidationError("updated_since_id requires updated_since")
         if updated_since is not None:
-            statement = statement.where(InputTask.updated_at > updated_since)
+            cursor_filter = InputTask.updated_at > updated_since
+            if updated_since_id is not None:
+                cursor_filter = or_(
+                    cursor_filter,
+                    and_(
+                        InputTask.updated_at == updated_since,
+                        InputTask.id > updated_since_id,
+                    ),
+                )
+            statement = statement.where(cursor_filter)
 
         # Get count before pagination
         count_statement = statement.with_only_columns(InputTask.id)
@@ -1106,12 +1135,60 @@ class InputTaskService:
             data: Update data
         """
         update_dict = data.model_dump(exclude_unset=True)
+        marker_changed = False
+        if "external_executor" in update_dict:
+            # Serialize ownership changes with SessionService.create_session's
+            # task lock. Its lock covers the session INSERT and commit, so an
+            # execute already in flight cannot slip past this session check.
+            task = db_session.exec(
+                select(InputTask)
+                .where(InputTask.id == task.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).one()
+            executor = update_dict["external_executor"]
+            marker_changed = executor != task.external_executor
+            if marker_changed:
+                if task.external_executor and task.status in {
+                    InputTaskStatus.IN_PROGRESS, InputTaskStatus.BLOCKED,
+                    InputTaskStatus.REFINING,
+                }:
+                    raise ValidationError(
+                        "Finish or cancel external work before changing external_executor"
+                    )
+                if executor is not None:
+                    existing_session = db_session.exec(
+                        select(Session.id).where(Session.source_task_id == task.id)
+                    ).first()
+                    if task.session_id is not None or existing_session is not None:
+                        raise ValidationError(
+                            "Cannot set external_executor on a task with cinna sessions"
+                        )
+                    update_dict["auto_execute"] = False
+                    # A legacy sessionless mirror may already have reported
+                    # in_progress before markers existed. It was never cinna work.
+                    task.executed_at = None
         task.sqlmodel_update(update_dict)
         task.updated_at = datetime.now(UTC)
 
         db_session.add(task)
         db_session.commit()
         db_session.refresh(task)
+        if marker_changed:
+            create_task_with_error_logging(
+                event_service.emit_event(
+                    event_type=EventType.TASK_UPDATED,
+                    model_id=task.id,
+                    user_id=task.owner_id,
+                    meta={
+                        "task_id": str(task.id),
+                        "short_code": task.short_code,
+                        "parent_task_id": str(task.parent_task_id) if task.parent_task_id else None,
+                        "external_executor": task.external_executor,
+                    },
+                ),
+                task_name=f"emit_task_updated_{task.id}",
+            )
         return task
 
     @staticmethod
@@ -1146,7 +1223,11 @@ class InputTaskService:
             task.error_message = None
 
         # Update timestamps based on status
-        if status == InputTaskStatus.IN_PROGRESS and task.executed_at is None:
+        if (
+            status == InputTaskStatus.IN_PROGRESS
+            and task.executed_at is None
+            and not task.external_executor
+        ):
             task.executed_at = datetime.now(UTC)
         elif status == InputTaskStatus.COMPLETED:
             task.completed_at = datetime.now(UTC)
@@ -1327,6 +1408,13 @@ class InputTaskService:
         Returns:
             Dict with success, refined_description, feedback_message, or error
         """
+
+        db_session.refresh(task)
+        if task.external_executor:
+            raise ValidationError(
+                "Task is executed externally; finish external work and clear "
+                "external_executor before refining in cinna"
+            )
 
         # Set status to refining if new
         if task.status == InputTaskStatus.NEW:
@@ -2146,7 +2234,11 @@ class InputTaskService:
         task.status = new_status
         task.updated_at = datetime.now(UTC)
 
-        if new_status == InputTaskStatus.IN_PROGRESS and task.executed_at is None:
+        if (
+            new_status == InputTaskStatus.IN_PROGRESS
+            and task.executed_at is None
+            and not task.external_executor
+        ):
             task.executed_at = datetime.now(UTC)
         elif new_status == InputTaskStatus.COMPLETED:
             task.completed_at = datetime.now(UTC)

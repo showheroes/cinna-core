@@ -54,6 +54,7 @@ export const EventTypes = {
 
   // Task lifecycle events
   TASK_CREATED: "task_created",
+  TASK_UPDATED: "task_updated",
   TASK_STATUS_UPDATED: "task_status_changed",
 
   // Task collaboration events

@@ -128,6 +128,7 @@ def list_tasks(
     team_id: uuid.UUID | None = None,
     priority: str | None = None,
     updated_since: datetime | None = None,
+    updated_since_id: uuid.UUID | None = None,
 ) -> Any:
     """
     List user's input tasks.
@@ -161,7 +162,10 @@ def list_tasks(
 
             Page by advancing the cursor, not by ``skip``: the sort key is
             mutable, so offset paging over it can skip unread rows. Take the
-            last row's ``updated_at`` as the next cursor.
+            last row's ``updated_at`` and ``id`` as ``updated_since`` and
+            ``updated_since_id`` for the next page. The ID keeps timestamp ties
+            from being skipped. Timestamp-only cursors retain strict-after semantics.
+        updated_since_id: Last task ID at the cursor timestamp; requires updated_since.
     """
     try:
         data, count = InputTaskService.list_tasks_extended(
@@ -175,6 +179,7 @@ def list_tasks(
             team_id=team_id,
             priority=priority,
             updated_since=updated_since,
+            updated_since_id=updated_since_id,
         )
         return InputTasksPublicExtended(data=data, count=count)
     except InputTaskError as e:
@@ -197,7 +202,7 @@ def get_task(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> A
 
 
 @router.patch("/{id}", response_model=InputTaskPublic)
-def update_task(
+async def update_task(
     *,
     session: SessionDep,
     current_user: CurrentUser,

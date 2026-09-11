@@ -65,6 +65,25 @@ class SessionService:
         if not agent or not agent.active_environment_id:
             return None
 
+        if source_task_id is not None:
+            from app.models import InputTask
+            from app.services.tasks.input_task_service import ValidationError
+
+            # This row lock is shared with execution-marker PATCH. Keep it until
+            # the session INSERT commits below: a marker cannot be claimed after
+            # this check but before there is a session for PATCH to discover.
+            task = db_session.exec(
+                select(InputTask)
+                .where(InputTask.id == source_task_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).one_or_none()
+            if task is not None and task.external_executor:
+                raise ValidationError(
+                    f"Task is executed by {task.external_executor}. "
+                    "Finish external work and clear external_executor before executing in cinna."
+                )
+
         # Use guest_share_id from parameter or from data
         effective_guest_share_id = guest_share_id or data.guest_share_id
         effective_webapp_share_id = webapp_share_id or data.webapp_share_id

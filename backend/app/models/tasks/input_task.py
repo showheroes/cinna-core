@@ -6,8 +6,10 @@ an AI-assisted preparation workflow. Extended for the task-based collaboration
 system: short-code IDs, hierarchy, team assignment, priority.
 """
 import uuid
+from typing import Any
 from datetime import datetime, UTC
 from sqlmodel import Field, SQLModel, Column
+from pydantic import field_validator
 from sqlalchemy import JSON, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -43,7 +45,7 @@ class InputTaskStatus:
         "open": {"in_progress", "cancelled", "archived"},
         "in_progress": {"completed", "blocked", "cancelled", "error", "archived"},
         "blocked": {"in_progress", "cancelled", "archived"},
-        "completed": {"archived"},
+        "completed": {"in_progress", "archived"},
         "error": {"new", "in_progress", "archived"},
         "cancelled": {"archived"},
         "archived": set(),
@@ -148,10 +150,21 @@ class InputTask(InputTaskBase, table=True):
     # (the desktop app) sends its own local task id here so a retried create
     # returns the first task instead of making a second one.
     external_ref: str | None = Field(default=None, max_length=64)
+    external_executor: str | None = Field(default=None, max_length=100)
+
+
+class ExternalExecutorFields(SQLModel):
+    """Client-owned execution marker shared by task write schemas."""
+    external_executor: str | None = Field(default=None, max_length=100)
+
+    @field_validator("external_executor", mode="before")
+    @classmethod
+    def normalize_external_executor(cls, value: Any) -> Any:
+        return (value.strip() or None) if isinstance(value, str) else value
 
 
 # Create schema
-class InputTaskCreate(SQLModel):
+class InputTaskCreate(ExternalExecutorFields):
     original_message: str = Field(min_length=1, max_length=10000)
     selected_agent_id: uuid.UUID | None = None
     user_workspace_id: uuid.UUID | None = None
@@ -173,7 +186,7 @@ class InputTaskCreate(SQLModel):
 
 
 # Update schema
-class InputTaskUpdate(SQLModel):
+class InputTaskUpdate(ExternalExecutorFields):
     current_description: str | None = Field(default=None, min_length=1, max_length=10000)
     selected_agent_id: uuid.UUID | None = None
     # Collaboration fields
@@ -214,6 +227,7 @@ class InputTaskPublic(SQLModel):
     assigned_node_id: uuid.UUID | None = None
     created_by_node_id: uuid.UUID | None = None
     external_ref: str | None = None
+    external_executor: str | None = None
     # Computed counts (populated by service layer)
     subtask_count: int = 0
     subtask_completed_count: int = 0
@@ -222,6 +236,8 @@ class InputTaskPublic(SQLModel):
 class InputTaskPublicExtended(InputTaskPublic):
     """Extended response with agent name, sessions count, and collaboration data"""
     agent_name: str | None = None
+    result_state: str | None = None
+    result_summary: str | None = None
     refinement_history: list = Field(default_factory=list)
     todo_progress: list | None = None
     sessions_count: int = 0

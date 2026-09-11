@@ -59,8 +59,33 @@ Frontend Components                    Backend Services
 **Agents**: `agent_created`, `agent_updated`, `agent_deleted`
 **Environments**: `environment_activating`, `environment_activated`, `environment_activation_failed`, `environment_suspended`
 **Streaming**: `stream_started`, `stream_completed`, `stream_error`, `stream_interrupted`, `session_interaction_status_changed`
+**Tasks**: `task_created`, `task_updated`, `task_status_updated`, `task_status_changed`, `task_comment_added`, `task_attachment_added`, `task_subtask_created`, `subtask_completed`
 **Todo Progress**: `todo_list_updated`, `task_todo_updated`
 **Generic**: `notification`
+
+### Desktop task subscriptions
+
+Desktop-issued user access tokens authenticate with `auth: {token}` through the
+same REST principal resolver and join `user_{owner_id}`. Device revocation is
+checked again on connection; revocation does not actively disconnect an already
+open socket. Desktop subscription/reconnect/token-refresh implementation lives in
+the separate desktop repository; this repository supplies the server contract.
+
+Task status, comments, attachments and activities already target this owner room.
+A change to `external_executor` now emits `task_updated` after the task commit,
+with `model_id=task.id`, `user_id=task.owner_id`, and metadata `task_id`,
+`short_code`, nullable `parent_task_id` and nullable `external_executor`.
+The web task detail, board/list queries and chat subtasks refresh on this event.
+It reports marker changes, not every possible task PATCH.
+
+Events are refresh hints, with incremental polling/reconnect reconciliation via
+`GET /api/v1/tasks/` (`updated_since` plus `updated_since_id`) as recovery. They
+are not a replayable deletion log; full-list reconciliation still detects deletes.
+`backend/tests/api/events/socket_desktop_client_test.py` verifies desktop token
+connection, revoked-device reconnect refusal and owner-targeted status emission.
+Connection and emission use separate assertions, not an end-to-end live desktop
+client test. Marker owner targeting is covered by
+`backend/tests/api/input_tasks/test_task_external_executor.py`.
 
 ### Session Interaction Status Changed
 

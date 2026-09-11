@@ -14004,7 +14004,10 @@ export class TasksService {
      *
      * Page by advancing the cursor, not by ``skip``: the sort key is
      * mutable, so offset paging over it can skip unread rows. Take the
-     * last row's ``updated_at`` as the next cursor.
+     * last row's ``updated_at`` and ``id`` as ``updated_since`` and
+     * ``updated_since_id`` for the next page. The ID keeps timestamp ties
+     * from being skipped. Timestamp-only cursors retain strict-after semantics.
+     * updated_since_id: Last task ID at the cursor timestamp; requires updated_since.
      * @param data The data for the request.
      * @param data.skip
      * @param data.limit
@@ -14014,6 +14017,7 @@ export class TasksService {
      * @param data.teamId
      * @param data.priority
      * @param data.updatedSince
+     * @param data.updatedSinceId
      * @returns InputTasksPublicExtended Successful Response
      * @throws ApiError
      */
@@ -14029,7 +14033,8 @@ export class TasksService {
                 root_only: data.rootOnly,
                 team_id: data.teamId,
                 priority: data.priority,
-                updated_since: data.updatedSince
+                updated_since: data.updatedSince,
+                updated_since_id: data.updatedSinceId
             },
             errors: {
                 422: 'Validation Error'

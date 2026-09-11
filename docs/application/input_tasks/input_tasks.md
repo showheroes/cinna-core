@@ -33,7 +33,7 @@ The task system also serves as the primary **collaboration surface** for agent w
 - **Source Session**: The agent session that created a task via handover; used for delegation tracking.
 - **Todo Progress**: Real-time task completion progress from agent's TodoWrite tool calls.
 - **External Ref**: Caller-supplied idempotency key on task creation (`external_ref`, max 64 chars), unique per owner. An external client sends its own local task id so a retried create returns the first task instead of making a second one.
-- **Sync Cursor**: The `updated_since` query param on the task list — an incremental-pull cursor for clients that poll for what changed, instead of re-reading the whole list.
+- **Sync Cursor**: The `updated_since` and `updated_since_id` query params on the task list — an incremental-pull cursor for clients that poll for what changed, instead of re-reading the whole list.
 - **Externally-Executed Task**: A task a user-authenticated client runs *outside* cinna (Cinna Desktop running it on a local agent). There is no cinna session; the client mirrors status back through the user status route so the web view reflects reality.
 
 ## User Stories / Flows
@@ -98,11 +98,11 @@ local agent of its own and keep the cinna copy in step. cinna never executes suc
 a task and never opens a session for it; it holds the mirror (title, description,
 priority, comments, attachments, short code) and the status the client reports.
 
-1. The client creates the task with `POST /api/v1/tasks/`, sending its own local task id as `external_ref`. If the response is lost and the client retries, the same call returns the same task — no duplicate, and no second execution
+1. The client creates the task with `POST /api/v1/tasks/`, sending its own local task id as `external_ref` and `external_executor: "desktop"`. If the response is lost and the client retries, the same call returns the same task — no duplicate, and no second execution
 2. The client runs the work locally and reports progress with `POST /api/v1/tasks/{id}/status` (`open`, `in_progress`, `blocked`, `completed`, `error`, `cancelled`)
 3. Each report is validated against the transition table, written to the status history attributed to the *user*, and posted to the comment feed as a `status_change` comment — identical in shape to a status change made anywhere else, so the web task page shows the real state instead of a permanent `new`
 4. The client posts its handoff notes and deliverables through the ordinary comment and attachment endpoints
-5. The client polls `GET /api/v1/tasks/?updated_since=<cursor>` to pick up changes made on the web (a priority change, a re-assignment, an archive), advancing the cursor by the last row's `updated_at`
+5. The client polls `GET /api/v1/tasks/?updated_since=<cursor>` to pick up changes made on the web (a priority change, a re-assignment, an archive), advancing with the last row's `updated_at` and `id` as `updated_since` and `updated_since_id`. Authenticated owner-room Socket.IO events can trigger these refreshes; polling remains a fallback
 6. After a reinstall or a re-link, the client re-binds its local tasks to their cinna counterparts by `external_ref`, which is returned on every task, instead of matching on title
 
 Nothing in the web UI writes through this path — the web executes tasks with
@@ -160,11 +160,25 @@ the task read as `new` on the web for ever while its comments described work tha
 had finished.
 
 - **Allowed targets**: `open`, `in_progress`, `blocked`, `completed`, `error`, `cancelled`. Anything else is refused with the same shape an agent's out-of-set request gets — a 400 naming the allowed set (`User can only set status to: ...`). `new` is the create state, `refining` belongs to the refine flow, and `archived` has its own route (`POST /{id}/archive`, which owns `archived_at`)
-- **Transitions are validated** against the same table every other writer uses. `completed → in_progress` is refused. A client that keeps a local copy of the table and sends the *path* rather than the destination (`new → in_progress → completed`, not `new → completed`) never trips this
+- **Transitions are validated** against the shared public transition table (session recomputation remains separate). `completed → in_progress` is allowed for Run Again. Client copies of the transition table should include this widening; narrowing the published table requires coordinated client updates. A client that keeps a local copy of the table and sends the *path* rather than the destination (`new → in_progress → completed`, not `new → completed`) never trips this
 - **Attribution is the user**, never "the system". The status history is an audit trail, and recording a human's client as the platform would be a lie in it
 - **It records; it does not act.** No session is started, resumed or interrupted. The route's only effects are the status field, the history row, the `status_change` comment and the real-time event
 - **The server wins where the server is doing the work.** For a task cinna is executing, the session-driven recompute runs on the next session event and overrides whatever a client wrote. This is not a conflict in practice — an externally-executed task has no session, so nothing contends — but it is the rule if a client writes to a task it does not own the execution of
 - **Ownership failures answer `400`, not `404`.** Every route in the task API reports "not yours" as a permission error, which carries a 400; only a genuinely absent task is a 404. Clients should treat the two identically on this route — unbind, do not retry
+
+### External Execution Ownership (`external_executor`)
+
+A client sets `external_executor: "desktop"` on create or PATCH to mark work it
+runs outside cinna. The nullable string is limited to 100 characters after
+trimming; blank values normalize to null. It is separate from the immutable
+create-retry key `external_ref` and appears on public, extended and detail responses.
+
+- A marked task disables automatic execution and automatic refinement. Manual Execute, Run Again and Refine also refuse it on the server, so a web client cannot accidentally duplicate local work.
+- A marker can be claimed only when no cinna session is linked, including older sessions linked through `source_task_id`. Session creation and marker changes lock the same task row until their writes commit.
+- An existing marker cannot be changed or cleared while status is `in_progress`, `blocked` or `refining`. Report completion, error or cancellation first, then PATCH `{"external_executor": null}` to release it. Repeating the same marker is allowed. Release does not turn automatic execution back on; explicitly execute when ready. A completed, released task supports Run Again.
+- User-reported progress retains user attribution. Marked work leaves `executed_at` unset because cinna performed no execution; claiming a legacy sessionless mirror clears its old execution timestamp. `completed_at` still records completion.
+- Task detail shows a notice, and board/list/chat subtask rows show an execution flag. Desktop tasks say “Running on Desktop” or “Managed by Desktop” according to status; other clients receive generic external-execution wording. Execute/refine controls explain why they are disabled. Comments and attachments remain available.
+- Marker changes emit owner-scoped `task_updated` events, refreshing these web surfaces. The web UI has no marker-editing control; release belongs to the external client's task workflow.
 
 ### Idempotent Creation (`external_ref`)
 
@@ -201,7 +215,7 @@ One limit remains, and it is deliberate:
 **Page by advancing the cursor, not by `skip`.** The sort key is mutable: a row
 already returned that is updated again moves to the tail and pushes an unread row
 back into the window `skip` has already consumed. Read a page, take the last row's
-`updated_at` as the next cursor, repeat until a page comes back short.
+`updated_at` and `id` as `updated_since` and `updated_since_id`, then repeat until a page comes back short. This pair preserves unread rows sharing a timestamp across page boundaries. Timestamp-only requests keep their strict-after behavior and can skip such ties; supplying an ID without a timestamp is a 400.
 
 ### Short Code Generation
 
@@ -329,4 +343,8 @@ Parent Task ──create_subtask──> Subtask ──auto_execute──> Target
 - ~~**Email Integration**~~: Incoming email can no longer create tasks — the email-originated task flow (and the "Send Answer" AI reply) was removed when email became a [Server Channel](../server_channels/server_channels.md) (Phase 4 of the channels & identity unification); see [Email Integration — Capabilities removed](../email_integration/email_integration.md#capabilities-removed-in-this-refactor)
 - **File Management**: Task attachments use the same storage infrastructure as agent file management — see [Agent File Management](../../agents/agent_file_management/agent_file_management.md)
 - **Real-time Events**: `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`, `SUBTASK_COMPLETED` events notify the frontend — see [Real-time Events](../realtime_events/event_bus_system.md)
-- **Native Clients (Cinna Desktop)**: A signed-in desktop client mirrors tasks it executes locally through the ordinary user-scoped task API — `external_ref` on create, `POST /{id}/status` to report progress, `updated_since` to poll. It authenticates with an ordinary user token from the desktop OAuth flow (see [Desktop Auth](../desktop_auth/desktop_auth.md)); no task-specific token type exists, and these routes are *not* part of the `/api/v1/external/` surface used for agent discovery and chat — see [External Agent Access](../external_agent_access/external_agent_access.md)
+- **Native Clients (Cinna Desktop)**: A signed-in desktop client mirrors tasks it executes locally through the ordinary user-scoped task API — `external_ref` and `external_executor` on create, `POST /{id}/status` to report progress, the paired sync cursor to poll, and authenticated owner-room events to trigger refreshes. It authenticates with an ordinary user token from the desktop OAuth flow (see [Desktop Auth](../desktop_auth/desktop_auth.md)); no task-specific token type exists, and these routes are *not* part of the `/api/v1/external/` surface used for agent discovery and chat — see [External Agent Access](../external_agent_access/external_agent_access.md)
+
+## Changelog
+
+- 2026-09-11: External execution ownership prevents duplicate cinna runs; marker-aware web controls and owner events expose the execution source. Incremental paging now accepts a task ID alongside the timestamp, and completed tasks may restart through the validated status API.

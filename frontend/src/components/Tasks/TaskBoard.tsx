@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { TaskShortCodeBadge } from "@/components/Tasks/TaskShortCodeBadge"
 import { TaskPriorityBadge } from "@/components/Tasks/TaskPriorityBadge"
+import { TaskExternalExecutorFlag } from "@/components/Tasks/TaskExternalExecutor"
 import { SubtaskProgressChip } from "@/components/Tasks/SubtaskProgressChip"
 import { cn } from "@/lib/utils"
 import useWorkspace from "@/hooks/useWorkspace"
@@ -72,6 +73,7 @@ function TaskCard({ task }: { task: InputTaskPublicExtended }) {
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <TaskExternalExecutorFlag task={task} />
           {(task.subtask_count ?? 0) > 0 && (
             <SubtaskProgressChip
               total={task.subtask_count ?? 0}
@@ -198,6 +200,7 @@ export function TaskBoard({ teamId }: TaskBoardProps) {
   useMultiEventSubscription(
     [
       EventTypes.TASK_STATUS_CHANGED,
+      EventTypes.TASK_UPDATED,
       EventTypes.TASK_SUBTASK_CREATED,
       EventTypes.SUBTASK_COMPLETED,
     ],

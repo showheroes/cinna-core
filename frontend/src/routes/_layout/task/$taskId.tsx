@@ -42,12 +42,14 @@ import { TaskSessionsModal } from "@/components/Tasks/TaskSessionsModal"
 import { TriggerManagementModal } from "@/components/Tasks/Triggers/TriggerManagementModal"
 import { TaskTriggersApi } from "@/components/Tasks/Triggers/triggerApi"
 import { TaskStatusPill } from "@/components/Tasks/TaskStatusPill"
+import { TaskExternalExecutorFlag, TaskExternalExecutorNotice } from "@/components/Tasks/TaskExternalExecutor"
 import { TaskShortCodeBadge } from "@/components/Tasks/TaskShortCodeBadge"
 import { SubtaskProgressChip } from "@/components/Tasks/SubtaskProgressChip"
 import { AgentSelectorDialog } from "@/components/Common/AgentSelectorDialog"
 import { RelativeTime } from "@/components/Common/RelativeTime"
 import { MarkdownRenderer } from "@/components/Chat/MarkdownRenderer"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog,
@@ -77,6 +79,7 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 import { downloadAuthenticatedFile } from "@/utils"
 import { getColorPreset } from "@/utils/colorPresets"
+import { getTaskExternalExecution } from "@/utils/taskExternalExecutor"
 import { getWorkspaceIcon } from "@/config/workspaceIcons"
 import {
   Popover,
@@ -277,6 +280,7 @@ function SubtaskRow({ subtask }: { subtask: InputTaskDetailPublic }) {
       </span>
       {subtask.short_code && <span className="font-mono text-xs text-muted-foreground shrink-0">{subtask.short_code}</span>}
       <span className="text-sm truncate flex-1">{subtask.title || subtask.current_description}</span>
+      <TaskExternalExecutorFlag task={subtask} />
       {subtask.agent_name && (
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground shrink-0">
           <Bot className="h-3 w-3" />{subtask.agent_name}
@@ -467,8 +471,8 @@ function TaskDetailPage() {
   const executeMutation = useMutation({
     mutationFn: () => TasksService.executeTask({ id: task!.id, requestBody: { mode: "conversation" } }),
     onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["task-detail", taskId] })
       if (result.success) {
-        queryClient.invalidateQueries({ queryKey: ["task-detail", taskId] })
         queryClient.invalidateQueries({ queryKey: ["task-sessions", task!.id] })
         showSuccessToast("Task execution started")
       } else showErrorToast(result.error || "Failed to execute task")
@@ -537,7 +541,8 @@ function TaskDetailPage() {
   const subtasks = (task?.subtasks as InputTaskDetailPublic[] | undefined) ?? []
   const selectedAgent = agents.find((a) => a.id === task?.selected_agent_id)
   const agentColorPreset = selectedAgent ? getColorPreset(selectedAgent.ui_color_preset) : null
-  const canExecute = task?.selected_agent_id && !["running", "archived"].includes(task?.status ?? "")
+  const externalExecution = getTaskExternalExecution(task)
+  const canExecute = task?.selected_agent_id && !externalExecution && !["in_progress", "running", "archived"].includes(task?.status || "")
 
   // ---------------------------------------------------------------------------
   // Real-time events
@@ -561,7 +566,7 @@ function TaskDetailPage() {
   )
 
   useMultiEventSubscription(
-    [EventTypes.TASK_COMMENT_ADDED, EventTypes.TASK_STATUS_CHANGED, EventTypes.TASK_ATTACHMENT_ADDED, EventTypes.SUBTASK_COMPLETED, EventTypes.TASK_SUBTASK_CREATED],
+    [EventTypes.TASK_COMMENT_ADDED, EventTypes.TASK_STATUS_CHANGED, EventTypes.TASK_UPDATED, EventTypes.TASK_ATTACHMENT_ADDED, EventTypes.SUBTASK_COMPLETED, EventTypes.TASK_SUBTASK_CREATED],
     handleTaskEvent,
   )
 
@@ -679,7 +684,7 @@ function TaskDetailPage() {
   }
 
   const handleRefineSubmit = () => {
-    if (!inputText.trim() || refineMutation.isPending) return
+    if (!inputText.trim() || refineMutation.isPending || externalExecution) return
     refineMutation.mutate({ userComment: inputText.trim(), userSelectedText: selectedText })
   }
 
@@ -689,8 +694,9 @@ function TaskDetailPage() {
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleCommentSubmit() }
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleRefineSubmit() }
+    if (e.key !== "Enter") return
+    if (e.metaKey || e.ctrlKey) { e.preventDefault(); handleRefineSubmit() }
+    else if (!e.shiftKey) { e.preventDefault(); handleCommentSubmit() }
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -752,6 +758,11 @@ function TaskDetailPage() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* ---- Left: main content area ---- */}
         <div className="flex-1 min-w-0 flex flex-col overflow-y-auto">
+          {externalExecution && (
+            <div className="px-6 pt-4 flex-shrink-0">
+              <TaskExternalExecutorNotice task={task} />
+            </div>
+          )}
           {/* Description */}
           <div className="px-6 py-5 flex-shrink-0">
             <div>
@@ -917,22 +928,31 @@ function TaskDetailPage() {
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={selectedText ? "Describe how to refine the selected text..." : "Add a comment or refinement..."}
+                placeholder={externalExecution ? "Add a comment..." : selectedText ? "Describe how to refine the selected text..." : "Add a comment or refinement..."}
                 rows={1}
                 className="resize-none text-sm flex-1 min-h-[40px] max-h-[120px] py-2"
                 disabled={refineMutation.isPending || addCommentMutation.isPending}
               />
               {/* Refine button */}
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={inputText.trim() ? handleRefineSubmit : () => autoRefineMutation.mutate()}
-                disabled={refineMutation.isPending || autoRefineMutation.isPending}
-                title={inputText.trim() ? "Refine with instructions (Ctrl+Enter)" : "Auto-refine"}
-                className="h-10 w-10 shrink-0 rounded-lg hover:text-amber-500 hover:border-amber-500/50 hover:bg-amber-500/10 transition-colors"
-              >
-                {refineMutation.isPending || autoRefineMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin text-amber-500" /> : <Sparkles className="h-4 w-4 text-amber-500" />}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="shrink-0">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={inputText.trim() ? handleRefineSubmit : () => autoRefineMutation.mutate()}
+                      disabled={!!externalExecution || refineMutation.isPending || autoRefineMutation.isPending}
+                      aria-label={inputText.trim() ? "Refine with instructions (Ctrl+Enter)" : "Auto-refine"}
+                      className="h-10 w-10 rounded-lg hover:text-warning hover:border-warning/50 hover:bg-warning/10 transition-colors"
+                    >
+                      {refineMutation.isPending || autoRefineMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin text-warning" /> : <Sparkles className="h-4 w-4 text-warning" />}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  {externalExecution?.reason || (inputText.trim() ? "Refine with instructions (Ctrl+Enter)" : "Auto-refine")}
+                </TooltipContent>
+              </Tooltip>
               {/* Send/Comment button */}
               <Button
                 size="icon"
@@ -1092,10 +1112,15 @@ function TaskDetailPage() {
 
           {/* Execute at bottom of panel */}
           <div className="px-5 py-4 border-t space-y-2 flex-shrink-0">
-            <Button className="w-full" onClick={() => executeMutation.mutate()} disabled={!canExecute || executeMutation.isPending}>
+            <Button className="w-full" onClick={() => executeMutation.mutate()} disabled={!canExecute || executeMutation.isPending} aria-describedby={externalExecution ? "external-execution-reason" : undefined}>
               {executeMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Play className="h-4 w-4 mr-1.5" />}
               {sessions.length > 0 ? "Run Again" : "Execute Task"}
             </Button>
+            {externalExecution && (
+              <p id="external-execution-reason" className="text-xs text-muted-foreground break-words">
+                {externalExecution.reason}
+              </p>
+            )}
           </div>
         </div>
       </div>

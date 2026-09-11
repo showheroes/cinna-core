@@ -1,56 +1,27 @@
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { OpenAPI, TasksService } from "@/client"
+import { useState } from "react"
+import { TasksService } from "@/client"
+import type { InputTaskPublicExtended } from "@/client"
 import { CheckCircle2, HelpCircle, AlertTriangle, Loader2, Play, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 import { RelativeTime } from "@/components/Common/RelativeTime"
+import { QueryErrorAlert } from "@/components/Common/QueryErrorAlert"
+import { TaskExternalExecutorFlag } from "@/components/Tasks/TaskExternalExecutor"
+import { getTaskExternalExecution } from "@/utils/taskExternalExecutor"
+import useCustomToast from "@/hooks/useCustomToast"
 
 interface SubTasksPanelProps {
   sessionId: string
   onClose: () => void
 }
 
-interface SubTaskData {
-  id: string
-  original_message: string
-  current_description: string
-  status: string
-  selected_agent_id: string | null
-  agent_name: string | null
-  session_id: string | null
-  auto_feedback: boolean
-  todo_progress: any[] | null
-  created_at: string
-  // Joined from session
-  result_state?: string | null
-  result_summary?: string | null
-}
-
-async function fetchSubTasks(sessionId: string): Promise<{ data: SubTaskData[]; count: number }> {
-  const token = typeof OpenAPI.TOKEN === "function"
-    ? await OpenAPI.TOKEN({} as any)
-    : OpenAPI.TOKEN || ""
-
-  const response = await fetch(`${OpenAPI.BASE}/api/v1/tasks/by-source-session/${sessionId}`, {
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch sub-tasks: ${response.status}`)
-  }
-
-  return response.json()
-}
-
 /**
  * Derive effective display state from result_state (agent-declared) and task status (lifecycle).
  * result_state takes priority when set; otherwise fall back to task status.
  */
-function getEffectiveState(task: SubTaskData): string {
+function getEffectiveState(task: InputTaskPublicExtended): string {
   if (task.result_state) return task.result_state
   switch (task.status) {
     case "completed": return "completed"
@@ -94,16 +65,18 @@ function getStateBadge(state: string) {
 export function SubTasksPanel({ sessionId, onClose }: SubTasksPanelProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const { showErrorToast } = useCustomToast()
+  const [executingTaskIds, setExecutingTaskIds] = useState<Set<string>>(new Set())
 
-  const { data: tasksResponse, isLoading } = useQuery({
+  const { data: tasksResponse, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["subTasks", sessionId],
-    queryFn: () => fetchSubTasks(sessionId),
+    queryFn: () => TasksService.listTasksBySourceSession({ sessionId }),
     refetchInterval: 10000, // Poll every 10 seconds
   })
 
   // Subscribe to session state updates for real-time refresh
   useMultiEventSubscription(
-    [EventTypes.SESSION_STATE_UPDATED],
+    [EventTypes.SESSION_STATE_UPDATED, EventTypes.TASK_UPDATED, EventTypes.TASK_STATUS_CHANGED],
     () => {
       queryClient.invalidateQueries({ queryKey: ["subTasks", sessionId] })
     }
@@ -112,9 +85,16 @@ export function SubTasksPanel({ sessionId, onClose }: SubTasksPanelProps) {
   const executeMutation = useMutation({
     mutationFn: (taskId: string) =>
       TasksService.executeTask({ id: taskId, requestBody: {} }),
+    onMutate: (taskId) => {
+      setExecutingTaskIds((current) => new Set(current).add(taskId))
+    },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["subTasks", sessionId] })
       queryClient.invalidateQueries({ queryKey: ["subTasksCount", sessionId] })
+      if (!data.success) {
+        showErrorToast(data.error || "Failed to execute task")
+        return
+      }
       if (data.session_id) {
         onClose()
         navigate({
@@ -124,11 +104,19 @@ export function SubTasksPanel({ sessionId, onClose }: SubTasksPanelProps) {
         })
       }
     },
+    onError: (error) => showErrorToast(error.message || "Failed to execute task"),
+    onSettled: (_data, _error, taskId) => {
+      setExecutingTaskIds((current) => {
+        const next = new Set(current)
+        next.delete(taskId)
+        return next
+      })
+    },
   })
 
   const tasks = tasksResponse?.data || []
 
-  const handleTaskClick = (task: SubTaskData) => {
+  const handleTaskClick = (task: InputTaskPublicExtended) => {
     if (task.session_id) {
       onClose()
       navigate({
@@ -147,79 +135,92 @@ export function SubTasksPanel({ sessionId, onClose }: SubTasksPanelProps) {
           <div className="flex items-center justify-center h-24">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
+        ) : isError ? (
+          <QueryErrorAlert error={error} fallback="Could not load sub-tasks" onRetry={() => refetch()} compact />
         ) : tasks.length === 0 ? (
           <div className="flex items-center justify-center h-24 text-sm text-muted-foreground">
             No sub-tasks
           </div>
         ) : (
-          tasks.map((task) => (
-            <div
-              key={task.id}
-              onClick={() => handleTaskClick(task)}
-              className={`px-3 py-2.5 rounded-md bg-muted/40 hover:bg-muted/80 transition-colors ${
-                task.session_id ? "cursor-pointer" : ""
-              }`}
-            >
-              <div className="flex items-start gap-2">
-                <div className="mt-0.5 shrink-0">
-                  {getStateIcon(getEffectiveState(task))}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    {task.agent_name && (
-                      <span className="text-xs font-medium text-muted-foreground">{task.agent_name}</span>
-                    )}
-                    {getStateBadge(getEffectiveState(task))}
+          tasks.map((task) => {
+            const externalExecution = getTaskExternalExecution(task)
+            const isExecuting = executingTaskIds.has(task.id)
+            return (
+              <div
+                key={task.id}
+                onClick={() => handleTaskClick(task)}
+                className={`px-3 py-2.5 rounded-md bg-muted/40 hover:bg-muted/80 transition-colors ${
+                  task.session_id ? "cursor-pointer" : ""
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <div className="mt-0.5 shrink-0">
+                    {getStateIcon(getEffectiveState(task))}
                   </div>
-                  <p className="text-sm text-foreground line-clamp-2">{task.original_message}</p>
-                  {task.result_summary && (
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2 italic">
-                      {task.result_summary}
-                    </p>
-                  )}
-                  <div className="flex items-center justify-between mt-1.5">
-                    <span className="text-xs text-muted-foreground">
-                      <RelativeTime timestamp={task.created_at} />
-                    </span>
-                    {!task.session_id && (
-                      task.selected_agent_id ? (
-                        <Button
-                          size="sm"
-                          className="h-6 px-2 text-xs gap-1"
-                          disabled={executeMutation.isPending}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            executeMutation.mutate(task.id)
-                          }}
-                        >
-                          {executeMutation.isPending ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Play className="h-3 w-3" />
-                          )}
-                          Execute
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-6 px-2 text-xs gap-1"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onClose()
-                            navigate({ to: "/task/$taskId", params: { taskId: task.id } })
-                          }}
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                          Open
-                        </Button>
-                      )
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      {task.agent_name && (
+                        <span className="text-xs font-medium text-muted-foreground">{task.agent_name}</span>
+                      )}
+                      {getStateBadge(getEffectiveState(task))}
+                      <TaskExternalExecutorFlag task={task} />
+                    </div>
+                    <p className="text-sm text-foreground line-clamp-2">{task.original_message}</p>
+                    {task.result_summary && (
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2 italic">
+                        {task.result_summary}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        <RelativeTime timestamp={task.created_at} />
+                      </span>
+                      {!task.session_id && (
+                        task.selected_agent_id ? (
+                          <Button
+                            size="sm"
+                            className="h-6 px-2 text-xs gap-1"
+                            disabled={!!externalExecution || isExecuting}
+                            aria-describedby={externalExecution ? `external-execution-${task.id}` : undefined}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              executeMutation.mutate(task.id)
+                            }}
+                          >
+                            {isExecuting ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Play className="h-3 w-3" />
+                            )}
+                            {isExecuting ? "Starting…" : "Execute"}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2 text-xs gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onClose()
+                              navigate({ to: "/task/$taskId", params: { taskId: task.id } })
+                            }}
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            Open
+                          </Button>
+                        )
+                      )}
+                    </div>
+                    {externalExecution && (
+                      <p id={`external-execution-${task.id}`} className="mt-1.5 text-xs text-muted-foreground break-words">
+                        {externalExecution.reason}
+                      </p>
                     )}
                   </div>
                 </div>
               </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
     </div>

@@ -40,7 +40,7 @@ Valid transitions (from InputTaskStatus.VALID_TRANSITIONS):
   open: in_progress, cancelled
   in_progress: completed, blocked, cancelled, error
   blocked: in_progress, cancelled
-  completed: archived
+  completed: in_progress, archived
   error: new, in_progress, archived
   cancelled: archived
   archived: (empty — terminal state)
@@ -407,8 +407,9 @@ def test_user_status_write_invalid_transition_400_names_valid_set(
     An invalid transition is a loud 400 that names what *is* valid.
 
       1. Task driven to 'completed'
-      2. POST /status {in_progress} — completed's only valid next is 'archived'
+      2. POST /status {blocked} — completed must restart before blocking
       3. 400, and the detail names the valid set
+      4. POST /status {in_progress} restarts the completed task, with history
 
     The desktop pins the same transition table locally, so a 400 here means the
     two copies drifted. It has to say which way.
@@ -422,16 +423,25 @@ def test_user_status_write_invalid_transition_400_names_valid_set(
         assert r.status_code == 200, f"Setup transition to {target} failed: {r.text}"
 
     r = client.post(
-        f"{_BASE}/{task_id}/status", headers=headers, json={"status": "in_progress"}
+        f"{_BASE}/{task_id}/status", headers=headers, json={"status": "blocked"}
     )
     assert r.status_code == 400, (
-        f"Expected 400 for completed→in_progress, got {r.status_code}: {r.text}"
+        f"Expected 400 for completed→blocked, got {r.status_code}: {r.text}"
     )
     detail = r.json()["detail"]
     assert "archived" in detail, (
         f"The 400 must name the valid set so a drifted client can see which way; got: {detail}"
     )
     assert get_task(client, headers, task_id)["status"] == "completed"
+
+    restarted = client.post(
+        f"{_BASE}/{task_id}/status", headers=headers,
+        json={"status": "in_progress", "reason": "Run the completed task again"},
+    )
+    assert restarted.status_code == 200, restarted.text
+    assert restarted.json()["status"] == "in_progress"
+    history = get_task_detail(client, headers, task_id)["status_history"]
+    assert any(row["from_status"] == "completed" and row["to_status"] == "in_progress" for row in history)
 
 
 def test_user_status_write_rejects_statuses_outside_the_user_set(

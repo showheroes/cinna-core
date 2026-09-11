@@ -111,11 +111,12 @@ New collaboration fields:
 - `created_by_node_id` (UUID FK → agentic_team_node.id SET NULL, nullable)
 
 External-client fields:
+- `external_executor` (VARCHAR(100), nullable) — normalized external execution owner, exposed on create/PATCH and every public task shape. `ExternalExecutorFields` trims before length validation and normalizes blanks to null.
 - `external_ref` (VARCHAR(64), nullable) — caller-supplied idempotency key, unique per owner where present. Normalised on write: blank or whitespace-only becomes `NULL`, because `''` **IS NOT NULL** and would therefore be covered by the partial unique index, turning a second create with an empty field into a constraint violation
 
 Indexes: `ix_input_task_owner_status`, `ix_input_task_parent_task_id`, `ix_input_task_team_id`, `ix_input_task_assigned_node_id`, `ix_input_task_owner_updated` (`(owner_id, updated_at)` — backs the `updated_since` cursor), `ix_input_task_owner_external_ref` (`(owner_id, external_ref)` UNIQUE `WHERE external_ref IS NOT NULL` — partial so the overwhelming majority of tasks, which carry no ref, do not collide with each other)
 
-**Migration `8f3a1d7c04e2`** (`add_input_task_external_ref_and_sync_index`) adds the column and both indexes.
+**Migration `8f3a1d7c04e2`** (`add_input_task_external_ref_and_sync_index`) adds the column and both indexes. Migration `fc99da75645c` (`backend/app/alembic/versions/fc99da75645c_add_external_executor_to_input_tasks.py`) adds the nullable execution marker without changing existing rows.
 
 **`InputTaskStatus` values:**
 
@@ -192,10 +193,11 @@ Index: `ix_task_status_history_task_id`
 **`backend/app/models/tasks/input_task.py`:**
 - `InputTaskBase` — `original_message`, `current_description`
 - `InputTask` — DB table (all columns above)
-- `InputTaskCreate` — includes: `title?`, `priority?`, `team_id?`, `assigned_node_id?`, `parent_task_id?`, `auto_execute?` (bool, default `False`; set to `True` by `CreateTaskDialog` when Execute switch is on), `external_ref?` (str ≤ 64 — idempotency key; cleared by `POST /{id}/subtasks/` before the service sees it)
-- `InputTaskUpdate` — includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?` (team can be changed after creation)
-- `InputTaskPublic` — includes new: `short_code`, `title`, `priority`, `parent_task_id`, `team_id`, `assigned_node_id`, `created_by_node_id`, `external_ref`, `subtask_count`, `subtask_completed_count`
-- `InputTaskPublicExtended` — extends Public with: `agent_name`, `refinement_history`, `todo_progress`, `sessions_count`, `latest_session_id`, `attached_files`, `assigned_node_name`, `team_name`, `parent_short_code` (resolved by service layer via DB lookup), `root_short_code` (walks up hierarchy to root; set only when task has a parent)
+- `ExternalExecutorFields` — shared create/update schema with `external_executor: str | None` (max 100, stripped; blank becomes null)
+- `InputTaskCreate` — inherits `ExternalExecutorFields`; includes: `title?`, `priority?`, `team_id?`, `assigned_node_id?`, `parent_task_id?`, `auto_execute?` (bool, default `False`; set to `True` by `CreateTaskDialog` when Execute switch is on), `external_ref?` (str ≤ 64 — idempotency key; cleared by `POST /{id}/subtasks/` before the service sees it)
+- `InputTaskUpdate` — inherits `ExternalExecutorFields`; omitted marker preserves it, explicit null releases it after validation; includes new: `title?`, `priority?`, `team_id?`, `assigned_node_id?` (team can be changed after creation)
+- `InputTaskPublic` — includes new: `short_code`, `title`, `priority`, `parent_task_id`, `team_id`, `assigned_node_id`, `created_by_node_id`, `external_ref`, `external_executor`, `subtask_count`, `subtask_completed_count`
+- `InputTaskPublicExtended` — extends Public with: `agent_name`, nullable `result_state` and `result_summary` (typed source-session compatibility fields), `refinement_history`, `todo_progress`, `sessions_count`, `latest_session_id`, `attached_files`, `assigned_node_name`, `team_name`, `parent_short_code` (resolved by service layer via DB lookup), `root_short_code` (walks up hierarchy to root; set only when task has a parent)
 - `InputTaskDetailPublic` — extends Extended with: `comments: list[TaskCommentPublic]`, `attachments: list[TaskAttachmentPublic]`, `subtasks: list[InputTaskPublic]`, `status_history: list[TaskStatusHistoryPublic]`
 - `InputTaskStatusUpdate` — user-side status write (`status`, `reason?`). Deliberately separate from `InputTaskUpdate` (a status change carries a reason, an audit row and a transition check, none of which the field-patch route does) and from `AgentTaskStatusUpdate` (whose allowed set and consumers belong to the container-side agent API). `reason` is uncapped, matching `AgentTaskStatusUpdate.reason` and the `TaskStatusHistory.reason` column — a length limit only one caller had would break the shared refusal vocabulary
 - `AgentTaskStatusUpdate` — agent edge-case status update (`status`, `reason?`, `task?` short code)
@@ -209,9 +211,9 @@ Index: `ix_task_status_history_task_id`
 
 **Task CRUD:**
 - `POST /api/v1/tasks/` — create task; auto-generates `short_code` and `title`; calls `create_task_idempotent` and receives `(task, created)`. If `created` **and** `auto_execute=True` **and** `selected_agent_id` is set, schedules `_auto_execute_task` as a background asyncio task (creates a session and sends the task description as the initial message). The `created` gate is what makes an `external_ref` retry harmless: a matched task is returned without a second execution being scheduled on it
-- `GET /api/v1/tasks/` — list tasks; query params: `root_only` (exclude subtasks), `team_id`, `priority`, `updated_since` (incremental-sync cursor — `updated_at >`, and switches the ordering to `(updated_at asc, id asc)` *only when present*; the route docstring carries the deletion limit and the cursor-not-`skip` paging rule so they reach the generated OpenAPI client)
+- `GET /api/v1/tasks/` — list tasks; query params: `root_only` (exclude subtasks), `team_id`, `priority`, `updated_since` plus optional `updated_since_id` (incremental cursor — lexicographic `(updated_at, id) >` when both are supplied; timestamp alone retains `updated_at >`, and switches the ordering to `(updated_at asc, id asc)` *only when present*; the route docstring carries the deletion limit and the cursor-not-`skip` paging rule so they reach the generated OpenAPI client)
 - `GET /api/v1/tasks/{id}` — get task (`InputTaskPublicExtended`)
-- `PATCH /api/v1/tasks/{id}` — update task
+- `PATCH /api/v1/tasks/{id}` — update task, including owner-validated `external_executor` claim/release; emits `TASK_UPDATED` when the marker changes
 - `DELETE /api/v1/tasks/{id}` — delete task (emits ACTIVITY_DELETED for linked activities)
 
 **Task Actions:**
@@ -291,8 +293,8 @@ Exception classes: `InputTaskError`, `TaskNotFoundError`, `AgentNotFoundError`, 
 - `get_task_by_short_code(session, short_code, user_id)` — lookup by `(short_code, owner_id)`
 - `get_task_detail(session, task_id, user_id) -> InputTaskDetailPublic` — full detail with comments (inline attachments), standalone attachments, subtasks, status history
 - `get_task_tree(session, task_id, user_id)` — recursive subtask tree
-- `list_tasks_extended()` — supports filters: `root_only`, `team_id`, `priority`, `updated_since` (passed straight through to `list_tasks`)
-- `list_tasks(..., updated_since=None)` — applies `InputTask.updated_at > updated_since` and, when the param is present, replaces the ordering with `(updated_at asc, id asc)`. The `id` tiebreak makes the sort total — `updated_at` is not unique, and two rows written in the same transaction would otherwise page in an order that can change between requests. The switch is **conditional on purpose**: making it unconditional would silently reorder the task list for every user on the web. `count_statement` is taken before any `order_by`, so the count is unaffected
+- `list_tasks_extended()` — supports filters: `root_only`, `team_id`, `priority`, `updated_since`, `updated_since_id` (passed straight through to `list_tasks`)
+- `list_tasks(..., updated_since=None, updated_since_id=None)` — applies `InputTask.updated_at > updated_since`, plus `updated_at == updated_since AND id > updated_since_id` when the companion ID is provided (ID without timestamp raises `ValidationError`) and, when the param is present, replaces the ordering with `(updated_at asc, id asc)`. Clients carry both final-row values into the next request; ordering by ID alone cannot prevent timestamp-only cursors skipping ties at page boundaries. The `id` tiebreak makes the sort total — `updated_at` is not unique, and two rows written in the same transaction would otherwise page in an order that can change between requests. The switch is **conditional on purpose**: making it unconditional would silently reorder the task list for every user on the web. `count_statement` is taken before any `order_by`, so the count is unaffected
 - `update_task()`, `delete_task()`, `update_status()`, `append_to_refinement_history()`
 - `link_session()` — set session_id, status to in_progress
 - `reset_task_if_no_sessions()` — reset to NEW if all linked sessions deleted
@@ -370,7 +372,7 @@ Base path resolved from `settings.UPLOAD_BASE_PATH`. Path traversal protection a
 
 ## External Client Sync Surface
 
-Three additions to the ordinary user-scoped task API let a user-authenticated
+The ordinary user-scoped task API additions let a user-authenticated
 client outside cinna (Cinna Desktop) mirror tasks it runs itself. They are not on
 the `/api/v1/external/` surface and need no new token type — an ordinary user JWT
 is the right identity.
@@ -399,14 +401,46 @@ refused the user. **The server overrides the client on a transition the client
 itself cannot make.** In practice nothing contends, because an externally-executed
 task has no session and `sync_task_status_from_sessions` returns `None` for it.
 
-Known and deliberately left as-is: `update_task_status` sets `executed_at` on a
-`→ in_progress` transition, so a client reporting local execution stamps an
-`executed_at` for a run cinna never performed. Harmless today; it wants an
-explicit "executed elsewhere" marker before it is worth changing.
+### External execution guard and release
+
+`create_task_idempotent` stores `external_executor` and forces `auto_execute=False`
+while marked. The create preparation path returns before automatic refinement;
+`refine_task` and `execute_task` refresh the task and refuse marked execution.
+The execute route reports its existing `success=False` result shape; PATCH and
+refine validation failures return 400. An idempotent create retry returns the
+existing row unchanged, including its marker.
+
+`update_task` uses `SELECT ... FOR UPDATE` when PATCH includes the marker.
+Changing an existing marker while `in_progress`, `blocked` or `refining` is
+refused. A non-null claim is refused if `task.session_id` or any session's
+`source_task_id` links cinna work to this task. Repeating the same marker is a
+no-op for ownership; explicit null releases it only after leaving active states.
+Claiming a legacy sessionless mirror clears `executed_at` and disables automatic
+execution. Releasing does not restore `auto_execute`.
+
+`SessionService.create_session` in `backend/app/services/sessions/session_service.py`
+locks and freshly reads the same task before inserting a task-linked session,
+refuses a non-null marker, and holds the lock through the session insert commit.
+This closes the claim-between-execute-check-and-session-insert window for every
+caller of that shared session creation path. The early execute check supplies a
+friendly error; the session-layer check enforces the invariant at insertion.
+
+Both `update_status` and the auditing `update_task_status` avoid setting
+`executed_at` for marked work. Completion still sets `completed_at`, and the user
+route still records `changed_by_user_id`. Unmarked legacy clients retain the
+previous timestamp semantics. `VALID_TRANSITIONS["completed"]` now includes
+`in_progress`, supporting explicit restart and release-then-Run-Again. This is
+an additive public contract change; desktop copies need updating to offer the
+new path locally, while future narrowing requires a coordinated client release.
+
+Marker-changing PATCH schedules owner-scoped `TASK_UPDATED` after commit with
+`task_id`, `short_code`, `parent_task_id` and nullable `external_executor`. No event
+is emitted merely for repeating the same marker. The async route preserves a
+running event loop for the scheduled event emission.
 
 ### `updated_since` — scope of the cursor
 
-The cursor reads `input_task.updated_at` and nothing else, so every write that
+Activity detection reads `input_task.updated_at` (with `id` for paging ties), so every write that
 changes a task's *activity* has to bump that column even though it writes to a
 different table. `app/services/tasks/task_touch.py` holds the one-line helper
 (`touch_task`) and the reasoning; it is called from eight write paths:
@@ -457,6 +491,10 @@ identically on these routes.
 - `backend/tests/api/input_tasks/test_task_status_transitions.py` — the user status route: happy path with history row and comment, invalid transition, disallowed target (`refining` is the case that truly proves the allowed-set gate, since `new → refining` is a *valid* transition and can only be refused by the set), non-owner, the mid-flight recompute override, and the two-token refusal
 - `backend/tests/api/input_tasks/test_task_external_sync.py` — `updated_since` filtering and ordering, the conditional sort, the comment-only gap, the non-report of deletions, and `external_ref` create / retry / per-owner scoping / blank-ref normalisation / the subtask route ignoring it / no-re-execute-on-retry
 
+- `backend/tests/api/input_tasks/test_task_external_executor.py` — marker normalization, public response coverage, idempotent retry, guarded execution/refinement, session-backed claim refusal, active-marker release refusal, user attribution/timestamps, marker owner events
+- `backend/tests/api/input_tasks/test_task_sync_pagination.py` — paired-cursor paging across timestamp ties and rejection of an ID without a timestamp
+- `backend/tests/unit/test_session_external_executor_guard.py` — defensive session-insertion guard regression; this does not simulate a concurrent database race
+
 ## Event Handler Registration
 
 **File:** `backend/app/main.py`
@@ -474,6 +512,7 @@ New events emitted from the task collaboration system (file: `backend/app/models
 
 | Event | Trigger | Payload |
 |-------|---------|---------|
+| `TASK_UPDATED` | Marker changes through `InputTaskService.update_task()` | `task_id`, `short_code`, `parent_task_id`, `external_executor` |
 | `TASK_COMMENT_ADDED` | `TaskCommentService.add_comment()` | `task_id`, `short_code`, `comment_id`, `author_name`, `has_attachments` |
 | `TASK_STATUS_CHANGED` | `InputTaskService.update_task_status()` | `task_id`, `short_code`, `from_status`, `to_status` |
 | `TASK_ATTACHMENT_ADDED` | `TaskAttachmentService._emit_attachment_event()` | `task_id`, `short_code`, `attachment_id`, `file_name` |
@@ -495,7 +534,7 @@ These events are matched by `meta.source_task_id` or by `meta.session_id` / `eve
 ## Frontend Components
 
 - `frontend/src/routes/_layout/tasks/index.tsx` — Tasks page: Board/List view toggle in header; Board view delegates to `TaskBoard` component; List view shows compact table with left sidebar status filters (Open, In Progress, Blocked, Completed, Archived below a separator) each with a count, date-grouped rows (Today/Yesterday/Last week/Older), status dots, short codes (with `CornerDownRight` + parent short code for subtasks that have `parent_task_id`), agent/team badges with color presets, relative timestamps; non-archived tasks fetched once and filtered client-side; archived tasks lazy-fetched only when Archived filter is active
-- `frontend/src/routes/_layout/task/$taskId.tsx` — unified task detail page (Linear-style layout): accepts UUID or short code in `$taskId` param; full-width layout with left body and right sidebar panel; four tabs: Comments, Sessions, Sub-tasks, Activity; session and subtask tab icons pulse blue when active sessions or in-progress subtasks exist; tab counters rendered as round pill badges; session rows use `space-y-0.5` (no dividers), agent color-preset badge, relative timestamp; subtask rows use `space-y-0.5`, `treeStatusIcons` status icons, relative timestamp; sidebar shows "Parent Task" row (above Status, when `parent_task_id` set) with `GitBranchPlus` tree icon opening `TaskTreePopover` and clickable `parent_short_code` badge; sidebar "Subtasks" label shows `GitBranchPlus` tree icon for root tasks; WebSocket session event handler uses a `sessionIdsRef` to avoid stale closure issues — matches events by `meta.session_id` or `event.model_id` against known task session IDs; subscribes to `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`, `SUBTASK_COMPLETED`, `TASK_SUBTASK_CREATED` (task events) and `SESSION_UPDATED`, `SESSION_INTERACTION_STATUS_CHANGED`, `SESSION_STATE_UPDATED`, `STREAM_COMPLETED` (session events)
+- `frontend/src/routes/_layout/task/$taskId.tsx` — unified task detail page (Linear-style layout): accepts UUID or short code in `$taskId` param; full-width layout with left body and right sidebar panel; four tabs: Comments, Sessions, Sub-tasks, Activity; session and subtask tab icons pulse blue when active sessions or in-progress subtasks exist; tab counters rendered as round pill badges; session rows use `space-y-0.5` (no dividers), agent color-preset badge, relative timestamp; subtask rows use `space-y-0.5`, `treeStatusIcons` status icons, relative timestamp; sidebar shows "Parent Task" row (above Status, when `parent_task_id` set) with `GitBranchPlus` tree icon opening `TaskTreePopover` and clickable `parent_short_code` badge; sidebar "Subtasks" label shows `GitBranchPlus` tree icon for root tasks; WebSocket session event handler uses a `sessionIdsRef` to avoid stale closure issues — matches events by `meta.session_id` or `event.model_id` against known task session IDs; subscribes to `TASK_UPDATED`, `TASK_COMMENT_ADDED`, `TASK_STATUS_CHANGED`, `TASK_ATTACHMENT_ADDED`, `SUBTASK_COMPLETED`, `TASK_SUBTASK_CREATED` (task events) and `SESSION_UPDATED`, `SESSION_INTERACTION_STATUS_CHANGED`, `SESSION_STATE_UPDATED`, `STREAM_COMPLETED` (session events)
 - `frontend/src/routes/_layout/tasks/$shortCode.tsx` — redirect-only: `beforeLoad` redirects `/tasks/$shortCode` to `/task/$taskId`
 - `frontend/src/components/Tasks/TaskBoard.tsx` — kanban board: 4 columns (Open merges `new`/`refining`/`open`, In Progress, Blocked, Completed); column headers show label left, shadcn `Badge` (secondary variant, `h-5` pill) with count right; Completed column has `ArchiveIcon` button to the left of the badge that archives all completed tasks in parallel (`Promise.all`); skeleton headers use matching rounded pill skeleton; `TaskShortCodeBadge`, `TaskPriorityBadge`, `SubtaskProgressChip` per card; workspace-aware via `useWorkspace`; no inline filters or create dialog (managed by parent page)
 - `TaskTreePopover` (inline component in `$taskId.tsx`) — fetches full task tree via `TasksService.getTaskTreeByCode({ shortCode: rootShortCode })`; renders recursive `renderNode` function with depth-based `paddingLeft` indentation; current task node highlighted with `bg-primary/10 font-medium`; all nodes are clickable navigation links showing status icon, short code, title
@@ -508,7 +547,8 @@ These events are matched by `meta.source_task_id` or by `meta.session_id` / `eve
 - `frontend/src/components/Tasks/RefinementChat.tsx` — shows `refinement_history`; submits via `TasksService.refineTask()`
 - `frontend/src/components/Tasks/TaskTodoProgress.tsx` — TodoWrite progress indicator; subscribes to `TASK_TODO_UPDATED`
 - `frontend/src/components/Tasks/TaskSessionsModal.tsx` — lists all sessions for a task; opened from the Sessions tab "View all" link
-- `frontend/src/components/Chat/SubTasksPanel.tsx` — slide-out subtask list for current chat session; subscribes to `SESSION_STATE_UPDATED`
+- `frontend/src/components/Chat/SubTasksPanel.tsx` — slide-out subtask list using generated `TasksService.listTasksBySourceSession`; subscribes to `SESSION_STATE_UPDATED`, `TASK_UPDATED`, `TASK_STATUS_CHANGED` with polling fallback. A failed query shows Retry separately from empty results. Execute tracks pending task IDs independently and refuses marked tasks with an explanatory reason
+- `frontend/src/components/Tasks/TaskExternalExecutor.tsx` — shared detail notice and `RowFlag` used by task detail, board, list and chat subtasks; labels come from `frontend/src/utils/taskExternalExecutor.ts`. Marker presence disables Execute/Run Again and Refine; comments remain enabled. Marker editing stays API/client-owned
 
 **No frontend surface** exists for `POST /tasks/{id}/status`, `updated_since` or `external_ref`. They land in the generated client (`TasksService`, `frontend/src/client/`) because the client is generated from the OpenAPI spec, but the web UI calls none of them: the web executes tasks with sessions, and the session lifecycle drives status for those.
 

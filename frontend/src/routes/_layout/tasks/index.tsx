@@ -8,7 +8,8 @@ import type { InputTaskPublicExtended } from "@/client"
 import { usePageHeader } from "@/routes/_layout"
 import { CreateTaskDialog } from "@/components/Tasks/CreateTaskDialog"
 import { TaskBoard } from "@/components/Tasks/TaskBoard"
-import { RelativeTime } from "@/components/Common/RelativeTime"
+import { TaskExternalExecutorFlag } from "@/components/Tasks/TaskExternalExecutor"
+import { RelativeTime, parseTimestamp } from "@/components/Common/RelativeTime"
 import { useMultiEventSubscription, EventTypes } from "@/hooks/useEventBus"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -54,7 +55,8 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 function getDateGroup(dateStr: string): string {
-  const date = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z")
+  const date = parseTimestamp(dateStr)
+  if (!date) return "Older"
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const yesterday = new Date(today)
@@ -72,7 +74,7 @@ const DATE_GROUP_ORDER = ["Today", "Yesterday", "Last week", "Older"]
 
 function groupTasksByDate(tasks: InputTaskPublicExtended[]): { label: string; tasks: InputTaskPublicExtended[] }[] {
   const sorted = [...tasks].sort(
-    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    (a, b) => (parseTimestamp(b.updated_at)?.getTime() ?? 0) - (parseTimestamp(a.updated_at)?.getTime() ?? 0),
   )
   const groups: Record<string, InputTaskPublicExtended[]> = {}
   for (const task of sorted) {
@@ -101,6 +103,7 @@ function TasksList() {
   useMultiEventSubscription(
     [
       EventTypes.TASK_STATUS_CHANGED,
+      EventTypes.TASK_UPDATED,
       EventTypes.TASK_SUBTASK_CREATED,
       EventTypes.SUBTASK_COMPLETED,
       EventTypes.TASK_COMMENT_ADDED,
@@ -406,6 +409,7 @@ function TasksList() {
                           </span>
 
                           {/* Last activity */}
+                          <TaskExternalExecutorFlag task={task} />
                           <span className="shrink-0 w-24 text-right">
                             <RelativeTime
                               timestamp={task.updated_at}

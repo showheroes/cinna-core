@@ -16,6 +16,7 @@ Auto-generated from OpenAPI spec. Tag: `tasks`
 **Create Task**
 
 **Request body** (`InputTaskCreate`):
+  - `external_executor`: string | null
   - `original_message`: string (required)
   - `selected_agent_id`: string | null
   - `user_workspace_id`: string | null
@@ -46,6 +47,7 @@ Auto-generated from OpenAPI spec. Tag: `tasks`
 - `team_id`: string | null
 - `priority`: string | null
 - `updated_since`: string | null
+- `updated_since_id`: string | null
 
 **Response:** `InputTasksPublicExtended`
 
@@ -68,6 +70,7 @@ Auto-generated from OpenAPI spec. Tag: `tasks`
 - `id`: uuid
 
 **Request body** (`InputTaskUpdate`):
+  - `external_executor`: string | null
   - `current_description`: string | null
   - `selected_agent_id`: string | null
   - `title`: string | null
@@ -313,6 +316,7 @@ Auto-generated from OpenAPI spec. Tag: `tasks`
 - `id`: uuid
 
 **Request body** (`InputTaskCreate`):
+  - `external_executor`: string | null
   - `original_message`: string (required)
   - `selected_agent_id`: string | null
   - `user_workspace_id`: string | null

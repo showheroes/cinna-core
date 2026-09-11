@@ -4161,6 +4161,7 @@ export type ImprovementRequestUpdate = {
 };
 
 export type InputTaskCreate = {
+    external_executor?: (string | null);
     original_message: string;
     selected_agent_id?: (string | null);
     user_workspace_id?: (string | null);
@@ -4207,9 +4208,12 @@ export type InputTaskDetailPublic = {
     assigned_node_id?: (string | null);
     created_by_node_id?: (string | null);
     external_ref?: (string | null);
+    external_executor?: (string | null);
     subtask_count?: number;
     subtask_completed_count?: number;
     agent_name?: (string | null);
+    result_state?: (string | null);
+    result_summary?: (string | null);
     refinement_history?: Array<unknown>;
     todo_progress?: (Array<unknown> | null);
     sessions_count?: number;
@@ -4253,6 +4257,7 @@ export type InputTaskPublic = {
     assigned_node_id?: (string | null);
     created_by_node_id?: (string | null);
     external_ref?: (string | null);
+    external_executor?: (string | null);
     subtask_count?: number;
     subtask_completed_count?: number;
 };
@@ -4288,9 +4293,12 @@ export type InputTaskPublicExtended = {
     assigned_node_id?: (string | null);
     created_by_node_id?: (string | null);
     external_ref?: (string | null);
+    external_executor?: (string | null);
     subtask_count?: number;
     subtask_completed_count?: number;
     agent_name?: (string | null);
+    result_state?: (string | null);
+    result_summary?: (string | null);
     refinement_history?: Array<unknown>;
     todo_progress?: (Array<unknown> | null);
     sessions_count?: number;
@@ -4322,6 +4330,7 @@ export type InputTaskStatusUpdate = {
 };
 
 export type InputTaskUpdate = {
+    external_executor?: (string | null);
     current_description?: (string | null);
     selected_agent_id?: (string | null);
     title?: (string | null);
@@ -11242,6 +11251,7 @@ export type TasksListTasksData = {
     status?: (string | null);
     teamId?: (string | null);
     updatedSince?: (string | null);
+    updatedSinceId?: (string | null);
     userWorkspaceId?: (string | null);
 };
 
