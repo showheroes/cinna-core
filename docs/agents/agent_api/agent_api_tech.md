@@ -51,7 +51,7 @@ Chain: `aa11 → aa22 → aa33 → aa44`. These migrations were authored togethe
 ### Env-Core (inside container)
 
 - `backend/app/env-templates/app_core_base/core/cinna_api/__init__.py` — SDK public surface: `api`, `credentials`, `error`, ergonomic re-exports
-- `backend/app/env-templates/app_core_base/core/cinna_api/credentials.py` — fresh-read `credentials.json` accessor
+- `backend/app/env-templates/app_core_base/core/cinna_api/credentials.py` — fresh-read `credentials.json` accessor. Beyond `get` / `by_type` / `all_by_type` it carries the **slot** helpers: `by_slot(slot)`, `require_slot(slot)` (raises `CredentialMissing`, whose `str()` names the slot and the fix and is written to be relayed verbatim) and `agent_api_session(slot)` → an `AgentApiSession(requests.Session)` pre-loaded with `Authorization: Bearer <token>` plus the `X-Cinna-Caller-Identity` header taken from the env's synthetic `owner_identity` entry, exposing `.base_url` / `.spec_url`. The session sends neither header to a non-producer origin and drops both across a cross-origin redirect (`rebuild_auth`). `requests` is imported on first use so the module stays importable without it, and the synthetic `current_user` / `owner_identity_token` entries never satisfy a slot (**needs env rebuild**)
 - `backend/app/env-templates/app_core_base/core/cinna_api/caller.py` (new) — request-scoped `caller` dependency + `Caller` dataclass; reads the trusted `X-Cinna-Caller-*` headers (**needs env rebuild**)
 - `backend/app/env-templates/app_core_base/core/cinna_api/errors.py` — `error()` structured-error helper
 - `backend/app/env-templates/app_core_base/core/cinna_api/supervisor.py` — `AgentApiSupervisor` class + `agent_api_supervisor` singleton

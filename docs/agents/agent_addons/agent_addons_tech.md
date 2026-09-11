@@ -60,7 +60,8 @@ correct.
 | `link` | `AgentPluginLinkWithUpdateInfo \| None` | Every non-local row. Carries the per-mode toggles, `has_update` and `skill_package_id`, so row mutations stay on the existing plugin routes |
 | `skills` | `list[AddonSkillPublic]` | Local row: itself. Catalog row: its one skill. Plugin row: every skill it ships. Empty when the index could not be read |
 | `status` | `str` | `ok` \| `warning` \| `error` |
-| `status_code` | `str \| None` | The offending skill's issue code, or a link-level code: `orphan` / `source_unavailable` / `not_materialized` / `unverified`. Client sentences for the link-level four live in `frontend/src/utils/addons.ts::LINK_STATUS_COPY` |
+| `status_code` | `str \| None` | The offending skill's issue code, or a link-level code: `orphan` / `source_unavailable` / `not_materialized` / `unverified` / `credential_missing`. Client sentences for the link-level codes live in `frontend/src/utils/addons.ts::LINK_STATUS_COPY` |
+| `credential_issues` | `list[AddonCredentialIssuePublic]` | `[]`. Catalog rows only: one `{slot, type, reason}` per credential slot of the pinned revision that is not usable yet, `reason` ∈ `not_linked` / `not_configured` / `access_revoked`. The client deep-links each one to the agent's Credentials tab |
 | `orphan` | `bool` | `False` |
 | `can_share` | `bool` | `False`. Local skills only |
 | `can_manage` | `bool` | `False` |
@@ -146,8 +147,9 @@ computed **first**, before any early return, so it is always set. Then:
 3. first skill with an `error` → `error` / that code
 4. `row.kind == "skill" and not row.skills` → depends on `index_readable`
    (below); `kind="plugin"` skips this step entirely
-5. first skill with a `warning` → `warning` / that code
-6. otherwise `ok` / `None`
+5. `row.credential_issues` → `warning` / `"credential_missing"`
+6. first skill with a `warning` → `warning` / that code
+7. otherwise `ok` / `None`
 
 #### `index_readable` — a tri-state, because absence is only sometimes evidence
 
@@ -168,6 +170,22 @@ legitimately ships only commands or agents. Local skill rows are built *from* an
 index entry and always carry one, so only a link row can be empty. Before this,
 an install whose files never reached the container read `ok`: the link was
 correct and the row was reporting the link.
+
+#### `credential_issues` — from the revision, not from the container
+
+`project()` builds one `SkillSlotIndex.build_for_agent(session, agent)` — and
+only when the agent has at least one `source=catalog` link — then fills
+`row.credential_issues` from `slot_index.issues_for_link(link.id)`. The index
+reads the **frozen specs of the revision each link pins**, never the
+environment's skill index, so the status is identical for a pre-feature
+container and a fresh one, and costs a constant number of queries whatever the
+number of rows (see
+[agent_skills_tech](../agent_skills/agent_skills_tech.md#after-install--skillslotindex)).
+
+It ranks **below** `not_materialized` / `unverified` because a skill whose files
+never arrived is a bigger fault than one whose credential is missing, and above
+the per-skill warnings because it is a property of the install, not of the
+`SKILL.md`.
 
 `_source_unavailable(row, unfetchable)`:
 

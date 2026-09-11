@@ -76,17 +76,12 @@ function PublishCredentialRow({
       summary={providedBy.short}
       facts={[
         item.credential_name && `Matched ${item.credential_name}`,
-        item.reason &&
-          publishReasonSentence(item.reason, item.credential_name, item.type),
+        item.reason && publishReasonSentence(item.reason, item.credential_name),
       ]}
       action={
         item.credential_id ? (
           <NewTabIconLink
-            label={publishOpenLabel(
-              item.reason,
-              item.credential_name,
-              item.type,
-            )}
+            label={publishOpenLabel(item.reason, item.credential_name)}
             linkOptions={{
               to: "/credential/$credentialId",
               params: { credentialId: item.credential_id },

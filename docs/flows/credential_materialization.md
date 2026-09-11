@@ -65,13 +65,24 @@ which encrypts `credential_data` with `encrypt_field`. Four provenances feed it:
   `credential_data={endpoint_url, transport, auth_mode, token, ...}`
   (`backend/app/services/mcp_providers/mcp_provider_service.py`).
 - **Bundle install.** `InstallService._setup_install_credentials`
-  (`backend/app/services/bundles/install_service.py`) walks the revision's
-  `required_credential_specs`. A `provided_by="publisher"` spec goes through
-  `_try_link_publisher_credential`, which validates that the publisher still owns the row and still
-  has `allow_sharing=True`, inserts a `CredentialShare` stamped `source="bundle_install"`, and
-  inserts the `AgentCredentialLink`. A `provided_by="user"` spec creates an installer-owned
-  placeholder instead; `CredentialsService.update_credential` flips `is_placeholder` off once
+  (`backend/app/services/bundles/install_service.py`) owns the transaction and hands the revision's
+  `required_credential_specs` to `CredentialProvisioner.provision(..., BUNDLE_INSTALL_POLICY)`.
+  A `provided_by="publisher"` spec validates that the publisher still owns the row and still has
+  `allow_sharing=True`, inserts a `CredentialShare` stamped `source="bundle_install"`, and inserts
+  the `AgentCredentialLink`. A `provided_by="user"` spec creates an installer-owned placeholder
+  instead; `CredentialsService.update_credential` flips `is_placeholder` off once
   `check_credential_completeness` passes.
+- **Catalog skill install.** The same `CredentialProvisioner`, under `SKILL_INSTALL_POLICY`, called
+  from `SkillCatalogService.install_into_agent` in the **same transaction as the plugin link**. The
+  specs come from the skill revision instead of the bundle revision, and the difference is policy:
+  a slot the installer already has (matched by `service_uri` through
+  `CredentialsService.find_slot_match`) is auto-linked rather than duplicated, a created placeholder
+  is stamped with the slot and the agent's workspace, the share is stamped
+  `source="skill_install"`, and **no slot ever fails the install**. The route then syncs credentials
+  before the plugin sync, because plugin sync does not carry them. Uninstall reverses only what it
+  created: `release_skill_slots` unlinks installer-owned placeholders for slots no other catalog
+  skill on the agent still declares, and deletes one nothing links any more. See
+  [Agent Skills](../agents/agent_skills/agent_skills.md).
 
 `CredentialsService.classify_credential_category` is the single source of truth that turns
 (ownership, type, `share_source`, `mcp_auth_mode`, `agent_api_kind`) into the `mine` / `automatic` /
@@ -118,9 +129,12 @@ This one function (`credentials_service.py`) is the whole transformation, and it
 load-bearing:
 
 1. **Decrypt.** `get_agent_credentials_with_data` decrypts each row into
-   `{id, name, type, notes, credential_data}`. `api_token` rows are rewritten by
-   `_process_api_token_credential` into a ready-to-use `http_header_name` / `http_header_value` pair,
-   and the non-secret `service_uri` column is folded into the data.
+   `{id, name, type, notes, service_uri, is_placeholder, credential_data}`. The last two are
+   **top-level and type-agnostic**, outside `credential_data`, so steps 5 and 7 — which act on
+   `credential_data` alone — can neither drop nor mask them: that is what lets a script find a
+   credential by **slot** whatever its type, and tell a filled one from an empty one. `api_token`
+   rows are additionally rewritten by `_process_api_token_credential` into a ready-to-use
+   `http_header_name` / `http_header_value` pair, and keep the older in-data `service_uri` copy.
 2. **Drop external `agent_api` keys.** `_drop_external_agent_api_keys` batch-resolves
    `AgentApiToken.kind` and keeps only rows positively identified as `kind="connection"`. It fails
    closed twice: an orphan with no bound token is dropped, and if the lookup itself raises, **every**
@@ -227,6 +241,12 @@ create / start / resume / rebuild:
 - **Scripts** read `/app/workspace/credentials/credentials.json` directly, or through
   `backend/app/env-templates/app_core_base/core/cinna_api/credentials.py`, which re-reads the file on
   **every** call so a just-refreshed OAuth token is picked up by a long-running serving child.
+  Beyond `get` / `by_type`, a script can ask by **slot** — `by_slot`, `require_slot` and
+  `agent_api_session`, which read the top-level `service_uri` and `is_placeholder` written in step 4.
+  `require_slot` raises `CredentialMissing` with a sentence naming the slot and the fix, so a skill
+  whose credential was never provisioned fails loudly and repairably rather than silently. The
+  synthetic `current_user` / `owner_identity_token` entries never satisfy a slot. These helpers are
+  new SDK code and need an **environment rebuild**; the two keys themselves reach any container.
 - **Prompts** get the redacted README: `PromptGenerator._load_credentials_readme`
   (`backend/app/env-templates/app_core_base/core/server/prompt_generator.py`) inlines it into the
   building prompt under "Available Credentials" with rules telling the agent to read the values only
@@ -273,13 +293,19 @@ create / start / resume / rebuild:
 | Add a field to the MCP manifest | `collect_mcp_provider_manifest` in `credentials_service.py` **and** `_normalise_mcp_entry` in `agent_env_service.py` | the normaliser drops unknown/invalid entries, so both sides must ship together |
 | Change which env var an AI credential lands in | `sdk_constants.py` (`SDK_TO_CREDENTIAL_TYPE`, `CREDENTIAL_TYPE_TO_BAG_KEY`, `apply_credential_to_bag`) | `_generate_env_file`, `_generate_opencode_config_files`, `_generate_minimax_settings_files`, `_usable_assigned_credential` |
 | Make an AI credential change reach a container without a restart | there is no live path today — add one beside `sync_credentials_to_agent_environments` | `EnvironmentService.get_environments_for_credential` already computes the affected set (explicit link + default resolution) |
-| Change bundle credential provisioning | `_setup_install_credentials` / `_try_link_publisher_credential` in `install_service.py` | `CredentialShare.source` stamping (drives the Bundle tab), `is_placeholder` flip in `update_credential`, deletion blast-radius gate |
+| Change bundle or skill credential provisioning | `CredentialProvisioner` in `backend/app/services/credentials/credential_provisioner.py` — the policy field first, the shared mechanism only if both must change | `CredentialShare.source` stamping (drives the Credentials tabs), `is_placeholder` flip in `update_credential`, deletion blast-radius gate, and the **bundle install suites, which must pass unedited** |
+| Change what a skill can declare | `parse_credential_declarations` in `backend/app/services/agents/skill_manifest.py` — **and the identical vendored copy** in `core/server/skill_manifest.py` | the `invalid_credentials` message, `AgentSkillsService._normalise_credential_declarations` (the tolerant cache reader), and whether publish's `resolve_for_publish` needs the new field |
 | Add a new re-sync trigger | call `CredentialsService.sync_credentials_to_agent_environments` | it filters to `running` envs only — a stopped env picks the change up at its next `_sync_dynamic_data` |
 
 ## Invariants and traps
 
 - **The link, not the share, is what syncs.** A `CredentialShare` only makes a credential *linkable*.
   Every downstream read starts from `AgentCredentialLink`.
+- **A slot is a plain column, and that is the point.** `Credential.service_uri` is non-secret,
+  user-editable and type-agnostic, so it reaches `credentials.json` at the **top level** rather than
+  through `AGENT_ENV_ALLOWED_FIELDS`. Putting it in the whitelist would mean every new credential
+  type had to re-earn the ability to answer a skill's slot lookup — and for `agent_api`, the type the
+  feature exists for, the whitelist was already dropping it.
 - **Two refresh classes, deliberately.** `Credential` changes push live to running containers.
   `AICredential` changes do not — they land only when `_update_environment_config` regenerates `.env`
   and the SDK config files, i.e. on start / restart / rebuild. Rotating a company LLM key does not

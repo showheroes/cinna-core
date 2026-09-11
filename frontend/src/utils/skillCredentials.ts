@@ -40,9 +40,6 @@ export type SlotPhase = "preview" | "installed"
 /** Which confirm an impact sentence is for. */
 export type ImpactAction = "disable" | "delete"
 
-/** Typed, so a renamed credential type fails to compile at the type-aware copy. */
-const API_TOKEN: CredentialType = "api_token"
-
 function plural(count: number, one: string, many: string): string {
   return count === 1 ? one : many
 }
@@ -139,17 +136,13 @@ export function providedByPublisherLabel(
 /*
  * Share skill (S1): why a slot resolved to "installers bring their own".
  *
- * `template_would_leak_secret` is type-aware until the backend D12
- * computed-field follow-up lands (plan §9.3 open item a, ruled by the
- * coordinator on 2026-09-10): an `api_token` stores its secret in `api_token`
- * but syncs a computed `http_header_value`, and the template-sharing picker
- * cannot mark that computed field private — so telling an `api_token` publisher
- * to "mark its secret fields private" names a fix the UI cannot reach. Drop the
- * branch once the backend treats the computed field as stripped.
+ * Every `template_would_leak_secret` fix is reachable from the private-field
+ * picker: since D17 the backend waives a computed secret whose stored source is
+ * private, so marking the fields the picker offers is always enough.
  */
 const PUBLISH_REASON_SENTENCE: Record<
   PublishReason,
-  (subject: string, object: string, type: string) => string
+  (subject: string, object: string) => string
 > = {
   no_linked_credential: () =>
     "No credential with this slot is linked to this agent, so installers bring their own.",
@@ -157,21 +150,17 @@ const PUBLISH_REASON_SENTENCE: Record<
     `Sharing is off on ${object}, so installers bring their own. Turn sharing on to provide it.`,
   not_owned: (subject) =>
     `${subject} belongs to someone else. Only credentials you own can be provided to installers.`,
-  template_would_leak_secret: (subject, _object, type) =>
-    type === API_TOKEN
-      ? `${subject} would ship its secret inside the published skill. Turn sharing on to provide it.`
-      : `${subject} would ship its secret inside the published skill. Mark its secret fields private to provide it as a template, or turn sharing on.`,
+  template_would_leak_secret: (subject) =>
+    `${subject} would ship its secret inside the published skill. Mark its secret fields private to provide it as a template, or turn sharing on.`,
 }
 
 export function publishReasonSentence(
   reason: PublishReason,
   credentialName: string | null | undefined,
-  type: string,
 ): string {
   return PUBLISH_REASON_SENTENCE[reason](
     credentialName || "The credential",
     credentialName || "the credential",
-    type,
   )
 }
 
@@ -179,17 +168,13 @@ export function publishReasonSentence(
 export function publishOpenLabel(
   reason: PublishReason | null | undefined,
   credentialName: string | null | undefined,
-  type: string,
 ): string {
   const name = credentialName || "the credential"
   if (reason === "not_shareable") {
     return `Open ${name} to turn sharing on (new tab)`
   }
   if (reason === "template_would_leak_secret") {
-    // Same interim as the sentence above (pending the backend D12 follow-up).
-    return type === API_TOKEN
-      ? `Open ${name} to turn sharing on (new tab)`
-      : `Open ${name} to mark its secret fields private (new tab)`
+    return `Open ${name} to mark its secret fields private (new tab)`
   }
   return `Open ${name} (new tab)`
 }

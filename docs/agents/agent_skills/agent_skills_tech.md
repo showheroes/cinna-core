@@ -67,8 +67,10 @@ have two parsers with two behaviours, `parse_frontmatter(text) -> (mapping,
 body)` implements the subset the Agent Skills standard actually uses.
 
 Supported: top-level `key: value` scalars; flow sequences `[a, b, "c"]`; block
-sequences (`- item`); block scalars (`|`, `>`, and the `-`/`+` variants); one
-level of nested mapping; a closing fence of `---` or `...`. Scalar coercion
+sequences (`- item`) **whose items may be flat mappings** (`- slot: x` plus
+indented continuation lines — this is how `credentials:` declares one entry per
+slot); block scalars (`|`, `>`, and the `-`/`+` variants); one level of nested
+mapping; a closing fence of `---` or `...`. Scalar coercion
 handles matched quotes, `true/yes`, `false/no`, `null/~`, integers and floats;
 everything else stays a string. Unknown keys are preserved untouched.
 
@@ -99,6 +101,10 @@ MAX_DESCRIPTION_LENGTH = 1024
 MAX_BODY_BYTES         = 64 * 1024          # oversized WARNING, still projected
 DEFAULT_MAX_SKILLS     = 50                 # per agent
 DEFAULT_MAX_TOTAL_BYTES = 16 * 1024 * 1024  # per agent
+MAX_SKILL_CREDENTIALS  = 20                 # declared slots per skill
+MAX_SLOT_LENGTH        = 255                # a slot is a Credential.service_uri
+SKILL_CREDENTIAL_SLOT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+\-]*$")
+SKILL_CREDENTIAL_TYPES = frozenset({...})   # mirror of CredentialType, minus mcp_provider
 RESERVED_SKILL_NAMES   = frozenset({...})   # mirror of the command registry
 SKIP_DIR_NAMES         = {".git", ".venv", "__pycache__", ".mypy_cache",
                           ".ruff_cache", "node_modules"}
@@ -108,6 +114,11 @@ SKIP_DIR_NAMES         = {".git", ".venv", "__pycache__", ".mypy_cache",
 `backend/app/services/agents/commands/__init__.py` (env-core cannot import the
 registry). `test_skill_manifest.py::test_every_registered_platform_command_is_reserved`
 guards the drift.
+
+`SKILL_CREDENTIAL_TYPES` mirrors `app.models.credentials.credential.CredentialType`
+for the same reason, minus `mcp_provider` — an MCP connector never reaches
+`credentials.json`, so no script could consume that slot. A unit test guards
+that mirror too.
 
 ### Issue vocabulary
 
@@ -129,6 +140,10 @@ class SkillIssue:
   the container, never migrated).
 - `pick_warning(*candidates)` returns the most severe per
   `WARNING_PRECEDENCE = ("secrets", "shadowed", "oversized")`.
+- `invalid_credentials` is an **error** code: a malformed `credentials:` block
+  excludes the skill from the projection and refuses publish, the same
+  discipline as a malformed `name`. Its message carries the first problem the
+  parser found, naming the offending slot.
 
 ### `SkillEntry`
 
@@ -148,6 +163,7 @@ class SkillEntry:
     warning: SkillIssue | None = None
     secret_paths: list[str] = []    # ALWAYS present; empty = clean
     version: str | None = None      # frontmatter `version`, via coerce_version()
+    credentials: list[dict] = []    # ALWAYS present; [] = none declared
     frontmatter: dict = {}          # opt-in on to_dict()
 
     is_valid       = error is None
@@ -162,6 +178,7 @@ catalog publish path needs it; the UI index never does.
 | Function | Notes |
 |----------|-------|
 | `parse_skill_dir(path, *, source, plugin_ref, rel_path)` | Never raises; a malformed skill comes back carrying an `error`. `rel_path` **must** be passed for a plugin's skill folder, or `path` would point at the agent's own `skills/<name>` and read the wrong file |
+| `parse_credential_declarations(raw)` → `(declarations, problem)` | Validates and normalises the `credentials:` block into `{slot, type, description}` entries. `problem` is a short phrase naming the **first** problem (no trailing period) and then the list is empty, which the caller turns into `invalid_credentials`. An absent key and a bare `credentials:` both declare nothing and are valid. Unknown item keys are ignored, so a skill written for this parser survives a later optional key |
 | `coerce_version(raw)` | Frontmatter `version` → `str \| None`. Public because the publish path reads the same key and must agree with the index on what counts as a version. `_coerce_scalar` has already turned `version: 2` into an `int` and `version: 1.0` into a `float`, so a bare number is stringified rather than dropped; a list or mapping is `None`. Capped at `MAX_VERSION_LENGTH` (64), the same bound as `SkillPublishRequest.version` |
 | `scan_skills_root(root, *, source, plugin_ref, rel_root, max_skills, max_total_bytes)` | Missing root → `[]`. Skips dotfiles **and non-directories silently** (see below). Sorts by name, then applies the caps |
 | `apply_budget(entries, *, max_skills, max_total_bytes)` | Mutates in place. Separate from the scan because the caps are per **agent** while a scan sees one root. Entries already carrying an error are skipped and charge nothing. Re-application is a fixed point — the merged pass sees the union of the per-root passes, so a second pass can only add exclusions |
@@ -423,8 +440,19 @@ credential would still carry a secret, by mirroring exactly what
 keys `_STORED_SECRET_FIELDS_BY_TYPE[type]` — `SENSITIVE_FIELDS` alone let an
 `api_token` credential marked private only on `http_header_value` freeze its
 raw `api_token`. It **fails closed**: a type that is neither force-private nor
-classified by either map is treated as leaking. Bundle
-`_template_payload_for` has the same gap and is deliberately left unchanged.
+classified by either map is treated as leaking.
+
+`_DERIVED_SECRET_SOURCES` is the other half of that rule: a secret the env sync
+*computes* and no stored `credential_data` carries (`api_token`'s
+`http_header_value`, derived from the stored `api_token`) cannot appear in a
+template on its own, so it leaks exactly when its source does. Without that
+waiver an `api_token` slot could never be a template at all — the private-field
+picker only offers stored fields, so the computed name could never be marked
+private. A unit test requires every derived field to name a source that is
+itself classified as a stored secret of that type.
+
+Bundle `_template_payload_for` has the same env-shaped/stored gap and is
+deliberately left unchanged.
 
 ### After install — `SkillSlotIndex`
 
@@ -439,7 +467,6 @@ reports rows without credentials at all — plus the agent's linked credentials.
 | `issues_for_link(link_id)` → `list[CredentialIssue]` | Drives the Addons row status |
 | `skill_provisioned_credential_ids()` | The readiness gate's exclusion: every candidate of every catalog spec, **minus** the credentials the agent's bundle revision claims |
 | `specs_for_link` / `specs_except_link` | Uninstall's released/retained split, handed to `CredentialProvisioner.release_skill_slots` |
-| `bundle_claimed_ids()` | Linked credentials the agent's bundle revision claims |
 
 **A slot is satisfied** when one of its candidates is owned by the agent owner
 and filled in, **or** is foreign, still `allow_sharing`, **and** shared with
@@ -617,6 +644,29 @@ and the capability reply cannot disagree about who the agent belongs to.
 `SkillEntryPublic.can_publish` = that **and** `source == "local"` **and**
 `entry.is_publishable`.
 
+`SkillEntryPublic.credentials` (`list[SkillCredentialDeclarationPublic]`,
+`{slot, type, description}`) carries the declared slots through to the agent
+page. Always present: `[]` both for a skill that declares none and for one
+reported by a container built before skills could declare credentials.
+`AgentSkillsService._normalise_credential_declarations` coerces the reported
+payload **tolerantly rather than validating** — the container's own parser
+already refused an invalid block (the skill carries `invalid_credentials`) — but
+still bounds it with the parser's own limits, because the payload comes from a
+container that agent code controls: at most `MAX_SKILL_CREDENTIALS` items, an
+over-long slot or unknown type dropped, a long description truncated.
+
+**The catalog's own schemas live in `backend/app/models/skills/schemas.py`:**
+`SkillCredentialRequirementPublic` (a revision's frozen slots, on
+`SkillPackageRevisionPublic.required_credentials` and the package detail),
+`SkillPublishCredentialPreview` (`SkillPublishPreview.credentials` — adds the
+matched `credential_id` / `credential_name` and the `reason` a slot fell back to
+`user`), `SkillCredentialProvisionPublic` + `SkillSlotOutcome` (the install
+report and `SkillInstallPreview`). None of them can carry `template_data` or
+`template_private_fields`; `publisher_credential_id` is an id, not a secret.
+`provisions_to_public` fills `credential_name` **only** for a credential the
+agent owner owns or already holds a share on, so a publisher's credential is
+never named to an installer before its share exists.
+
 `SkillEntryPublic.version` (`str | None`) carries the frontmatter's optional
 `version`, so `GET /agents/{agent_id}/skills` reports it alongside the addons
 projection's `AddonPublic.version`. `None` for a skill nobody has versioned and
@@ -755,6 +805,7 @@ bundle installs.
 | `revision_number` | int | unique with `package_id`; allocated under the publish lock, never reused |
 | `version` | `String(64)`, nullable | publisher label, independent of `revision_number` |
 | `frontmatter` | JSON, not null, default `'{}'` | parsed `SKILL.md` frontmatter as published |
+| `required_credential_specs` | JSON, not null, server default `'[]'` | one frozen spec per declared slot, **the same entry schema as `agent_bundle_revision.required_credential_specs`** — added by migration `562ac5a89f04` |
 | `snapshot_path` | `String(1024)` | absolute path of the snapshot's `skills/<name>/` |
 | `content_hash` | `String(64)` | `PublishService.hash_workspace_tree` over the snapshot root |
 | `archive_sha256` | `String(64)`, nullable | digest of the **gzipped tarball** — different bytes, hence a second column |
@@ -817,11 +868,15 @@ release_notes, visibility, package_id)`:
    (requested, else the package's current, else `private`) is not `users` — see
    [agent_addons_tech](../agent_addons/agent_addons_tech.md#visibility-and-grants).
    All four run **before** anything is written.
-4. Under a per-`(publisher, skill name)` `asyncio.Lock` (locking on the package
+4. `SkillCredentialRequirements.resolve_for_publish` then `build_specs` —
+   read-only, and still **ahead of anything that commits**, so a template
+   credential whose stored data cannot be decrypted is a refusal
+   (422 `credential_template_unreadable`) rather than a half-written package.
+5. Under a per-`(publisher, skill name)` `asyncio.Lock` (locking on the package
    uuid would leave the create path — the one that races into a unique-constraint
    violation — unguarded): resolve or create the package, allocate
-   `revision_number`, write the snapshot off the event loop, insert the revision,
-   point the package at it.
+   `revision_number`, write the snapshot off the event loop, insert the revision
+   **with its frozen `required_credential_specs`**, point the package at it.
 
 `_write_snapshot_to_disk` fills `<rev>.tmp/skills/<name>/` via `safe_copytree`
 (symlinks refused at every depth) and moves it into place, then builds and caches
@@ -861,9 +916,27 @@ package, `name_conflict` when a **different** publisher's package already
 occupies that skill name in this agent — one agent has a single
 `plugins/cinna-skills/<name>/` directory, so the two genuinely cannot coexist.
 
+**Install also provisions the revision's credential slots**, in the *same*
+transaction as the link (`CredentialProvisioner.provision` under
+`SKILL_INSTALL_POLICY`, with `PublisherBoundary(package.publisher_user_id)`):
+either both rows exist or neither does. A per-slot problem only marks the report
+`degraded`; it never fails the install. The route then pushes credentials to the
+environments **before** the plugin sync, because plugin sync does not carry
+credentials — and only when `report.changed`, so an idempotent reinstall costs
+nothing. `install_preview` runs the same decision tree read-only.
+
 **Upgrade** — `upgrade_link` re-pins to `package.latest_revision_id`; idempotent.
+It provisions only `_credential_specs_added(previous, latest)` — specs whose
+`(type, slot)` the previous revision did not declare — in the re-pin's own
+transaction. A slot the user unlinked after the install must stay unlinked, so
+re-provisioning everything would undo a deliberate act.
 **Uninstall** is deliberately not a verb here: it is
-`DELETE /llm-plugins/agents/{agent_id}/plugins/{link_id}` like every other plugin.
+`DELETE /llm-plugins/agents/{agent_id}/plugins/{link_id}` like every other
+plugin — which now routes through `LLMPluginService.uninstall_plugin_link`,
+releasing the link's skill placeholders through
+`CredentialProvisioner.release_skill_slots` before deleting the link row, in one
+commit. **That is the only path that releases slots**: any future code that
+deletes an `AgentPluginLink` another way would leak placeholders.
 
 **File listing** — `list_revision_files(revision) -> (files, total_count,
 total_bytes)` walks the snapshot through `snapshot_files(skill_dir)`, the one
@@ -906,7 +979,7 @@ parsing prose.
 
 | Code | Status | Code | Status |
 |------|--------|------|--------|
-| `not_accessible`, `package_not_found`, `revision_not_found`, `skill_not_found` | 404 | `skill_invalid`, `skill_contains_secrets`, `skill_too_large`, `package_id_invalid`, `invalid_visibility`, `invalid_display_name` | 422 |
+| `not_accessible`, `package_not_found`, `revision_not_found`, `skill_not_found` | 404 | `skill_invalid`, `skill_contains_secrets`, `skill_too_large`, `credential_template_unreadable`, `package_id_invalid`, `invalid_visibility`, `invalid_display_name` | 422 |
 | `not_developer`, `foreign_install`, `not_publisher`, `not_superuser` | 403 | `package_id_taken`, `package_id_immutable`, `already_installed`, `name_conflict`, `no_revision` | 409 |
 | `no_environment`, `workspace_unavailable` | 409 | `snapshot_missing` | **410** |
 | `not_a_catalog_link` | 400 | `archive_unavailable` | 503 |
@@ -931,7 +1004,8 @@ Two routers, one `skills` tag → one `SkillsService` in the generated client.
 | `GET /skills/packages/{package_id}/revisions/{n}/archive` | `AgentEnvContextDep` | tarball; `X-Content-SHA256` header. 403 (not 404) when the env authenticated fine but holds no install of that revision |
 | `GET /agents/{agent_id}/skills/{name}/publish-preview` | owner + developer gate | `SkillPublishPreview` — the version and `package_id` a publish would take, from the same code that will take them. Runs the authorization gate and the workspace lookup but **not** the three content checks: a preview that refused would leave the Share dialog with nothing to show for a skill whose row already carries the warning |
 | `POST /agents/{agent_id}/skills/{name}/publish` | owner + developer gate | `SkillPackageRevisionPublic` |
-| `POST /agents/{agent_id}/skills/install` | owner | creates the link, then `LLMPluginService.sync_plugins_to_agent_environments(message_prefix="Skill added.")` → `PluginSyncResponse` |
+| `GET /agents/{agent_id}/skills/install-preview?package_id=&revision_number=` | owner | `SkillInstallPreview` — what the install would do per credential slot. **Declared before the `/{agent_id}/skills/{name}` patterns**, or the literal segment would be read as a skill name. Same gates as the install: another user's agent and an invisible package both answer 404 |
+| `POST /agents/{agent_id}/skills/install` | owner | creates the link **and provisions its slots**, syncs credentials when anything changed, then `LLMPluginService.sync_plugins_to_agent_environments(message_prefix="Skill added.")` → `PluginSyncResponse` with `credential_provisioning` filled in |
 | `POST /agents/{agent_id}/plugins/{link_id}/upgrade` | existing route | now maps `SkillCatalogError` through `http_error_for` |
 | `GET`/`POST` `/skills/packages/{package_id}/grants`, `DELETE .../grants/{user_id}` | publisher (`_get_managed_package`; **no superuser bypass**) | `users`-visibility allowlist — see [agent_addons_tech](../agent_addons/agent_addons_tech.md) |
 
@@ -1121,6 +1195,7 @@ plainly exists.
 | `2affe6c57bf7` `add_bundle_revision_skills_summary` | `08e5661b36ed` | `agent_bundle_revision.skills_summary` JSON nullable, **no backfill** (NULL = predates the feature) |
 | `c24bd7ff8728` `add_skill_package_tables` | `2affe6c57bf7` | `skill_package` (+ `ix_skill_package_publisher`, `ix_skill_package_visibility`) and `skill_package_revision` (+ `ix_skill_package_revision_package`); `fk_skill_package_latest_revision` added **after** both tables exist |
 | `b71f4a9c2d30` `add_agent_plugin_link_catalog_source` | `c24bd7ff8728` | `agent_plugin_link.skill_package_revision_id` + index + FK `ON DELETE SET NULL`. `source` stays VARCHAR (the `catalog` enum value is app-level). Downgrade requires rewriting `source='catalog'` rows first — noted in the migration docstring |
+| `562ac5a89f04` `add_skill_package_revision_required_credential_specs` | `d7b41e0c9a35` | `skill_package_revision.required_credential_specs` JSON NOT NULL, server default `'[]'`. No data step: every existing revision predates slots, so "declares nothing" is its true value. **Downgrade loses the frozen provisioning** of every revision published since — it cannot be re-derived, and installs would silently treat every slot as absent |
 
 ---
 

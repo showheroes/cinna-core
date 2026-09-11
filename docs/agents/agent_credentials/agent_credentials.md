@@ -72,7 +72,22 @@ When a bundle is installed, placeholder credentials are created for any user-pro
 2. For Bearer: system generates `Authorization: Bearer {token}` header pair
 3. For Custom: user provides template (e.g., `X-API-Key: {TOKEN}`), system parses to header name/value
 4. Agent environment receives pre-processed `http_header_name` and `http_header_value` - no parsing needed
-5. If the credential has a `service_uri` set (a non-secret audience/slot id stored as a `Credential` column), it is also synced into the credential data so agent scripts can read it alongside the header pair
+5. If the credential has a `service_uri` set (a non-secret audience/slot id stored as a `Credential` column), it is also synced into the credential data so agent scripts can read it alongside the header pair — in addition to the type-agnostic top-level copy every entry carries (below)
+
+### Slots: finding a credential without knowing its id
+
+Every **real** entry in `credentials.json` carries two keys at the top level, beside `id` / `name` / `type` / `notes` and outside `credential_data`:
+
+- **`service_uri`** — the credential's **slot**, a non-secret id a script uses to find the credential it needs whatever its type. It is the binding a catalog skill declares in its `SKILL.md` (see [Agent Skills](../agent_skills/agent_skills.md)), which is how a skill published by one person works for a second person's credential.
+- **`is_placeholder`** — `true` when the credential is linked to this agent but nobody has filled it in yet.
+
+Scripts read them through the container SDK rather than by hand:
+
+- `credentials.by_slot("<slot>")` → the entry, or `None`
+- `credentials.require_slot("<slot>")` → the entry, or a `CredentialMissing` whose message names the slot and the fix — a sentence the agent can relay to the user verbatim
+- `credentials.agent_api_session("<slot>")` → a `requests.Session` for an `agent_api` connection, pre-loaded with the bearer token and the caller-identity header
+
+Both keys sit outside `credential_data` on purpose, so the per-type whitelist and the README redaction — which act on `credential_data` alone — can never drop or mask them. The synthetic `current_user` / `owner_identity_token` entries carry neither key and never satisfy a slot. Using the SDK helpers requires an environment rebuilt since they shipped; a pre-feature container still receives both keys in the file, it simply has no helper to read them with.
 
 ### Email SMTP Credential Usage in Agent Scripts
 

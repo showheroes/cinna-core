@@ -65,6 +65,8 @@ The installer can choose `mode="use_existing"` on the install form. `_setup_inst
 
 Format is an opaque publisher-chosen string. Convention is a URI-like discriminator, for example `agent-b://company-scope-token`. The value is never encrypted, never carries authority, and does not gate access — authority lives in the token value itself, validated server-side inside the producer agent.
 
+**A catalog skill's credential slot is the same field.** A `SKILL.md` declares `credentials: [{slot, type}]`, and that `slot` **is** the `service_uri` the skill's scripts look the credential up by (`credentials.require_slot("<slot>")` in the container). A slot therefore behaves exactly like the publisher-stamped slot above: two skills declaring `erp-public-api` resolve to the same credential, and a user who has filled it once never fills it twice. See [Agent Skills](../agent_skills/agent_skills.md). For a skill, the slot is also **public** — it is the spec's name in an immutable revision every catalog viewer can read — which is another reason it must never carry a secret.
+
 ### Install-time Auto-Prefill Matcher — Full Precedence Order
 
 `CredentialsService.find_match_for_spec` tries tiers in order and returns on the first hit:
@@ -81,6 +83,8 @@ Format is an opaque publisher-chosen string. Convention is a URI-like discrimina
 Tiers 0a and 0b short-circuit the entire chain — they win even over the PBT value-anchor check (OQ1 resolution). When `service_uri` is `NULL` or not set on the spec, Tiers 0a/0b are skipped entirely and the function is equivalent to pre-feature behavior (full backward compatibility, I5).
 
 When two credentials collide at Tier 0a (an installer owns two credentials with the same `service_uri` and type), the most recently created one wins. The `service_uri` value should be unique per (user, slot) to avoid this.
+
+**Tier 0 is also the only tier anything auto-links.** `CredentialsService.find_slot_match` is tiers 0a+0b extracted as their own callable, and it is what `CredentialProvisioner` uses when a catalog skill install resolves a slot: a slot hit is linked to the agent without asking, because the slot id is an exact statement of *which* credential is meant. The name and type-only tiers stay suggestion-only — they guess, and a guess belongs in a picker, not in a silent link. Placeholders are candidates for the slot tier on purpose: a placeholder an earlier install created for that slot is reused rather than duplicated.
 
 ### Two-Credential Bundle Pattern
 
@@ -146,11 +150,13 @@ Deleting a service credential now goes through a graduated blast-radius check. B
 |------|-----------|---------|
 | **0** (self-only) | Credential linked only to owner's own agents; no `CredentialShare` rows; not PBP in a published bundle with foreign installs | Delete proceeds. UI lists affected own agents. |
 | **1** (direct shares) | At least one `CredentialShare` exists, but the credential is not PBP in a published bundle with active foreign installs | Delete proceeds with a warning: "N users will lose access immediately." |
-| **2** (PBP in published bundle, active installs) | Credential is publisher-provided in a published bundle AND has at least one active foreign install | Non-forced `DELETE` returns **HTTP 409** with the structured `CredentialDeletionImpact` payload. The owner can pass `?force=true` to override. The UI shows the affected bundles, the install count, and a "Force delete & break installs" button. On force-delete the affected installs degrade to `publisher_broken` state at runtime (the `InstallReadinessGate` detects the missing PBP credential). |
+| **2** (PBP in a published bundle or catalog skill, active installs) | Credential is publisher-provided in a published bundle AND has at least one active foreign install, **or** publisher-provided in one of the owner's published catalog skills AND at least one foreign agent links it through an install of such a revision | Non-forced `DELETE` returns **HTTP 409** with the structured `CredentialDeletionImpact` payload. The owner can pass `?force=true` to override. The UI shows the affected bundles, the install count, and a "Force delete & break installs" button. On force-delete the affected installs degrade to `publisher_broken` state at runtime (the `InstallReadinessGate` detects the missing PBP credential). |
 
 Important scoping: `active_install_count` in the impact payload is restricted to installs of the PBP bundle(s). Direct-share recipients who have linked the same `Credential` row to their own agents are counted in `direct_share_count` (Tier 1), not `active_install_count`, so the two tiers cannot over-count each other.
 
 PBT (template) installs materialise an independent copy of the credential owned by the installer — they are unaffected by deletion of the publisher's original row and do not count toward Tier 2.
+
+**Catalog skills count the same way, with their own two fields.** `skill_pbp_usages` lists the owner's published skill packages whose frozen revision specs name this credential as publisher-provided (with the revision numbers), and `active_skill_install_count` counts the **distinct foreign agents** that link the credential *and* hold a catalog install of one of those revisions. The install scoping matters for the same reason as the bundle half: a direct-share recipient who linked the credential is not an installer. Without this, deleting the connection behind a public skill would silently break every install of it — which is exactly the failure the gate exists to prevent. The delete dialog and the disable-sharing confirm both list the skills. (A single under-count is known and accepted: an installer who has since upgraded to a revision that no longer provides the credential still holds the share, but no longer counts.)
 
 **Bundle membership disclosure (all tiers / all modes).** In addition to the Tier-2 PBP block, `CredentialDeletionImpact` carries a `bundle_usages` field that lists every bundle whose publisher install links the credential, regardless of provisioning mode (`publisher`, `template`, or `user`). This field is purely informational — it does not affect the tier classification or block logic. The delete dialog always shows a "Used in bundles" section when `bundle_usages` is non-empty, so a credential that is template-provided (PBT) or user-provided (PBU) in a bundle, or publisher-provided with zero active installs, is now disclosed to the owner even when the deletion would otherwise proceed without a block. The `bundle_pbp_usages` field remains the subset that exclusively drives the Tier-2 block and install-count accounting.
 
@@ -196,7 +202,10 @@ The single source of truth is `CredentialsService.classify_credential_category(*
 | Owned, type `mcp_provider`, external (`none` / `fixed_token` / `oauth_dcr` / NULL) | Manually managed → mine | **My Credentials** |
 | Owned, any other type | | **My Credentials** |
 | Shared (received), `share.source == "bundle_install"` | Bundle-installed → bundle | **Bundle Credentials** |
+| Shared (received), `share.source == "skill_install"` | Shared **for** the installer by adding a catalog skill, not by any hand action → automatic | **Automatic Credentials** |
 | Shared (received), `share.source ∈ {"direct", NULL}` | NULL is read as "direct" | **My Credentials** |
+
+A received share is categorised by its **provenance alone**, never by its type. The `skill_install` row is the one deliberate exception to "shared credentials are never automatic": nobody asked for it, the install created it, and it sits with the other connection records the platform made on the user's behalf — the same place a user goes looking for "things my agents got by themselves".
 
 `agent_api` **connection** credentials and **agent2agent** `mcp_provider` credentials are always owned (a shared `agent_api` connection still belongs to the recipient as an owned credential after connect); they appear under Automatic Credentials regardless of whether they are shared further. An **external** `mcp_provider` server, and an `agent_api` **external key**, are manually/hand-issued credentials and appear under My Credentials instead — the same automatic-vs-manual split applied to two different credential types. The `mcp_auth_mode` discriminator is a cheap non-secret column on `Credential` (mirrored out of the encrypted blob); the `agent_api` split instead requires one batched lookup of the bound `AgentApiToken.kind` (`AgentApiTokenService.get_kinds_by_credential`) since `kind` lives on a separate table, not on `Credential` itself. Either way the classifier never decrypts `credential_data` to decide the tab.
 
@@ -214,12 +223,13 @@ A nullable `source` column (`varchar(20)`) on the `credential_shares` table reco
 |-------|---------|
 | `"direct"` | Created by the owner explicitly sharing with a specific user |
 | `"bundle_install"` | Created automatically when an installer installed a bundle that provides this credential (PBP flow) |
+| `"skill_install"` | Created automatically when an installer added a catalog **skill** whose revision provides this credential |
 | `NULL` | Legacy row (pre-feature); read as `"direct"` everywhere |
 
 The value is **stamped at creation time, never updated after the fact**. Two code paths stamp it:
 
 - `CredentialShareService.share_credential(...)` — the direct-sharing path — stamps `source="direct"`.
-- `InstallService._try_link_publisher_credential(...)` — the PBP install path — stamps `source="bundle_install"` on **insert only** (see first-writer-wins below).
+- `CredentialProvisioner._share_and_link_publisher_credential(...)` — the one install-time writer for both bundles and skills — stamps the share source its policy carries (`"bundle_install"` or `"skill_install"`) on **insert only** (see first-writer-wins below).
 
 **First-writer-wins re-install rule:** if a `CredentialShare` row already exists (because the owner previously shared the credential directly with this user, OR because the bundle was already installed), the insert is skipped and the existing `source` is never overwritten. This means:
 - A pre-existing `source="direct"` share survives a later bundle install unchanged → the credential stays in **My Credentials** for that recipient.

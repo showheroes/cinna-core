@@ -4,6 +4,7 @@ domain: agents
 one_liner: "Lets an agent carry reusable skill folders that the engine loads on demand, publishable to and installable from a server-wide skills catalog."
 docs:
   tech: agent_skills_tech.md
+affects: [agent_credentials, agent_bundles, agent_addons]
 ---
 # Agent Skills
 
@@ -57,11 +58,32 @@ are preserved verbatim. Three of them are *interpreted* by the platform:
 `disable-model-invocation: true` records that the model may not reach for it
 unprompted, and **`version`** is read into `SkillEntry.version` — the only
 optional key the platform also **writes** (see "Versions live in the header"
+below). One key beyond the standard is platform-defined: **`credentials`**, the
+block of credential slots the skill's scripts need (see "Credential slots"
 below).
 
 | Field | Rule |
 |-------|------|
 | `version` | optional; free text on **one line**, at most 64 characters. Nothing validates its *shape* and nothing refuses a skill without one, but a newline or any other control character is refused — the catalog writes this key back into the block, where a newline would inject top-level keys. A header longer than 64 is truncated on read; a request body longer than 64 is a 422. An unquoted `1.0` arrives as a float and is stringified, so the header and the row say the same thing |
+
+### Credential slots
+
+A skill is prompt text plus scripts, and the scripts do nothing without a
+credential. `SKILL.md` declares what it needs as a block sequence of **slots**:
+
+| Key | Rule |
+|-----|------|
+| `slot` | required; the `service_uri` of the credential — a non-secret id a script looks the credential up by. Starts with a letter or digit, then letters, digits and `. _ : / @ + -`; no spaces; at most 255 characters; unique within the skill |
+| `type` | required; a credential type (`agent_api`, `api_token`, `odoo`, `email_imap`, …). `mcp_provider` is refused: an MCP connector never reaches `credentials.json`, so no script could consume the slot |
+| `description` | optional; what the credential is for, shown to publishers and installers. Falls back to the credential's notes, but only when its owner consented to provide it |
+
+At most 20 slots per skill. Unknown keys inside an entry are ignored, so a skill
+written for this parser survives a later optional key. A malformed block is the
+error `invalid_credentials` — the skill is excluded from the projection and
+cannot be published, exactly like a malformed `name`.
+
+**A declaration carries no secret.** It names a slot and a type; the credential
+itself is resolved at publish and provisioned at install.
 
 ### Three sources, one index
 
@@ -201,6 +223,27 @@ immutable storage and appends a `SkillPackageRevision`.
 - **The secret gate is filename-only.** Nothing reads file contents; the only
   file the validator opens at all is `SKILL.md`, and only for its frontmatter. A
   token pasted inside `SKILL.md` publishes cleanly.
+- **Each declared slot is resolved against the publishing agent's linked
+  credentials** and frozen onto the revision as one spec. The publisher never
+  picks: what they already did to the credential decides it.
+
+  | What the publishing agent links for the slot | What installers get |
+  |---|---|
+  | A credential the publisher **owns** with sharing on | `publisher` — the install shares that credential with the installer |
+  | A credential the publisher **owns** with template sharing on, and no secret left in the template | `template` — the install copies the non-private values into the installer's own credential |
+  | Anything else — nothing linked, a credential someone else owns, sharing off, or a template that would still carry a secret | `user` — the installer brings their own |
+
+  `user` is a normal outcome, not a refusal: a generic "github" skill is
+  supposed to let each installer bring their own token.
+- The Share dialog shows the resolution **before** the press, one line per slot
+  with the credential it matched and, when the answer is "installers bring
+  their own", why — so the publisher can turn sharing on, or mark the secret
+  fields private, and try again.
+- **A publish never freezes a secret.** A template is refused for any type whose
+  secret field would survive into the revision, and an `agent_api` connection is
+  never offered as a template at all (it has no user-fillable fields — a copy
+  would be the token). A publisher who wants to provide a connection turns
+  sharing on.
 - The dialog's success panel links to the catalog entry; it never opens another
   dialog.
 
@@ -246,12 +289,42 @@ The container fetches the pinned revision as a signed archive, verifies its
 sha256, safe-extracts it into `plugins/cinna-skills/<package name>/` and
 synthesises the `.claude-plugin/plugin.json` locally.
 
+**The install also provisions every credential slot the revision declares**, in
+the same transaction as the link, before the credentials are pushed to the
+environment — so the first sync already carries them. Per slot, in order:
+
+1. the agent already links a credential for the slot → nothing to do;
+2. the spec is `publisher` and the credential still exists, still allows sharing
+   and is still owned by the package publisher → it is shared with the installer
+   and linked;
+3. the installer already owns (or holds a share on) a credential carrying that
+   slot → it is linked;
+4. the spec is `template` → a copy of the publisher's non-private values is
+   created, owned by the installer;
+5. otherwise an empty **placeholder** is created, carrying the slot, and linked.
+
+**An install never fails because of a slot.** A publisher who turned sharing off
+after publishing degrades to a placeholder; the install still succeeds, and the
+install dialog says what happened to each slot. The same resolution is available
+before the press: the dialog previews each slot through the same decision tree,
+so what it shows is what the install will report.
+
+A user who has filled a slot once never fills it twice: the slot match is by
+`service_uri`, so a second skill declaring `erp-public-api` links the credential
+the first one brought.
+
 ### 7. Upgrading, uninstalling, managing
 
 - **Upgrade** re-pins the link to the package's latest revision, through the same
-  `POST /agents/{id}/plugins/{link_id}/upgrade` route every plugin uses.
+  `POST /agents/{id}/plugins/{link_id}/upgrade` route every plugin uses. It
+  provisions only the slots the new revision **adds** — a slot the user
+  deliberately unlinked since the install stays unlinked.
 - **Uninstall** is the ordinary plugin delete — there is deliberately no
-  catalog-specific uninstall verb.
+  catalog-specific uninstall verb. It releases the skill's **placeholders**: an
+  empty, installer-owned credential carrying a slot that no other catalog skill
+  on the agent still declares is unlinked, and deleted once no agent links it.
+  A credential the user actually filled in, and one shared by a publisher, are
+  never touched.
 - **The publisher** may rename, re-describe, change visibility and list/unlist
   their package. **A superuser** may *delist* (hide from the catalog) but never
   delete or edit somebody else's package; existing installs keep working, which
@@ -277,7 +350,8 @@ wrote; they never match on prose.
 **Errors** (the skill is excluded from the projection):
 `not_a_directory`, `missing_skill_md`, `unreadable`, `invalid_frontmatter`,
 `missing_name`, `invalid_name`, `name_mismatch`, `reserved_name`,
-`missing_description`, `description_too_long`, `budget`, `projection_error`.
+`missing_description`, `description_too_long`, `invalid_credentials`, `budget`,
+`projection_error`.
 
 **Warnings** (the skill still works): `secrets`, `shadowed`, `oversized`.
 
@@ -341,6 +415,28 @@ overreach in the other direction, which is why the middle case is its own code
 rather than folded into either neighbour. `kind="plugin"` rows are **exempt**: a
 plugin legitimately ships only commands or agents and contributes nothing here in
 perfect health. See [agent_addons](../agent_addons/agent_addons.md).
+
+### A missing credential is a warning, never a block
+
+A bundle's credential specs are the agent's contract: an unfilled one blocks the
+agent on every channel until it is fixed. A skill is one capability among many on
+an agent that may do a dozen other things, so an unfilled **skill** slot never
+blocks it. Instead:
+
+- the skill's Addons row turns amber with `credential_missing` and names the
+  slots, each with a reason — `not_linked` (nothing carries the slot),
+  `not_configured` (a placeholder nobody filled in) or `access_revoked` (the
+  publisher's share is gone, or sharing was turned off);
+- the install response says the same thing at the moment of installing;
+- the script fails with a message naming the slot and the fix, which the agent
+  can relay to the user verbatim.
+
+The readiness gate therefore ignores a credential that a catalog skill
+provisioned — **unless the agent's bundle claims it too**. Claiming errs wide on
+purpose: a linked credential of a bundle spec's type that no recorded pick
+answers counts as the bundle's, because under-claiming would unblock an agent
+its own bundle says is not ready. On a bundle agent, a skill placeholder of a
+type the bundle also needs therefore keeps blocking, and survives uninstall.
 
 ### Caps are per agent, applied once over the merged list
 
@@ -510,8 +606,19 @@ posture: explicit install, per-mode toggles, disable without delete, visibility
 rules, and the tools-approval flow. A skill's `allowed-tools` never widens what
 `can_use_tool` permits.
 
+**A credential slot does not widen that boundary.** A `publisher` spec only ever
+shares a credential the **package publisher owns** — a share received by the
+publisher cannot be re-shared — and only with users the package's visibility
+already admits. The install re-checks ownership and the sharing flag against the
+live credential, so a spec frozen months ago cannot outlive the owner's consent:
+revoking is turning sharing off, or deleting the connection, and deleting it
+tells the owner how many foreign installs depend on it first.
+
 Secrets never travel: the same predicate warns on the agent page and refuses at
 publish, so the refusal can never surprise a publisher who read their own card.
+The declaration itself is names only, and a template payload is stripped of
+every field the owner marked private and of every secret field the type is known
+to carry.
 Projection writes are confined to `/root/.claude/skills/`, refuse symlinks on
 both sides, and only ever copy directories whose name already passed the skill
 regex.
@@ -524,6 +631,12 @@ regex.
 |----------|-----------|
 | `SKILL.md` missing, unreadable, no frontmatter fence, bad name, name ≠ folder | Excluded from projection; listed with the matching `error` code; the card shows the sentence; bundle publish blocks |
 | Skill name collides with a platform command | `error: reserved_name` — excluded from projection and from the popup |
+| A malformed `credentials:` block (not a list, no slot, unknown type, duplicate slot, more than 20 entries) | `error: invalid_credentials` — excluded from projection; publish refuses with the sentence naming the first problem |
+| A slot whose only linked credential is an unfilled placeholder | Resolves to `user` at publish. An empty credential shared to installers would be a credential they cannot edit |
+| The publisher turns sharing off after publishing | The frozen spec still says `publisher`; the install falls through to a placeholder and reports `publisher_unavailable`. Existing installs keep the credential until the share is deleted, then show `access_revoked` |
+| A `publisher` spec whose credential belongs to someone else | Refused at install, not at publish: the publish path only resolves credentials the publisher owns, and the install re-checks the live owner against the package publisher |
+| Two skills on one agent declare the same slot | They share one credential — that is the point of a slot. Uninstalling one keeps it, because the other still declares it |
+| A revision published before slots existed | No specs, so nothing is provisioned and nothing is released. A container built before slots existed reports no `credentials` for its skills; the Addons status is computed from the revision on the server, never from the container |
 | **A non-directory at the skills root** | **Skipped silently — this is the normal case, not a mistake.** The Local Agent Kit ships `skills/README.md` as scaffolding, so the `not child.is_dir()` guard is load-bearing rather than defensive. `not_a_directory` stays reachable only through a direct `parse_skill_dir` call. Dotfiles at the root are skipped the same way |
 | More than 50 skills or over 16 MB | Overflow entries stay in the index with `error: budget`; not projected; not in `skills_summary`; **not** a publish blocker |
 | `SKILL.md` body over 64 KB | `warning: oversized` — still projected. The content viewer's own cap is 256 KB, comfortably above it, so an over-long skill stays readable |
@@ -559,7 +672,9 @@ regex.
 | [agent_prompts](../agent_prompts/agent_prompts.md) | `BUILDING_AGENT.md` gains the authoring section. No change to the three synced prompt docs or their reconcile. The prompt generator's `## Agent Skills` fallback block is a **no-op for both shipped engines** — it only fires for an adapter that sets `SUPPORTS_SKILLS = False` |
 | [agent_addons](../agent_addons/agent_addons.md) | The index is one of the two inputs to the addons projection; the Skills card moved into the Addons tab; `visibility=users` + `SkillPackageAccessGrant` extend the catalog; `cinna skills list|publish` |
 | [agent_plugins](../agent_plugins/agent_plugins.md) | `skills` left the OpenCode "unsupported" list; each active plugin's `skills/` is registered as an OpenCode `skills.paths` entry; new `PluginSource.catalog` with archive coordinates; the per-mode OpenCode server is stopped after a real manifest change |
-| [agent_bundles](../agent_bundles/agent_bundles.md) | `skills/` is captured by the existing denylist walk (no change); derived `skills_summary` in manifest, revision and catalog entry; publish hard-blocks on invalid or secret-bearing skills |
+| [agent_bundles](../agent_bundles/agent_bundles.md) | `skills/` is captured by the existing denylist walk (no change); derived `skills_summary` in manifest, revision and catalog entry; publish hard-blocks on invalid or secret-bearing skills; skill and bundle revisions share one credential-spec schema and one install-time provisioner |
+| [agent_credentials](../agent_credentials/agent_credentials.md) | A slot **is** a `Credential.service_uri`; every `credentials.json` entry carries it top-level next to `is_placeholder`, which is how a script tells a filled slot from an empty one. An install share carries `source="skill_install"` and shows on the Credentials **Automatic** tab ([sharing](../agent_credentials/credential_sharing.md)); deleting a credential a published skill provides is a Tier 2 impact |
+| [agent_api](../agent_api/agent_api.md) | The motivating case: a producer agent's connection is distributed through a public skill, and the consumer container still calls it as itself (`credentials.agent_api_session(slot)` carries the owner-identity header) |
 | [agent_environment_data_management](../agent_environment_data_management/agent_environment_data_management.md) | `.claude` joined `RUNTIME_NAME_DENYLIST` — see the consequence below |
 | [agent_git_versioning](../agent_git_versioning/agent_git_versioning.md) | Automatic. `workspace/.claude` now appears in the generated `.gitignore`, and the git live manifest derives the same `skills_summary` so `cinna.agent.json` and `manifest.json` stay one schema |
 | [agent_commands](../agent_commands/agent_commands.md) | `/skills` handler; dynamic `/<skill>` popup entries with `kind="skill"` |

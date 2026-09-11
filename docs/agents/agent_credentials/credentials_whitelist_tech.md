@@ -28,6 +28,14 @@ Located at `backend/app/services/credentials/credentials_service.py:258`
 - Returns new dict containing ONLY the whitelisted fields that exist in the input
 - If credential type is not in the whitelist, logs a warning and returns empty dict (fail-safe)
 
+### Top-level `service_uri` / `is_placeholder` (outside the filter)
+
+`get_agent_credentials_with_data()` writes both keys **beside** `credential_data`, not inside it, so neither `filter_credential_data_for_agent_env()` nor `redact_credential_data()` can reach them — both act on `credential_data` alone. That is the mechanism behind the "two fields sit outside the whitelist" rule in the business doc: the pair is type-agnostic and non-secret by construction, and putting them in `AGENT_ENV_ALLOWED_FIELDS` would mean every new credential type had to re-earn the ability to answer a skill's slot lookup.
+
+The README renderer copies the two keys through only when the entry has them, so the synthetic `current_user` / `owner_identity_token` blocks are rendered without invented values, and it documents the convention in a `## Slots (service_uri)` section.
+
+The in-`credential_data` copy of `service_uri` for `api_token` is unchanged and stays whitelisted, for scripts written against it.
+
 ### `CredentialsService.prepare_credentials_for_environment()`
 
 Located at `backend/app/services/credentials/credentials_service.py:736`

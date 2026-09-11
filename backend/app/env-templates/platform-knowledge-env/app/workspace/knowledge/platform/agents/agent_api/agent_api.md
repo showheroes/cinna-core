@@ -224,6 +224,35 @@ The identity token is a narrow, audience-restricted JWT (`aud="agent_api_caller"
 
 ---
 
+## How a consumer's code calls a producer (SDK `credentials`)
+
+A consumer's script does not need the credential's uuid. It asks for the **slot** — the connection credential's `service_uri` — and gets a ready session:
+
+```python
+from core.cinna_api import credentials
+
+erp = credentials.agent_api_session("erp-public-api")
+orders = erp.get(f"{erp.base_url}/orders").json()
+```
+
+`agent_api_session(slot)` loads `credentials.json` fresh, finds the `agent_api` entry carrying that slot, and returns a `requests.Session` pre-loaded with `Authorization: Bearer <token>` **and** the `X-Cinna-Caller-Identity` header from the environment's `owner_identity` entry — so the producer still sees *which user* is calling and their live scopes. It exposes `.base_url` / `.spec_url`, refuses to send either header to any other origin, and drops them on a cross-origin redirect.
+
+Two lower-level helpers sit beside it: `credentials.by_slot(slot)` returns the entry or `None`, and `credentials.require_slot(slot)` raises `CredentialMissing` — `not_linked` when nothing carries the slot, `not_configured` when a placeholder is linked but unfilled. `str(exc)` names the slot and the fix and is written to be relayed to the user verbatim, which is the whole point: a missing credential must never be a silent failure inside a container. **These helpers require an environment rebuild** (new SDK code in the env template); the underlying `service_uri` / `is_placeholder` keys reach even an old container, which simply has no helper to read them with.
+
+### Distributing a producer through a public skill
+
+The slot is what makes a producer usable by people who have never met its owner. The full path:
+
+1. The producer's owner enables the Agent REST API, writes `policy.yaml`, and turns on caller identity + scopes.
+2. From a second agent, they **Connect Agent API** to the producer, stamp a `service_uri` (say `erp-public-api`) on the resulting connection credential, and turn sharing on.
+3. They author a skill whose `SKILL.md` declares `credentials: [{slot: erp-public-api, type: agent_api}]`, and publish it to the catalog with `visibility=public`.
+4. Anyone who may see the package installs it into their own agent. The install shares the connection with them and links it, so the skill's scripts work immediately — `agent_api_session("erp-public-api")` just resolves.
+5. Every installer's container carries **its own** `owner_identity` entry, so the producer sees each caller as themselves and resolves their scopes live from `agent_api_access_grant`. One shared token, many distinct callers.
+
+Revocation is unchanged and has two granularities: revoke one installer's `CredentialShare`, or delete the connection credential to cut everyone. Deleting it is a Tier 2 deletion impact — the dialog names the skills and counts the foreign installs first. The shared-token trade-offs also stand: one rate budget for everyone, and no per-installer token to revoke on its own. See [Agent Skills](../agent_skills/agent_skills.md).
+
+---
+
 ## Cross-User Sharing via `CredentialShare`
 
 `agent_api` credentials support all three sharing modes (user / publisher / template) by riding the existing `CredentialShare` pipeline. Because the thing shared is the **narrowed proxy** (`{base_url, token}`) and not the upstream secret, cross-user sharing is safe by construction:

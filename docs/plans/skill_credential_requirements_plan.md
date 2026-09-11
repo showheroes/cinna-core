@@ -1,6 +1,6 @@
 # Skill Credential Requirements — Implementation Plan
 
-Status: Phases 1–3 implemented, all uncommitted on HEAD `f2664d3a`. Phase 4 (§10) not started. Current state, test counts and Phase 4 inputs: **§15**.
+Status: Phases 1–3 committed as `793782a3`. Phase 4 (§10) done except the manual dev-stack scenario — seam review answered, D17 fixed, docs swept, full suite green (4616/0). Current state, test counts and Phase 4 notes: **§15**.
 Date: 2026-09-10
 Input: `docs/plans/skill_credential_requirements_design.md` (the architecture brief)
 Feature name: `skill-credential-requirements`
@@ -1526,9 +1526,13 @@ Frontmatter: add `affects` edges where a doc now depends on another (e.g. `agent
 run `make check-docs` (green).
 
 ### Definition of done (Phase 4)
-- [ ] Seam checklist answered. Blocking findings fixed and re-reviewed. The manual scenario passes.
-- [ ] Full backend suite green.
-- [ ] Docs updated per the table. `make check-docs` green.
+- [x] Seam checklist answered (§15). One blocking finding (D17) fixed, with a unit guard and an API
+      regression case. The manual scenario has **not** been run — it needs a dev stack with a rebuilt
+      environment and two users.
+- [x] Full backend suite green: **4616 passed, 10 skipped, 0 failed** (26 min) — the first full-suite
+      run of this feature. Re-run after the D17 fix over `tests/unit` + `skill_credentials` +
+      `credentials` + `bundles` + `bundles_install`: 2343 passed, 10 skipped.
+- [x] Docs updated per the table. `make check-docs` green. `sync_platform_knowledge.py` re-run.
 
 ---
 
@@ -1622,21 +1626,25 @@ run `make check-docs` (green).
 - [x] Gate: skill placeholder does not block; bundle placeholder still does (API)
 - [x] Deletion impact Tier 2 via skills (API)
 - [x] Bundle, credentials, agent_api and sessions suites green with no test edits
-- [ ] Phase 4 seam review + manual end-to-end scenario + docs sweep + `make check-docs`
+- [x] Phase 4 seam review + docs sweep + `make check-docs` + full backend suite
+- [ ] Phase 4 manual end-to-end scenario (needs a dev stack: two users, a producer agent, a rebuilt env)
 
 ---
 
-## 15. Implementation status and Phase 4 handover (2026-09-10)
+## 15. Implementation status and Phase 4 handover (2026-09-10, updated 2026-09-11)
 
-Everything is **uncommitted** on top of HEAD `f2664d3a`. HEAD is the pre-feature state: never "restore
-to HEAD" or stash. The regenerated client is not committed either.
+Phases 1–3 and the regenerated client are committed as `793782a3` ("skill credentials: a skill says
+which credential it needs, and the install brings it"). A follow-up docs commit `e82ee6c9` closed the
+two `make check-docs` "undocumented module" failures the feature shipped with, documenting
+`CredentialProvisioner` in `agent_bundles_tech.md` and `skill_credential_requirements` in
+`agent_skills_tech.md` ahead of this phase's sweep.
 
 | Phase | State | Verification |
 |---|---|---|
 | 1 (§7) | Done | 483 tests green. Migration `562ac5a89f04` applied, single head. |
 | 2 (§8) | Done; code review clean after 2 rounds | Part A gate before part B: `bundles/` + `bundles_install/` 154/0, no fixes, no test edits. Final regression re-run on the finished tree (after D16): **618/0**. unit (secret-field coverage, manifest, SDK slots) 118 · `skill_credentials/` 20 · `credentials/` 84 · `bundles/` 76 · `bundles_install/` 78 · `agents/core/` 123 · `agent_api/` 75 · `sessions/` 44. No new migration. Client regenerated: `SkillsService.previewAgentSkillInstall({agentId, packageId, revisionNumber?})`. **The full backend suite has not been run.** |
 | 3 (§9) | Done; `cinna-core.ui.review` PASS (every surface 10) and code review CLEAN, each after 2 rounds | Full `tsc --noEmit` exit 0. No backend or client change. Biome is clean on 21 of 24 touched files. `ApiTokenFields.tsx`, `columns.tsx` and `routes/_layout/credentials.tsx` have the same format/import findings as at HEAD and were left alone. |
-| 4 (§10) | Not started | — |
+| 4 (§10) | Seam review done (§10.1 checklist answered below); one blocking finding fixed (D17); docs sweep done (§10.2, `make check-docs` green, platform knowledge re-synced) | **Full suite 4616/0** (10 skipped, 26 min) — the first full run of this feature. Post-D17 re-run of unit + `skill_credentials` + `credentials` + `bundles` + `bundles_install`: 2343/0. The manual dev-stack scenario is still outstanding |
 
 Phase 2 test additions:
 - `skill_credentials/`: install test 10, gate test 2 (including the D15 over-claim case), publish test +1 (the D16 leak regression).
@@ -1644,18 +1652,44 @@ Phase 2 test additions:
 - `tests/unit/test_skill_credential_secret_fields_coverage.py`: 2.
 - One setup line changed in the Phase 1 publish test: its slot-template case now marks `api_token` private as well as `http_header_value`. No existing bundle, credentials or core test was edited.
 
-### Open items for the §10.1 seam review
-1. **D17 backend follow-up (decide first: Phase 4 or §13).** D16 should treat the computed
-   `http_header_value` as stripped when the stored `api_token` is private. Then UI publishers can reach
-   `template` for `api_token`, and the `api_token` copy in `frontend/src/utils/skillCredentials.ts` gets
-   reverted.
-2. **D15 over-claim, end to end.** On a bundle agent with a same-type bundle spec, a skill placeholder
+### §10.1 seam review — answers (2026-09-11)
+
+| Seam | Verdict |
+|---|---|
+| S-1 declaration → derivation | **Pass.** `resolve_for_publish` reads `entry.credentials` only (`skill_catalog_service.py:406`), normalised by `parse_credential_declarations`. `publish_from_agent` refuses on any `entry.error` (`:321`), and `invalid_credentials` is an error code, so an invalid block cannot reach a write. |
+| S-2 derivation → revision JSON | **Pass.** `build_specs` sets `name = service_uri = slot`; `producer_agent_id` is appended by the skill caller only, for `agent_api` only, never inside `build_spec` — bundle JSON keeps its shape and key order. |
+| S-3 revision JSON → readers | **Pass.** Provisioner, `SkillSlotIndex`, `specs_to_public` and `publisher_usages_of_credential` all go through `parse_credential_spec`, and all derive the slot as `service_uri or name` (`spec_slot`, one definition). |
+| S-4 provisioner writes → matchers | **Pass.** A skill placeholder is stamped `service_uri=slot`, and `find_slot_match` keeps placeholders as candidates, so the next install links rather than duplicates. `release_skill_slots` targets exactly installer-owned placeholders whose `(type, service_uri)` is released and not retained. One accepted consequence: a **partially** filled template credential is still `is_placeholder=True`, so uninstall deletes it. It is unusable as it stands, and completing it flips the flag (`update_credential`), so the loss is bounded to half-entered data. |
+| S-5 preview ↔ install | **Pass.** Both call `_decide_slot`; `preview` differs only where it cannot know the future — a template whose decryption fails reports `template_materialised` and the install degrades to `placeholder_created`. |
+| S-6 credential rows → container | **Pass.** `get_agent_credentials_with_data` writes `service_uri` / `is_placeholder` top-level, outside the whitelist and the redaction; the SDK's `_find_slot` skips the synthetic entries, and `require_slot` maps "no candidate" / "unfilled placeholder" to the same two reasons the status projection uses. |
+| S-7 gate ↔ bundles | **Pass.** `_drop_skill_provisioned` runs only on a non-empty list, subtracts `bundle_claimed_credential_ids`, and never touches AI items (they carry no `credential_id`). |
+| S-8 classifier + impact → UI | **Pass.** `skill_install` → `automatic` in `classify_credential_category`; `skill_pbp_usages` is rendered in both `CredentialSharing.tsx:187` and `DeleteCredential.tsx:120`. |
+| S-9 old containers / old caches | **Pass.** `_normalise_credential_declarations` tolerates a row with no `credentials` key; every status is computed from the revision's frozen specs, never from the container. |
+| S-10 transactions | **Pass.** Install (link + provisioning), upgrade (re-pin + provisioning) and uninstall (release + delete) each commit once; every credential sync happens after the commit. |
+
+**One blocking finding, fixed: D17.** `_template_leaking_secret_fields` required the computed
+`http_header_value` to be marked private, but that field is never stored — `_process_api_token_credential`
+computes it at env-sync time — and the private-field picker only offers stored fields
+(`CredentialTemplateSharing.tsx:83`). An `api_token` slot could therefore **never** resolve to
+`template`. Fixed with `_DERIVED_SECRET_SOURCES`: a computed secret is waived exactly when its stored
+source is stripped. The leak the check exists for is unaffected (marking only `http_header_value`
+private still resolves to `user` / `template_would_leak_secret`). A unit test requires every derived
+field to name a source that is itself a classified stored secret; the publish regression test gained
+the newly reachable case; the `api_token` copy branch in `frontend/src/utils/skillCredentials.ts` is
+reverted, and `publishReasonSentence` / `publishOpenLabel` lost their `type` argument.
+
+Also removed: `SkillSlotIndex.bundle_claimed_ids`, a property with no reader outside the class.
+
+### Open items carried into the manual scenario
+1. **D15 over-claim, end to end.** On a bundle agent with a same-type bundle spec, a skill placeholder
    stays gated and is kept on uninstall. Confirm this is acceptable in the manual scenario.
-3. **Single uninstall path.** Removing a catalog link releases slots and syncs credentials only through
-   `LLMPluginService.uninstall_plugin_link`. As of Phase 2, only the `DELETE` plugin route calls it. Any
-   other path that deletes an `AgentPluginLink` skips slot release.
-4. **Partial-sync toast (S2/S3 setup panel link path).** It relies on every partial sync leaving the
-   addon row in a non-ok status. Confirm this against `AddonsService` status ordering.
+2. **Single uninstall path — verified.** `LLMPluginService.uninstall_plugin_link` is the only writer:
+   `session.delete` on a plugin link appears once in the whole backend, and there is no bulk-delete
+   statement over `AgentPluginLink`. Still a standing invariant for future code, now recorded in
+   `agent_plugins_tech.md` and `agent_skills_tech.md`.
+3. **Partial-sync toast (S2/S3 setup panel link path) — verified.** `_settle_status` evaluates
+   `not_materialized` / `unverified` **before** `credential_missing`, so a partially synced catalog row
+   is never `ok` and the toast's assumption holds.
 5. **Accepted Phase 2 deviations to re-read:**
    - uninstall's retained specs come from `specs_except_link`;
    - `SkillSlotIndex` skips its credential queries when no link declares a slot;
@@ -1668,7 +1702,8 @@ Phase 2 test additions:
    - `producer_agent_id` arrives without an agent name, so "backed by agent X" is not rendered;
    - skill usages appear only inside the Sharing card's dialogs, not on the card body.
 7. **Secrets:**
-   - a literal token typed into `api_token_template` is not detected (S8 only warns);
+   - a literal token typed into `api_token_template` is not detected (S8 only warns) — the one
+     `api_token` leak D17 does **not** close, since that field is not a secret by name;
    - bundle publish still has the stored-vs-env template leak (§13), and only known secret field names are blocked, so extra keys in free-form `credential_data` are not;
    - skill revisions published from this tree before D16 cannot be scrubbed (I12), which only matters if something was published from it.
 8. **Deferred UI:**

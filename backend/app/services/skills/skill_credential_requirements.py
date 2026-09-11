@@ -96,6 +96,19 @@ _STORED_SECRET_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
     "mcp_provider": frozenset({"token", "oauth_client_secret", "oauth_refresh_token"}),
 }
 
+#: D17: secret fields the env sync **computes** and no stored ``credential_data``
+#: carries, mapped to the stored field they are computed from. A template copies
+#: stored keys only (``PublishService._template_payload_for``), so a computed
+#: field can never appear in ``template_data`` on its own — it leaks exactly when
+#: its source does. Without this, an ``api_token`` slot could never resolve to
+#: ``template``: the private-field picker only offers stored fields, so
+#: ``http_header_value`` could never be marked private and always counted as
+#: leaking. Each value must itself be classified in
+#: ``_STORED_SECRET_FIELDS_BY_TYPE`` (guarded by a unit test).
+_DERIVED_SECRET_SOURCES: dict[str, dict[str, str]] = {
+    "api_token": {"http_header_value": "api_token"},
+}
+
 #: Returned for a type no secret map classifies, so it can never be ``template``.
 _UNCLASSIFIED_TYPE_SECRET = "<unclassified credential type>"
 
@@ -268,6 +281,13 @@ class SkillCredentialRequirements:
         Fails closed: a type that is not force-private and that neither map
         classifies always leaks.
 
+        A field ``_DERIVED_SECRET_SOURCES`` names is computed at env-sync time
+        and never stored, so a template cannot carry it unless it carries the
+        stored field it is computed from: it leaks exactly when its source
+        does (D17). Without that, an ``api_token`` could never be a template —
+        the private-field picker only offers stored fields, so the computed
+        ``http_header_value`` could never be marked private.
+
         Bundle ``_template_payload_for`` has the same gap. Fixing it is out of
         scope (plan §13) and it stays unchanged (I1).
         """
@@ -281,14 +301,22 @@ class SkillCredentialRequirements:
         allowlist = PublishService._TEMPLATE_TEMPLATABLE_FIELDS_BY_TYPE.get(
             credential_type
         )
-        if allowlist is not None:
-            secrets &= allowlist
         private = {
             field
             for field in (credential.template_private_fields or [])
             if isinstance(field, str)
         }
-        return frozenset(secrets - private)
+
+        def stripped(field: str) -> bool:
+            return field in private or (allowlist is not None and field not in allowlist)
+
+        derived = _DERIVED_SECRET_SOURCES.get(credential_type, {})
+        return frozenset(
+            field
+            for field in secrets
+            if not stripped(field)
+            and not (field in derived and stripped(derived[field]))
+        )
 
     @staticmethod
     def _read_producer_agent_id(
@@ -652,11 +680,6 @@ class SkillSlotIndex:
                 session, agent=agent, linked_credentials=linked
             ),
         )
-
-    @property
-    def bundle_claimed_ids(self) -> frozenset[uuid.UUID]:
-        """Linked credentials the agent's bundle revision claims."""
-        return self._bundle_claimed_ids
 
     def specs_for_link(self, link_id: uuid.UUID) -> list[ParsedCredentialSpec]:
         return list(self._specs_by_link.get(link_id, []))

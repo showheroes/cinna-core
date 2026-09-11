@@ -55,6 +55,17 @@ For API tokens, raw fields like `api_token_type`, `api_token_template`, and `api
 
 For SSH keys, `private_key` and `passphrase` are NEVER whitelisted. They travel on a sibling transport — the `ssh_keys` array in the `/config/credentials` payload — and are written directly into `~/.ssh/` (0600) inside the container, so they never appear in `credentials.json` or any agent-readable workspace file. See [SSH Key Credentials](ssh_key_credentials.md) for the full security model and delivery path.
 
+## Two fields sit outside the whitelist on purpose
+
+Every real entry in `credentials.json` carries **`service_uri`** and **`is_placeholder`** at the **top level**, beside `id` / `name` / `type` / `notes` — outside `credential_data`, which is the only thing the whitelist and the README redaction ever act on. They are therefore never filtered and never masked, and that is deliberate:
+
+- `service_uri` is the credential's **slot**: a non-secret id a script uses to find the credential it needs, whatever its type (`credentials.require_slot("erp-public-api")`). It is a `Credential` column, chosen by a person, and for a catalog skill it is public by construction — it is the spec name in an immutable revision every catalog viewer can read. Keeping it type-agnostic is the whole point: a per-type whitelist entry would mean a new credential type silently loses the ability to fill a skill's slot.
+- `is_placeholder` says the credential is linked to the agent but **not filled in yet**, so a script can raise "this slot needs setting up" instead of failing on an empty token.
+
+The pre-existing in-`credential_data` copy of `service_uri` for `api_token` stays, for scripts written against it.
+
+The **synthetic** entries (`current_user`, `owner_identity_token`) are not credentials and carry neither key, rather than carrying invented ones — which is also why the container SDK's slot lookup skips them.
+
 ## Why Whitelist Over Blacklist
 
 - **Blacklist risk**: A new field added to the database (e.g., `internal_user_id`) would be automatically exposed to agents unless someone remembers to add it to the exclusion list

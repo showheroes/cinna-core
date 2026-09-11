@@ -542,6 +542,12 @@ def test_template_private_fields_must_cover_the_stored_secret_key(
         stored field is still unprotected).
       - ``api_token`` marked private on BOTH ``api_token`` and
         ``http_header_value`` -> ``template``.
+      - ``api_token`` marked private on the stored ``api_token`` ALONE ->
+        ``template`` (D17): ``http_header_value`` is computed at env-sync time
+        and never stored, so a template cannot carry it once its source is
+        private. The private-field picker only offers stored fields, so
+        requiring the computed name here made the template path unreachable
+        for this type.
       - ``odoo`` marked private on its stored secret key (``api_token``) ->
         ``template``.
     """
@@ -566,6 +572,10 @@ def test_template_private_fields_must_cover_the_stored_secret_key(
         template_private_fields=["api_token", "http_header_value"],
     )
     _templatable_cred(
+        "api_token", "d17-stored-key-only",
+        template_private_fields=["api_token"],
+    )
+    _templatable_cred(
         "odoo", "d12-odoo-stored-secret",
         template_private_fields=["api_token"],
     )
@@ -573,6 +583,7 @@ def test_template_private_fields_must_cover_the_stored_secret_key(
     credentials_block = (
         "  - slot: d12-http-header-only\n    type: api_token\n"
         "  - slot: d12-both-private\n    type: api_token\n"
+        "  - slot: d17-stored-key-only\n    type: api_token\n"
         "  - slot: d12-odoo-stored-secret\n    type: odoo\n"
     )
     write_skill(
@@ -590,6 +601,10 @@ def test_template_private_fields_must_cover_the_stored_secret_key(
     fully_private = _credential_by_slot(preview["credentials"], "d12-both-private")
     assert fully_private["provided_by"] == "template"
 
+    # D17: the stored key alone is enough — the computed header cannot outlive it.
+    stored_key_only = _credential_by_slot(preview["credentials"], "d17-stored-key-only")
+    assert stored_key_only["provided_by"] == "template"
+
     odoo_private = _credential_by_slot(preview["credentials"], "d12-odoo-stored-secret")
     assert odoo_private["provided_by"] == "template"
     _assert_no_template_secrets(preview)
@@ -600,4 +615,5 @@ def test_template_private_fields_must_cover_the_stored_secret_key(
     required = revision["required_credentials"]
     assert _credential_by_slot(required, "d12-http-header-only")["provided_by"] == "user"
     assert _credential_by_slot(required, "d12-both-private")["provided_by"] == "template"
+    assert _credential_by_slot(required, "d17-stored-key-only")["provided_by"] == "template"
     assert _credential_by_slot(required, "d12-odoo-stored-secret")["provided_by"] == "template"

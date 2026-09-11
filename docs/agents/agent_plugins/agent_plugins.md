@@ -63,6 +63,12 @@ The resilient system removes the backend cache entirely from the hot path. Plugi
 
 ### Plugin Sync on Changes
 1. Any install, uninstall, upgrade, or enable/disable action triggers a sync.
+   A **catalog skill** install, upgrade or uninstall may also provision or release
+   credentials for the skill's declared slots. Plugin sync does not carry
+   credentials, so each of those three routes pushes the credentials **first** and
+   then runs the ordinary plugin sync; the install's response carries
+   `credential_provisioning`, one entry per slot. See
+   [Agent Skills](../agent_skills/agent_skills.md).
 2. Backend builds the manifest (git coordinates + flags, no file bytes) once and delivers it to all **running** and **suspended** environments.
 3. Suspended environments are activated first, then synced.
 4. A `PluginSyncResponse` is returned with per-environment status plus `plugin_results` (per-plugin install outcomes) and `partial_failures` (true when any plugin failed).

@@ -152,6 +152,7 @@ class PluginSource(str, Enum):
 | `plugin_results` | Aggregated, deduplicated `failed` entries across all synced envs |
 | `partial_failures` | True when any plugin failed (env transport may still have succeeded) |
 | `unsupported_syncs` | `int`, default `0`. Environments whose core predates the endpoint. Counted apart from `failed_syncs` so `success` stays `True` and a client can name the rebuild instead of the restart. `message` gains "(N need rebuilding to pick this up)" |
+| `credential_provisioning` | `list[SkillCredentialProvisionPublic]`, default `[]`. Filled **only** by the catalog-skill install route: one entry per credential slot the installed revision declares, with its `outcome` (`already_linked`, `linked_publisher`, `linked_existing`, `template_materialised`, `placeholder_created`, `publisher_unavailable`). Set on the response after the sync, so the install dialog can report the link, the files and the credentials in one answer |
 
 ## API Endpoints
 
@@ -196,7 +197,8 @@ Plugin Discovery:
 
 Agent Plugin Management:
 - `install_plugin_for_agent()` — Creates `AgentPluginLink` with `source=marketplace`, version and commit pinning
-- `uninstall_plugin_from_agent()` — Removes plugin link (prune happens at next manifest apply)
+- `uninstall_plugin_link()` — Removes a plugin link, and for a `source=catalog` link first releases the skill's credential placeholders (`CredentialProvisioner.release_skill_slots`, driven by `SkillSlotIndex.specs_for_link` / `specs_except_link`) — all in one commit. Returns `PluginUninstallResult{deleted, credentials_changed}`; the route pushes credentials to the environments when `credentials_changed`, because plugin sync does not carry them. **This is the only path that releases slots**: any other code that deletes an `AgentPluginLink` would leak placeholders
+- `uninstall_plugin_from_agent()` — Thin `bool`-returning wrapper over `uninstall_plugin_link()` (prune happens at next manifest apply)
 - `get_agent_plugins()` — Returns plugins with computed `has_update` and display fields. Bundle plugins: `has_update=False` (updates arrive via bundle apply-update); display resolves from snapshot fields. Marketplace plugins: display resolves from live plugin row.
 - `update_plugin_modes()` — Updates `conversation_mode`, `building_mode`, `disabled`
 - `upgrade_agent_plugin()` — Updates link to latest version and commit hash

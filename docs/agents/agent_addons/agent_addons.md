@@ -124,8 +124,10 @@ so no call site re-derives it:
 3. the first skill carrying an `error` → **error**, with that skill's issue code
 4. a `kind="skill"` row that carries **no skill at all** → **error**
    (`not_materialized`) or **warning** (`unverified`), per the next rule
-5. the first skill carrying a `warning` → **warning**, with that code
-6. otherwise **ok**
+5. a catalog row whose **credential slots** are not all satisfied → **warning**
+   (`credential_missing`), with the slots listed in `credential_issues`
+6. the first skill carrying a `warning` → **warning**, with that code
+7. otherwise **ok**
 
 ### A skill row that contributes no skill is not `ok`
 
@@ -148,6 +150,33 @@ environment — the model can't load it." `unverified` — "Installed here. Whet
 its files reached the environment couldn't be checked." Calling an install broken
 because we could not reach its container would be the same overreach as calling
 it healthy, which is why the middle case is its own code.
+
+### A catalog skill missing its credential is amber, never red
+
+A catalog skill declares the credentials its scripts need
+([agent_skills](../agent_skills/agent_skills.md)). The install brings them —
+shared by the publisher, matched from what the user already has, or created as
+an empty placeholder — and the row reports whichever slots are not usable yet in
+`credential_issues`, one entry per slot with a `reason`:
+
+| `reason` | What it means | What the user does |
+|----------|---------------|--------------------|
+| `not_linked` | No credential carrying that slot is linked to the agent | Link or create one on the Credentials tab |
+| `not_configured` | A placeholder is linked but nobody filled it in | Open it and fill it in |
+| `access_revoked` | The publisher's credential is gone, or its owner turned sharing off | Provide your own, or ask the publisher |
+
+**It is a warning, not an error, and it never blocks the agent.** The skill still
+loads and every other capability on the agent still works; only the scripts that
+need that credential fail, with a message naming the slot. A bundle's credential
+specs are the agent's contract and *do* block — this is the deliberate
+difference between the two, and the install readiness gate honours it by ignoring
+credentials a catalog skill provisioned (unless the agent's bundle claims the
+same credential, in which case the bundle's rule wins).
+
+It sits **below** `not_materialized` / `unverified` in the precedence above: a
+skill whose files never arrived has a bigger problem than a skill whose
+credential is missing, and saying the smaller one first would send the user to
+the wrong tab.
 
 **`kind="plugin"` rows are exempt.** A plugin legitimately ships only commands or
 agents and contributes nothing to the skill index in perfect health. Local skill
@@ -513,6 +542,8 @@ for the admin surface and the sync mechanics.
 |----------|-----------|
 | Environment asleep / adapter error / pre-feature container | Plugin rows still return; `skills_error` carries the banner (`env_not_running` / `adapter_error` / **`adapter_unsupported`** / `parse_error` — see [agent_skills](../agent_skills/agent_skills.md), where the four codes and their one-per-code remedies are defined); local rows come from the cache if there is one |
 | An installed `kind="skill"` row with no skill in the index | Index read → `status=error`, `status_code=not_materialized`. Index unreadable → `status=warning`, `status_code=unverified`. No environment / no read yet → silent. `kind="plugin"` rows are exempt |
+| A catalog skill whose credential slot is unlinked, unfilled or no longer shared | `status=warning`, `status_code=credential_missing`, with `credential_issues` naming each slot and why. Never an error, and never a block |
+| A catalog skill installed before slots existed, or from a container that never reported them | No issues: the status is computed from the **revision's** frozen specs on the server, never from what the container reports |
 | Plugin sync to a pre-feature environment | `EnvironmentSyncStatus.status="unsupported"`, counted in `unsupported_syncs`, **not** in `failed_syncs` — the link write succeeded, so `success` stays `True`. The only remedy is a rebuild; nothing here is retryable |
 | Catalog link whose package or revision was deleted | `status=error`, `status_code=source_unavailable`; uninstall offered, upgrade hidden |
 | Marketplace link whose plugin row is gone | Same `source_unavailable`; upgrading answers **409 `source_unavailable`** with a sentence telling the user to uninstall |

@@ -27,6 +27,7 @@ available" the next time someone adds a type.
 from app.models.credentials.credential import CredentialType
 from app.services.bundles.publish_service import PublishService
 from app.services.skills.skill_credential_requirements import (
+    _DERIVED_SECRET_SOURCES,
     _STORED_SECRET_FIELDS_BY_TYPE,
 )
 
@@ -66,3 +67,27 @@ def test_api_token_stored_secret_map_includes_the_raw_token_field() -> None:
     be in its own type's stored-secret set, not only the computed
     ``http_header_value`` ``SENSITIVE_FIELDS`` names."""
     assert "api_token" in _STORED_SECRET_FIELDS_BY_TYPE["api_token"]
+
+
+def test_every_derived_secret_names_a_classified_stored_source() -> None:
+    """D17: a computed secret is waived only when its stored source is stripped.
+
+    ``_DERIVED_SECRET_SOURCES`` says a field is computed at env-sync time and
+    never stored, so a template carries it only when it carries the stored
+    field behind it. That waiver is safe only while the source is itself
+    classified as a secret of the same type — otherwise a computed secret
+    would be waived on the strength of a field nothing protects.
+    """
+    for credential_type, derived in _DERIVED_SECRET_SOURCES.items():
+        stored = _STORED_SECRET_FIELDS_BY_TYPE.get(credential_type)
+        assert stored is not None, (
+            f"'{credential_type}' declares derived secret fields but has no "
+            "entry in _STORED_SECRET_FIELDS_BY_TYPE."
+        )
+        for field, source in derived.items():
+            assert source in stored, (
+                f"The derived secret '{field}' of '{credential_type}' is "
+                f"waived when '{source}' is stripped, but '{source}' is not "
+                "one of that type's stored secret keys."
+            )
+            assert field != source
