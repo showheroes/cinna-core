@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     # setting outgrew its name. Deployments that already set it keep working;
     # BACKEND_BASE_URL wins when both are present.
     WEBHOOK_BASE_URL: str = ""
+    # Public ACP WebSocket base, e.g. wss://api.example.com/acp.
+    ACP_SERVER_BASE_URL: str = ""
     MCP_SERVER_BASE_URL: str = ""
     # Internal/container-reachable MCP origin. The public MCP_SERVER_BASE_URL is
     # not always routable from inside the agent network, so for agent2agent

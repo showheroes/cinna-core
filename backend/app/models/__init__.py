@@ -659,6 +659,21 @@ from .mcp.mcp_auth_code import (
     MCPAuthCode,
     MCPAuthRequest,
 )
+from .acp.acp_connector import (
+    ACPConnector,
+    ACPConnectorCreate,
+    ACPConnectorUpdate,
+    ACPConnectorPublic,
+    ACPConnectorsPublic,
+)
+from .acp.acp_token import (
+    ACPToken,
+    ACPTokenCreate,
+    ACPTokenCreated,
+    ACPTokenPublic,
+    ACPTokensPublic,
+)
+
 from .mcp.mcp_token import (
     MCPToken,
     MCPConnectorTokenCreate,
@@ -1477,6 +1492,17 @@ __all__ = [
     "OutgoingEmailQueue",
     "OutgoingEmailQueuePublic",
     "OutgoingEmailStatus",
+    # ACP Connectors
+    "ACPConnector",
+    "ACPConnectorCreate",
+    "ACPConnectorUpdate",
+    "ACPConnectorPublic",
+    "ACPConnectorsPublic",
+    "ACPToken",
+    "ACPTokenCreate",
+    "ACPTokenCreated",
+    "ACPTokenPublic",
+    "ACPTokensPublic",
     # MCP Connectors
     "MCPConnector",
     "MCPConnectorCreate",

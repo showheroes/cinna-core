@@ -449,6 +449,76 @@ export type AccountStatusRefreshCommandBody = {
     command?: (string | null);
 };
 
+export type ACPConnectorCreate = {
+    name: string;
+    mode?: 'conversation' | 'building';
+    is_active?: boolean;
+    max_connections?: number;
+};
+
+export type mode = 'conversation' | 'building';
+
+export type ACPConnectorPublic = {
+    name: string;
+    mode?: 'conversation' | 'building';
+    is_active?: boolean;
+    max_connections?: number;
+    id: string;
+    agent_id: string;
+    owner_id: string;
+    acp_server_url?: (string | null);
+    created_at: string;
+    updated_at: string;
+};
+
+export type ACPConnectorsPublic = {
+    data: Array<ACPConnectorPublic>;
+    count: number;
+};
+
+export type ACPConnectorUpdate = {
+    name?: (string | null);
+    mode?: ('conversation' | 'building' | null);
+    is_active?: (boolean | null);
+    max_connections?: (number | null);
+};
+
+export type ACPTokenCreate = {
+    label: string;
+    expires_in_days?: number;
+};
+
+/**
+ * The bearer token is returned only when it is minted.
+ */
+export type ACPTokenCreated = {
+    id: string;
+    connector_id: string;
+    prefix: string;
+    label: string;
+    revoked: boolean;
+    expires_at: string;
+    created_at: string;
+    last_used_at: (string | null);
+    token: string;
+};
+
+export type ACPTokenPublic = {
+    id: string;
+    connector_id: string;
+    prefix: string;
+    label: string;
+    revoked: boolean;
+    expires_at: string;
+    created_at: string;
+    last_used_at: (string | null);
+};
+
+export type ACPTokensPublic = {
+    data: Array<ACPTokenPublic>;
+    count: number;
+};
+
 export type ActivitiesPublicExtended = {
     data: Array<ActivityPublicExtended>;
     count: number;
@@ -4407,7 +4477,7 @@ export type InstallCredentialSelection = {
     credential_id?: (string | null);
 };
 
-export type mode = 'use_existing' | 'placeholder' | 'publisher_provides' | 'skip';
+export type mode2 = 'use_existing' | 'placeholder' | 'publisher_provides' | 'skip';
 
 /**
  * Body of ``POST /catalog/{bundle_id}/install``.
@@ -7800,6 +7870,72 @@ export type AccessTokensDeleteAccessTokenData = {
 };
 
 export type AccessTokensDeleteAccessTokenResponse = (Message);
+
+export type AcpConnectorsCreateAcpConnectorData = {
+    agentId: string;
+    requestBody: ACPConnectorCreate;
+};
+
+export type AcpConnectorsCreateAcpConnectorResponse = (ACPConnectorPublic);
+
+export type AcpConnectorsListAcpConnectorsData = {
+    agentId: string;
+};
+
+export type AcpConnectorsListAcpConnectorsResponse = (ACPConnectorsPublic);
+
+export type AcpConnectorsGetAcpConnectorData = {
+    agentId: string;
+    connectorId: string;
+};
+
+export type AcpConnectorsGetAcpConnectorResponse = (ACPConnectorPublic);
+
+export type AcpConnectorsUpdateAcpConnectorData = {
+    agentId: string;
+    connectorId: string;
+    requestBody: ACPConnectorUpdate;
+};
+
+export type AcpConnectorsUpdateAcpConnectorResponse = (ACPConnectorPublic);
+
+export type AcpConnectorsDeleteAcpConnectorData = {
+    agentId: string;
+    connectorId: string;
+};
+
+export type AcpConnectorsDeleteAcpConnectorResponse = (Message);
+
+export type AcpConnectorsCreateAcpTokenData = {
+    agentId: string;
+    connectorId: string;
+    requestBody: ACPTokenCreate;
+};
+
+export type AcpConnectorsCreateAcpTokenResponse = (ACPTokenCreated);
+
+export type AcpConnectorsListAcpTokensData = {
+    agentId: string;
+    connectorId: string;
+};
+
+export type AcpConnectorsListAcpTokensResponse = (ACPTokensPublic);
+
+export type AcpConnectorsRevokeAcpTokenData = {
+    agentId: string;
+    connectorId: string;
+    tokenId: string;
+};
+
+export type AcpConnectorsRevokeAcpTokenResponse = (ACPTokenPublic);
+
+export type AcpConnectorsDeleteAcpTokenData = {
+    agentId: string;
+    connectorId: string;
+    tokenId: string;
+};
+
+export type AcpConnectorsDeleteAcpTokenResponse = (Message);
 
 export type ActivitiesCreateActivityData = {
     requestBody: ActivityCreate;
