@@ -1,6 +1,11 @@
 # Skill Credential Requirements — Implementation Plan
 
 Status: Complete. Phases 1–3 landed in `793782a3`; Phase 4, including the manual two-user dev-stack scenario, landed through `cdb42afe`. Seam review answered and D17 fixed. The final readiness audit, follow-up fixes, current test counts and Phase 4 notes are recorded in **§15**.
+
+Current independent review: [completion review](skill_credential_requirements_review.md).
+It records the additional template-secret, slot-readiness and install-dialog fixes,
+fresh validation results and deployment limits. Historical audit counts and
+superseded decisions below remain as implementation history.
 Date: 2026-09-10
 Input: `docs/plans/skill_credential_requirements_design.md` (the architecture brief)
 Feature name: `skill-credential-requirements`
@@ -244,19 +249,21 @@ This is the same schema as `AgentBundleRevision.required_credential_specs`, writ
 (`user|publisher|template`) · `publisher_credential_id` (str | null) · `service_uri` (= slot) ·
 [`template_data`, `template_private_fields`, only when `provided_by="template"`] ·
 [`producer_agent_id` (str), only for `type="agent_api"` when the matched credential carries one, and
-appended by the skill caller (D9)].
+appended by the skill caller (D9)] · [`producer_agent_name` (str), when known,
+frozen alongside the producer id by the later UI follow-up].
 
 `parse_credential_spec` is the single reader. It gains
-`ParsedCredentialSpec.producer_agent_id: uuid.UUID | None = None`, read tolerantly (old JSON → `None`).
+`ParsedCredentialSpec.producer_agent_id: uuid.UUID | None = None` and
+`producer_agent_name: str | None = None`, read tolerantly (old JSON → `None`).
 **The slot of a parsed spec is `parsed.service_uri or parsed.name`.**
 
 ### C3. Public projections (Pydantic, no secrets)
 
 - `SkillCredentialDeclarationPublic { slot: str, type: str, description: str | None }`: what a
   skill's index entry declares.
-- `SkillCredentialRequirementPublic { slot, type, description, provided_by, publisher_credential_id: UUID | None, producer_agent_id: UUID | None }`:
+- `SkillCredentialRequirementPublic { slot, type, description, provided_by, publisher_credential_id: UUID | None, producer_agent_id: UUID | None, producer_agent_name: str | None }`:
   what a published revision requires.
-- `SkillPublishCredentialPreview { slot, type, description, provided_by, credential_id: UUID | None, credential_name: str | None, producer_agent_id: UUID | None, reason: str | None }`.
+- `SkillPublishCredentialPreview { slot, type, description, provided_by, credential_id: UUID | None, credential_name: str | None, producer_agent_id: UUID | None, producer_agent_name: str | None, reason: str | None }`.
   `reason` explains a `user` resolution: `no_linked_credential` | `not_shareable` | `not_owned` | `template_would_leak_secret` (D12).
   `credential_*` refers to the **publisher's own** matched credential.
 - `SkillCredentialProvisionPublic { slot, type, description, provided_by, outcome: SlotOutcome, needs_setup: bool, credential_id: UUID | None, credential_name: str | None }`. Readiness is independent of the outcome: reusing a placeholder still requires setup.
@@ -274,7 +281,7 @@ appended by the skill caller (D9)].
 | `linked_existing` | A credential the installer owns, or has a share on, carries this slot and is linked (D3). It may itself be a placeholder from an earlier install. |
 | `template_materialised` | A placeholder is created from the publisher's template and linked. |
 | `placeholder_created` | An empty placeholder is created (`name=slot`, `service_uri=slot`) and linked. |
-| `publisher_unavailable` | A `provided_by="publisher"` spec could not be satisfied (credential gone, sharing off, owner ≠ publisher), and no own slot credential exists. A placeholder is created. The report is `degraded`. |
+| `publisher_unavailable` | A `provided_by="publisher"` spec could not be satisfied (credential gone, sharing off, owner ≠ publisher, or live type/slot changed), and no matching slot credential exists. A placeholder is created. The report is `degraded`. |
 
 ### C5. Addons status
 
@@ -548,8 +555,10 @@ without network; `requests` is imported lazily).
   the mirror.
 - `class CredentialMissing(Exception)`: `__init__(self, slot: str, reason: str)`; `__str__` is the
   C7 text.
-- `_Credentials.by_slot(slot) -> dict | None`: the first non-synthetic entry whose top-level
-  `service_uri == slot` (read fresh).
+- `_Credentials.by_slot(slot) -> dict | None`: a non-synthetic entry whose top-level
+  `service_uri == slot` (read fresh). Prefer a filled entry over a remaining
+  placeholder; preserve payload order among equally ready entries. This
+  follow-up makes linking a filled replacement work without unlinking the old placeholder.
 - `_Credentials.require_slot(slot) -> dict`:
   - `None` → `CredentialMissing(slot, "not_linked")`;
   - `entry.get("is_placeholder") is True` → `CredentialMissing(slot, "not_configured")`;
@@ -735,11 +744,13 @@ commits (it uses `session.flush()`).
     - The 422 case raises `ProvisioningSelectionError(spec_name, <the exact current detail text>)`.
   - **Skill policy**, per spec (slot = `parsed.service_uri or parsed.name`, type = `CredentialType(parsed.type)`;
     an unknown type is skipped):
-    1. **Already linked**: the agent already links a credential with `id == parsed.publisher_credential_id`,
-       or with (`type`, `service_uri == slot`) → `already_linked`.
+    1. **Already linked**: the agent already links a credential with matching
+       (`type`, `service_uri == slot`) → `already_linked`. Prefer a filled match
+       over a placeholder. A frozen publisher id alone cannot satisfy a slot.
     2. `provided_by="publisher"`: shared publisher-link routine (trust boundary, `allow_sharing`,
        first-writer-wins `CredentialShare(source=policy.share_source, access_level="read")`, no
-       share when owner == agent owner, idempotent link) → `linked_publisher`. On failure set
+       share when owner == agent owner, idempotent link), additionally requiring
+       the live type and slot to match → `linked_publisher`. On failure set
        `degraded=True` and fall through to step 4 with `publisher_failed=True`.
     3. `provided_by="template"`: `find_slot_match` hit → link → `linked_existing`. Otherwise
        materialise (notes `parsed.description or policy.template_notes_fallback`), then set
@@ -859,14 +870,15 @@ Add to `backend/app/services/skills/skill_credential_requirements.py`:
      `InstallReadinessGate._spec_lookup_for_install` (publisher id, `name:<name>`). Expose it as
      `bundle_claimed_ids`, computed against the linked credentials.
 - Spec satisfaction (one private function, used by every method). Candidates are linked credentials
-  with `id == publisher_credential_id` or (`type` match and `service_uri == slot`). The spec is
+  with matching `type` and `service_uri == slot`. A frozen publisher id is not a
+  runtime alias for a credential whose slot has changed. The spec is
   satisfied if any candidate is:
   - owned and not a placeholder, or
-  - foreign with `allow_sharing` and a share row.
+  - foreign, not a placeholder, with `allow_sharing` and a share row.
 
   Otherwise the reason is:
   - no candidates → `not_linked`;
-  - any owned placeholder → `not_configured`;
+  - any placeholder → `not_configured`;
   - else `access_revoked`.
 - `issues_for_link(link_id) -> list[CredentialIssue]`
 - `skill_provisioned_credential_ids() -> set[uuid.UUID]`: candidates of every catalog spec, minus

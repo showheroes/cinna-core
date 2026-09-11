@@ -40,6 +40,7 @@ from tests.utils.credential import (
     create_random_credential,
     get_agent_credentials,
     get_credential,
+    get_credential_with_data,
     link_credential_to_agent,
     set_credential_sharing,
     share_credential_via_api,
@@ -48,6 +49,7 @@ from tests.utils.credential import (
 from tests.utils.skill_catalog import (
     error_code,
     get_skill_package,
+    install_skill,
     make_agent_with_env,
     make_developer,
     patched_skill_storage,
@@ -559,8 +561,8 @@ def test_template_private_fields_must_cover_the_stored_secret_key(
         ``http_header_value`` -> ``template``.
       - ``api_token`` marked private on the stored ``api_token`` ALONE ->
         ``template`` (D17): ``http_header_value`` is computed at env-sync time
-        and never stored, so a template cannot carry it once its source is
-        private. The private-field picker only offers stored fields, so
+        and explicitly stripped from templates even if stored. The
+        private-field picker only offers stored fields, so
         requiring the computed name here made the template path unreachable
         for this type.
       - ``odoo`` marked private on its stored secret key (``api_token``) ->
@@ -632,3 +634,53 @@ def test_template_private_fields_must_cover_the_stored_secret_key(
     assert _credential_by_slot(required, "d12-both-private")["provided_by"] == "template"
     assert _credential_by_slot(required, "d17-stored-key-only")["provided_by"] == "template"
     assert _credential_by_slot(required, "d12-odoo-stored-secret")["provided_by"] == "template"
+
+
+def test_template_drops_a_stored_copy_of_the_derived_secret(
+    client: TestClient, superuser_token_headers: dict[str, str],
+) -> None:
+    """The credential API accepts arbitrary data, including computed fields.
+
+    Marking the token private must also strip a stored Authorization value
+    before it is frozen and materialised for another user (D17 / I6).
+    """
+    _, publisher_headers = make_developer(client, superuser_token_headers)
+    publisher_agent, publisher_env = make_agent_with_env(
+        client, publisher_headers, "Stored-Header-Publisher"
+    )
+    credential = create_random_credential(
+        client, publisher_headers, credential_type="api_token",
+        credential_data={
+            "api_token": "publisher-private-token",
+            "api_token_template": "Authorization: Bearer {TOKEN}",
+            "http_header_value": "Bearer publisher-private-token",
+        },
+    )
+    update_credential(
+        client, publisher_headers, credential["id"],
+        service_uri="stored-header", allow_template_sharing=True,
+        template_private_fields=["api_token"],
+    )
+    link_credential_to_agent(client, publisher_headers, publisher_agent, credential["id"])
+    write_skill(
+        publisher_env, "stored-header-skill",
+        frontmatter=_skill_frontmatter(
+            "stored-header-skill", "  - slot: stored-header\n    type: api_token\n"
+        ),
+    )
+    revision = publish_skill(
+        client, publisher_headers, publisher_agent, "stored-header-skill",
+        visibility="public",
+    )
+    assert revision["required_credentials"][0]["provided_by"] == "template"
+
+    _, consumer_headers = make_developer(client, superuser_token_headers)
+    consumer_agent, _ = make_agent_with_env(client, consumer_headers, "Stored-Header-Consumer")
+    installed = install_skill(client, consumer_headers, consumer_agent, revision["package_id"])
+    provision = installed["credential_provisioning"][0]
+    assert provision["outcome"] == "template_materialised"
+    template = get_credential_with_data(client, consumer_headers, provision["credential_id"])
+    data = template["credential_data"]
+    assert "api_token" not in data
+    assert "http_header_value" not in data
+    assert data["api_token_template"] == "Authorization: Bearer {TOKEN}"

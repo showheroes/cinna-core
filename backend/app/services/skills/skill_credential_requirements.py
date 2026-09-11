@@ -96,11 +96,11 @@ _STORED_SECRET_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
     "mcp_provider": frozenset({"token", "oauth_client_secret", "oauth_refresh_token"}),
 }
 
-#: D17: secret fields the env sync **computes** and no stored ``credential_data``
-#: carries, mapped to the stored field they are computed from. A template copies
-#: stored keys only (``PublishService._template_payload_for``), so a computed
-#: field can never appear in ``template_data`` on its own — it leaks exactly when
-#: its source does. Without this, an ``api_token`` slot could never resolve to
+#: D17: secret fields the env sync **computes**, mapped to their stored source.
+#: The credential API accepts arbitrary data, so imported payloads can also
+#: contain these computed keys. ``build_specs`` strips them explicitly from
+#: skill templates; marking the source private is therefore enough. Without
+#: this, an ``api_token`` slot could never resolve to
 #: ``template``: the private-field picker only offers stored fields, so
 #: ``http_header_value`` could never be marked private and always counted as
 #: leaking. Each value must itself be classified in
@@ -291,9 +291,9 @@ class SkillCredentialRequirements:
         classifies always leaks.
 
         A field ``_DERIVED_SECRET_SOURCES`` names is computed at env-sync time
-        and never stored, so a template cannot carry it unless it carries the
-        stored field it is computed from: it leaks exactly when its source
-        does (D17). Without that, an ``api_token`` could never be a template —
+        and explicitly stripped by ``build_specs`` even if an imported payload
+        stores it. Its source still has to be protected (D17). Without that,
+        an ``api_token`` could never be a template —
         the private-field picker only offers stored fields, so the computed
         ``http_header_value`` could never be marked private.
 
@@ -396,6 +396,12 @@ class SkillCredentialRequirements:
                 service_uri=resolution.slot,
                 description=resolution.description,
             )
+            if resolution.provided_by == "template":
+                # The API accepts arbitrary credential_data. A stored copy
+                # of a computed secret must not survive the D17 waiver when
+                # its source is private. Keep this skill-only (bundle I1).
+                for field in _DERIVED_SECRET_SOURCES.get(resolution.type, {}):
+                    spec["template_data"].pop(field, None)
             # Appended by this caller only, never by ``build_spec``, so bundle
             # revision JSON keeps its exact shape.
             if (
@@ -642,8 +648,7 @@ class CredentialIssue:
 
 @dataclass(frozen=True)
 class _SlotState:
-    #: Linked credentials addressing the spec: its publisher credential, or a
-    #: credential of its type carrying its slot.
+    #: Linked credentials of the spec's type carrying its current slot.
     candidates: tuple[Credential, ...]
     #: ``None`` when a candidate is usable.
     reason: CredentialIssueReason | None
@@ -658,11 +663,11 @@ class SkillSlotIndex:
     credentials. One instance answers the Addons row status, the readiness
     gate's D1 exclusion and uninstall's released/retained split.
 
-    A spec is satisfied when one of its candidates is owned by the agent owner
-    and filled in, or is foreign, still ``allow_sharing`` **and** shared with
-    the agent owner. A share row alone is not enough: older sharing-disable
+    A spec is satisfied when one of its candidates is filled in and either
+    owned by the agent owner, or foreign, still ``allow_sharing`` **and** shared
+    with the agent owner. A share row alone is not enough: older sharing-disable
     paths could leave it behind. Otherwise the reason is ``not_linked`` (no
-    candidate), ``not_configured`` (an owned placeholder) or
+    candidate), ``not_configured`` (a placeholder) or
     ``access_revoked``.
     """
 
@@ -807,11 +812,8 @@ class SkillSlotIndex:
         candidates = tuple(
             credential
             for credential in self._linked
-            if (
-                parsed.publisher_credential_id is not None
-                and credential.id == parsed.publisher_credential_id
-            )
-            or (credential_type_value(credential) == parsed.type and credential.service_uri == slot)
+            if credential_type_value(credential) == parsed.type
+            and credential.service_uri == slot
         )
         reason: CredentialIssueReason | None
         if any(self._usable(credential) for credential in candidates):
@@ -819,7 +821,7 @@ class SkillSlotIndex:
         elif not candidates:
             reason = "not_linked"
         elif any(
-            credential.owner_id == self._owner_id and credential.is_placeholder
+            credential.is_placeholder
             for credential in candidates
         ):
             reason = "not_configured"
@@ -828,8 +830,10 @@ class SkillSlotIndex:
         return _SlotState(candidates=candidates, reason=reason)
 
     def _usable(self, credential: Credential) -> bool:
+        if credential.is_placeholder:
+            return False
         if credential.owner_id == self._owner_id:
-            return not credential.is_placeholder
+            return True
         return bool(credential.allow_sharing) and credential.id in self._shared_ids
 
 

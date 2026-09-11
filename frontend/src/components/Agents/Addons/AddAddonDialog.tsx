@@ -24,6 +24,10 @@ import {
   invalidateAddons,
   isAddonResultBlocked,
 } from "@/utils/addons"
+import {
+  hasPluginSyncIssues,
+  pluginInstallSyncWarning,
+} from "@/utils/pluginSync"
 import { countSlotsNeedingSetup } from "@/utils/skillCredentials"
 import { AddAddonChooseStep } from "./AddAddonChooseStep"
 import { AddAddonModesStep } from "./AddAddonModesStep"
@@ -33,22 +37,6 @@ import type { SyncReporter } from "./AddonRow"
 const RESULT_LIMIT = 50
 
 type Step = "choose" | "modes"
-
-/**
- * A partial failure is not a success with a footnote: it goes to the tab's
- * sync-issues dialog rather than to a toast that claims the install worked
- * everywhere. An *unsupported* sync counts here too: the link write succeeded,
- * so `success` stays true and the count never reaches `failed_syncs` — but the
- * environment did not take the change, and that dialog is the only surface that
- * renders the backend's explanation.
- */
-function isPartialSync(result: PluginSyncResponse): boolean {
-  return (
-    (result.failed_syncs ?? 0) > 0 ||
-    (result.unsupported_syncs ?? 0) > 0 ||
-    !!result.partial_failures
-  )
-}
 
 interface AddAddonDialogProps {
   agentId: string
@@ -172,7 +160,7 @@ export function AddAddonDialog({
   const isCapped = selectable.length > RESULT_LIMIT
 
   const settleSync = (result: PluginSyncResponse, name: string) => {
-    if (isPartialSync(result)) {
+    if (hasPluginSyncIssues(result)) {
       onSyncResult(`${name} installed`, result)
     } else {
       showSuccessToast(`${name} installed`)
@@ -200,7 +188,7 @@ export function AddAddonDialog({
   const finishSetup = () => {
     if (!setup) return
     onOpenChange(false)
-    if (isPartialSync(setup.result)) {
+    if (hasPluginSyncIssues(setup.result)) {
       onSyncResult(`${setup.name} installed`, setup.result)
     }
   }
@@ -211,10 +199,8 @@ export function AddAddonDialog({
   const openCredentialsFromSetup = () => {
     if (!setup) return
     onOpenChange(false)
-    if (isPartialSync(setup.result)) {
-      showErrorToast(
-        `${setup.name} installed, but it didn't reach every environment — check the Addons tab`,
-      )
+    if (hasPluginSyncIssues(setup.result)) {
+      showErrorToast(pluginInstallSyncWarning(setup.name))
     }
   }
 

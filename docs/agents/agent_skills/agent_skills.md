@@ -44,8 +44,8 @@ A folder in the agent workspace:
 └── assets/             # optional
 ```
 
-Two frontmatter fields are validated and everything else is passed through
-untouched:
+Two frontmatter fields are required; optional `version` and platform-defined
+`credentials` have additional rules described below:
 
 | Field | Rule |
 |-------|------|
@@ -75,12 +75,30 @@ credential. `SKILL.md` declares what it needs as a block sequence of **slots**:
 |-----|------|
 | `slot` | required; the `service_uri` of the credential — a non-secret id a script looks the credential up by. Starts with a letter or digit, then letters, digits and `. _ : / @ + -`; no spaces; at most 255 characters; unique within the skill |
 | `type` | required; a credential type (`agent_api`, `api_token`, `odoo`, `email_imap`, …). `mcp_provider` is refused: an MCP connector never reaches `credentials.json`, so no script could consume the slot |
-| `description` | optional; what the credential is for, shown to publishers and installers. Falls back to the credential's notes, but only when its owner consented to provide it |
+| `description` | optional text, at most 1024 characters after trimming; what the credential is for, shown to publishers and installers. Falls back to the credential's notes, but only when its owner consented to provide it |
 
 At most 20 slots per skill. Unknown keys inside an entry are ignored, so a skill
 written for this parser survives a later optional key. A malformed block is the
 error `invalid_credentials` — the skill is excluded from the projection and
 cannot be published, exactly like a malformed `name`.
+
+For example, `skills/erp-public-data/SKILL.md` starts with:
+
+```yaml
+---
+name: erp-public-data
+description: Read public ERP customer data.
+credentials:
+  - slot: erp-public-api
+    type: agent_api
+    description: Connection to the public ERP API.
+---
+```
+
+Use this block-list form: the lightweight frontmatter parser does not support
+inline mapping entries such as `credentials: [{slot: ..., type: ...}]`.
+Omitting `credentials`, a bare `credentials:` or `credentials: []` all declare
+no slots. Quote a slot made entirely of digits so it remains text.
 
 **A declaration carries no secret.** It names a slot and a type; the credential
 itself is resolved at publish and provisioned at install.
@@ -239,8 +257,8 @@ immutable storage and appends a `SkillPackageRevision`.
   with the credential it matched and, when the answer is "installers bring
   their own", why — so the publisher can turn sharing on, or mark the secret
   fields private, and try again.
-- An `agent_api` slot also reads **"Backed by agent X"**, wherever the slot is
-  shown: in the Share dialog before publishing, and on the package card's
+- An `agent_api` slot also reads **"Backed by agent X"** in the Share dialog
+  before publishing, and on the package card's
   Credentials sheet for anyone browsing the catalogue. The producer's name is
   frozen into the revision at publish alongside its id, so it is the name as it
   read then — renaming the producer afterwards does not rewrite a published
@@ -300,10 +318,11 @@ synthesises the `.claude-plugin/plugin.json` locally.
 the same transaction as the link, before the credentials are pushed to the
 environment — so the first sync already carries them. Per slot, in order:
 
-1. the agent already links a credential for the slot → nothing to do;
+1. the agent already links a credential of the declared type for the slot →
+   nothing to do; a filled match takes precedence over a placeholder;
 2. the spec is `publisher` and the credential still exists, still allows sharing
-   and is still owned by the package publisher → it is shared with the installer
-   and linked;
+   and is still owned by the package publisher, with the declared type and slot
+   unchanged → it is shared with the installer and linked;
 3. the installer already owns (or holds a share on) a credential carrying that
    slot → it is linked;
 4. the spec is `template` → a copy of the publisher's non-private values is
@@ -320,6 +339,13 @@ Reusing a credential does not necessarily mean it is ready: if that credential
 is still an unfilled placeholder, both the preview and the install result keep
 the setup warning and the link to the agent's Credentials tab.
 
+Credential readiness and file synchronization are separate. If the install was
+saved but an environment failed or could not accept the sync, the catalog dialog
+reports that failure and directs the user to Addons. When credentials also need
+setup, it keeps the setup panel first and reports the sync issue when that panel
+closes, including when the user follows its Credentials link. The Add addon
+wizard uses its parent Addons sync-issues dialog when the tab stays open.
+
 A user who has filled a slot once never fills it twice: the slot match is by
 `service_uri`, so a second skill declaring `erp-public-api` links the credential
 the first one brought.
@@ -334,6 +360,8 @@ the first one brought.
   catalog-specific uninstall verb. It releases the skill's **placeholders**: an
   empty, installer-owned credential carrying a slot that no other catalog skill
   on the agent still declares is unlinked, and deleted once no agent links it.
+  A placeholder the agent's bundle may still require is retained; its setup
+  description explains why it remains after the last skill is removed.
   A credential the user actually filled in, and one shared by a publisher, are
   never touched.
 - **The publisher** may rename, re-describe, change visibility and list/unlist
@@ -649,7 +677,7 @@ regex.
 | Skill name collides with a platform command | `error: reserved_name` — excluded from projection and from the popup |
 | A malformed `credentials:` block (not a list, no slot, unknown type, duplicate slot, more than 20 entries) | `error: invalid_credentials` — excluded from projection; publish refuses with the sentence naming the first problem |
 | A slot whose only linked credential is an unfilled placeholder | Resolves to `user` at publish. An empty credential shared to installers would be a credential they cannot edit |
-| The publisher turns sharing off after publishing | The frozen spec still says `publisher`; the install falls through to a placeholder and reports `publisher_unavailable`. Existing installs lose it at once — the shares are deleted, the installers' agents are unlinked and their environments re-synced without it — and the row reads `not_linked`. Re-enabling sharing does not re-share or re-link; a reinstall or an upgrade to a revision that adds the slot does |
+| The publisher turns sharing off after publishing | The frozen spec still says `publisher`; the install falls through to a placeholder and reports `publisher_unavailable`. Existing installs lose it at once — the shares are deleted, the installers' agents are unlinked and their environments re-synced without it — and the row reads `not_linked`. Re-enabling sharing does not re-share or re-link; uninstalling then installing again, or upgrading to a revision that newly adds the slot, reruns provisioning |
 | A `publisher` spec whose credential belongs to someone else | Refused at install, not at publish: the publish path only resolves credentials the publisher owns, and the install re-checks the live owner against the package publisher |
 | Two skills on one agent declare the same slot | They share one credential — that is the point of a slot. Uninstalling one keeps it, because the other still declares it |
 | A revision published before slots existed | No specs, so nothing is provisioned and nothing is released. A container built before slots existed reports no `credentials` for its skills; the Addons status is computed from the revision on the server, never from the container |

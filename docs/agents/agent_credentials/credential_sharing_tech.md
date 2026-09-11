@@ -73,7 +73,7 @@
 - `shared_by_user_id` (UUID, FK → user)
 - `shared_at` (datetime)
 - `access_level` (varchar, default 'read')
-- `source` (varchar(20), nullable) — provenance marker: `"direct"` | `"bundle_install"` | NULL (legacy, read as `"direct"`). Stamped at creation, never updated. Added in migration `3c3c37a5e144` (nullable, no server default, no index, no backfill).
+- `source` (varchar(20), nullable) — provenance marker: `"direct"` | `"bundle_install"` | `"skill_install"` | NULL (legacy, read as `"direct"`). Stamped at creation, never updated. Added in migration `3c3c37a5e144` (nullable, no server default, no index, no backfill); the skill source uses the existing column.
 - Unique constraint: `(credential_id, shared_with_user_id)`
 
 ### Bundle Revision Spec (no DB column — JSON inside `agent_bundle_revision.required_credential_specs`)
@@ -98,7 +98,7 @@ Each entry the publish flow emits:
 ### Updated Credential Endpoints (`backend/app/api/routes/credentials.py`)
 - `GET /api/v1/credentials/{id}` - Allows viewing if user owns OR has share (returns `is_shared=true` for shared)
 - `GET /api/v1/credentials/{id}/deletion-impact` - Returns a `CredentialDeletionImpact` classifying the blast radius of deleting this credential (Tier 0 / 1 / 2). Owner-only; returns 404 when the credential does not exist or the requester is not the owner (no existence leak).
-- `DELETE /api/v1/credentials/{id}?force=` - Deletes the credential. Blocked with HTTP 409 at Tier 2 (PBP in a published bundle with active foreign installs) unless `force=true` is passed; Tier 0 and Tier 1 always proceed. The 409 body is the serialised `CredentialDeletionImpact` so the frontend can render affected bundles and offer force delete.
+- `DELETE /api/v1/credentials/{id}?force=` - Deletes the credential. Blocked with HTTP 409 at Tier 2 (PBP in a published bundle or catalog skill with active foreign installs) unless `force=true` is passed; Tier 0 and Tier 1 always proceed. The 409 body is the serialised `CredentialDeletionImpact` so the frontend can render affected bundles and skills and offer force delete.
 - `GET /api/v1/credentials/{id}/bundles` - Lists bundles whose publisher install has this credential linked; each entry resolves `provided_by` via `_resolve_provided_by_for_usage()` (override map → consent-flag inference) so the frontend can split usages between the Sharing and Share-as-Template cards
 - All endpoints return `share_count`, `is_shared`, `owner_email`, `allow_template_sharing`, `template_private_fields` in CredentialPublic response via `_credential_to_public()` helper
 

@@ -682,8 +682,9 @@ class CredentialProvisioner:
     ) -> _SlotDecision:
         """The skill decision tree for one spec. Reads only.
 
-        1. The agent already links the publisher credential or a credential
-           of this type carrying the slot → ``already_linked``.
+        1. The agent already links a credential of this type carrying the
+           slot → ``already_linked``; prefer a filled credential when more
+           than one matches, as the runtime slot lookup does.
         2. ``publisher`` spec with a usable publisher credential →
            ``linked_publisher``; otherwise remember the failure.
         3. The installer owns, or has a share on, a credential carrying the
@@ -693,11 +694,8 @@ class CredentialProvisioner:
            placeholder (``publisher_unavailable`` after a publisher failure).
         """
         slot = spec_slot(parsed)
-        for credential in linked:
-            if (
-                parsed.publisher_credential_id is not None
-                and credential.id == parsed.publisher_credential_id
-            ) or (credential.type == cred_type and credential.service_uri == slot):
+        for credential in sorted(linked, key=lambda item: item.is_placeholder):
+            if credential.type == cred_type and credential.service_uri == slot:
                 return _SlotDecision("already_linked", credential)
 
         publisher_failed = False
@@ -720,6 +718,14 @@ class CredentialProvisioner:
                     publisher=publisher,
                     log=log,
                 )
+            # A frozen publisher id is not a runtime slot alias. The payload
+            # carries the credential's current type and service_uri, so a
+            # publisher who changes either can no longer provide this slot.
+            # Keep this check skill-only: bundle resolution is unchanged.
+            if publisher_cred is not None and (
+                publisher_cred.type != cred_type or publisher_cred.service_uri != slot
+            ):
+                publisher_cred = None
             if publisher_cred is not None:
                 return _SlotDecision("linked_publisher", publisher_cred)
             publisher_failed = True

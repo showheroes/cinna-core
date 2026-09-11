@@ -81,7 +81,8 @@ which encrypts `credential_data` with `encrypt_field`. Four provenances feed it:
   `source="skill_install"`, and **no slot ever fails the install**. The route then syncs credentials
   before the plugin sync, because plugin sync does not carry them. Uninstall reverses only what it
   created: `release_skill_slots` unlinks installer-owned placeholders for slots no other catalog
-  skill on the agent still declares, and deletes one nothing links any more. See
+  skill on the agent still declares, except credentials its bundle may still require,
+  and deletes one nothing links any more. See
   [Agent Skills](../agents/agent_skills/agent_skills.md).
 
 `CredentialsService.classify_credential_category` is the single source of truth that turns

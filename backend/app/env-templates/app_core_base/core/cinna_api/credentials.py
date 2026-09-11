@@ -194,7 +194,7 @@ class _Credentials:
         try:
             if not _CREDENTIALS_PATH.is_file():
                 return []
-            with open(_CREDENTIALS_PATH, "r", encoding="utf-8") as f:
+            with open(_CREDENTIALS_PATH, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list):
                 return data
@@ -238,8 +238,10 @@ class _Credentials:
 
     def by_slot(self, slot: str) -> dict | None:
         """
-        Return the first real credential whose ``service_uri`` equals ``slot``,
-        or None. Synthetic entries never match. Reads the file fresh.
+        Return a real credential whose ``service_uri`` equals ``slot``, or
+        None. Prefer a filled credential over any remaining placeholder, so
+        linking a replacement makes the slot usable immediately. Synthetic
+        entries never match. Reads the file fresh.
         """
         return self._find_slot(self._load(), slot)
 
@@ -290,12 +292,16 @@ class _Credentials:
 
     @staticmethod
     def _find_slot(entries: list[dict], slot: str) -> dict | None:
+        placeholder = None
         for cred in entries:
             if cred.get("type") in _SYNTHETIC_TYPES:
                 continue
             if cred.get("service_uri") == slot:
-                return cred
-        return None
+                if cred.get("is_placeholder") is not True:
+                    return cred
+                if placeholder is None:
+                    placeholder = cred
+        return placeholder
 
     @classmethod
     def _require_slot_in(cls, entries: list[dict], slot: str) -> dict:

@@ -87,6 +87,13 @@ Scripts read them through the container SDK rather than by hand:
 - `credentials.require_slot("<slot>")` → the entry, or a `CredentialMissing` whose message names the slot and the fix — a sentence the agent can relay to the user verbatim
 - `credentials.agent_api_session("<slot>")` → a `requests.Session` for an `agent_api` connection, pre-loaded with the bearer token and the caller-identity header
 
+When several linked credentials carry the same slot, the helpers prefer a filled
+entry over a placeholder, keeping file order among equally ready entries. If
+only placeholders match, `by_slot` returns one and `require_slot` reports that
+it needs configuring. Use distinct slots for different credential types; the
+general helpers look up the slot alone, and `agent_api_session` rejects a result
+whose type is not `agent_api`.
+
 Both keys sit outside `credential_data` on purpose, so the per-type whitelist and the README redaction — which act on `credential_data` alone — can never drop or mask them. The synthetic `current_user` / `owner_identity_token` entries carry neither key and never satisfy a slot. Using the SDK helpers requires an environment rebuilt since they shipped; a pre-feature container still receives both keys in the file, it simply has no helper to read them with.
 
 ### Email SMTP Credential Usage in Agent Scripts

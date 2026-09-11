@@ -235,9 +235,13 @@ erp = credentials.agent_api_session("erp-public-api")
 orders = erp.get(f"{erp.base_url}/orders").json()
 ```
 
-`agent_api_session(slot)` loads `credentials.json` fresh, finds the `agent_api` entry carrying that slot, and returns a `requests.Session` pre-loaded with `Authorization: Bearer <token>` **and** the `X-Cinna-Caller-Identity` header from the environment's `owner_identity` entry — so the producer still sees *which user* is calling and their live scopes. It exposes `.base_url` / `.spec_url`, refuses to send either header to any other origin, and drops them on a cross-origin redirect.
+`agent_api_session(slot)` loads `credentials.json` fresh, finds the `agent_api` entry carrying that slot, and returns a `requests.Session` pre-loaded with `Authorization: Bearer <token>` **and** the `X-Cinna-Caller-Identity` header from the environment's `owner_identity` entry — so the producer still sees *which user* is calling and their live scopes. It exposes `.base_url` / `.spec_url`. Its normal `get` / `post` / `request` methods suppress the session's credential headers for another origin, and redirects away from the producer drop both headers. Explicit per-request headers remain the caller's responsibility, and low-level `send(prepare_request(...))` bypasses the initial-request guard; use the normal request methods in skill scripts. Create a new session after a credential or identity refresh, because a session keeps the headers loaded when it was created.
 
 Two lower-level helpers sit beside it: `credentials.by_slot(slot)` returns the entry or `None`, and `credentials.require_slot(slot)` raises `CredentialMissing` — `not_linked` when nothing carries the slot, `not_configured` when a placeholder is linked but unfilled. `str(exc)` names the slot and the fix and is written to be relayed to the user verbatim, which is the whole point: a missing credential must never be a silent failure inside a container. **These helpers require an environment rebuild** (new SDK code in the env template); the underlying `service_uri` / `is_placeholder` keys reach even an old container, which simply has no helper to read them with.
+
+Slot lookup prefers a filled entry when a placeholder and a filled credential
+both carry the slot. Slots should identify one credential type:
+`agent_api_session` raises `ValueError` if the resolved entry is another type.
 
 ### Distributing a producer through a public skill
 
@@ -245,7 +249,7 @@ The slot is what makes a producer usable by people who have never met its owner.
 
 1. The producer's owner enables the Agent REST API, writes `policy.yaml`, and turns on caller identity + scopes.
 2. From a second agent, they **Connect Agent API** to the producer, stamp a `service_uri` (say `erp-public-api`) on the resulting connection credential, and turn sharing on.
-3. They author a skill whose `SKILL.md` declares `credentials: [{slot: erp-public-api, type: agent_api}]`, and publish it to the catalog with `visibility=public`.
+3. They author a skill whose `SKILL.md` declares slot `erp-public-api` with type `agent_api`, using the [credential block example](../agent_skills/agent_skills.md#credential-slots), and publish it to the catalog with `visibility=public`.
 4. Anyone who may see the package installs it into their own agent. The install shares the connection with them and links it, so the skill's scripts work immediately — `agent_api_session("erp-public-api")` just resolves.
 5. Every installer's container carries **its own** `owner_identity` entry, so the producer sees each caller as themselves and resolves their scopes live from `agent_api_access_grant`. One shared token, many distinct callers.
 

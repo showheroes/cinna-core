@@ -72,9 +72,9 @@ def test_api_token_stored_secret_map_includes_the_raw_token_field() -> None:
 def test_every_derived_secret_names_a_classified_stored_source() -> None:
     """D17: a computed secret is waived only when its stored source is stripped.
 
-    ``_DERIVED_SECRET_SOURCES`` says a field is computed at env-sync time and
-    never stored, so a template carries it only when it carries the stored
-    field behind it. That waiver is safe only while the source is itself
+    ``_DERIVED_SECRET_SOURCES`` names fields computed at env-sync time;
+    skill publish also strips any stored copies from its template. The
+    waiver is safe only while the source is itself
     classified as a secret of the same type — otherwise a computed secret
     would be waived on the strength of a field nothing protects.
     """

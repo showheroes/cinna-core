@@ -410,6 +410,11 @@ A skill declares its credentials in `SKILL.md` frontmatter
 `spec_slot(parsed)` (`credential_provisioner.py`) reads it as
 `parsed.service_uri or parsed.name`.
 
+Use a slot consistently for one service and credential type. Provisioning and
+status match `(type, slot)`, while the container's general `by_slot` and
+`require_slot` helpers look up the slot alone; `agent_api_session` rejects a
+resolved credential of another type.
+
 ### Publish — `SkillCredentialRequirements`
 
 | Member | Notes |
@@ -454,14 +459,15 @@ keys `_STORED_SECRET_FIELDS_BY_TYPE[type]` — `SENSITIVE_FIELDS` alone let an
 raw `api_token`. It **fails closed**: a type that is neither force-private nor
 classified by either map is treated as leaking.
 
-`_DERIVED_SECRET_SOURCES` is the other half of that rule: a secret the env sync
-*computes* and no stored `credential_data` carries (`api_token`'s
-`http_header_value`, derived from the stored `api_token`) cannot appear in a
-template on its own, so it leaks exactly when its source does. Without that
-waiver an `api_token` slot could never be a template at all — the private-field
-picker only offers stored fields, so the computed name could never be marked
-private. A unit test requires every derived field to name a source that is
-itself classified as a stored secret of that type.
+`_DERIVED_SECRET_SOURCES` is the other half of that rule: an env-computed secret
+(`api_token`'s `http_header_value`, derived from the stored `api_token`) is safe
+when its source is private. The API accepts arbitrary credential-data keys,
+however, so callers can also store a field with that derived name. Skill
+`build_specs` strips all derived secret fields from `template_data` before
+freezing it, even if one was explicitly stored. This keeps the ordinary
+token-private-only workflow valid without leaking a separately stored header.
+A unit test requires every derived field to name a source that is itself
+classified as a stored secret of that type.
 
 Bundle `_template_payload_for` has the same env-shaped/stored gap and is
 deliberately left unchanged.
@@ -481,13 +487,17 @@ reports rows without credentials at all — plus the agent's linked credentials.
 | `skill_provisioned_credential_ids()` | The readiness gate's exclusion: `slot_credential_ids()` **minus** the credentials the agent's bundle revision claims |
 | `specs_for_link` / `specs_except_link` | Uninstall's released/retained split, handed to `CredentialProvisioner.release_skill_slots` |
 
-**A slot is satisfied** when one of its candidates is owned by the agent owner
-and filled in, **or** is foreign, still `allow_sharing`, **and** shared with
-the agent owner. *A share row alone is not enough* — it is a defence against
+**A slot is satisfied** when one of its candidates is filled in and either
+owned by the agent owner, **or** foreign, still `allow_sharing`, **and** shared
+with the agent owner. Candidates must match the frozen type and slot: a
+publisher credential id alone is insufficient if its live `service_uri` or
+type changed. Install preview/provisioning likewise treats such a publisher
+credential as unavailable and tries the usual fallback paths.
+*A share row alone is not enough* — it is a defence against
 stale or manually-corrupted state. Both sharing-disable paths (`PUT
 /credentials/{id}` and `PATCH …/sharing`) delete shares **and** recipient links,
 so their normal result is `not_linked`. Otherwise `CredentialIssueReason` is
-`not_linked` (no candidate), `not_configured` (an owned placeholder) or
+`not_linked` (no candidate), `not_configured` (a placeholder) or
 `access_revoked`.
 
 **Why the readiness gate subtracts bundle-claimed ids.** An unfilled *skill*
@@ -937,8 +947,10 @@ transaction as the link (`CredentialProvisioner.provision` under
 either both rows exist or neither does. A per-slot problem only marks the report
 `degraded`; it never fails the install. The route then pushes credentials to the
 environments **before** the plugin sync, because plugin sync does not carry
-credentials — and only when `report.changed`, so an idempotent reinstall costs
-nothing. `install_preview` runs the same decision tree read-only.
+credentials — and only when `report.changed`. The provisioner is idempotent
+when slots already link; the catalog install endpoint itself rejects an
+already-installed package with `already_installed`. `install_preview` runs the
+same decision tree read-only.
 
 **Upgrade** — `upgrade_link` re-pins to `package.latest_revision_id`; idempotent.
 It provisions only `_credential_specs_added(previous, latest)` — specs whose
@@ -1301,6 +1313,36 @@ by `make sync-platform-knowledge`.
 
 ## Testing
 
+The credential requirements contract has focused regression coverage in addition
+to the skill discovery and catalog tests below:
+
+| File | Covers |
+|------|--------|
+| `backend/tests/unit/test_skill_manifest.py` | Credential block parsing, type/slot/description validation, limits, duplicates, and host/environment parser identity |
+| `backend/tests/unit/test_skill_credential_secret_fields_coverage.py` | Complete stored/derived secret-field classification and template fail-closed rules |
+| `backend/tests/unit/test_skill_credential_provision_readiness.py` | Placeholder reuse, privacy-redacted publisher previews, stale shares, and bounded projection queries |
+| `backend/tests/unit/test_cinna_api_credentials_slots.py` | Fresh slot reads, missing/unfilled remedies, caller identity, and request/redirect origin protection |
+| `backend/tests/api/agents/skill_credentials/agents_skill_credentials_publish_test.py` | Consent-derived publisher/template/user specs, immutable revisions, safe public fields, and producer identity |
+| `backend/tests/api/agents/skill_credentials/agents_skill_credentials_install_test.py` | Preview/provision parity, sharing, slot reuse, templates/placeholders, upgrades, uninstall, and revocation |
+| `backend/tests/api/agents/skill_credentials/agents_skill_credentials_gate_test.py` | Addons warnings, skill-only non-blocking readiness, bundle claims, and retained-placeholder copy |
+| `backend/tests/api/credentials/test_credential_service_uri_env_sync.py` | Type-independent slot and placeholder fields in environment payloads |
+| `backend/tests/api/credentials/test_credential_deletion_impact_skills.py` | Skill Tier 2 impact, including installs upgraded past the providing revision |
+| `backend/tests/api/credentials/test_credential_share_revocation.py` | Individual-share and both sharing-disable paths remove recipient links |
+| `frontend/tests/skillCredentials.test.mjs` | Install readiness/outcome copy and producer facts; run with `npm run test:skill-credentials` from `frontend/` |
+| `frontend/tests/skillInstallDialog.test.mjs` | Real catalog install dialog (S2): failed/unsupported/partial sync warnings, reused-placeholder setup and focus, Done/Escape/Credentials close paths, and clean success; run with `npm run test:skill-credentials:ui` from `frontend/` |
+
+The browser tests use `frontend/tests/fixtures/skillInstallHarness.tsx` to mount
+the production dialog with its providers in a loopback Vite server and run it
+in Playwright Chromium. All API calls are mocked; no running backend, login or
+persistent test data is required. They exercise component lifecycle and
+navigation separately from the helper tests, rather than claiming a live
+publish/install end-to-end run.
+
+The bundle and bundle-install suites remain the regression guard for the shared
+`CredentialProvisioner`. Run backend tests in Docker as documented in
+`backend/tests/README.md`; current audit results belong in the implementation
+plan, rather than being frozen as test counts here.
+
 | File | Covers |
 |------|--------|
 | `backend/tests/unit/test_skill_manifest.py` | Byte-identity of the two parser copies; every validation rule; warning precedence; `is_publishable`; issue round-trip and the bare-code legacy shape; caps (overflow, invalid entries charging nothing, re-application as a fixed point, merged == first-N); `tree_hash` stability; the secret predicate; every registered command being reserved; **a plain file at the skills root being skipped** |
@@ -1320,6 +1362,11 @@ by `make sync-platform-knowledge`.
 
 ## Rollout and Unverified Items
 
+- **Deployment concurrency:** the supported compose deployment runs one backend
+  worker (`docker-compose.yml`, `--workers 1`), also required by its in-memory MCP
+  sessions. Provisioning idempotency assumes that deployment model; there is no
+  owner/type/slot lock to serialize concurrent multiworker provisioning. Harden
+  that path before enabling multiple backend workers.
 - **Existing environments need a rebuild** — `/rebuild-env` in a session,
   `cinna agent rebuild-env <agent>` from the CLI, or the admin bulk rebuild.
   env-core ships in the per-environment `/app/core` copy, so a pre-feature

@@ -50,7 +50,7 @@ _APP_CORE_BASE = (
     Path(__file__).parents[2] / "app" / "env-templates" / "app_core_base"
 )
 
-import core.cinna_api  # noqa: E402  (import after sys.path setup above)
+import core.cinna_api  # noqa: E402, F401 (load the shadowed credentials submodule)
 
 credentials_module = sys.modules["core.cinna_api.credentials"]
 
@@ -104,6 +104,24 @@ class TestBySlot:
 
 
 class TestRequireSlot:
+
+    @pytest.mark.parametrize("filled_first", [False, True])
+    def test_filled_credential_wins_over_an_old_placeholder(
+        self, tmp_path, monkeypatch, filled_first
+    ):
+        placeholder = {
+            "id": "placeholder", "type": "api_token",
+            "service_uri": "billing", "is_placeholder": True,
+        }
+        filled = {
+            "id": "filled", "type": "api_token",
+            "service_uri": "billing", "is_placeholder": False,
+        }
+        entries = [filled, placeholder] if filled_first else [placeholder, filled]
+        _write_credentials(tmp_path, monkeypatch, entries)
+
+        assert credentials_module.credentials.by_slot("billing")["id"] == "filled"
+        assert credentials_module.credentials.require_slot("billing")["id"] == "filled"
 
     def test_not_linked_raises_with_the_exact_c7_message(self, tmp_path, monkeypatch):
         _write_credentials(tmp_path, monkeypatch, [])
@@ -174,6 +192,31 @@ class TestCredentialMissingPickling:
 
 class TestAgentApiSessionConstruction:
 
+    def test_new_accesses_observe_setup_refresh_and_revocation(self, tmp_path, monkeypatch):
+        entry = {
+            "id": "connection", "type": "agent_api", "service_uri": "erp",
+            "is_placeholder": True, "credential_data": {},
+        }
+        path = _write_credentials(tmp_path, monkeypatch, [entry])
+        with pytest.raises(credentials_module.CredentialMissing) as missing:
+            credentials_module.credentials.agent_api_session("erp")
+        assert missing.value.reason == "not_configured"
+
+        for token in ("original-token", "refreshed-token"):
+            entry.update(
+                is_placeholder=False,
+                credential_data={"base_url": "https://producer.example/api", "token": token},
+            )
+            path.write_text(json.dumps([entry]), encoding="utf-8")
+            session = credentials_module.credentials.agent_api_session("erp")
+            assert session.headers["Authorization"] == f"Bearer {token}"
+
+        path.write_text("[]", encoding="utf-8")
+        assert credentials_module.credentials.by_slot("erp") is None
+        with pytest.raises(credentials_module.CredentialMissing) as missing:
+            credentials_module.credentials.require_slot("erp")
+        assert missing.value.reason == "not_linked"
+
     def test_sets_bearer_and_identity_headers(self, tmp_path, monkeypatch):
         entries = [
             {
@@ -235,7 +278,7 @@ def _capture_sent_requests(monkeypatch) -> list:
     """Patch ``requests.Session.send`` so no network call is ever made."""
     captured: list = []
 
-    def _fake_send(self, request, **kwargs):
+    def _fake_send(_self, request, **_kwargs):
         captured.append(request)
         response = requests.Response()
         response.status_code = 200

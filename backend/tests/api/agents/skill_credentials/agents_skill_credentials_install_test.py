@@ -35,6 +35,9 @@ Scenarios (plan §8.9):
      by two installed skills survives until the last one is gone.
   10. Guards: preview on another user's agent, an invisible package, and an
       unknown revision number are all 404.
+  11. Publisher slot drift warns existing consumers and creates a correctly
+      slotted placeholder for new installs; a frozen id is not a runtime alias.
+  12. Directly shared placeholders warn until their owner fills them in.
 
 Publish-time resolution matrix (owned/shareable/template/not-owned) is
 covered in ``agents_skill_credentials_publish_test.py``. The gate's D1
@@ -50,6 +53,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
+from tests.stubs.environment_adapter_stub import EnvironmentTestAdapter
 from tests.utils.addons import addons_by_name, refresh_agent_addons
 from tests.utils.credential import (
     create_random_credential,
@@ -63,7 +67,6 @@ from tests.utils.credential import (
     unlink_credential_from_agent,
     update_credential,
 )
-from tests.stubs.environment_adapter_stub import EnvironmentTestAdapter
 from tests.utils.skill_catalog import (
     get_skill_install_preview,
     get_skill_package,
@@ -237,6 +240,92 @@ def test_publisher_provided_credential_end_to_end(
 
 
 # ---------------------------------------------------------------------------
+# Scenarios 11 / 12: live slot readiness after publish and sharing
+# ---------------------------------------------------------------------------
+
+
+def test_publisher_slot_change_warns_and_degrades_new_installs(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    patch_environment_adapter,
+) -> None:
+    """Frozen publisher ids cannot satisfy a slot the live credential dropped."""
+    _, pub_headers = make_developer(client, superuser_token_headers)
+    pub_agent, pub_env = make_agent_with_env(client, pub_headers, "SlotDrift-Publisher")
+    credential = create_random_credential(client, pub_headers, credential_type="api_token")
+    update_credential(
+        client, pub_headers, credential["id"], service_uri="frozen-slot", allow_sharing=True,
+    )
+    link_credential_to_agent(client, pub_headers, pub_agent, credential["id"])
+    write_skill_with_credentials(
+        pub_env, "slot-drift", [{"slot": "frozen-slot", "type": "api_token"}],
+    )
+    revision = publish_skill(client, pub_headers, pub_agent, "slot-drift", visibility="public")
+    _, con_headers = make_developer(client, superuser_token_headers)
+    con_agent, _ = make_agent_with_env(client, con_headers, "SlotDrift-Existing")
+    new_agent, _ = make_agent_with_env(client, con_headers, "SlotDrift-New")
+    adapter = _install_adapter(patch_environment_adapter)
+    install_skill(client, con_headers, con_agent, revision["package_id"])
+
+    update_credential(client, pub_headers, credential["id"], service_uri="different-slot")
+    row = _addon_row_for_skill(client, con_headers, con_agent, adapter, "slot-drift")
+    assert row["credential_issues"] == [
+        {"slot": "frozen-slot", "type": "api_token", "reason": "not_linked"}
+    ]
+    assert row["status"] == "warning"
+    assert _setup_status(client, con_headers, con_agent)["status"] == "ready"
+
+    # Neither the existing link nor the existing share can bring the drifted
+    # publisher credential back as a working frozen slot.
+    for agent_id in (con_agent, new_agent):
+        preview = get_skill_install_preview(client, con_headers, agent_id, revision["package_id"])
+        assert preview["credentials"][0]["outcome"] == "publisher_unavailable"
+        assert preview["credentials"][0]["needs_setup"] is True
+    installed = install_skill(client, con_headers, new_agent, revision["package_id"])
+    provision = installed["credential_provisioning"][0]
+    assert provision["outcome"] == "publisher_unavailable"
+    assert provision["credential_id"] != credential["id"]
+    materialized = get_credential(client, con_headers, provision["credential_id"])
+    assert materialized["service_uri"] == "frozen-slot"
+    assert materialized["is_placeholder"] is True
+
+
+def test_shared_placeholder_keeps_addon_warning_until_owner_fills_it(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    patch_environment_adapter,
+) -> None:
+    """A share grants access; it does not fill a placeholder for SDK consumers."""
+    _, owner_headers = make_developer(client, superuser_token_headers)
+    owner_agent, owner_env = make_agent_with_env(client, owner_headers, "SharedEmpty-Owner")
+    write_skill_with_credentials(
+        owner_env, "shared-empty", [{"slot": "shared-empty-slot", "type": "api_token"}],
+    )
+    revision = publish_skill(client, owner_headers, owner_agent, "shared-empty", visibility="public")
+    adapter = _install_adapter(patch_environment_adapter)
+    owner_install = install_skill(client, owner_headers, owner_agent, revision["package_id"])
+    placeholder_id = owner_install["credential_provisioning"][0]["credential_id"]
+    update_credential(client, owner_headers, placeholder_id, allow_sharing=True)
+    consumer, con_headers = make_developer(client, superuser_token_headers)
+    share_credential_via_api(client, owner_headers, placeholder_id, consumer["email"])
+    con_agent, _ = make_agent_with_env(client, con_headers, "SharedEmpty-Consumer")
+    installed = install_skill(client, con_headers, con_agent, revision["package_id"])
+    assert installed["credential_provisioning"][0]["needs_setup"] is True
+    row = _addon_row_for_skill(client, con_headers, con_agent, adapter, "shared-empty")
+    assert row["status"] == "warning"
+    assert row["credential_issues"] == [
+        {"slot": "shared-empty-slot", "type": "api_token", "reason": "not_configured"}
+    ]
+    update_credential(
+        client, owner_headers, placeholder_id,
+        credential_data={"api_token_type": "bearer", "api_token": "filled-secret"},
+    )
+    row = _addon_row_for_skill(client, con_headers, con_agent, adapter, "shared-empty")
+    assert row["status"] == "ok"
+    assert row["credential_issues"] == []
+
+
+# ---------------------------------------------------------------------------
 # Scenario 2: installer is the publisher -- no share row
 # ---------------------------------------------------------------------------
 
@@ -393,6 +482,16 @@ def test_user_provided_no_match_placeholder_then_fill(
     reused = install_skill(client, b_headers, b_agent_2, other_package)
     assert reused["credential_provisioning"][0]["outcome"] == "already_linked"
     assert reused["credential_provisioning"][0]["needs_setup"] is True
+
+    # A filled replacement may coexist with the placeholder. Preview must
+    # agree with Addons and the runtime: the filled slot makes this agent ready.
+    replacement = create_random_credential(client, b_headers, credential_type="api_token")
+    update_credential(client, b_headers, replacement["id"], service_uri="slot-empty")
+    link_credential_to_agent(client, b_headers, b_agent_2, replacement["id"])
+    preview = get_skill_install_preview(client, b_headers, b_agent_2, other_package)
+    assert preview["credentials"][0]["outcome"] == "already_linked"
+    assert preview["credentials"][0]["credential_id"] == replacement["id"]
+    assert preview["credentials"][0]["needs_setup"] is False
 
     # Fill the placeholder -> the row becomes ok.
     update_credential(

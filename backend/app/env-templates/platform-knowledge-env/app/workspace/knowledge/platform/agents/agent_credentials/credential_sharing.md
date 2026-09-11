@@ -149,9 +149,9 @@ Deleting a service credential now goes through a graduated blast-radius check. B
 
 | Tier | Condition | Outcome |
 |------|-----------|---------|
-| **0** (self-only) | Credential linked only to owner's own agents; no `CredentialShare` rows; not PBP in a published bundle with foreign installs | Delete proceeds. UI lists affected own agents. |
-| **1** (direct shares) | At least one `CredentialShare` exists, but the credential is not PBP in a published bundle with active foreign installs | Delete proceeds with a warning: "N users will lose access immediately." |
-| **2** (PBP in a published bundle or catalog skill, active installs) | Credential is publisher-provided in a published bundle AND has at least one active foreign install, **or** publisher-provided in one of the owner's published catalog skills AND at least one foreign agent links it through an install of such a revision | Non-forced `DELETE` returns **HTTP 409** with the structured `CredentialDeletionImpact` payload. The owner can pass `?force=true` to override. The UI shows the affected bundles, the install count, and a "Force delete & break installs" button. On force-delete the affected installs degrade to `publisher_broken` state at runtime (the `InstallReadinessGate` detects the missing PBP credential). |
+| **0** (self-only) | No `CredentialShare` rows and no Tier 2 impact | Delete proceeds. UI lists affected own agents. |
+| **1** (direct shares) | At least one `CredentialShare` exists and no Tier 2 impact | Delete proceeds with a warning: "N users will lose access immediately." |
+| **2** (PBP in a published bundle or catalog skill, active installs) | Credential is publisher-provided in a published bundle AND has at least one active foreign install, **or** publisher-provided in one of the owner's published catalog skills AND at least one foreign agent links it and holds an install of that package | Non-forced `DELETE` returns **HTTP 409** with the structured `CredentialDeletionImpact` payload. The owner can pass `?force=true` to override. The UI shows affected bundles, skills and install counts, and a "Force delete & break installs" button. On force-delete, bundle requirements can become `publisher_broken` in `InstallReadinessGate`; a still-declared skill slot becomes an Addons `credential_missing` warning and does not by itself block the agent. |
 
 Important scoping: `active_install_count` in the impact payload is restricted to installs of the PBP bundle(s). Direct-share recipients who have linked the same `Credential` row to their own agents are counted in `direct_share_count` (Tier 1), not `active_install_count`, so the two tiers cannot over-count each other.
 
@@ -180,7 +180,7 @@ AI credentials (LLM provider keys) follow the same 409 / force pattern but have 
 - **Recipient (template share)** - Owns their own credential row pre-seeded with non-private values; can fill in their private fields and modify their copy; publisher's actual private values are never exposed
 - Credential values (`encrypted_data`) are never exposed to share recipients in either mode
 - Revoking a direct share immediately removes the recipient's access, unlinks the credential from their agents and re-syncs those environments, so the value leaves their containers too; template materialised rows are independent copies and are unaffected by the publisher revoking template sharing after install
-- A recipient whose share is restored must re-link the credential to their agents (a skill or bundle reinstall / upgrade does it for them) — the link is not remembered across a revocation
+- A recipient whose share is restored must re-link the credential on their agents' Credentials tab — the link is not remembered across a revocation. For catalog skills, uninstalling and installing again also runs provisioning; installing an already-installed package is refused, and upgrading does not repair an unchanged slot because it provisions only newly added slots.
 
 ### Role Gating
 

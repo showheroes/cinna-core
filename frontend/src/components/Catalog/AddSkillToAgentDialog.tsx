@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { ChevronDown, ChevronRight, MessageCircle, Wrench } from "lucide-react"
 import { useMemo, useState } from "react"
 
-import type { SkillCredentialProvisionPublic } from "@/client"
+import type { PluginSyncResponse } from "@/client"
 import { AgentsService, SkillsService } from "@/client"
 import { AgentSelectorList } from "@/components/Common/AgentSelectorDialog"
 import { QueryErrorAlert } from "@/components/Common/QueryErrorAlert"
@@ -29,6 +29,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import useCustomToast from "@/hooks/useCustomToast"
 import { invalidateAddons } from "@/utils/addons"
+import {
+  hasPluginSyncIssues,
+  pluginInstallSyncWarning,
+} from "@/utils/pluginSync"
 import { skillRevisionLabel } from "@/utils/skillCatalog"
 import { countSlotsNeedingSetup } from "@/utils/skillCredentials"
 import { SkillCatalogErrorAlert } from "./SkillCatalogErrorAlert"
@@ -74,7 +78,7 @@ export function AddSkillToAgentDialog({
   onOpenChange,
 }: AddSkillToAgentDialogProps) {
   const queryClient = useQueryClient()
-  const { showSuccessToast } = useCustomToast()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
 
   const [agentId, setAgentId] = useState("")
   const [conversationMode, setConversationMode] = useState(true)
@@ -82,9 +86,9 @@ export function AddSkillToAgentDialog({
   const [revisionNumber, setRevisionNumber] = useState<string>("latest")
   const [advancedOpen, setAdvancedOpen] = useState(false)
   // The install report, held only when some slot still needs the user.
-  const [setupSlots, setSetupSlots] = useState<
-    SkillCredentialProvisionPublic[] | null
-  >(null)
+  const [setupResult, setSetupResult] = useState<PluginSyncResponse | null>(
+    null,
+  )
 
   const {
     data: agentsData,
@@ -151,12 +155,16 @@ export function AddSkillToAgentDialog({
       })
       if (countSlotsNeedingSetup(provisioning) > 0) {
         // The state that still needs action stays on screen; no toast.
-        setSetupSlots(provisioning)
+        setSetupResult(result)
         return
       }
-      showSuccessToast(
-        `Added ${packageName} to ${selectedAgent?.name ?? "the agent"}`,
-      )
+      if (hasPluginSyncIssues(result)) {
+        showErrorToast(pluginInstallSyncWarning(packageName))
+      } else {
+        showSuccessToast(
+          `Added ${packageName} to ${selectedAgent?.name || "the agent"}`,
+        )
+      }
       onOpenChange(false)
     },
     // No `onError`: the refusal is coded and belongs in the dialog, where the
@@ -167,22 +175,34 @@ export function AddSkillToAgentDialog({
   const canSubmit =
     !!agentId && (conversationMode || buildingMode) && !isPending
 
+  const finishSetup = () => {
+    onOpenChange(false)
+    if (setupResult && hasPluginSyncIssues(setupResult)) {
+      showErrorToast(pluginInstallSyncWarning(packageName))
+    }
+  }
+
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
         // Escape and outside-click must not close a dialog mid-request.
-        if (!isPending) onOpenChange(next)
+        if (isPending) return
+        if (!next && setupResult) {
+          finishSetup()
+          return
+        }
+        onOpenChange(next)
       }}
     >
       <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden sm:max-w-md [&>*]:min-w-0">
-        {setupSlots ? (
+        {setupResult ? (
           <SkillInstallSetupPanel
             skillName={packageName}
             agentId={agentId}
-            items={setupSlots}
-            onClose={() => onOpenChange(false)}
-            onOpenCredentials={() => onOpenChange(false)}
+            items={setupResult.credential_provisioning ?? []}
+            onClose={finishSetup}
+            onOpenCredentials={finishSetup}
           />
         ) : (
           <>

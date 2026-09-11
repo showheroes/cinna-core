@@ -161,8 +161,8 @@ an empty placeholder — and the row reports whichever slots are not usable yet 
 
 | `reason` | What it means | What the user does |
 |----------|---------------|--------------------|
-| `not_linked` | No credential carrying that slot is linked to the agent | Link or create one on the Credentials tab |
-| `not_configured` | A placeholder is linked but nobody filled it in | Open it and fill it in |
+| `not_linked` | No credential of the declared type carrying that slot is linked to the agent; a publisher's renamed slot also stops matching | Link or create one on the Credentials tab |
+| `not_configured` | A placeholder is linked but nobody filled it in | Fill in an owned credential; for a shared placeholder, ask its owner to complete it or link your own configured credential for the slot |
 | `access_revoked` | A linked foreign credential has no usable share (a defensive stale-state result) | Provide your own, or ask the publisher |
 
 **It is a warning, not an error, and it never blocks the agent.** The skill still
