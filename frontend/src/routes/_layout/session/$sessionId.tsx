@@ -634,6 +634,12 @@ function ChatInterface() {
                     A2A
                   </span>
                 )}
+                {session.integration_type === "acp" && (
+                  <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                    <Plug className="h-2.5 w-2.5" />
+                    ACP
+                  </span>
+                )}
                 {session.integration_type === "identity_mcp" && (
                   <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded text-[10px] font-medium bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">
                     <UserCircle className="h-2.5 w-2.5" />

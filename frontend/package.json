@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "generate-client": "openapi-ts",
     "test:skill-credentials": "node --experimental-strip-types --test tests/skillCredentials.test.mjs",
-    "test:skill-credentials:ui": "node --test tests/skillInstallDialog.test.mjs"
+    "test:skill-credentials:ui": "node --test tests/skillInstallDialog.test.mjs",
+    "test:acp:ui": "node --test tests/acpConnectors.test.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

@@ -26,6 +26,7 @@ import { WebappShareCard } from "./WebappShareCard"
 import { LocalDevCard } from "./LocalDevCard"
 import { GitVersioningCard } from "./GitVersioningCard"
 import { AgentWebhooksCard } from "./Webhooks/AgentWebhooksCard"
+import { AcpConnectorsCard } from "./Acp/AcpConnectorsCard"
 
 interface AgentIntegrationsTabProps {
   agent: AgentPublic
@@ -95,7 +96,7 @@ export function AgentIntegrationsTab({ agent }: AgentIntegrationsTabProps) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         {/* A2A Integration Card */}
         <Card>
           <CardHeader>
@@ -175,6 +176,8 @@ export function AgentIntegrationsTab({ agent }: AgentIntegrationsTabProps) {
 
         {/* MCP Connectors Card */}
         <McpConnectorsCard agentId={agent.id} agentName={agent.name} />
+
+        {isOwner && <AcpConnectorsCard key={agent.id} agentId={agent.id} />}
 
         {/* Webapp Share Links Card */}
         <WebappShareCard agentId={agent.id} webappEnabled={agent.webapp_enabled ?? false} />
