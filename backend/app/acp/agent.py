@@ -480,6 +480,9 @@ class CinnaACPAgent:
                 )
             except RequestError as exc:
                 error = exc
+            except Exception:
+                logger.exception("ACP authorization watchdog failed for %s", session_id)
+                error = RequestError.internal_error()
             self.stop_errors[session_id] = error
             await self.interrupt(session_id)
             return
