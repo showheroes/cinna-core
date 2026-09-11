@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { useAgentTabLinkClick } from "@/hooks/useAgentTabLinkClick"
 import { slotOutcomeSummary } from "@/utils/skillCredentials"
 import { SkillProvisionRow } from "./SkillInstallCredentialsSection"
 
@@ -50,8 +49,6 @@ export function SkillInstallSetupPanel({
   onOpenCredentials,
 }: SkillInstallSetupPanelProps) {
   const credentialsLinkRef = useRef<HTMLAnchorElement>(null)
-  // The Add addon wizard opens this on the agent's own page.
-  const followCredentialsTab = useAgentTabLinkClick(agentId, "credentials")
 
   // The submit button that held focus unmounted with the form, so focus would
   // otherwise fall to the document; put it on the action this panel exists for.
@@ -88,11 +85,13 @@ export function SkillInstallSetupPanel({
             params={{ agentId }}
             hash="credentials"
             onClick={(event) => {
-              followCredentialsTab(event)
-              // Prevented means the tab switched in place, leaving the Addons
-              // tab behind. A modified click (new tab) leaves this page as it
-              // is, so it closes like Done and keeps that path's reporting.
-              if (event.defaultPrevented) {
+              if (
+                event.button === 0 &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                !event.altKey
+              ) {
                 onOpenCredentials()
               } else {
                 onClose()

@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   PROVIDED_BY_PUBLISHER_COPY,
+  producerAgentFact,
   publishOpenLabel,
   publishReasonSentence,
   slotProvidedBy,
@@ -76,6 +77,7 @@ function PublishCredentialRow({
       summary={providedBy.short}
       facts={[
         item.credential_name && `Matched ${item.credential_name}`,
+        producerAgentFact(item.producer_agent_name),
         item.reason && publishReasonSentence(item.reason, item.credential_name),
       ]}
       action={

@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import useCustomToast from "@/hooks/useCustomToast"
 import useRole from "@/hooks/useRole"
 import { handleError } from "@/utils"
@@ -36,7 +37,7 @@ import {
   bundleImpactSentence,
   skillImpactSentence,
 } from "@/utils/skillCredentials"
-import { CredentialBundleUsagesSheet } from "./CredentialBundleUsagesSheet"
+import { CredentialUsagesSheet } from "./CredentialUsagesSheet"
 import { BundleUsageRow, SkillUsageRow } from "./CredentialUsageRows"
 
 interface CredentialSharingProps {
@@ -49,6 +50,7 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
   const { isAgentUser } = useRole()
   const [isDisableDialogOpen, setIsDisableDialogOpen] = useState(false)
   const [allBundlesOpen, setAllBundlesOpen] = useState(false)
+  const [allSkillsOpen, setAllSkillsOpen] = useState(false)
   const [allowSharing, setAllowSharing] = useState(
     credential.allow_sharing ?? false,
   )
@@ -83,8 +85,9 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
   // Deletion-impact also covers the disable-sharing blast radius: when this
   // credential is publisher-provided (PBP) in published bundles or catalog
   // skills, disabling sharing revokes the publisher shares and breaks those
-  // installs — the same class of impact as a delete. Surfaced in the
-  // disable-sharing dialog.
+  // installs — the same class of impact as a delete. Read by the
+  // disable-sharing dialog, the delete dialog (same cache key) and the card's
+  // "Used in Skills" list.
   const {
     data: deletionImpact,
     isLoading: isImpactLoading,
@@ -95,9 +98,10 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
     queryKey: ["credential-deletion-impact", credential.id],
     queryFn: () =>
       CredentialsService.getCredentialDeletionImpact({ id: credential.id }),
-    // Only fetch when the disable-sharing dialog is open. Shares the cache
-    // key with the delete dialog so either entry point warms the same data.
-    enabled: isDisableDialogOpen,
+    // Un-gated, unlike the dialogs it also feeds: the skill usages are on the
+    // card body now, and the bundle usages beside them have always been an
+    // always-on read. Both dialogs therefore open with the data already warm
+    // rather than on a spinner.
   })
 
   // Invalidate every cache that carries this credential's share_count so the
@@ -185,6 +189,12 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
   // otherwise), one alert for both, and one list of those sources' rows.
   const pbpBundleUsages = deletionImpact?.bundle_pbp_usages ?? []
   const pbpSkillUsages = deletionImpact?.skill_pbp_usages ?? []
+  // Same two rules as the bundles list above: a failed background refetch
+  // keeps the rows it had, and the section hides only once it is known to be
+  // empty, so a failure never reads as "used in no skills".
+  const impactDown = isImpactError && !deletionImpact
+  const showSkillUsages =
+    isImpactLoading || impactDown || pbpSkillUsages.length > 0
   const activeBundleInstalls = deletionImpact?.active_install_count ?? 0
   const activeSkillInstalls = deletionImpact?.active_skill_install_count ?? 0
   const bundlesBreak = pbpBundleUsages.length > 0 && activeBundleInstalls > 0
@@ -228,29 +238,13 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
                 : "Enable to share this credential with other users."}
             </CardDescription>
           </div>
-          <label className="flex cursor-pointer select-none items-center ml-4 mt-1">
-            <div className="relative">
-              <input
-                type="checkbox"
-                checked={allowSharing}
-                onChange={(e) => handleToggleSharing(e.target.checked)}
-                disabled={toggleSharingMutation.isPending}
-                className="sr-only"
-              />
-              <div
-                className={`block h-6 w-11 rounded-full transition-colors ${
-                  allowSharing
-                    ? "bg-emerald-500"
-                    : "bg-gray-300 dark:bg-gray-600"
-                }`}
-              />
-              <div
-                className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                  allowSharing ? "translate-x-5" : ""
-                }`}
-              />
-            </div>
-          </label>
+          <Switch
+            checked={allowSharing}
+            onCheckedChange={handleToggleSharing}
+            disabled={toggleSharingMutation.isPending}
+            aria-label="Allow credential sharing"
+            className="ml-4 mt-1"
+          />
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -301,11 +295,56 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
           </div>
         )}
 
-        <CredentialBundleUsagesSheet
-          usages={sharedBundleUsages}
+        {showSkillUsages && (
+          <div className="space-y-2 pt-2">
+            <h4 className="text-sm font-medium">Used in Skills</h4>
+            <p className="text-xs text-muted-foreground">
+              Published skills that ship this credential as a fully shared
+              publisher credential.
+            </p>
+            {/* P5: capped at the house five, the rest in a Sheet. */}
+            <PreviewList
+              items={pbpSkillUsages}
+              getKey={(usage) => usage.package_uuid}
+              renderItem={(usage) => <SkillUsageRow usage={usage} />}
+              isLoading={isImpactLoading}
+              isError={impactDown}
+              error={impactError}
+              onRetry={() => refetchImpact()}
+              errorFallback="Couldn't load the skills that use this credential"
+              empty={null}
+              skeletonRows={1}
+              skeletonClassName="h-[44px] w-full rounded-md"
+              onShowAll={() => setAllSkillsOpen(true)}
+            />
+          </div>
+        )}
+
+        <CredentialUsagesSheet
+          title="Used in bundles"
+          description={`${sharedBundleUsages.length} bundle${
+            sharedBundleUsages.length === 1 ? "" : "s"
+          } that ship this credential as a fully shared publisher credential`}
           open={allBundlesOpen}
           onOpenChange={setAllBundlesOpen}
-        />
+        >
+          {sharedBundleUsages.map((usage) => (
+            <BundleUsageRow key={usage.bundle_uuid} usage={usage} />
+          ))}
+        </CredentialUsagesSheet>
+
+        <CredentialUsagesSheet
+          title="Used in skills"
+          description={`${pbpSkillUsages.length} published skill${
+            pbpSkillUsages.length === 1 ? "" : "s"
+          } that ship this credential as a fully shared publisher credential`}
+          open={allSkillsOpen}
+          onOpenChange={setAllSkillsOpen}
+        >
+          {pbpSkillUsages.map((usage) => (
+            <SkillUsageRow key={usage.package_uuid} usage={usage} />
+          ))}
+        </CredentialUsagesSheet>
 
         {/* Disable-sharing confirm. A `Dialog` rather than an `AlertDialog`
             because it carries fetched impact data (§2 Confirmation). */}
@@ -339,7 +378,7 @@ export function CredentialSharing({ credential }: CredentialSharingProps) {
                 <Skeleton className="h-[44px] w-full" />
                 <Skeleton className="h-[44px] w-full" />
               </div>
-            ) : isImpactError && !deletionImpact ? (
+            ) : impactDown ? (
               // Revoking access must not be blocked by a failed read, so the
               // confirm below stays enabled.
               <QueryErrorAlert

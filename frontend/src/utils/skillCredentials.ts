@@ -164,6 +164,21 @@ export function publishReasonSentence(
   )
 }
 
+/**
+ * "Backed by agent X" for an `agent_api` slot (brief §4) — the fact that says
+ * which agent the connection behind the slot talks to.
+ *
+ * The name is frozen into the revision at publish beside `producer_agent_id`,
+ * so it is the name as it read then: a later rename does not reach a published
+ * revision, and a revision published before the name was frozen sends none, in
+ * which case there is no line rather than a bare id.
+ */
+export function producerAgentFact(
+  producerAgentName: string | null | undefined,
+): string | null {
+  return producerAgentName ? `Backed by agent ${producerAgentName}` : null
+}
+
 /** Tooltip and `aria-label` of S1's open-the-credential control. */
 export function publishOpenLabel(
   reason: PublishReason | null | undefined,

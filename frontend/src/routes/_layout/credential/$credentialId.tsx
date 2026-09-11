@@ -289,7 +289,7 @@ function OwnedCredentialView({
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <CredentialSharing credential={credential} />
           <CredentialTemplateSharing credential={credential} />
         </div>
@@ -322,7 +322,7 @@ function OwnedCredentialView({
       <div className="space-y-6">
         <McpProviderConnectionView credential={credential} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <CredentialSharing credential={credential} />
         </div>
       </div>
@@ -333,7 +333,7 @@ function OwnedCredentialView({
     <div className="space-y-6">
       {/* Two-column layout for OAuth credentials */}
       {isOAuthCredential ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           {/* Left Card: Basic Information */}
           <Card>
             <CardHeader>
@@ -482,7 +482,7 @@ function OwnedCredentialView({
       )}
 
       {/* Sharing Section - Only for owned credentials */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <CredentialSharing credential={credential} />
         <CredentialTemplateSharing credential={credential} />
       </div>

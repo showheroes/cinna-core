@@ -1981,8 +1981,10 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         # The same block for catalog skills: the requester's packages whose
         # revisions freeze this credential as publisher-provided, and the
         # distinct foreign agents that link it through an install of one of
-        # those revisions. Scoped by revision for the same reason as above —
-        # a direct-share recipient linking the credential is not an install.
+        # those packages. Scoped by install for the same reason as above — a
+        # direct-share recipient linking the credential is not an install —
+        # but at package granularity, because an installer who upgraded past
+        # the providing revision keeps the link (see the helper's comment).
         from app.models.plugins.llm_plugin import AgentPluginLink, PluginSource
         from app.services.skills.skill_credential_requirements import (
             SkillCredentialRequirements,

@@ -239,6 +239,13 @@ immutable storage and appends a `SkillPackageRevision`.
   with the credential it matched and, when the answer is "installers bring
   their own", why — so the publisher can turn sharing on, or mark the secret
   fields private, and try again.
+- An `agent_api` slot also reads **"Backed by agent X"**, wherever the slot is
+  shown: in the Share dialog before publishing, and on the package card's
+  Credentials sheet for anyone browsing the catalogue. The producer's name is
+  frozen into the revision at publish alongside its id, so it is the name as it
+  read then — renaming the producer afterwards does not rewrite a published
+  revision, and a revision published before names were frozen simply shows no
+  line.
 - **A publish never freezes a secret.** A template is refused for any type whose
   secret field would survive into the revision, and an `agent_api` connection is
   never offered as a template at all (it has no user-fillable fields — a copy

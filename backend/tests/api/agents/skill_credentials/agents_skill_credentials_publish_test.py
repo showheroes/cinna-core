@@ -361,6 +361,9 @@ def test_agent_api_slot_records_producer_agent_id_and_never_resolves_template(
     shared_entry = _credential_by_slot(preview["credentials"], "producer-shared")
     assert shared_entry["provided_by"] == "publisher"
     assert shared_entry["producer_agent_id"] == producer_id
+    # The name travels with the id, so a reader can say "backed by agent X"
+    # without resolving it (§15 item 6).
+    assert shared_entry["producer_agent_name"] == "Producer-Agent"
 
     template_entry = _credential_by_slot(preview["credentials"], "producer-template")
     assert template_entry["provided_by"] == "user"
@@ -368,8 +371,20 @@ def test_agent_api_slot_records_producer_agent_id_and_never_resolves_template(
 
     revision = publish_skill(client, dev_headers, agent_id, "connector-skill")
     required = revision["required_credentials"]
-    assert _credential_by_slot(required, "producer-shared")["producer_agent_id"] == producer_id
+    shared_required = _credential_by_slot(required, "producer-shared")
+    assert shared_required["producer_agent_id"] == producer_id
+    assert shared_required["producer_agent_name"] == "Producer-Agent"
     assert _credential_by_slot(required, "producer-template")["provided_by"] == "user"
+
+    # Frozen with the rest of the spec: renaming the producer afterwards does
+    # not reach a published revision.
+    update_agent(client, dev_headers, producer_id, name="Producer-Agent-Renamed")
+    package = get_skill_package(client, dev_headers, revision["package_id"])
+    republished = package["revisions"][0]["required_credentials"]
+    assert (
+        _credential_by_slot(republished, "producer-shared")["producer_agent_name"]
+        == "Producer-Agent"
+    )
 
 
 # ---------------------------------------------------------------------------

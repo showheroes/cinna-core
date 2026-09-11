@@ -24,7 +24,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useAgentTabLinkClick } from "@/hooks/useAgentTabLinkClick"
 import useCustomToast from "@/hooks/useCustomToast"
 import {
   addonFormatLabel,
@@ -80,9 +79,6 @@ export function AddonDetailDialog({
 }: AddonDetailDialogProps) {
   const skills = addon.skills ?? []
   const credentialIssues = addon.credential_issues ?? []
-  // This dialog lives on the agent's own page, so a plain router push to
-  // `#credentials` would not switch the tab.
-  const followCredentialsTab = useAgentTabLinkClick(agentId, "credentials")
   const [openSkillKey, setOpenSkillKey] = useState<string | null>(null)
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -241,10 +237,7 @@ export function AddonDetailDialog({
                 to="/agent/$agentId"
                 params={{ agentId }}
                 hash="credentials"
-                onClick={(event) => {
-                  followCredentialsTab(event)
-                  onOpenChange(false)
-                }}
+                onClick={() => onOpenChange(false)}
               >
                 Open the agent's Credentials tab
               </Link>

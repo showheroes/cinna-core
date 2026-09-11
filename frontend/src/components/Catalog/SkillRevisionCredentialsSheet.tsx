@@ -7,7 +7,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { PROVIDED_BY_COPY, slotProvidedBy } from "@/utils/skillCredentials"
+import {
+  PROVIDED_BY_COPY,
+  producerAgentFact,
+  slotProvidedBy,
+} from "@/utils/skillCredentials"
 import { SkillCredentialSlotRow } from "./SkillCredentialSlotRow"
 
 interface SkillRevisionCredentialsSheetProps {
@@ -58,7 +62,10 @@ export function SkillRevisionCredentialsSheet({
                   summary={copy.short}
                   // The sentence adds something only for a template ("you add
                   // the secret"); for the other two it is the meta line again.
-                  facts={[providedBy === "template" && copy.sentence]}
+                  facts={[
+                    providedBy === "template" && copy.sentence,
+                    producerAgentFact(requirement.producer_agent_name),
+                  ]}
                 />
               )
             })}

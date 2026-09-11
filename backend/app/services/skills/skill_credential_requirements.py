@@ -129,6 +129,7 @@ class SkillCredentialResolution:
     credential: Credential | None
     reason: str | None
     producer_agent_id: uuid.UUID | None
+    producer_agent_name: str | None = None
 
 
 class SkillCredentialRequirements:
@@ -237,6 +238,13 @@ class SkillCredentialRequirements:
             if match is not None and credential_type == _AGENT_API_TYPE
             else None
         )
+        producer_agent_name = (
+            SkillCredentialRequirements._read_producer_agent_name(
+                session, producer_agent_id
+            )
+            if producer_agent_id is not None
+            else None
+        )
 
         # A credential's notes are exposed only when its owner consented to
         # provide the credential (``publisher`` / ``template``). Otherwise a
@@ -255,6 +263,7 @@ class SkillCredentialRequirements:
             credential=match,
             reason=reason,
             producer_agent_id=producer_agent_id,
+            producer_agent_name=producer_agent_name,
         )
 
     @staticmethod
@@ -346,6 +355,20 @@ class SkillCredentialRequirements:
             return None
 
     @staticmethod
+    def _read_producer_agent_name(
+        session: Session, producer_agent_id: uuid.UUID
+    ) -> str | None:
+        """The producer agent's display name, or ``None`` if it is gone.
+
+        Informational like the id it accompanies: no access check, because the
+        name of the agent a published skill talks to is already carried by the
+        slot itself (the slot *is* the connection's ``service_uri``).
+        """
+        return session.exec(
+            select(Agent.name).where(Agent.id == producer_agent_id)
+        ).first()
+
+    @staticmethod
     def build_specs(
         session: Session, resolutions: list[SkillCredentialResolution]
     ) -> list[dict]:
@@ -380,6 +403,8 @@ class SkillCredentialRequirements:
                 and resolution.producer_agent_id is not None
             ):
                 spec["producer_agent_id"] = str(resolution.producer_agent_id)
+                if resolution.producer_agent_name is not None:
+                    spec["producer_agent_name"] = resolution.producer_agent_name
             specs.append(spec)
         return specs
 
@@ -401,6 +426,7 @@ class SkillCredentialRequirements:
                     resolution.credential.name if resolution.credential else None
                 ),
                 producer_agent_id=resolution.producer_agent_id,
+                producer_agent_name=resolution.producer_agent_name,
                 reason=resolution.reason,
             )
             for resolution in resolutions
@@ -481,8 +507,9 @@ class SkillCredentialRequirements:
 
         A revision counts when one of its frozen specs is
         ``provided_by="publisher"`` with this ``publisher_credential_id``.
-        Returns the usages grouped by package plus the matching revision ids.
-        Two queries.
+        Returns the usages grouped by package plus **every** revision id of the
+        packages those revisions belong to — see the loop below for why the
+        second element is wider than the first. Two queries.
         """
         packages = session.exec(
             select(SkillPackage)
@@ -508,15 +535,28 @@ class SkillCredentialRequirements:
         ).all()
 
         revision_numbers: dict[uuid.UUID, list[int]] = {}
-        revision_ids: list[uuid.UUID] = []
+        revisions_by_package: dict[uuid.UUID, list[uuid.UUID]] = {}
         for revision_id, package_id, revision_number, raw_specs in revision_rows:
+            revisions_by_package.setdefault(package_id, []).append(revision_id)
             if any(
                 parsed.provided_by == "publisher"
                 and parsed.publisher_credential_id == credential_id
                 for parsed in SkillCredentialRequirements.parse_specs(raw_specs)
             ):
                 revision_numbers.setdefault(package_id, []).append(revision_number)
-                revision_ids.append(revision_id)
+
+        # An install of *any* revision of an affected package counts, not only
+        # of the revisions that still provide the credential. Upgrading re-pins
+        # the link and provisions the specs a revision *added*; it never
+        # releases one it dropped. So an installer who has moved on to a
+        # revision where the slot became user-provided still holds the share and
+        # the link, and deleting the credential still breaks them. Matching on
+        # the providing revisions alone lost exactly those installers.
+        revision_ids = [
+            revision_id
+            for package_id in revision_numbers
+            for revision_id in revisions_by_package[package_id]
+        ]
 
         usages = [
             CredentialSkillUsage(
@@ -548,6 +588,7 @@ class SkillCredentialRequirements:
                     provided_by=parsed.provided_by,
                     publisher_credential_id=parsed.publisher_credential_id,
                     producer_agent_id=parsed.producer_agent_id,
+                    producer_agent_name=parsed.producer_agent_name,
                 )
             )
         return requirements

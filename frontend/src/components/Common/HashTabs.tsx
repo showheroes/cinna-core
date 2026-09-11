@@ -1,4 +1,5 @@
-import { useState, useEffect, ReactNode } from "react"
+import { useLocation, useNavigate } from "@tanstack/react-router"
+import { useEffect, ReactNode } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export interface TabConfig {
@@ -24,34 +25,20 @@ interface HashTabsProps {
 }
 
 export function HashTabs({ tabs, defaultTab, onTabChange }: HashTabsProps) {
-  // Get initial tab from URL hash
-  const getInitialTab = () => {
-    const hash = window.location.hash.slice(1) // Remove the # character
-    const validTabs = tabs.map((tab) => tab.value)
-    return validTabs.includes(hash) ? hash : (defaultTab || tabs[0]?.value || "")
-  }
-
-  const [activeTab, setActiveTab] = useState(getInitialTab())
+  // Router state updates for both browser hash changes and in-app Links. The
+  // latter do not dispatch `hashchange`, so window event listeners leave a
+  // same-page link pointing at the old tab.
+  const hash = useLocation({ select: (location) => location.hash })
+  const navigate = useNavigate()
+  const validTabs = tabs.map((tab) => tab.value)
+  const activeTab = validTabs.includes(hash)
+    ? hash
+    : defaultTab || tabs[0]?.value || ""
 
   // Update hash when tab changes
   const handleTabChange = (value: string) => {
-    setActiveTab(value)
-    window.location.hash = value
+    void navigate({ hash: value })
   }
-
-  // Listen to hash changes (for browser back/forward)
-  useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.slice(1)
-      const validTabs = tabs.map((tab) => tab.value)
-      if (validTabs.includes(hash)) {
-        setActiveTab(hash)
-      }
-    }
-
-    window.addEventListener("hashchange", handleHashChange)
-    return () => window.removeEventListener("hashchange", handleHashChange)
-  }, [tabs])
 
   useEffect(() => {
     onTabChange?.(activeTab)

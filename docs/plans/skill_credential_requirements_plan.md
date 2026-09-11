@@ -1440,7 +1440,8 @@ accepted and supersede the spec text above where they differ._
   Impact sentences and the S6a rows appear only for a source with active installs; the 409 body seeds
   the impact cache; the tier 0/1 button is "Delete credential".
 - **S6c**: "Used in Bundles" is a `PreviewList` (cap 5, loading, error with Retry, hidden when loaded
-  and empty), with Show all opening `Credentials/CredentialBundleUsagesSheet.tsx`.
+  and empty), with Show all opening `Credentials/CredentialUsagesSheet.tsx` (generalised
+  2026-09-11 from `CredentialBundleUsagesSheet.tsx` when the skills list gained the same door).
 - **S5b is gated on `credential_issues.length > 0`**, not on `status_code`, because a link failure
   (`not_materialized`, `unverified`) outranks `credential_missing` while the slots are still unusable.
 - **Partial sync on the setup panel's link path (Add addon wizard)**: the panel has a separate
@@ -1698,19 +1699,19 @@ Also removed: `SkillSlotIndex.bundle_claimed_ids`, a property with no reader out
    - unknown spec types are skipped;
    - the upgrade route syncs credentials on every catalog upgrade, even with nothing added;
    - `active_skill_install_count` does not filter on `is_publisher_install`.
-6. **Small gaps:**
-   - deletion impact under-counts installers who upgraded from a publisher-provided revision to a user-provided one;
-   - `SkillSlotIndex.bundle_claimed_ids` has no reader outside the class;
-   - `producer_agent_id` arrives without an agent name, so "backed by agent X" is not rendered;
-   - skill usages appear only inside the Sharing card's dialogs, not on the card body.
+6. **Small gaps** (worked 2026-09-11 — see "Item 6" below):
+   - ~~deletion impact under-counts installers who upgraded from a publisher-provided revision to a user-provided one~~ — fixed;
+   - ~~`SkillSlotIndex.bundle_claimed_ids` has no reader outside the class~~ — not a gap: it is a constructor kwarg stored as `_bundle_claimed_ids` and read by `skill_provisioned_credential_ids`, which is the encapsulation working;
+   - ~~`producer_agent_id` arrives without an agent name, so "backed by agent X" is not rendered~~ — fixed;
+   - ~~skill usages appear only inside the Sharing card's dialogs, not on the card body~~ — fixed by un-gating the impact read (coordinator decision, below).
 7. **Secrets:**
    - a literal token typed into `api_token_template` is not detected (S8 only warns) — the one
      `api_token` leak D17 does **not** close, since that field is not a secret by name;
    - bundle publish still has the stored-vs-env template leak (§13), and only known secret field names are blocked, so extra keys in free-form `credential_data` are not;
    - skill revisions published from this tree before D16 cannot be scrubbed (I12), which only matters if something was published from it.
-8. **Deferred UI:**
-   - `HashTabs` should follow the router hash, after which `hooks/useAgentTabLinkClick.ts` can be deleted;
-   - `CredentialSharing` / `CredentialTemplateSharing` still have a hand-rolled switch and header (R11, R14a, R15), so A10 stays open for them.
+8. **Deferred UI — completed 2026-09-11:**
+   - ~~`HashTabs` should follow the router hash, after which `hooks/useAgentTabLinkClick.ts` can be deleted~~ — fixed: `HashTabs` derives its active tab from the router location and changes tabs through router navigation, so same-page `Link hash=` navigation works and the workaround hook is deleted;
+   - ~~`CredentialSharing` / `CredentialTemplateSharing` still have a hand-rolled switch and header (R11, R14a, R15), so A10 stays open for them~~ — fixed together: both now use the shared `Switch` primitive and its semantic state colours; all five credential-detail two-column grids use `items-start`, so a long Sharing card cannot stretch its neighbor.
 
 ### Inputs for the §10.2 docs sweep
 - **New API surface:**
@@ -1842,3 +1843,52 @@ Confirmed live and already known: the generic `PUT /credentials/{id}` turning `a
 leaves the shares in place (only `PATCH /credentials/{id}/sharing` deletes them) — the stale-share
 trap Phase 2 guarded around. Note that once the flag has been flipped by `PUT`, the `PATCH` path can
 no longer purge, because it only deletes shares when the flag was still true.
+
+### Item 6 — the small gaps, worked 2026-09-11
+
+**The deletion-impact under-count, fixed.** `active_skill_install_count` matched a foreign agent's
+catalog install against the revisions that *still* freeze the credential as publisher-provided. But
+`upgrade_link` provisions only the specs a revision **adds** (§8.4) and never releases one it dropped,
+so an installer who moved to a revision where the slot became `user` keeps both the share and the
+link — and still breaks when the credential is deleted. They fell out of the count, which took the
+Tier-2 block with them: the unforced `DELETE` returned 200.
+
+`publisher_usages_of_credential` now returns **every** revision id of the packages its usages name,
+not only the providing ones; the EXISTS is unchanged otherwise, so a direct-share recipient who
+linked the credential is still not an installer. The residual error changed direction: an installer
+of an affected package who holds the credential by direct share rather than through the install now
+counts. That is the safe direction — over-counting warns, under-counting deletes. `revision_numbers`
+on each usage still names only where the credential *is* publisher-provided, so the dialog's list is
+unchanged. Covered by scenario 3 in `test_credential_deletion_impact_skills.py`, which fails with the
+fix disabled.
+
+**"Backed by agent X", rendered.** The name is now frozen into the spec at publish beside
+`producer_agent_id` (`build_specs`, from `_read_producer_agent_name`), parsed back by
+`parse_credential_spec`, and carried on `SkillCredentialRequirementPublic` and
+`SkillPublishCredentialPreview` — the two payloads that already carried the id. Freezing rather than
+resolving at read time is what keeps a catalog listing at its current query count: `revision_to_public`
+is a pure projection with no session, and resolving per revision would have made it N+1. The cost is
+that a rename does not reach a published revision, which is the same immutability the rest of the spec
+has (I12), and an old revision sends no name — the FE then renders no line rather than a bare id.
+`utils/skillCredentials.ts` gained `producerAgentFact`, rendered as a row fact on S1 (Share skill) and
+S4b (the package card's Credentials sheet). Covered by the extended scenario 5 in
+`agents_skill_credentials_publish_test.py`, including the rename.
+
+**Not extended to the install dialogs.** S2/S3 rows are built from `SkillCredentialProvisionPublic`,
+which never carried `producer_agent_id` either — adding it means threading producer fields through
+`SlotProvision`, which the bundle install path shares. Out of the gap as recorded; worth doing only as
+its own decision.
+
+**Skill usages on the Sharing card body — done, by un-gating the impact read.** The choice was
+between un-gating `GET /credentials/{id}/deletion-impact` on every credential detail view and adding a
+skill-usages endpoint mirroring the bundle one; the coordinator chose un-gating (2026-09-11), so no
+API surface was added. `CredentialSharing` dropped `enabled: isDisableDialogOpen`; the body gained a
+"Used in Skills" `PreviewList` over `skill_pbp_usages`, following the bundles block beside it exactly
+— capped at five, hidden only once *known* to be empty, and keeping its rows through a failed
+background refetch, so a failure never reads as "used in no skills".
+
+Two knock-ons. Both dialogs that share the cache key now open with the data warm instead of on a
+skeleton, and `DeleteCredential` deliberately keeps its own `enabled: isOpen`: it renders once per row
+in the credentials list, where un-gating would be one request per row, while on the detail page it
+reads the warm entry anyway. `CredentialBundleUsagesSheet` became `CredentialUsagesSheet`, one shell
+taking title, description and row children, rather than a second near-identical file.

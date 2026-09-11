@@ -25,15 +25,19 @@ from fastapi.testclient import TestClient
 from app.core.config import settings
 from tests.utils.credential import (
     create_random_credential,
+    get_agent_credentials,
     link_credential_to_agent,
+    unlink_credential_from_agent,
     update_credential,
 )
 from tests.utils.skill_catalog import (
     install_skill,
+    list_agent_plugins,
     make_agent_with_env,
     make_developer,
     patched_skill_storage,
     publish_skill,
+    upgrade_agent_plugin,
     write_skill_with_credentials,
 )
 
@@ -160,3 +164,88 @@ def test_skill_pbp_credential_with_only_publishers_own_install_stays_below_tier2
 
     r = client.delete(f"{API}/credentials/{cred['id']}", headers=pub_headers)
     assert r.status_code == 200, r.text
+
+
+# ---------------------------------------------------------------------------
+# Scenario 3: an installer who upgraded past the providing revision still counts
+# ---------------------------------------------------------------------------
+
+
+def test_installer_who_upgraded_past_the_providing_revision_still_counts(
+    client: TestClient, superuser_token_headers: dict[str, str],
+) -> None:
+    """Upgrading never releases a slot a revision dropped (§8.4), so the
+    installer keeps the share and the link -- deleting the credential still
+    breaks them, and the count has to say so. Matching installs on the
+    providing revisions alone lost exactly these installers (§15 item 6)."""
+    pub, pub_headers = make_developer(client, superuser_token_headers)
+    pub_agent, pub_env = make_agent_with_env(client, pub_headers, "DelImpact-Upgraded-Pub")
+
+    cred = create_random_credential(client, pub_headers, credential_type="api_token")
+    update_credential(
+        client, pub_headers, cred["id"],
+        service_uri="del-impact-upgraded-slot", allow_sharing=True,
+    )
+    link_credential_to_agent(client, pub_headers, pub_agent, cred["id"])
+
+    write_skill_with_credentials(
+        pub_env, "del-impact-upgraded-skill",
+        [{"slot": "del-impact-upgraded-slot", "type": "api_token"}],
+    )
+    revision1 = publish_skill(
+        client, pub_headers, pub_agent, "del-impact-upgraded-skill", visibility="public",
+    )
+    package_uuid = revision1["package_id"]
+    assert revision1["required_credentials"][0]["provided_by"] == "publisher"
+
+    con, con_headers = make_developer(client, superuser_token_headers)
+    con_agent, _ = make_agent_with_env(client, con_headers, "DelImpact-Upgraded-Con")
+    install_skill(client, con_headers, con_agent, package_uuid)
+    link_id = list_agent_plugins(client, con_headers, con_agent)[0]["id"]
+
+    # ── Revision 2 no longer provides the credential ──────────────────────
+    # Unlinking it from the publisher's own agent (rather than flipping
+    # sharing off) is what keeps the consumer's share alive: revoking sharing
+    # now deletes the recipient's links, which would remove the very exposure
+    # this scenario is about.
+    unlink_credential_from_agent(client, pub_headers, pub_agent, cred["id"])
+    write_skill_with_credentials(
+        pub_env, "del-impact-upgraded-skill",
+        [{"slot": "del-impact-upgraded-slot", "type": "api_token"}],
+        body="v2 body",
+    )
+    revision2 = publish_skill(
+        client, pub_headers, pub_agent, "del-impact-upgraded-skill", version="2.0.0",
+    )
+    assert revision2["required_credentials"][0]["provided_by"] == "user", (
+        "revision 2 must drop the publisher-provided resolution for the scenario to bite"
+    )
+
+    upgrade_agent_plugin(client, con_headers, con_agent, link_id)
+    assert (
+        list_agent_plugins(client, con_headers, con_agent)[0][
+            "skill_package_revision_id"
+        ]
+        == revision2["id"]
+    )
+
+    # The consumer still holds the publisher's credential -- the exposure is real.
+    con_credentials = get_agent_credentials(client, con_headers, con_agent)["data"]
+    assert cred["id"] in {c["id"] for c in con_credentials}, (
+        "upgrade must not have released the slot; the scenario depends on it"
+    )
+
+    # ── The count has to see them ─────────────────────────────────────────
+    impact = _deletion_impact(client, pub_headers, cred["id"])
+    assert impact["active_skill_install_count"] == 1, (
+        "an installer pinned to a later, user-provided revision still uses the credential"
+    )
+    assert impact["tier"] == 2
+    usage = impact["skill_pbp_usages"][0]
+    assert usage["package_uuid"] == package_uuid
+    assert usage["revision_numbers"] == [revision1["revision_number"]], (
+        "revision_numbers still names only where the credential IS publisher-provided"
+    )
+
+    r = client.delete(f"{API}/credentials/{cred['id']}", headers=pub_headers)
+    assert r.status_code == 409, r.text

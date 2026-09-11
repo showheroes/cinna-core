@@ -42,6 +42,11 @@ class ParsedCredentialSpec:
     #: skill publish (never by bundle publish), so bundle revisions and old
     #: revision JSON carry no key → ``None``.
     producer_agent_id: uuid.UUID | None = None
+    #: Its display name as it read at publish, so a reader can say "backed by
+    #: agent X" without resolving the id (which a catalog listing would have to
+    #: do once per revision). Frozen with the rest of the spec: a later rename
+    #: does not reach a published revision, and neither does a deletion.
+    producer_agent_name: str | None = None
 
     @property
     def non_private_template_data(self) -> dict:
@@ -72,7 +77,8 @@ def build_spec(
     ``allow_template_sharing``, ``description``, ``provided_by``,
     ``publisher_credential_id``, ``service_uri``, then ``template_data`` and
     ``template_private_fields`` only for ``provided_by="template"``. Callers
-    that add a key (skill publish adds ``producer_agent_id``) append it after.
+    that add a key (skill publish adds ``producer_agent_id`` and
+    ``producer_agent_name``) append it after.
 
     ``credential`` is the publisher's credential the spec was resolved from, or
     ``None`` when there is none to point at (a ``user`` spec). The consent flags
@@ -170,6 +176,11 @@ def parse_credential_spec(spec: object) -> ParsedCredentialSpec | None:
     service_uri_raw = spec.get("service_uri")
     service_uri = service_uri_raw if isinstance(service_uri_raw, str) else None
 
+    producer_name_raw = spec.get("producer_agent_name")
+    producer_agent_name = (
+        producer_name_raw if isinstance(producer_name_raw, str) else None
+    )
+
     return ParsedCredentialSpec(
         name=name,
         type=type_str,
@@ -180,4 +191,5 @@ def parse_credential_spec(spec: object) -> ParsedCredentialSpec | None:
         template_private_fields=template_private_fields,
         service_uri=service_uri,
         producer_agent_id=_optional_uuid(spec.get("producer_agent_id")),
+        producer_agent_name=producer_agent_name,
     )

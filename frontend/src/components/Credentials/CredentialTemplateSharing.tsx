@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import useCustomToast from "@/hooks/useCustomToast"
 import useRole from "@/hooks/useRole"
 import { handleError } from "@/utils"
@@ -286,27 +287,13 @@ export function CredentialTemplateSharing({
                 : "Enable to publish this credential as a template on bundles that require it."}
             </CardDescription>
           </div>
-          <label className="flex cursor-pointer select-none items-center ml-4 mt-1">
-            <div className="relative">
-              <input
-                type="checkbox"
-                checked={allowTemplate}
-                onChange={(e) => handleToggle(e.target.checked)}
-                disabled={updateMutation.isPending}
-                className="sr-only"
-              />
-              <div
-                className={`block h-6 w-11 rounded-full transition-colors ${
-                  allowTemplate ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"
-                }`}
-              />
-              <div
-                className={`dot absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                  allowTemplate ? "translate-x-5" : ""
-                }`}
-              />
-            </div>
-          </label>
+          <Switch
+            checked={allowTemplate}
+            onCheckedChange={handleToggle}
+            disabled={updateMutation.isPending}
+            aria-label="Allow template sharing"
+            className="ml-4 mt-1"
+          />
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -428,4 +415,3 @@ export function CredentialTemplateSharing({
     </Card>
   )
 }
-

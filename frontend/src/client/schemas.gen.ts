@@ -13760,7 +13760,9 @@ bundle. \`\`active_install_count\`\` is the number of foreign installs
 revisions freeze this credential as \`\`provided_by="publisher"\`\`.
 \`\`active_skill_install_count\`\` is the number of distinct foreign agents
 that link the credential and carry a catalog install of one of those
-revisions. Both together drive the skill half of Tier 2.`
+**packages** — any revision of it, since upgrading away from the providing
+revision leaves the share and the link in place. Both together drive the
+skill half of Tier 2.`
 } as const;
 
 export const CredentialPublicSchema = {
@@ -27106,6 +27108,17 @@ export const SkillCredentialRequirementPublicSchema = {
                 }
             ],
             title: 'Producer Agent Id'
+        },
+        producer_agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Producer Agent Name'
         }
     },
     type: 'object',
@@ -28000,6 +28013,17 @@ export const SkillPublishCredentialPreviewSchema = {
                 }
             ],
             title: 'Producer Agent Id'
+        },
+        producer_agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Producer Agent Name'
         },
         reason: {
             anyOf: [

@@ -418,8 +418,8 @@ A skill declares its credentials in `SKILL.md` frontmatter
 | `build_specs(...)` | Freezes the resolutions onto `SkillPackageRevision.required_credential_specs`, using **the same spec schema as a bundle revision** — written by `credential_spec.build_spec`, read back by `credential_spec.parse_credential_spec` |
 | `to_publish_preview(...)` / `specs_to_public(...)` / `provisions_to_public(...)` | Read projections for the publish preview, the catalog detail payload and the install response |
 | `parse_specs(raw_specs)` | Tolerant read of the frozen JSON |
-| `publisher_usages_of_credential(...)` | Which published skills a given credential backs — feeds credential deletion impact |
-| `SkillCredentialResolution` | `slot`, `type`, `description`, `provided_by`, `credential`, `reason`, `producer_agent_id`. `credential` names the publisher's **own** matched row even for a refused resolution, so the preview can say *which* credential was rejected rather than just that something was |
+| `publisher_usages_of_credential(...)` | Which published skills a given credential backs — feeds credential deletion impact. Returns the usages plus **every** revision id of the packages they name, not only the providing revisions (see `credential_sharing_tech.md`) |
+| `SkillCredentialResolution` | `slot`, `type`, `description`, `provided_by`, `credential`, `reason`, `producer_agent_id`, `producer_agent_name`. `credential` names the publisher's **own** matched row even for a refused resolution, so the preview can say *which* credential was rejected rather than just that something was |
 
 **Resolution uses only the credential's own consent flags, and requires the
 publisher to *own* it for `publisher` / `template`.** A share the publisher

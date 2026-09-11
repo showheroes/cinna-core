@@ -31,6 +31,10 @@ class SkillCredentialRequirementPublic(SQLModel):
     publisher_credential_id: uuid.UUID | None = None
     #: The producer agent an ``agent_api`` slot connects to, when known.
     producer_agent_id: uuid.UUID | None = None
+    #: Its display name as frozen at publish, so a reader can say "backed by
+    #: agent X". ``None`` on a revision published before the name was frozen,
+    #: or when the agent was already gone.
+    producer_agent_name: str | None = None
 
 
 class SkillPublishCredentialPreview(SQLModel):
@@ -47,6 +51,7 @@ class SkillPublishCredentialPreview(SQLModel):
     credential_id: uuid.UUID | None = None
     credential_name: str | None = None
     producer_agent_id: uuid.UUID | None = None
+    producer_agent_name: str | None = None
     #: Why a slot resolved to ``user``: no credential with this slot is linked
     #: to the agent (``no_linked_credential``), the publisher's credential
     #: allows neither sharing nor template sharing (``not_shareable``), or the
