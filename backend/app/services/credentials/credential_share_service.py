@@ -125,7 +125,7 @@ class CredentialShareService:
         )
 
     @staticmethod
-    def revoke_credential_share(
+    async def revoke_credential_share(
         session: Session,
         share_id: UUID,
         owner_id: UUID
@@ -137,7 +137,11 @@ class CredentialShareService:
         - Share must exist
         - Credential must be owned by owner_id
 
-        Deletes the CredentialShare record.
+        Deletes the CredentialShare record, then unlinks the credential from the
+        recipient's agents and re-syncs their running environments — a link
+        outlives the share it was made under, and env materialisation reads the
+        link table only, so leaving it would keep a working secret inside the
+        recipient's containers.
         """
         share = session.get(CredentialShare, share_id)
         if not share:
@@ -150,11 +154,20 @@ class CredentialShareService:
         if credential.owner_id != owner_id:
             raise ValueError("Not enough permissions to revoke this share")
 
+        credential_id = share.credential_id
+        recipient_id = share.shared_with_user_id
+
         session.delete(share)
         session.commit()
 
         logger.info(
             f"Credential share {share_id} revoked by owner {owner_id}"
+        )
+
+        await CredentialsService.unlink_credential_from_revoked_recipients(
+            session=session,
+            credential_id=credential_id,
+            recipient_user_ids=[recipient_id],
         )
 
     @staticmethod
@@ -290,7 +303,7 @@ class CredentialShareService:
         return count
 
     @staticmethod
-    def update_credential_sharing(
+    async def update_credential_sharing(
         session: Session,
         credential_id: UUID,
         owner_id: UUID,
@@ -301,6 +314,8 @@ class CredentialShareService:
 
         If disabling (allow_sharing=false):
         - All existing CredentialShare records are DELETED
+        - Every recipient agent is unlinked and re-synced, so the value leaves
+          their running containers too
         - Users who had access lose it immediately
 
         Returns updated Credential.
@@ -316,11 +331,13 @@ class CredentialShareService:
             CredentialsService.assert_sharing_allowed(session, credential)
 
         # If disabling sharing, delete all existing shares
+        revoked_recipient_ids: list[UUID] = []
         if not allow_sharing and credential.allow_sharing:
             statement = select(CredentialShare).where(
                 CredentialShare.credential_id == credential_id
             )
             shares = session.exec(statement).all()
+            revoked_recipient_ids = [share.shared_with_user_id for share in shares]
             for share in shares:
                 session.delete(share)
             logger.info(
@@ -332,6 +349,12 @@ class CredentialShareService:
         session.add(credential)
         session.commit()
         session.refresh(credential)
+
+        await CredentialsService.unlink_credential_from_revoked_recipients(
+            session=session,
+            credential_id=credential_id,
+            recipient_user_ids=revoked_recipient_ids,
+        )
 
         return credential
 

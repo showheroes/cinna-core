@@ -25,8 +25,10 @@ Scenarios (plan §8.9):
      placeholder carrying its non-private fields, never the live secret.
   6. Publisher unavailable at install (sharing turned off before install):
      ``publisher_unavailable``, a placeholder, and a warning row.
-  7. Access revoked after install: the row's reason becomes ``access_revoked``;
-     setup-status stays ready (D1).
+  7. Access revoked after install: turning sharing off unlinks the recipient's
+     agents (so the value leaves their containers) and the row's reason becomes
+     ``not_linked``; the generic update path, which leaves the link behind,
+     still reads ``access_revoked``. Setup-status stays ready either way (D1).
   8. Upgrade provisions only the slot the new revision adds; a slot the user
      unlinked earlier is not re-linked.
   9. Uninstall release semantics: an orphaned placeholder is unlinked and
@@ -545,19 +547,69 @@ def test_access_revoked_after_install(
     install_result = install_skill(client, b_headers, b_agent, package_uuid)
     assert install_result["credential_provisioning"][0]["outcome"] == "linked_publisher"
 
-    # The publisher revokes sharing AFTER install -- the share row survives
-    # (the stale-share trap), but it no longer authorises usage.
+    # The publisher revokes sharing AFTER install. The shares are deleted AND
+    # every recipient agent is unlinked, so the credential leaves the consumer's
+    # containers instead of living on behind a link nothing re-checks.
     set_credential_sharing(client, pub_headers, pub_cred["id"], False)
+
+    assert pub_cred["id"] not in {
+        cred["id"]
+        for cred in get_agent_credentials(client, b_headers, b_agent)["data"]
+    }
 
     row = _addon_row_for_skill(client, b_headers, b_agent, adapter, "revoke-skill")
     assert row["status"] == "warning"
     assert row["credential_issues"] == [
-        {"slot": "slot-revoke", "type": "api_token", "reason": "access_revoked"}
+        {"slot": "slot-revoke", "type": "api_token", "reason": "not_linked"}
     ]
 
     # D1: still never blocks the agent's other channels.
     setup = _setup_status(client, b_headers, b_agent)
     assert setup["status"] == "ready"
+
+
+def test_sharing_off_through_the_generic_update_reads_access_revoked(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    patch_environment_adapter,
+) -> None:
+    """``PUT /credentials/{id}`` turning sharing off keeps share and link.
+
+    Only ``PATCH /credentials/{id}/sharing`` revokes (and now unlinks). The
+    generic update just flips the flag, which is what leaves a linked-but-
+    unusable credential behind -- the state ``access_revoked`` describes.
+    """
+    pub, pub_headers = make_developer(client, superuser_token_headers)
+    pub_agent, pub_env = make_agent_with_env(client, pub_headers, "Flag-Publisher")
+    pub_cred = create_random_credential(client, pub_headers, credential_type="api_token")
+    update_credential(
+        client, pub_headers, pub_cred["id"], service_uri="slot-flag", allow_sharing=True,
+    )
+    link_credential_to_agent(client, pub_headers, pub_agent, pub_cred["id"])
+
+    write_skill_with_credentials(
+        pub_env, "flag-skill", [{"slot": "slot-flag", "type": "api_token"}],
+    )
+    revision = publish_skill(
+        client, pub_headers, pub_agent, "flag-skill", visibility="public",
+    )
+
+    b, b_headers = make_developer(client, superuser_token_headers)
+    b_agent, _ = make_agent_with_env(client, b_headers, "Flag-Consumer")
+    adapter = _install_adapter(patch_environment_adapter)
+    install_skill(client, b_headers, b_agent, revision["package_id"])
+
+    update_credential(client, pub_headers, pub_cred["id"], allow_sharing=False)
+
+    assert pub_cred["id"] in {
+        cred["id"]
+        for cred in get_agent_credentials(client, b_headers, b_agent)["data"]
+    }
+    row = _addon_row_for_skill(client, b_headers, b_agent, adapter, "flag-skill")
+    assert row["credential_issues"] == [
+        {"slot": "slot-flag", "type": "api_token", "reason": "access_revoked"}
+    ]
+    assert _setup_status(client, b_headers, b_agent)["status"] == "ready"
 
 
 # ---------------------------------------------------------------------------

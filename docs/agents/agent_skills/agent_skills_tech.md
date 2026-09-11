@@ -465,13 +465,16 @@ reports rows without credentials at all — plus the agent's linked credentials.
 |--------|-------|
 | `build_for_agent(session, agent)` | Loads with a constant number of queries: the agent's catalog links, their revisions' specs, the agent's linked credentials, the share rows of the foreign ones, and (only for an agent with an installed bundle revision) that revision. The last three are skipped when no link declares a slot |
 | `issues_for_link(link_id)` → `list[CredentialIssue]` | Drives the Addons row status |
-| `skill_provisioned_credential_ids()` | The readiness gate's exclusion: every candidate of every catalog spec, **minus** the credentials the agent's bundle revision claims |
+| `slot_credential_ids()` | Every linked credential a catalog spec on the agent points at, with no bundle subtraction — "does anything installed still declare this slot". Read by `InstallService.list_setup_credentials` to stop a kept placeholder from claiming a skill needs it |
+| `skill_provisioned_credential_ids()` | The readiness gate's exclusion: `slot_credential_ids()` **minus** the credentials the agent's bundle revision claims |
 | `specs_for_link` / `specs_except_link` | Uninstall's released/retained split, handed to `CredentialProvisioner.release_skill_slots` |
 
 **A slot is satisfied** when one of its candidates is owned by the agent owner
 and filled in, **or** is foreign, still `allow_sharing`, **and** shared with
-the agent owner. *A share row alone is not enough* — turning sharing off leaves
-the row behind, which is why both conditions are checked. Otherwise
+the agent owner. *A share row alone is not enough* — turning sharing off through
+the generic `PUT /credentials/{id}` leaves the row behind, which is why both
+conditions are checked (the Sharing card's `PATCH …/sharing` deletes the shares
+**and** the recipient's links, so that path lands on `not_linked`). Otherwise
 `CredentialIssueReason` is `not_linked` (no candidate), `not_configured` (an
 owned placeholder) or `access_revoked`.
 

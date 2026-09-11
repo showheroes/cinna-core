@@ -24,6 +24,8 @@ Scenarios (plan §8.9, gate file):
      same-type skill-only placeholder, which then stays blocking instead of
      being D1-excluded. Deliberate: under-claiming would silently drop a real
      bundle blocker from the gate.
+  3. The copy after that skill is uninstalled: the claim keeps the placeholder
+     (D15), so the setup page must stop saying an installed skill requires it.
 """
 from pathlib import Path
 
@@ -41,10 +43,12 @@ from tests.utils.credential import (
 )
 from tests.utils.skill_catalog import (
     install_skill,
+    list_agent_plugins,
     make_agent_with_env,
     make_developer,
     patched_skill_storage,
     publish_skill,
+    uninstall_agent_plugin,
     write_skill_with_credentials,
 )
 
@@ -59,6 +63,14 @@ def skill_storage(tmp_path: Path):
 
 def _setup_status(client: TestClient, headers: dict[str, str], agent_id: str) -> dict:
     r = client.get(f"{API}/agents/{agent_id}/setup-status", headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _setup_credentials(
+    client: TestClient, headers: dict[str, str], agent_id: str,
+) -> list[dict]:
+    r = client.get(f"{API}/agents/{agent_id}/setup-credentials", headers=headers)
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -181,3 +193,70 @@ def test_overclaim_unaccounted_bundle_spec_claims_same_type_skill_placeholder(
     )
     spec_names = {item["spec_name"] for item in status["missing"]}
     assert "overclaim-slot" in spec_names, status["missing"]
+
+
+# ---------------------------------------------------------------------------
+# Scenario 3: the copy on a placeholder whose skill is gone
+# ---------------------------------------------------------------------------
+
+
+def test_kept_placeholder_stops_claiming_a_skill_requires_it(
+    client: TestClient, superuser_token_headers: dict[str, str],
+) -> None:
+    """Uninstalling the skill keeps the claimed placeholder -- and the block.
+
+    The row's notes were stamped at install time ("Required by an installed
+    skill"), which stops being true the moment the skill is uninstalled while
+    the bundle claim keeps the row alive. The agent stays blocked with an empty
+    Addons tab, so the setup page is the only place that can explain it: it must
+    say no skill needs it any more, and how to clear the block.
+    """
+    bundle_cred, fresh = _publish_pbu_bundle(
+        client, superuser_token_headers, "Stale-Copy-Bundle-Publisher",
+    )
+
+    consumer, consumer_headers = make_developer(client, superuser_token_headers)
+    install = install_bundle(client, consumer_headers, fresh["bundle_id"])
+    install_id = install["id"]
+
+    installed_creds = get_agent_credentials(client, consumer_headers, install_id)["data"]
+    bundle_placeholder = next(c for c in installed_creds if c["is_placeholder"] is True)
+    unlink_credential_from_agent(
+        client, consumer_headers, install_id, bundle_placeholder["id"],
+    )
+    replacement = create_random_credential(
+        client, consumer_headers, credential_type="api_token",
+    )
+    link_credential_to_agent(client, consumer_headers, install_id, replacement["id"])
+
+    skill_pub, skill_pub_headers = make_developer(client, superuser_token_headers)
+    skill_agent, skill_env = make_agent_with_env(
+        client, skill_pub_headers, "Stale-Copy-Skill-Publisher",
+    )
+    write_skill_with_credentials(
+        skill_env, "stale-copy-skill", [{"slot": "stale-slot", "type": "api_token"}],
+    )
+    revision = publish_skill(
+        client, skill_pub_headers, skill_agent, "stale-copy-skill", visibility="public",
+    )
+    install_skill(client, consumer_headers, install_id, revision["package_id"])
+
+    while_installed = _setup_credentials(client, consumer_headers, install_id)
+    stale_row = next(row for row in while_installed if row["name"] == "stale-slot")
+    assert "installed skill" in (stale_row["description"] or "")
+
+    link = next(
+        plugin
+        for plugin in list_agent_plugins(client, consumer_headers, install_id)
+        if plugin["snapshot_plugin_name"] == "stale-copy-skill"
+    )
+    uninstall_agent_plugin(client, consumer_headers, install_id, link["id"])
+
+    assert _setup_status(client, consumer_headers, install_id)["status"] == "needs_setup", (
+        "the claimed placeholder is kept on uninstall (D15), so the block stays"
+    )
+    after = _setup_credentials(client, consumer_headers, install_id)
+    kept_row = next(row for row in after if row["name"] == "stale-slot")
+    description = kept_row["description"] or ""
+    assert "No installed skill requires this any more" in description, description
+    assert "unlink it on the Credentials tab" in description, description

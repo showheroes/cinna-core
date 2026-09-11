@@ -2554,6 +2554,69 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         )
 
     @staticmethod
+    async def unlink_credential_from_revoked_recipients(
+        session: Session,
+        credential_id: uuid.UUID,
+        recipient_user_ids: list[uuid.UUID],
+    ) -> list[uuid.UUID]:
+        """
+        Drop a revoked recipient's links to a credential and re-sync their envs.
+
+        A share is the recipient's *right* to use the credential, but nothing
+        else re-checks it: ``get_agent_credentials`` joins ``AgentCredentialLink``
+        alone, so an agent linked to a credential keeps receiving its value into
+        every running container for as long as the link exists. Deleting the
+        share row without deleting those links leaves the recipient's containers
+        holding a working secret indefinitely — the credential page says access
+        is gone while the container disagrees. So revocation deletes the links
+        too, then syncs, which rewrites ``credentials.json`` (and the ssh_keys
+        bundle) without the credential.
+
+        The owner's own links are never touched: only agents owned by one of
+        ``recipient_user_ids`` are considered.
+
+        Args:
+            session: Database session
+            credential_id: The credential whose shares were revoked
+            recipient_user_ids: Users who just lost their share
+
+        Returns:
+            The agent ids that were unlinked (already synced).
+        """
+        recipient_ids = {uid for uid in recipient_user_ids if uid is not None}
+        if not recipient_ids:
+            return []
+
+        links = session.exec(
+            select(AgentCredentialLink)
+            .join(Agent, Agent.id == AgentCredentialLink.agent_id)
+            .where(
+                AgentCredentialLink.credential_id == credential_id,
+                Agent.owner_id.in_(recipient_ids),
+            )
+        ).all()
+        if not links:
+            return []
+
+        agent_ids = [link.agent_id for link in links]
+        for link in links:
+            session.delete(link)
+        session.commit()
+
+        logger.info(
+            f"Credential {credential_id} unlinked from {len(agent_ids)} agent(s) "
+            f"of {len(recipient_ids)} revoked recipient(s)"
+        )
+
+        for agent_id in agent_ids:
+            await CredentialsService.event_credential_unshared(
+                session=session,
+                agent_id=agent_id,
+                credential_id=credential_id,
+            )
+        return agent_ids
+
+    @staticmethod
     async def unlink_credential_from_agent(
         session: Session,
         agent_id: uuid.UUID,

@@ -27,7 +27,8 @@ Enables users to share their credentials with other users, allowing recipients t
 1. Owner revokes a specific share from the credential's sharing management panel
 2. Alternatively, owner disables sharing entirely (`allow_sharing=false`)
 3. Disabling sharing immediately revokes ALL existing shares (destructive, with confirmation). When the credential is publisher-provided (PBP) in published bundles, the disable-sharing dialog also surfaces the blast-radius data (same `GET /credentials/{id}/deletion-impact` cache as the delete dialog) so the publisher can see which bundles and installs will break before confirming.
-4. Deleting a credential is **blast-radius-gated** (see Deletion Impact Gate below).
+4. Either way, revocation also **unlinks the credential from every agent the recipient owns** and re-syncs their running environments. A share is a right to use the credential, but the environment payload is built from `AgentCredentialLink` alone — leaving the link behind would keep a working secret inside the recipient's containers while the credential page said access was gone. The owner's own links are untouched.
+5. Deleting a credential is **blast-radius-gated** (see Deletion Impact Gate below).
 
 ### Template Sharing (bundle context)
 
@@ -178,7 +179,8 @@ AI credentials (LLM provider keys) follow the same 409 / force pattern but have 
 - **Recipient (full share)** - Read-only: view metadata, link to own agents, use in environments; cannot see values, edit, or delete
 - **Recipient (template share)** - Owns their own credential row pre-seeded with non-private values; can fill in their private fields and modify their copy; publisher's actual private values are never exposed
 - Credential values (`encrypted_data`) are never exposed to share recipients in either mode
-- Revoking a direct share immediately removes the recipient's access; template materialised rows are independent copies and are unaffected by the publisher revoking template sharing after install
+- Revoking a direct share immediately removes the recipient's access, unlinks the credential from their agents and re-syncs those environments, so the value leaves their containers too; template materialised rows are independent copies and are unaffected by the publisher revoking template sharing after install
+- A recipient whose share is restored must re-link the credential to their agents (a skill or bundle reinstall / upgrade does it for them) — the link is not remembered across a revocation
 
 ### Role Gating
 
@@ -249,7 +251,7 @@ Owner enables sharing → Shares credential by recipient email
                     ├→ Recipient links shared credential to their agents
                     └→ Agent environments receive shared credential data (same as owned)
 
-Owner revokes share → CredentialShare record deleted → Immediate access removal
+Owner revokes share → CredentialShare record deleted → recipient's AgentCredentialLink rows deleted → their running envs re-synced without it
 
 Bundle Install (PBP):
 Installer installs bundle with publisher-provided credential

@@ -426,7 +426,10 @@ blocks it. Instead:
 - the skill's Addons row turns amber with `credential_missing` and names the
   slots, each with a reason — `not_linked` (nothing carries the slot),
   `not_configured` (a placeholder nobody filled in) or `access_revoked` (the
-  publisher's share is gone, or sharing was turned off);
+  credential is linked but no longer usable — sharing was turned off through the
+  generic credential update, which leaves the link in place). Revoking the share
+  itself, or turning sharing off from the Sharing card, unlinks the credential
+  from the installer's agents as well, so that reads `not_linked`;
 - the install response says the same thing at the moment of installing;
 - the script fails with a message naming the slot and the fix, which the agent
   can relay to the user verbatim.
@@ -612,7 +615,10 @@ publisher cannot be re-shared — and only with users the package's visibility
 already admits. The install re-checks ownership and the sharing flag against the
 live credential, so a spec frozen months ago cannot outlive the owner's consent:
 revoking is turning sharing off, or deleting the connection, and deleting it
-tells the owner how many foreign installs depend on it first.
+tells the owner how many foreign installs depend on it first. Both revocations
+reach the installers' containers, not just their credential pages — the share
+and the agent links go together (see
+[Credential Sharing](../agent_credentials/credential_sharing.md#revoking-access)).
 
 Secrets never travel: the same predicate warns on the agent page and refuses at
 publish, so the refusal can never surprise a publisher who read their own card.
@@ -633,7 +639,7 @@ regex.
 | Skill name collides with a platform command | `error: reserved_name` — excluded from projection and from the popup |
 | A malformed `credentials:` block (not a list, no slot, unknown type, duplicate slot, more than 20 entries) | `error: invalid_credentials` — excluded from projection; publish refuses with the sentence naming the first problem |
 | A slot whose only linked credential is an unfilled placeholder | Resolves to `user` at publish. An empty credential shared to installers would be a credential they cannot edit |
-| The publisher turns sharing off after publishing | The frozen spec still says `publisher`; the install falls through to a placeholder and reports `publisher_unavailable`. Existing installs keep the credential until the share is deleted, then show `access_revoked` |
+| The publisher turns sharing off after publishing | The frozen spec still says `publisher`; the install falls through to a placeholder and reports `publisher_unavailable`. Existing installs lose it at once — the shares are deleted, the installers' agents are unlinked and their environments re-synced without it — and the row reads `not_linked`. Re-enabling sharing does not re-share or re-link; a reinstall or an upgrade to a revision that adds the slot does |
 | A `publisher` spec whose credential belongs to someone else | Refused at install, not at publish: the publish path only resolves credentials the publisher owns, and the install re-checks the live owner against the package publisher |
 | Two skills on one agent declare the same slot | They share one credential — that is the point of a slot. Uninstalling one keeps it, because the other still declares it |
 | A revision published before slots existed | No specs, so nothing is provisioned and nothing is released. A container built before slots existed reports no `credentials` for its skills; the Addons status is computed from the revision on the server, never from the container |

@@ -131,6 +131,7 @@ class InstallReadinessGate:
         """
         missing: list[GateMissingItem] = []
         missing.extend(InstallReadinessGate._scan_service_credentials(session, install))
+        missing.extend(InstallReadinessGate._scan_unlinked_publisher_specs(session, install))
         missing.extend(InstallReadinessGate._scan_ai_credentials(session, install))
         return missing
 
@@ -225,6 +226,91 @@ class InstallReadinessGate:
             items = InstallReadinessGate._drop_skill_provisioned(
                 session, install, items
             )
+        return items
+
+    @staticmethod
+    def _scan_unlinked_publisher_specs(
+        session: Session, install: Agent
+    ) -> list[GateMissingItem]:
+        """Bundle specs whose publisher credential is no longer even linked.
+
+        The link scan above sees only what the agent still carries, which was
+        enough while a revoked share left its link behind. Revocation now
+        deletes the recipient's links (so the value leaves their containers),
+        and without this pass the bundle's own contract would go quiet exactly
+        when it breaks — the installer would see a ``ready`` agent that cannot
+        do the thing it was installed for (I10).
+
+        Only ``publisher_credential_id`` specs are scanned, and only when
+        nothing links that credential any more:
+
+          * the credential row is gone → ``publisher_credential_missing``
+          * it exists but the installer can no longer reach it (sharing off, or
+            no share row) → ``publisher_credential_unshared``
+          * it exists and is still reachable → silent. The installer unlinked a
+            credential they can re-link themselves, which never blocked the
+            agent before either.
+        """
+        from app.models.bundles.agent_bundle_revision import AgentBundleRevision
+
+        if install.installed_revision_id is None:
+            return []
+        revision = session.get(AgentBundleRevision, install.installed_revision_id)
+        if revision is None:
+            return []
+        specs = [
+            spec
+            for spec in revision.required_credential_specs or []
+            if isinstance(spec, dict) and spec.get("publisher_credential_id")
+        ]
+        if not specs:
+            return []
+
+        linked_ids = {
+            link.credential_id
+            for link in session.exec(
+                select(AgentCredentialLink).where(
+                    AgentCredentialLink.agent_id == install.id
+                )
+            ).all()
+        }
+
+        items: list[GateMissingItem] = []
+        for spec in specs:
+            try:
+                credential_id = uuid.UUID(str(spec["publisher_credential_id"]))
+            except (ValueError, TypeError):
+                continue
+            if credential_id in linked_ids:
+                continue  # the link scan already judged it
+
+            spec_name = spec.get("name") or "(missing)"
+            spec_type = spec.get("type") or ""
+            cred = session.get(Credential, credential_id)
+            if cred is None:
+                items.append(GateMissingItem(
+                    spec_name=spec_name,
+                    spec_type=spec_type,
+                    reason="publisher_credential_missing",
+                    is_ai=False,
+                    credential_id=credential_id,
+                ))
+                continue
+            if cred.owner_id == install.owner_id:
+                continue
+            if not cred.allow_sharing or session.exec(
+                select(CredentialShare).where(
+                    CredentialShare.credential_id == cred.id,
+                    CredentialShare.shared_with_user_id == install.owner_id,
+                )
+            ).first() is None:
+                items.append(GateMissingItem(
+                    spec_name=spec_name,
+                    spec_type=spec_type,
+                    reason="publisher_credential_unshared",
+                    is_ai=False,
+                    credential_id=credential_id,
+                ))
         return items
 
     @staticmethod

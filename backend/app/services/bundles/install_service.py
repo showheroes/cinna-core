@@ -88,6 +88,18 @@ AUTO_UPDATE_ALLOWED_ENV_STATUSES = frozenset({"suspended", "stopped"})
 BUNDLE_AUTO_UPDATE_LOCK_KEY = 0x42554E444C4155  # "BUNDLAU"
 
 
+# What the setup page says about a skill placeholder whose skill is gone. The
+# row survives an uninstall only when the agent's bundle revision claims it
+# (D15), so it may still be the credential an unrecorded bundle spec picked —
+# the copy must not assert the opposite, only that no skill asks for it any
+# more, and how to stop it blocking the agent.
+ORPHANED_SKILL_PLACEHOLDER_NOTE = (
+    "No installed skill requires this any more. It is kept because this agent's "
+    "bundle may use it — fill it in, or unlink it on the Credentials tab to clear "
+    "the setup block."
+)
+
+
 @contextmanager
 def sweep_leader_session():
     """Yield a session that holds the sweep's leader lock, or ``None`` to skip.
@@ -1758,8 +1770,20 @@ class InstallService:
         Decryption failures fall back to an empty prefilled dict — a
         corrupted credential should still surface in the setup list so
         the installer can re-fill it from scratch rather than disappear.
+
+        ``description`` is the credential's notes, except for a skill
+        placeholder no installed skill declares any more: its notes were
+        stamped at install time and would still claim a skill needs it. That
+        happens on a bundle agent, where the D15 claim rule deliberately keeps
+        the row on uninstall (it may be the credential an unrecorded bundle
+        spec picked), so the copy has to say what is actually true and how to
+        clear the setup block.
         """
         from app.services.credentials.credentials_service import CredentialsService
+        from app.services.credentials.credential_provisioner import (
+            SKILL_INSTALL_POLICY,
+        )
+        from app.services.skills.skill_credential_requirements import SkillSlotIndex
 
         rows = session.exec(
             select(Credential)
@@ -1773,6 +1797,16 @@ class InstallService:
                 Credential.is_placeholder == True,  # noqa: E712
             )
         ).all()
+
+        stale_skill_rows = {
+            cred.id
+            for cred in rows
+            if cred.notes == SKILL_INSTALL_POLICY.placeholder_notes
+        }
+        if stale_skill_rows:
+            stale_skill_rows -= SkillSlotIndex.build_for_agent(
+                session, install
+            ).slot_credential_ids()
 
         summaries: list[SetupCredentialSummary] = []
         for cred in rows:
@@ -1792,7 +1826,11 @@ class InstallService:
                     id=cred.id,
                     name=cred.name,
                     type=cred.type.value if hasattr(cred.type, "value") else str(cred.type),
-                    description=cred.notes,
+                    description=(
+                        ORPHANED_SKILL_PLACEHOLDER_NOTE
+                        if cred.id in stale_skill_rows
+                        else cred.notes
+                    ),
                     template_private_fields=private_fields,
                     template_prefilled_data=prefilled,
                 )

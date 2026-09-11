@@ -91,7 +91,7 @@ def get_credential_shares(
 
 
 @router.delete("/{credential_id}/shares/{share_id}")
-def revoke_credential_share(
+async def revoke_credential_share(
     credential_id: UUID,
     share_id: UUID,
     session: SessionDep,
@@ -101,7 +101,7 @@ def revoke_credential_share(
     Revoke a credential share.
     """
     try:
-        CredentialShareService.revoke_credential_share(
+        await CredentialShareService.revoke_credential_share(
             session=session,
             share_id=share_id,
             owner_id=current_user.id
@@ -128,7 +128,7 @@ def get_credentials_shared_with_me(
 
 
 @router.patch("/{credential_id}/sharing", response_model=CredentialPublic)
-def update_credential_sharing(
+async def update_credential_sharing(
     credential_id: UUID,
     allow_sharing: bool = Body(..., embed=True),
     session: SessionDep = None,
@@ -137,10 +137,11 @@ def update_credential_sharing(
     """
     Enable or disable sharing for a credential.
 
-    WARNING: Disabling sharing revokes ALL existing shares immediately.
+    WARNING: Disabling sharing revokes ALL existing shares immediately, and
+    unlinks the credential from every recipient agent.
     """
     try:
-        credential = CredentialShareService.update_credential_sharing(
+        credential = await CredentialShareService.update_credential_sharing(
             session=session,
             credential_id=credential_id,
             owner_id=current_user.id,

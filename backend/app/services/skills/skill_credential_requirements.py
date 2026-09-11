@@ -705,11 +705,11 @@ class SkillSlotIndex:
                 )
         return issues
 
-    def skill_provisioned_credential_ids(self) -> set[uuid.UUID]:
-        """Credentials linked because a catalog skill spec requires them (D1).
+    def slot_credential_ids(self) -> set[uuid.UUID]:
+        """Every linked credential a catalog skill spec on the agent points at.
 
-        Every candidate of every catalog spec, minus the credentials the
-        agent's bundle revision claims (I10).
+        No bundle subtraction: this answers "does anything installed still
+        declare this slot", which is what stale copy has to be checked against.
         """
         ids: set[uuid.UUID] = set()
         for specs in self._specs_by_link.values():
@@ -717,7 +717,15 @@ class SkillSlotIndex:
                 state = self._slot_state(parsed)
                 if state is not None:
                     ids.update(credential.id for credential in state.candidates)
-        return ids - self._bundle_claimed_ids
+        return ids
+
+    def skill_provisioned_credential_ids(self) -> set[uuid.UUID]:
+        """Credentials linked because a catalog skill spec requires them (D1).
+
+        Every candidate of every catalog spec, minus the credentials the
+        agent's bundle revision claims (I10).
+        """
+        return self.slot_credential_ids() - self._bundle_claimed_ids
 
     def _slot_state(self, parsed: ParsedCredentialSpec) -> _SlotState | None:
         """Candidates and satisfaction of one spec; ``None`` for an unknown type."""

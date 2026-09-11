@@ -252,7 +252,12 @@ def test_gate_publisher_broken_when_sharing_revoked(
     superuser_token_headers: dict[str, str],
     db: Session,
 ) -> None:
-    """D. Publisher flips allow_sharing=False post-install → publisher_broken, publisher_credential_unshared."""
+    """D. Publisher flips allow_sharing=False post-install → publisher_broken, publisher_credential_unshared.
+
+    Revocation also unlinks the credential from the installer's agent, so the
+    verdict comes from the gate's spec-side pass over the bundle revision, not
+    from a surviving link.
+    """
     install_dict, installer, installer_headers, shared_cred = _setup_pbp_install(
         client, superuser_token_headers, db
     )
@@ -275,6 +280,14 @@ def test_gate_publisher_broken_when_sharing_revoked(
     reasons = {m["reason"] for m in body["missing"]}
     assert "publisher_credential_unshared" in reasons
     assert all(not m["is_ai"] for m in body["missing"])
+
+    linked = client.get(
+        f"{API}/agents/{install_id}/credentials", headers=installer_headers
+    )
+    assert linked.status_code == 200, linked.text
+    assert shared_cred["id"] not in {c["id"] for c in linked.json()["data"]}, (
+        "the revoked credential must be unlinked, not merely unusable"
+    )
 
 
 # Scenario E moved to tests/unit/test_install_readiness_gate_defensive.py

@@ -114,11 +114,11 @@ Each entry the publish flow emits:
 
 ### CredentialShareService (`backend/app/services/credentials/credential_share_service.py`)
 - `share_credential(..., source="direct")` - Create share with validations (ownership, allow_sharing, target exists, not self, not duplicate); stamps `source="direct"` on the new `CredentialShare` row. The direct-sharing UI passes the default; no client-supplied source is accepted.
-- `revoke_credential_share()` - Delete share record with ownership check
+- `revoke_credential_share()` - Async. Deletes the share record with an ownership check, then calls `CredentialsService.unlink_credential_from_revoked_recipients` for that recipient
 - `get_shares_by_credential()` - List shares with resolved user emails
 - `get_credentials_shared_with_me()` - Query shares where user is recipient; enriched to compute `category` via `classify_credential_category(is_owned=False, ...)` from `share.source`, populate `agent_usage_count` via batched `get_agent_usage_counts` (recipient-scoped), and carry `source` on `SharedCredentialPublic`.
 - `get_share_count_for_credential()` - Count shares for a credential
-- `update_credential_sharing()` - Toggle allow_sharing; auto-revokes all shares when disabled
+- `update_credential_sharing()` - Async. Toggles allow_sharing; auto-revokes all shares when disabled, then unlinks every recipient the same way. Note the divergence: the generic `PUT /credentials/{id}` also writes `allow_sharing`, but it neither deletes shares nor unlinks — a credential turned unshareable that way stays linked and reads `access_revoked` on the skill Addons row
 - `can_user_access_credential()` - Check if user owns OR has share
 - `delete_all_shares_for_credential()` - Bulk delete for credential deletion
 
@@ -127,6 +127,7 @@ Each entry the publish flow emits:
 - `get_agent_usage_counts(session, credential_ids, owner_scope=None)` — **batched** count helper. One `GROUP BY` query over `AgentCredentialLink` for the whole page, returning `{credential_id: count}`. For shared credentials, pass `owner_scope=recipient_id` to count only the recipient's own agents. Avoids per-row N+1.
 - `get_used_in_bundle_flags(session, *, owner_id, credential_ids)` — **batched** boolean helper. Single `DISTINCT credential_id` query over the `list_bundle_usages` join, returning the subset of ids that appear in ≥1 of the owner's bundles. Owner-scoped (only the owner's published bundles count).
 - `link_credential_to_agent()` - Allows linking shared credentials (not just owned)
+- `unlink_credential_from_revoked_recipients(session, credential_id, recipient_user_ids)` — the revocation counterpart. Deletes every `AgentCredentialLink` to the credential on agents owned by a revoked recipient, commits, then fires `event_credential_unshared` per agent. Returns the unlinked agent ids. Nothing else re-checks share access at materialisation time (`get_agent_credentials` joins the link table only), so this is what makes revocation reach the container
 - `update_credential()` - Persists `allow_template_sharing` + `template_private_fields`; flips `is_placeholder=False` only when `check_credential_completeness == "complete"` (so partial fills on template placeholders keep the gate engaged); rejects non-`list[str]` `template_private_fields` payloads; also persists `service_uri` (editable, nullable)
 - `check_credential_completeness()` - Per-type required-field check the placeholder-flip relies on
 - `find_match_for_spec(session, user_id, spec_name, spec_type, *, service_uri=None, ...)` — install-time auto-prefill matcher. Full precedence order when `service_uri` is a non-empty string: **(Tier 0a)** owned credential with matching `service_uri` + `type` (newest by `id desc`); **(Tier 0b)** shared credential (via `CredentialShare`) with matching `service_uri` + `type`; these tiers short-circuit even the PBT value-anchor check. When `service_uri` is `None` or empty, Tiers 0a/0b are bypassed and the remaining tiers run unchanged. Remaining tiers: (1) owned name+type; (2) shared name+type; (3) type-only fallback (PBU only); PBT value-anchor runs after name tiers for PBT specs
@@ -277,8 +278,8 @@ Each entry the publish flow emits:
 - `GET /credentials/{id}/bundles` - 403 unless requester owns the credential (or is superuser)
 - Share recipients get read-only access (can use, cannot see values)
 - Credential values (encrypted_data) never exposed to share recipients
-- Revoking share immediately removes access
-- Disabling sharing is destructive (revokes all shares with warning)
+- Revoking share immediately removes access, deletes the recipient's `AgentCredentialLink` rows and re-syncs their running environments
+- Disabling sharing is destructive (revokes all shares with warning) and unlinks every recipient
 
 ### Template Privacy Layers (defence in depth)
 1. **Frontend filter** — only fields the publisher leaves unchecked are sent as `template_private_fields=[]` candidates

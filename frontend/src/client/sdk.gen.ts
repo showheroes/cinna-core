@@ -7105,7 +7105,8 @@ export class CredentialsService {
      * Update Credential Sharing
      * Enable or disable sharing for a credential.
      *
-     * WARNING: Disabling sharing revokes ALL existing shares immediately.
+     * WARNING: Disabling sharing revokes ALL existing shares immediately, and
+     * unlinks the credential from every recipient agent.
      * @param data The data for the request.
      * @param data.credentialId
      * @param data.requestBody

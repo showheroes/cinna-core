@@ -1787,22 +1787,56 @@ in on the agent's Credentials tab."* — while the Addons tab is empty. Nothing 
 block, and the one sentence that tries to is now false. While the skill **is** installed the same
 block reads fine: the slot name matches the amber Addons row and the setup page's sentence is true.
 
-**Finding needing a decision (1): a revoked share does not reach the container.** Turning sharing off
-deletes the `CredentialShare` and turns the Addons row amber, but `AgentCredentialLink` survives and
-env materialisation is link-based (`get_agent_credentials` joins the link table only, never
-re-checking access), and nothing re-syncs on revocation. The consumer container kept a working token:
-after the revoke — and after an env restart — the script still called the producer successfully, and
-the platform kept minting a fresh `owner_identity_token` for the revoked user on every sync. Only
-deleting the credential (or unlinking it) cut the container off. This is the generic sharing path, so
-`bundle_install` shares behave the same; it is not introduced by this feature. It does contradict
-`credential_sharing.md` ("Revoking a direct share immediately removes the recipient's access",
-"Immediate access removal") and softens the skill docs' revocation story, so either the code gains a
-revoke-time unlink + re-sync, or the docs stop promising immediacy.
+**Finding (1), fixed: a revoked share did not reach the container.** Turning sharing off deleted the
+`CredentialShare` and turned the Addons row amber, but `AgentCredentialLink` survived and env
+materialisation is link-based (`get_agent_credentials` joins the link table only, never re-checking
+access), and nothing re-synced on revocation. The consumer container kept a working token: after the
+revoke — and after an env restart — the script still called the producer successfully, and the
+platform kept minting a fresh `owner_identity_token` for the revoked user on every sync. Only deleting
+the credential cut it off. Pre-existing and generic (bundle shares behaved the same), and it
+contradicted `credential_sharing.md` ("Immediate access removal"). It is also the unfinished half of a
+bug `tests/api/credentials/test_ssh_key_credential_update_share.py` had already recorded: that note
+asked for a re-sync, which alone would have written the same credential straight back.
 
-**Finding needing a decision (2): the post-uninstall blocked bundle agent**, above. Options: release a
-claimed placeholder when the claim comes only from rule (c) and no skill on the agent declares the
-slot; or leave the rule alone and make the copy honest (name the slot's origin, and say "no longer
-required by anything" once the skill is gone).
+Fixed (coordinator decision, 2026-09-11): `CredentialsService.unlink_credential_from_revoked_recipients`
+deletes every link to the credential on agents owned by a revoked recipient and fires the existing
+`event_credential_unshared` per agent. Both revocation entry points call it —
+`DELETE /credentials/{id}/shares/{share_id}` and `PATCH /credentials/{id}/sharing` — and both service
+methods and their routes became async. The owner's own links are untouched. Consequences to know: a
+recipient whose share is restored must re-link (a reinstall or an upgrade does it for them), and
+`access_revoked` now describes only the generic `PUT /credentials/{id}` path, which still leaves share
+and link in place; the `PATCH` path lands on `not_linked`. Covered by
+`tests/api/credentials/test_credential_share_revocation.py` (2), the rewritten scenario 7 and a new
+`PUT`-path case in `agents_skill_credentials_install_test.py` — all four fail with the fix disabled.
+
+**The bundle half of that fix (I10).** The readiness gate walked `AgentCredentialLink` rows only, so
+deleting the link on revocation silently took a bundle install's `publisher_broken` verdict with it —
+`agents_bundles_install_readiness_test.py::test_gate_publisher_broken_when_sharing_revoked` caught it:
+the agent read `ready` while the credential its bundle contracts for was gone. The gate gained a
+spec-side pass, `_scan_unlinked_publisher_specs`: for a bundle spec with a `publisher_credential_id`
+that nothing links any more, a deleted credential row is `publisher_credential_missing`, an
+unreachable one (sharing off, or no share) is `publisher_credential_unshared`, and one the installer
+can still reach is silent — that last case is an installer who unlinked something they can re-link,
+which never blocked the agent before either. Scenario D now also asserts the link is gone, so the two
+halves cannot drift apart again.
+
+**Finding (2), fixed as copy: the post-uninstall blocked bundle agent**, above. Decision: keep the D15
+claim rule (under-claiming would drop a bundle blocker, I10) and make the copy true.
+`InstallService.list_setup_credentials` now compares each skill placeholder against
+`SkillSlotIndex.slot_credential_ids()` — a new method with no bundle subtraction, which
+`skill_provisioned_credential_ids()` is now defined in terms of — and describes a row nothing declares
+any more with `ORPHANED_SKILL_PLACEHOLDER_NOTE`: "No installed skill requires this any more. It is kept
+because this agent's bundle may use it — fill it in, or unlink it on the Credentials tab to clear the
+setup block." The gate's own sentence is left alone: it says the agent needs setup and names the slot,
+both still true, and it makes no claim about where the slot came from (D15 keeps gate enrichment
+unchanged). Covered by scenario 3 in `agents_skill_credentials_gate_test.py`.
+
+**Regression after both fixes:** `tests/api/credentials` + `tests/api/agents/skill_credentials` +
+`tests/api/agents/bundles` + `tests/api/agents/bundles_install` + `tests/unit` +
+`tests/api/agents/core` = **2470 passed, 10 skipped**; `tests/api/agents/sessions` +
+`tests/api/agents/agent_api` + `tests/api/agents/bundles_install` = **197 passed** (the gate runs on
+the chat path). `make check-docs` green, platform knowledge re-synced, client regenerated — the only
+API-surface change is the `PATCH …/sharing` description.
 
 Confirmed live and already known: the generic `PUT /credentials/{id}` turning `allow_sharing` off
 leaves the shares in place (only `PATCH /credentials/{id}/sharing` deletes them) — the stale-share
