@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
 import json
 import logging
 import time
@@ -34,6 +35,7 @@ from sqlalchemy import func
 from sqlmodel import Session as DBSession
 from sqlmodel import select
 
+from app.core.config import settings
 from app.core.db import create_session, leader_session
 from app.models import Session, SessionCreate, SessionMessage
 from app.services.acp.connector_service import ACPConnectorService
@@ -49,12 +51,69 @@ logger = logging.getLogger(__name__)
 REMOTE_CWD = "/app/workspace"
 MAX_PROMPT_BYTES = 128 * 1024
 MAX_REPLAY_MESSAGES = 2000
-MAX_ACTIVE_PROMPTS = 8
+# An admitted prompt holds ``session_lease`` for its whole turn, and
+# ``leader_session`` pins one *physical* pooled DB connection for the life of
+# that block — up to ``PROMPT_TIMEOUT``. The budget is therefore a slice of the
+# shared pool rather than a free-floating constant: a third of ``DB_POOL_SIZE``.
+# A third, not a half, because a running prompt also takes *transient*
+# checkouts on top of its pinned lease (the watchdog every
+# ``AUTH_CHECK_INTERVAL``, each stream write, the finalizer), and REST traffic,
+# Socket.IO and the schedulers need the remainder without falling into the
+# overflow. Need more concurrency? Raise ``DB_POOL_SIZE``, not this.
+MAX_ACTIVE_PROMPTS = settings.DB_POOL_SIZE // 3
+# Sub-quota beneath the global cap: the cap alone is process-wide, so a single
+# tenant could hold every slot and answer everyone else with -32004 until it
+# finished. A third again, so saturating the server takes at least three
+# connectors rather than the two the original report described.
+# Residual, deliberately accepted: the quota is per *connector*, so one owner
+# with many connectors can still crowd the cap. Connector is the granularity
+# the protocol exposes (one connector ~ one client install, itself bounded by
+# the connector's own ``max_connections``), and it is the granularity a client
+# can reason about when it sees the error.
+MAX_ACTIVE_PROMPTS_PER_CONNECTOR = max(1, MAX_ACTIVE_PROMPTS // 3)
+assert 0 < MAX_ACTIVE_PROMPTS_PER_CONNECTOR < MAX_ACTIVE_PROMPTS, (
+    "the per-connector prompt quota must sit strictly below the global cap "
+    "(both derive from settings.DB_POOL_SIZE, floored at 8 in config)"
+)
 MAX_STREAM_BYTES = 8 * 1024 * 1024
 MAX_REPLAY_BYTES = 8 * 1024 * 1024
 PROMPT_TIMEOUT = 1800
 AUTH_CHECK_INTERVAL = 5
-_active_prompts: set[str] = set()
+# Consecutive *unexpected* watchdog failures tolerated before the turn is
+# stopped. A real authorization failure still stops it on the first check.
+MAX_AUTH_CHECK_FAILURES = 3
+# Lifetime of the per-session authorization memo used by ``update()`` only.
+AUTH_MEMO_TTL = 1.0
+# ticket -> connector_id of every prompt currently admitted in this process.
+_active_prompts: dict[int, UUID] = {}
+_prompt_tickets = itertools.count()
+
+
+def admit_prompt(connector_id: UUID, operation: str) -> int:
+    """Reserve one global and one per-connector prompt slot, or raise -32004.
+
+    Slots are keyed by a unique ticket instead of by session id, so a release
+    can never free a slot another holder is still using, and both counts are
+    derived from this single dict so they cannot drift apart from it.
+
+    Callers must reserve synchronously — no ``await`` between the check and the
+    reservation, or two prompts race past a full cap — and release the returned
+    ticket in a ``finally``.
+    """
+    if len(_active_prompts) >= MAX_ACTIVE_PROMPTS:
+        raise RequestError(-32004, f"Server {operation} capacity reached; retry later")
+    mine = sum(1 for owner in _active_prompts.values() if owner == connector_id)
+    if mine >= MAX_ACTIVE_PROMPTS_PER_CONNECTOR:
+        raise RequestError(
+            -32004, f"Connector {operation} capacity reached; retry later"
+        )
+    ticket = next(_prompt_tickets)
+    _active_prompts[ticket] = connector_id
+    return ticket
+
+
+def release_prompt(ticket: int) -> None:
+    _active_prompts.pop(ticket, None)
 
 
 @contextmanager
@@ -82,6 +141,9 @@ class CinnaACPAgent:
         self.prompts: dict[str, asyncio.Task[Any]] = {}
         self.cancelled: set[str] = set()
         self.stop_errors: dict[str, RequestError] = {}
+        # session_id -> monotonic time of its last real authorization check.
+        # Read by ``authorize_stream`` only; see ``update()``.
+        self.auth_checked_at: dict[str, float] = {}
 
     def authorize(self, db: DBSession):
         auth = ACPConnectorService.authenticate(self.connector_id, self.raw_token, db)
@@ -252,15 +314,14 @@ class CinnaACPAgent:
         lock = get_session_lock(session_id)
         if lock.locked():
             raise RequestError(-32006, "Session is busy")
-        if len(_active_prompts) >= MAX_ACTIVE_PROMPTS:
-            raise RequestError(-32004, "Server session capacity reached; retry later")
-        _active_prompts.add(session_id)
+        ticket = admit_prompt(self.connector_id, "session")
         try:
             async with lock:
                 with session_lease(session_id):
                     return await self._replay_session(session_id)
         finally:
-            _active_prompts.discard(session_id)
+            release_prompt(ticket)
+            self.auth_checked_at.pop(session_id, None)
 
     async def _replay_session(self, session_id: str) -> LoadSessionResponse:
         with create_session() as db:
@@ -323,9 +384,16 @@ class CinnaACPAgent:
                     },
                 )
             return
-        # Streaming must not continue disclosing output after revocation.
-        with create_session() as db:
-            self.session(db, session_id)
+        # Streaming must not continue disclosing output after revocation, but
+        # this runs per event *and* per sub-chunk of the split above, and each
+        # real check is two blocking queries on the worker's only event loop
+        # (a 2000-message replay issued thousands of them while holding the
+        # prompt's leased connection). Hence the memo — and hence the memo is
+        # confined to this one caller. The hard guarantee is ``watch_prompt``,
+        # which re-checks uncached every ``AUTH_CHECK_INTERVAL`` and interrupts
+        # the turn; ``AUTH_MEMO_TTL`` is well inside that window, so the memo
+        # never becomes the weakest link in the revocation path.
+        self.authorize_stream(session_id)
         if self.connection is not None:
             payload = SessionNotification.model_validate(
                 {"sessionId": session_id, "update": update}
@@ -334,6 +402,22 @@ class CinnaACPAgent:
                 "session/update",
                 payload.model_dump(mode="json", by_alias=True, exclude_none=True),
             )
+
+    def authorize_stream(self, session_id: str) -> None:
+        """Authorize a streamed notification, reusing a check under a TTL.
+
+        Per-operation callers (``_dispatch``, ``new_session``, ``load_session``,
+        ``prompt``, ``session/cancel``, ``watch_prompt``) must keep calling
+        ``session()`` directly: they run once per operation, and the watchdog's
+        check is the revocation guarantee.
+        """
+        now = time.monotonic()
+        checked_at = self.auth_checked_at.get(session_id)
+        if checked_at is not None and now - checked_at < AUTH_MEMO_TTL:
+            return
+        with create_session() as db:
+            self.session(db, session_id)
+        self.auth_checked_at[session_id] = now
 
     async def prompt(self, session_id: str, text: str) -> PromptResponse:
         with create_session() as db:
@@ -345,15 +429,14 @@ class CinnaACPAgent:
         lock = get_session_lock(session_id)
         if lock.locked() or session_id in self.prompts:
             raise RequestError(-32006, "Session is busy")
-        if len(_active_prompts) >= MAX_ACTIVE_PROMPTS:
-            raise RequestError(-32004, "Server prompt capacity reached; retry later")
-        _active_prompts.add(session_id)
+        ticket = admit_prompt(self.connector_id, "prompt")
         try:
             async with lock:
                 with session_lease(session_id):
                     return await self._run_prompt(session_id, text)
         finally:
-            _active_prompts.discard(session_id)
+            release_prompt(ticket)
+            self.auth_checked_at.pop(session_id, None)
 
     async def _run_prompt(self, session_id: str, text: str) -> PromptResponse:
         task = asyncio.current_task()
@@ -468,20 +551,36 @@ class CinnaACPAgent:
 
     async def watch_prompt(self, session_id: str) -> None:
         deadline = time.monotonic() + PROMPT_TIMEOUT
+        failures = 0
         while True:
             await asyncio.sleep(AUTH_CHECK_INTERVAL)
             try:
                 with create_session() as db:
                     self.session(db, session_id)
+                failures = 0
                 if time.monotonic() < deadline:
                     continue
                 error = RequestError(
                     -32008, "Prompt exceeded the 30-minute execution limit"
                 )
             except RequestError as exc:
+                # A real authorization failure (revoked, expired, deactivated)
+                # stops the turn on the first check. Never tolerated.
                 error = exc
             except Exception:
-                logger.exception("ACP authorization watchdog failed for %s", session_id)
+                # Anything else is infrastructure, not authorization: a pool
+                # checkout timeout or a dropped connection must not kill a
+                # 25-minute prompt. Tolerate a few in a row, then give up
+                # rather than stream on with an unverifiable authorization.
+                failures += 1
+                logger.exception(
+                    "ACP authorization watchdog failed for %s (%d/%d consecutive)",
+                    session_id,
+                    failures,
+                    MAX_AUTH_CHECK_FAILURES,
+                )
+                if failures < MAX_AUTH_CHECK_FAILURES:
+                    continue
                 error = RequestError.internal_error()
             self.stop_errors[session_id] = error
             await self.interrupt(session_id)
@@ -508,6 +607,12 @@ class CinnaACPAgent:
             )
 
     async def interrupt(self, session_id: str) -> None:
+        # Drop the streaming memo first: once the server has decided this turn
+        # must stop — a revoked token caught by the watchdog, a client cancel,
+        # a disconnect — no further notification may go out on a check made
+        # before that decision. Interrupting the environment and awaiting the
+        # task takes seconds, and the processor keeps emitting throughout.
+        self.auth_checked_at.pop(session_id, None)
         task = self.prompts.get(session_id)
         if task is None or session_id in self.cancelled:
             return
@@ -528,6 +633,7 @@ class CinnaACPAgent:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.raw_token = ""
         self.loaded.clear()
+        self.auth_checked_at.clear()
 
 
 class ACPStreamEventHandler:

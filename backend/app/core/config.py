@@ -252,6 +252,40 @@ class Settings(BaseSettings):
             path=self.POSTGRES_DB,
         )
 
+    # ── Shared SQLAlchemy connection pool ────────────────────────────────
+    # Sized explicitly instead of inheriting SQLAlchemy's default 5 + 10,
+    # because one worker (docker-compose.yml pins ``--workers 1``) serves REST,
+    # Socket.IO, the schedulers AND *long* checkouts: ``leader_session`` pins
+    # one physical connection for the whole life of its block, and an ACP
+    # prompt holds that block for up to its 30-minute timeout. On the default
+    # pool a handful of concurrent ACP prompts starved the rest of the app with
+    # "QueuePool limit of size 5 overflow 10 reached".
+    # ``DB_POOL_SIZE + DB_MAX_OVERFLOW`` is the ceiling per worker — keep
+    # workers x ceiling comfortably under the Postgres ``max_connections``
+    # (100 by default).
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    # How long a caller waits for a free connection before raising.
+    DB_POOL_TIMEOUT: int = 30
+    # Retire pooled connections below the usual server/proxy idle timeouts so a
+    # long-idle one is replaced rather than handed out dead.
+    DB_POOL_RECYCLE: int = 1800
+
+    @model_validator(mode="after")
+    def _check_db_pool_headroom(self) -> Self:
+        # ``app/acp/agent.py`` derives its prompt admission budget from
+        # ``DB_POOL_SIZE`` (a third of the pool globally, a third of that per
+        # connector), since every admitted prompt pins one connection for the
+        # whole turn. Below this floor those slices round down to nothing
+        # usable and the pool has no headroom left for request traffic.
+        if self.DB_POOL_SIZE < 8:
+            raise ValueError(
+                "DB_POOL_SIZE must be at least 8: a third of the pool is the "
+                "ACP prompt budget and the rest serves REST, Socket.IO and "
+                "the schedulers"
+            )
+        return self
+
     # Test mode. Defaults to False (full production behavior). The pytest
     # harness (`tests/conftest.py`) flips this to True *before* importing the
     # app so the lifespan can skip background schedulers and other heavy startup

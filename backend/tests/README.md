@@ -173,6 +173,9 @@ tests/
     conftest.py            # No-op setup_db override + env-template sys.path
     test_*.py
   architecture/            # Contract / drift tests — see "Architecture Tests" below.
+  infra/                   # README.md: engine pool + leader_session, on a scratch DB of
+                           #   their own (patches app.core.db.engine, TESTING off).
+  migrations/              # README.md: Alembic up/downgrade on a scratch DB of their own.
   stubs/                   # Test doubles for external services
     environment_adapter_stub.py
     email_stubs.py

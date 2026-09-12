@@ -8,7 +8,21 @@ from app.core.config import settings
 from app.models import AccountOrigin, User, UserCreate
 from app.services.users.user_service import UserService
 
-engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
+# Explicit pool sizing (see ``DB_POOL_SIZE`` in ``app/core/config.py``): this
+# engine serves ordinary request traffic *and* callers that hold a connection
+# for minutes at a time (``leader_session`` below, and the ACP prompt budget
+# derived from ``DB_POOL_SIZE``), which the 5 + 10 default cannot absorb.
+# ``pool_pre_ping`` discards connections the server closed while they sat idle,
+# so a stale checkout surfaces as a fresh connection rather than as an
+# ``OperationalError`` in the middle of someone's request.
+engine = create_engine(
+    str(settings.SQLALCHEMY_DATABASE_URI),
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_recycle=settings.DB_POOL_RECYCLE,
+    pool_pre_ping=True,
+)
 
 
 def create_session():

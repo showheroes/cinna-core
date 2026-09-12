@@ -2,16 +2,19 @@
 
 import asyncio
 import json
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from acp import connect_to_agent
+from acp.exceptions import RequestError
 from acp.schema import TextContentBlock
 from starlette.websockets import WebSocketDisconnect
 
+from app.acp.agent import CinnaACPAgent
 from tests.stubs.agent_env_stub import StubAgentEnvConnector
 from tests.utils.acp import acp_connector_url, create_acp_connector, create_acp_token
-from tests.utils.acp_runtime import acp_runtime_counts
+from tests.utils.acp_runtime import acp_prompt_slots, acp_runtime_counts
 from tests.utils.agent import create_agent_via_api
 from tests.utils.background_tasks import drain_tasks
 from tests.utils.message import list_messages
@@ -397,7 +400,7 @@ def test_disconnect_interrupts_remote_execution(client, superuser_token_headers)
         "connections": 0,
         "tasks": 0,
         "admitted": 0,
-        "sessions": 0,
+        "prompts": 0,
     }
 
 
@@ -450,3 +453,186 @@ def test_stream_tool_ids_thoughts_and_runtime_interrupt_map_to_acp(
         u["sessionUpdate"] == "tool_call_update" and u["status"] == "failed"
         for u in updates
     )
+
+
+def test_watchdog_tolerates_transient_failure_but_stops_real_auth_failure(
+    client, superuser_token_headers
+):
+    """
+    F3: ``watch_prompt`` must tell a transient infrastructure blip apart from a
+    real authorization failure.
+
+      1. A single unexpected (non-``RequestError``) exception from the
+         watchdog's authorization check must not kill a live prompt — the
+         turn is still alive afterwards and resolves normally on a
+         client-initiated cancel.
+      2. A real ``RequestError`` (revoked/expired/deactivated token) must
+         still stop the turn on its very first occurrence — the security
+         property ``029fb77b`` introduced must not regress.
+    """
+    real_session = CinnaACPAgent.session
+    inject: dict[str, str | None] = {"kind": None}
+
+    def flaky_session(self, db, session_id):
+        kind = inject["kind"]
+        if kind is not None:
+            inject["kind"] = None
+            if kind == "transient":
+                raise RuntimeError("simulated transient DB blip")
+            raise RequestError.auth_required()
+        return real_session(self, db, session_id)
+
+    agent, connector, token = setup_acp_client(client, superuser_token_headers)
+    with (
+        patch("app.services.sessions.message_service.agent_env_connector", SlowAgent()),
+        patch(
+            "app.services.sessions.message_service.MessageService.forward_interrupt_to_environment",
+            new_callable=AsyncMock,
+            return_value={"status": "ok"},
+        ),
+        patch("app.acp.agent.AUTH_CHECK_INTERVAL", 0.02),
+        patch.object(CinnaACPAgent, "session", flaky_session),
+    ):
+        with socket(client, connector, token) as ws:
+            initialize(ws)
+            sid = new_session(ws)
+
+            # ── Phase 1: one transient exception does not kill the turn ────
+            ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "prompt1",
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": sid,
+                        "prompt": [{"type": "text", "text": "Work"}],
+                    },
+                }
+            )
+            assert ws.receive_json()["params"]["update"]["content"]["text"] == "Working"
+            inject["kind"] = "transient"
+            # >> the patched AUTH_CHECK_INTERVAL: gives the watchdog several
+            # cycles to pick the failure up and tolerate it.
+            time.sleep(0.2)
+            assert inject["kind"] is None, (
+                "watchdog never consumed the injected failure — this test "
+                "would pass vacuously without AUTH_CHECK_INTERVAL actually firing"
+            )
+            # The turn is still alive: a client-initiated cancel resolves it
+            # normally instead of racing an unsolicited watchdog error that
+            # would already be sitting on the socket if the blip had killed it.
+            ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/cancel",
+                    "params": {"sessionId": sid},
+                }
+            )
+            result = ws.receive_json()
+            assert result["id"] == "prompt1"
+            assert "result" in result, result
+            assert result["result"]["stopReason"] == "cancelled"
+
+            # ── Phase 2: a real auth failure stops the turn immediately ────
+            sid2 = new_session(ws)
+            ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "prompt2",
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": sid2,
+                        "prompt": [{"type": "text", "text": "Work"}],
+                    },
+                }
+            )
+            assert ws.receive_json()["params"]["update"]["content"]["text"] == "Working"
+            inject["kind"] = "auth"
+            result = ws.receive_json()
+            assert result["id"] == "prompt2"
+            assert result["error"]["code"] == -32000, result
+
+
+def test_per_connector_prompt_quota_isolates_tenants(client, superuser_token_headers):
+    """
+    F4: ``MAX_ACTIVE_PROMPTS_PER_CONNECTOR`` bounds each connector's admitted
+    prompts independently of the global cap, so one connector saturating its
+    own sub-quota must not lock out a different connector.
+    """
+    agent, connector_a, token_a = setup_acp_client(client, superuser_token_headers)
+    connector_b = create_acp_connector(client, superuser_token_headers, agent["id"])
+    token_b = create_acp_token(
+        client, superuser_token_headers, agent["id"], connector_b["id"]
+    )
+    with (
+        patch("app.services.sessions.message_service.agent_env_connector", SlowAgent()),
+        patch(
+            "app.services.sessions.message_service.MessageService.forward_interrupt_to_environment",
+            new_callable=AsyncMock,
+            return_value={"status": "ok"},
+        ),
+        patch("app.acp.agent.MAX_ACTIVE_PROMPTS_PER_CONNECTOR", 1),
+    ):
+        with socket(client, connector_a, token_a) as ws_a1:
+            initialize(ws_a1)
+            sid_a1 = new_session(ws_a1)
+            ws_a1.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "prompt_a1",
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": sid_a1,
+                        "prompt": [{"type": "text", "text": "Work A1"}],
+                    },
+                }
+            )
+            assert (
+                ws_a1.receive_json()["params"]["update"]["content"]["text"]
+                == "Working"
+            )
+
+            # ── A second prompt on the SAME connector is rejected: its own
+            #    sub-quota (patched to 1) is already saturated. ─────────────
+            with socket(client, connector_a, token_a) as ws_a2:
+                initialize(ws_a2)
+                sid_a2 = new_session(ws_a2)
+                result, _ = rpc(
+                    ws_a2,
+                    "session/prompt",
+                    {
+                        "sessionId": sid_a2,
+                        "prompt": [{"type": "text", "text": "Work A2"}],
+                    },
+                )
+                assert result["error"]["code"] == -32004, result
+                assert "Connector" in result["error"]["message"], result
+
+            # ── A different connector is unaffected: it can still admit. ────
+            with socket(client, connector_b, token_b) as ws_b:
+                initialize(ws_b)
+                sid_b = new_session(ws_b)
+                ws_b.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "prompt_b",
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": sid_b,
+                            "prompt": [{"type": "text", "text": "Work B"}],
+                        },
+                    }
+                )
+                assert (
+                    ws_b.receive_json()["params"]["update"]["content"]["text"]
+                    == "Working"
+                )
+
+                # Both connectors' admissions are visible at once — asserted
+                # as a whole dict (not a single key) so a typo'd connector id
+                # or an unrelated key can't pass vacuously against the
+                # ``Counter``'s zero-default.
+                assert acp_prompt_slots() == {
+                    str(connector_a["id"]): 1,
+                    str(connector_b["id"]): 1,
+                }

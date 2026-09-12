@@ -187,7 +187,12 @@ def revoke_acp_token(
     connector_id: uuid.UUID,
     token_id: uuid.UUID,
 ) -> ACPTokenPublic:
-    """Permanently revoke a token. Create a replacement to restore access."""
+    """Permanently revoke a token.
+
+    Create a replacement to restore access. Conversations started with the
+    revoked token cannot be reopened: each ACP session is bound to the token
+    that created it, so a replacement token starts fresh.
+    """
     _owned_connector(session, agent_id, connector_id, current_user.id)
     token = _scoped_token(session, connector_id, token_id)
     return ACPConnectorService.revoke_token(session, token)
@@ -204,6 +209,12 @@ def delete_acp_token(
     connector_id: uuid.UUID,
     token_id: uuid.UUID,
 ) -> Message:
+    """Delete a token.
+
+    Like revoking it, this permanently ends the app's access, and conversations
+    started with this token cannot be reopened — each ACP session is bound to
+    the token that created it.
+    """
     _owned_connector(session, agent_id, connector_id, current_user.id)
     ACPConnectorService.delete_token(
         session, _scoped_token(session, connector_id, token_id)

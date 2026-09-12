@@ -345,7 +345,8 @@ export function AcpTokensDialog({
               {target?.token.label}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              The app using this token loses access. This token cannot be
+              The app using this token loses access, and a replacement token
+              cannot reopen conversations this one started. This token cannot be
               restored.
             </AlertDialogDescription>
           </AlertDialogHeader>

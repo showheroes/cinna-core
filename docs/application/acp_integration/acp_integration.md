@@ -57,6 +57,7 @@ The management UI follows the existing integrations role restrictions: direct co
 - Token lifetime is between one and 365 days. Token lists show identifying prefixes and lifecycle dates, never reusable secrets.
 - An inactive owner or agent, a deleted/disabled connector, an expired/revoked token, or lost building privileges stops authorization.
 - Session loading and prompting are serialized. A second overlapping operation receives a busy error instead of silently queuing a duplicate turn.
+- Only a limited number of prompts and session replays run at once, both across the whole server and per connector; once a limit is reached, further attempts receive a capacity error until an existing one finishes. This budget is now tied to the server's database capacity rather than a fixed number, so it can be smaller on a modestly sized deployment — capacity errors can arrive sooner than before under concurrent load. See the [technical reference](acp_integration_tech.md#authentication-and-limits) for exact figures.
 - Prompts support text only. Images, audio, embedded resources, client-provided MCP servers, additional directories, local file access, and client terminal access are not supported. Cinna's existing owner-configured agent tools continue to run inside its environment.
 - A client that sends a local working directory must use the provided bridge, which maps it to `/app/workspace`, or explicitly support the hosted directory. The bridge does not upload local files or inject local MCP tools.
 - MCP connectors and ACP connectors are separate; their credentials are not interchangeable.
@@ -83,3 +84,4 @@ Remote ACP transport is still experimental in the [official ACP transport docume
 ## Changelog
 
 - 2026-09-11: Added owner-managed ACP connectors, hashed access tokens, hosted WebSocket sessions, and an external-client stdio bridge.
+- 2026-09-12: Tied the concurrent prompt/replay budget to server database capacity (was a fixed number) and added a per-connector share of it, so capacity errors can arrive sooner under load and one connector can no longer exhaust the whole server's budget; clarified the revoke/delete-token copy shown to owners.

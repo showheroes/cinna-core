@@ -511,7 +511,11 @@ export class AcpConnectorsService {
     
     /**
      * Revoke Acp Token
-     * Permanently revoke a token. Create a replacement to restore access.
+     * Permanently revoke a token.
+     *
+     * Create a replacement to restore access. Conversations started with the
+     * revoked token cannot be reopened: each ACP session is bound to the token
+     * that created it, so a replacement token starts fresh.
      * @param data The data for the request.
      * @param data.agentId
      * @param data.connectorId
@@ -536,6 +540,11 @@ export class AcpConnectorsService {
     
     /**
      * Delete Acp Token
+     * Delete a token.
+     *
+     * Like revoking it, this permanently ends the app's access, and conversations
+     * started with this token cannot be reopened — each ACP session is bound to
+     * the token that created it.
      * @param data The data for the request.
      * @param data.agentId
      * @param data.connectorId
