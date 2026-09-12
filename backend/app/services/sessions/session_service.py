@@ -2,7 +2,10 @@ from uuid import UUID
 from datetime import datetime, UTC
 import logging
 import asyncio
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.server_channels.channel_conversation_context_service import ChannelContextResult
 from sqlmodel import Session as DBSession, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
@@ -1391,6 +1394,10 @@ class SessionService:
         *,
         uploader_user_id: UUID | None = None,
         redelivered_file_ids: set[UUID] | None = None,
+        channel_context: "ChannelContextResult | None" = None,
+        context_binding_id: UUID | None = None,
+        external_message_id: str | None = None,
+        channel_reply_target: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Send a message to a session and optionally initiate streaming.
@@ -1468,6 +1475,10 @@ class SessionService:
         if get_fresh_db_session is None:
             get_fresh_db_session = create_session
 
+        live_file_ids = list(file_ids or [])
+        if channel_context:
+            file_ids = list(dict.fromkeys([*live_file_ids, *channel_context.file_ids]))
+            redelivered_file_ids = set(redelivered_file_ids or ()) | channel_context.reused_file_ids
         has_files = bool(file_ids)
         environment_id: UUID | None = None
         environment_status: str | None = None
@@ -1590,6 +1601,7 @@ class SessionService:
                         content=content,
                         sent_to_agent_status="pending",  # queued for async streaming
                         message_metadata={
+                            **({"channel_reply_target": channel_reply_target} if channel_reply_target else {}),
                             "command": True,
                             "command_name": command_label,
                             "routing": "command_stream",
@@ -1737,26 +1749,82 @@ class SessionService:
             # agent-bound content without it being stored in message.content
             # (and therefore never rendered in the chat UI).
             base_message_metadata: dict = {}
+            if channel_reply_target:
+                base_message_metadata["channel_reply_target"] = channel_reply_target
             if page_context:
                 base_message_metadata["page_context"] = page_context
 
-            if has_files:
+            context_transaction = channel_context is not None and context_binding_id is not None
+            uploaded_file_paths: dict[UUID, str] | None = None
+            if context_transaction and has_files:
                 try:
-                    # Prepare user message with files (uploads to agent-env)
-                    user_message, message_content_for_agent = await MessageService.prepare_user_message_with_files(
-                        session=db,
-                        session_id=session_id,
-                        message_content=content,
-                        file_ids=file_ids,
-                        environment_id=chat_session.environment_id,
-                        user_id=user_id,
-                        answers_to_message_id=answers_to_message_id,
-                        message_metadata=base_message_metadata,
-                        uploader_user_id=uploader_user_id,
+                    # Complete every awaited file operation before FOR UPDATE.
+                    # A second coroutine can otherwise synchronously block this
+                    # event loop while the lock holder waits for the network.
+                    uploaded_file_paths = await MessageService.upload_user_message_files(
+                        session=db, file_ids=file_ids, environment_id=chat_session.environment_id,
+                        user_id=user_id, uploader_user_id=uploader_user_id,
                         redelivered_file_ids=redelivered_file_ids,
                     )
+                except Exception as error:
+                    db.rollback()
+                    logger.exception("Failed to upload channel files before ingestion")
+                    return {"action": "error", "message": f"Failed to prepare message with files: {error}"}
+            if context_transaction:
+                from app.services.server_channels.channel_conversation_context_service import ChannelConversationContextService
+                try:
+                    channel_context, duplicate = ChannelConversationContextService.reconcile_context(
+                        db=db, binding_id=context_binding_id, context=channel_context,
+                        external_message_id=external_message_id,
+                    )
+                except Exception:
+                    db.rollback()
+                    logger.exception("Failed to lock channel context for ingestion")
+                    return {"action": "error", "message": "Failed to prepare channel message"}
+                if duplicate:
+                    db.commit()
+                    return {"action": "pending", "session_id": session_id, "message": "Message already received"}
+                file_ids = list(dict.fromkeys([*live_file_ids, *channel_context.file_ids]))
+                has_files = bool(file_ids)
+            if context_transaction and (channel_context.transcript or channel_context.truncated or channel_context.degraded_reason):
+                base_message_metadata["agent_context_prefix"] = channel_context.transcript
+                MessageService.create_message(
+                    session=db, session_id=session_id, role="system",
+                    content=channel_context.transcript or "",
+                    message_metadata=channel_context.message_metadata,
+                    sent_to_agent_status="sent", commit=False,
+                )
+
+            if has_files:
+                try:
+                    if context_transaction:
+                        # No await until the binding lock is released by commit:
+                        # transfer paths were prepared before reconciliation.
+                        user_message, message_content_for_agent = MessageService.create_user_message_with_uploaded_files(
+                            session=db, session_id=session_id, message_content=content,
+                            file_ids=file_ids, agent_file_paths=uploaded_file_paths or {},
+                            answers_to_message_id=answers_to_message_id,
+                            message_metadata=base_message_metadata,
+                            agent_context_prefix=channel_context.transcript, commit=False,
+                        )
+                    else:
+                        # Prepare user message with files (uploads to agent-env)
+                        user_message, message_content_for_agent = await MessageService.prepare_user_message_with_files(
+                            session=db,
+                            session_id=session_id,
+                            message_content=content,
+                            file_ids=file_ids,
+                            environment_id=chat_session.environment_id,
+                            user_id=user_id,
+                            answers_to_message_id=answers_to_message_id,
+                            message_metadata=base_message_metadata,
+                            uploader_user_id=uploader_user_id,
+                            redelivered_file_ids=redelivered_file_ids,
+                        )
                     logger.info(f"Prepared message with {len(file_ids)} files for session {session_id}")
                 except Exception as e:
+                    if context_transaction:
+                        db.rollback()
                     logger.error(f"Failed to prepare message with files: {e}", exc_info=True)
                     return {"action": "error", "message": f"Failed to prepare message with files: {str(e)}"}
             else:
@@ -1768,8 +1836,22 @@ class SessionService:
                     content=content,
                     answers_to_message_id=answers_to_message_id,
                     message_metadata=base_message_metadata if base_message_metadata else None,
+                    commit=not context_transaction,
                 )
                 logger.info(f"Created user message for session {session_id}")
+
+            if context_transaction:
+                from app.services.server_channels.channel_conversation_context_service import ChannelConversationContextService
+                try:
+                    ChannelConversationContextService.stage_ingest(
+                        db=db, binding_id=context_binding_id, context=channel_context,
+                        external_message_id=external_message_id, live_char_count=len(content),
+                    )
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    logger.exception("Failed to persist channel turn and context")
+                    return {"action": "error", "message": "Failed to persist channel message"}
 
             # If not initiating streaming, return session info for manual streaming
             if not initiate_streaming:

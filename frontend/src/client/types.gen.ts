@@ -6335,6 +6335,9 @@ export type ServerChannelPublic = {
     webhook_token: (string | null);
     webhook_url: (string | null);
     has_outbound_credentials: boolean;
+    conversation_capabilities?: {
+        [key: string]: (boolean);
+    };
     created_by?: (string | null);
     created_at: string;
     updated_at: string;

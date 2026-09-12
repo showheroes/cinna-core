@@ -10,11 +10,10 @@ Covers:
   - A verified Google Chat message with one attachment -> a ``FileUpload``
     owned by the sender + a ``MessageFile`` on the user message.
   - A ``DRIVE_FILE`` attachment is never fetched.
-  - Webhook redelivery of a message with an attachment creates no second
-    ``FileUpload`` — the safe case (dedup at step 3 stops the second
-    delivery before step 6.5 ever runs). NOT the "redelivery inside the
-    dedup window on an already-bound thread" case, which is a currently
-    known-imperfect edge (see the test's own docstring).
+  - Webhook redelivery normally stops before attachment materialisation.
+    If the binding's latest-message stamp is lost, attachment-position reuse
+    still avoids refetching survivors and the durable live-ingest ledger
+    prevents a second user message or agent turn.
   - An attachment over the per-file cap is skipped; the message still
     reaches the agent, and the stored content names the file and the reason.
   - Attachment-only message, all skipped -> ``REPLY_ATTACHMENTS_REJECTED``.
@@ -473,16 +472,16 @@ def test_redelivery_of_a_message_with_an_attachment_creates_no_second_file(
     ``ChannelAttachmentService.materialize`` is ever called a second time.
 
     The OTHER window — a redelivery that reaches step 6.5 a second time
-    because the stamp was never written (the first ingest failed downstream
+    because the stamp was never written (the first ingest stopped downstream
     of materialisation) — used to be able to materialise files twice. It is
     now closed by ``ChannelAttachmentService``'s own idempotency, keyed on
     ``(server_channel_id, thread_key, external_message_id,
     attachment_index)`` and stored in the existing ``file_metadata`` JSON (no
     migration). That window — the one this test's docstring used to describe
     as "currently imperfect" — is exercised directly in
-    ``test_a_genuine_step_6_5_retry_reuses_survivors_and_only_re_materialises_
-    what_is_missing`` below, by resetting ``binding.last_external_message_id``
-    to simulate the stamp never having been written.
+    ``test_retry_after_binding_stamp_loss_reuses_files_without_duplicate_ingestion``
+    below. Resetting ``binding.last_external_message_id`` bypasses early dedup,
+    while the durable live-ingest ledger still prevents a duplicate agent turn.
 
     Asserted on the ``FileStorageService.store_file`` **call count**, not
     only the resulting ``FileUpload``/``files`` count — a future
@@ -535,80 +534,23 @@ def test_redelivery_of_a_message_with_an_attachment_creates_no_second_file(
     assert len(user_msgs[0]["files"]) == 1, "No second FileUpload from the redelivery"
 
 
-def test_a_genuine_step_6_5_retry_reuses_survivors_and_only_re_materialises_what_is_missing(
+def test_retry_after_binding_stamp_loss_reuses_files_without_duplicate_ingestion(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
-    """
-    The OTHER redelivery window — the one the previous test's docstring used
-    to describe as "currently imperfect": a retry that reaches step 6.5 a
-    SECOND time because ``binding.last_external_message_id`` was never
-    stamped by the first ingest (a downstream ingest failure, after
-    materialisation but before the stamp). Simulated directly here — the
-    same documented DB-seam exemption ``test_parked_entry_with_no_file_ids_
-    key_drains_without_error`` uses to reach a state no API call can
-    reproduce — because reproducing a genuine downstream failure is not
-    needed to prove the file-level idempotency this closes.
+    """A lost latest-message stamp cannot replay an already-ingested message.
 
-    The message carries three attachments: ``good1.pdf`` and ``good2.pdf``
-    (accepted) and ``toobig.pdf`` (skipped, over the per-file cap, on BOTH
-    deliveries — the cap does not change between them). Between the two
-    deliveries, ``good1.pdf``'s row is soft-deleted through the real
-    ``DELETE /files/{id}`` endpoint — ``_existing_materializations`` excludes
-    ``marked_for_deletion`` rows by design (those bytes are already promised
-    back to the owner), so this simulates "the row genuinely isn't there any
-    more" through an ordinary API call rather than a direct DB mutation.
+    The first delivery materialises two accepted files and reports one skipped
+    file. One accepted file is then soft-deleted through the API, and the
+    binding's latest-message stamp is cleared through the documented DB seam.
 
-    On the retry:
-      1. ``good2.pdf`` is REUSED — no fetch, no store — proving idempotency is
-         per attachment position, not all-or-nothing for the message.
-      2. ``good1.pdf`` IS re-fetched and re-stored, under a NEW file id — the
-         missing row is finished, not silently left absent.
-      3. ``toobig.pdf`` is fetched again and skipped again for the same
-         reason, and named again in the second message's content — a
-         previously-skipped attachment does not silently vanish on a retry
-         just because it was already reported once.
-      4. File order in the second message follows ref order (good1, good2),
-         not "reused first."
+    The retry reaches materialisation again: the surviving attachment is reused,
+    the missing file is stored again, and the oversized attachment is rejected
+    again. Those per-position assertions preserve attachment retry coverage.
 
-    **FINDING (currently RED — reported, not worked around; see the runner's
-    instructions):** points 1-2 above (the ``fetch2`` / ``store_mock``
-    assertions) pass — ``ChannelAttachmentService``'s own idempotency lookup
-    and per-position skip-index plumbing work exactly as designed. But the
-    test as a whole fails at the "two user messages" assertion afterward,
-    because of a real interaction bug one layer up:
-
-    ``good2.pdf`` was already attached to the FIRST message, and
-    ``MessageService.prepare_user_message_with_files`` flips a file's
-    ``status`` from ``"temporary"`` to ``"attached"`` the moment it is used
-    (``FileService.mark_files_as_attached``). On the retry,
-    ``ChannelAttachmentService`` correctly REUSES ``good2.pdf``'s row (no
-    re-fetch, no re-store — the assertions above prove it) and hands its id
-    down to ``prepare_user_message_with_files`` for the SECOND message — which
-    rejects it: ``if file.status != "temporary": raise MessageServiceError(
-    "File already attached: ...")``. That exception does not propagate as a
-    failure a sender or admin can see: ``ChannelIngestionService.
-    ingest_inbound_message`` returns it as a soft ``action="error"`` result
-    rather than raising, so ``ChannelInboundService._ingest`` does not raise
-    either, and ``_continue_thread`` — which decides whether to stamp
-    ``binding.last_external_message_id`` purely on "did an exception escape
-    ``_ingest_or_fail``", not on whether the ingest actually produced a
-    message — stamps the binding as if the retry had succeeded. Net effect:
-    the sender's retried message is silently and PERMANENTLY lost. No second
-    message, no error reply, no debug-feed entry, and no further retry
-    opportunity, because the next identical redelivery is now deduped as
-    already-processed.
-
-    This is a real gap in the idempotency design (plan §A), not a flaw in
-    this test's setup: the one documented trigger for reaching step 6.5 a
-    second time — "the first ingest failed downstream of materialisation, so
-    the stamp was never written" — is exactly the shape needed to hit it
-    whenever that first, unstamped attempt nonetheless got as far as
-    attaching at least one file to a message before whatever crashed it (a
-    failure between the message-creation commit and the later, separate
-    binding-stamp commit, which are two distinct commits in
-    ``_continue_thread``). Per this project's testing rules, this is reported
-    rather than fixed or routed around: do not soften these assertions, and
-    do not modify ``app/`` to make this test pass.
+    Clearing the binding stamp does NOT undo the committed user message or its
+    durable live-ingest ledger entry. The late deduplication guard must therefore
+    leave the original transcript and attachment links unchanged and never run
+    the agent a second time. A missing file is not permission to replay a turn.
     """
     channel = _channel(client, superuser_token_headers)
     signer = GoogleChatJWTSigner()
@@ -637,11 +579,12 @@ def test_a_genuine_step_6_5_retry_reuses_survivors_and_only_re_materialises_what
         ],
     )
 
+    stream_stub = StubAgentEnvConnector(response_text="Received the attachments.")
     store_patcher, store_mock = _spy(_STORE_FILE_TARGET)
     try:
         with patch.object(settings, "CHANNEL_ATTACHMENT_MAX_FILE_MB", 1):
             resp1, _send1, fetch1 = _post_chat(
-                client, channel, signer, event, fetch_side_effect=_fetch
+                client, channel, signer, event, stub=stream_stub, fetch_side_effect=_fetch
             )
         assert resp1.status_code == 200
         assert fetch1.await_count == 3
@@ -661,25 +604,28 @@ def test_a_genuine_step_6_5_retry_reuses_survivors_and_only_re_materialises_what
         r_delete = client.delete(f"{API}/files/{good1_id_v1}", headers=headers)
         assert r_delete.status_code == 200, r_delete.text
 
-        # Simulate the stamp never having been written by the first ingest —
-        # the only way to reach step 6.5 a second time for the SAME
-        # external_message_id.
+        # Simulate a crash after the message/ledger commit but before the
+        # separate binding-stamp commit. The durable ledger must survive.
         binding = _binding_for_channel(db, channel["id"])
         assert binding is not None
         binding.last_external_message_id = None
         db.add(binding)
         db.commit()
+        messages_before_retry = list_messages(client, headers, session_id)
+        assert len(stream_stub.stream_calls) == 1
 
         with patch.object(settings, "CHANNEL_ATTACHMENT_MAX_FILE_MB", 1):
             resp2, _send2, fetch2 = _post_chat(
-                client, channel, signer, event, fetch_side_effect=_fetch
+                client, channel, signer, event, stub=stream_stub, fetch_side_effect=_fetch
             )
         assert resp2.status_code == 200
-        # good1.pdf (deleted) and toobig.pdf (never stored) are re-fetched;
-        # good2.pdf (still a live row) is not — this much is proven and
-        # green: ``ChannelAttachmentService``'s own idempotency lookup and
-        # skip-index plumbing behave exactly as designed.
-        assert fetch2.await_count == 2
+        _send2.assert_not_awaited()
+        # The retry really reached step 6.5: only missing/skipped positions
+        # are fetched again; the surviving file is reused.
+        assert [call.args[1].filename for call in fetch2.await_args_list] == [
+            "good1.pdf",
+            "toobig.pdf",
+        ]
         assert store_mock.call_count == 3, (
             "only good1.pdf's re-store, on top of the two stores from the "
             "first delivery"
@@ -687,30 +633,16 @@ def test_a_genuine_step_6_5_retry_reuses_survivors_and_only_re_materialises_what
     finally:
         store_patcher.stop()
 
-    # ---- This is where the test currently goes red — see the docstring's
-    # "FINDING" section. `ChannelIngestionService.ingest_inbound_message`
-    # returns `action="error"` for this retry (`prepare_user_message_with_
-    # files` raises `MessageServiceError("File already attached: good2.pdf")`
-    # because good2.pdf's `FileUpload.status` was flipped from "temporary" to
-    # "attached" when the FIRST message consumed it), `_ingest` does not
-    # raise, and `_continue_thread` stamps `binding.last_external_message_id`
-    # anyway — indistinguishable from a genuine success. The sender's retried
-    # message is silently and permanently lost: no second message, no error
-    # reply, no debug-feed entry, and no further retry opportunity (the next
-    # identical redelivery is now deduped as already-processed).
-    user_msgs = [m for m in list_messages(client, headers, session_id) if m["role"] == "user"]
-    assert len(user_msgs) == 2, "the retry is a genuine second ingest (the stamp was reset)"
-    message2 = user_msgs[1]
-    files2 = message2["files"]
-    assert [f["filename"] for f in files2] == ["good1.pdf", "good2.pdf"], (
-        "file order must follow ref order, not reused-first"
+    messages_after_retry = list_messages(client, headers, session_id)
+    assert messages_after_retry == messages_before_retry, (
+        "a committed live-ingest ledger entry must prevent duplicate messages and attachment links"
     )
-    assert files2[0]["id"] != good1_id_v1, "good1.pdf must be a NEW row, not the deleted one"
-    assert files2[1]["id"] == good2_id, "good2.pdf must be the SAME row, reused"
-    assert "toobig.pdf" in (message2["content"] or ""), (
-        "a previously-skipped attachment must be named again on a retry, "
-        "not silently dropped because it was already reported once"
-    )
+    user_msgs = [m for m in messages_after_retry if m["role"] == "user"]
+    assert len(user_msgs) == 1
+    assert user_msgs[0]["id"] == message1["id"]
+    assert any(file["id"] == good2_id for file in user_msgs[0]["files"])
+    assert "toobig.pdf" in user_msgs[0]["content"]
+    assert len(stream_stub.stream_calls) == 1, "the attachment retry must not replay the agent turn"
 
 
 # ---------------------------------------------------------------------------

@@ -5,16 +5,10 @@ regression coverage and being the most likely to rot silently, plus one
 deliberate, documented deviation from the plan. If anything here goes red,
 treat it as more serious than a normal test failure.
 
-  1. Cross-user thread gate (`test_cross_user_thread_gate_*`) — a sender who
-     is not the binding's owner must never reach the bound agent/session,
-     for an ACTIVE binding or a FAILED one (the failed check must not be
-     reachable by a non-owner either — a non-owner can't trigger the
-     self-heal delete).
-  2. Lost-race ownership refusal (`test_lost_race_*`) — two different callers
-     racing to create the binding for a brand-new thread: the loser is
-     declined, never delivered into (`_handle_lost_race`'s "ingest" branch)
-     and never parked onto (`_handle_lost_race`'s "park" branch) the
-     winner's binding.
+  1. Per-asker isolation — another sender routes independently and never
+     reaches an existing asker's ACTIVE or FAILED binding.
+  2. Concurrent askers — two people opening one thread each get their own
+     session or pending install. Same-asker races still park both messages.
   3. Malformed-JWT handling on the public webhook
      (`test_malformed_jwt_probe_family_returns_403_not_500`) — a bearer
      token with an unknown/garbage/oversized `kid`, or none at all, must
@@ -33,6 +27,8 @@ See `tests/api/server_channels/README.md` for the park-branch design notes
 deterministically instead).
 """
 import uuid
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
@@ -139,25 +135,16 @@ def _classify_the_only_candidate(candidates, message, **kwargs):
 
 
 # ---------------------------------------------------------------------------
-# 1. Cross-user thread gate
+# 1. Per-asker session isolation
 # ---------------------------------------------------------------------------
 
 
-def test_cross_user_thread_gate_declines_non_owner_on_active_binding(
+def test_second_asker_without_an_agent_is_declined_without_touching_first_session(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
-    """
-    A thread already bound to user A's session must decline a message from a
-    different (also-whitelisted) user B outright — synchronously, in the
-    webhook's own HTTP response — never dispatching to A's agent/session.
+    """A second asker with no eligible agent gets their own detail-free decline.
 
-      1. User A sends the first message into a brand-new thread → Pass 1
-         match on A's own agent → binding created + session created for A.
-      2. User B (different account, also whitelisted) posts into the SAME
-         thread_key → must get REPLY_THREAD_OWNED synchronously, not
-         REPLY_WORKING (which would mean B fell through to routing).
-      3. B never gets a session. A's session/message count is unaffected —
-         B's text never reached A's agent.
+    The first asker's session remains unchanged and inaccessible to the second.
     """
     signer = GoogleChatJWTSigner()
     channel = _channel(client, superuser_token_headers)
@@ -184,15 +171,15 @@ def test_cross_user_thread_gate_declines_non_owner_on_active_binding(
     event_b = build_message_event(
         thread_key=thread_key, text="Hijack attempt from B", sender_email=user_b["email"]
     )
-    resp_b, _ = _post(client, channel, signer, event_b)
+    resp_b, send_b = _post(client, channel, signer, event_b)
 
     assert resp_b.status_code == 200
-    assert resp_b.json().get("text") == (
-        "This conversation belongs to someone else. Please start a new thread and "
-        "I'll set you up with your own assistant."
-    )
+    replies = [call.args[-1] or "" for call in send_b.await_args_list]
+    assert any("couldn't find an assistant" in reply for reply in replies), replies
+    assert all(user_a["email"] not in reply for reply in replies)
 
-    # B never got a session of their own for A's agent (or anywhere else).
+
+    # No route was granted, and A's session is not exposed to B.
     assert list_sessions(client, headers_b) == []
 
     # A's session is untouched — B's message never reached it.
@@ -202,27 +189,19 @@ def test_cross_user_thread_gate_declines_non_owner_on_active_binding(
     assert all("Hijack" not in (m["content"] or "") for m in messages_after)
 
 
-def test_cross_user_thread_gate_declines_non_owner_even_on_failed_binding(
+    assert client.get(f"{API}/sessions/{session_a['id']}", headers=headers_b).status_code in (400, 403, 404)
+
+def test_second_asker_routes_independently_of_first_askers_failed_binding(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
-    """
-    The cross-user ownership check runs BEFORE the status branch — including
-    the `failed` self-heal branch. A non-owner posting into a thread whose
-    binding is `failed` must still be declined, not trigger (or benefit from)
-    the delete-and-reroute self-heal.
+    """A failed binding for A cannot prevent B from reaching B's own agent.
 
-      1. User A's agent has no active environment when A's first message
-         arrives → Pass 1 still matches the agent, the binding is created,
-         but ingest raises NoActiveEnvironmentError → binding → `failed`.
-      2. User B posts into the same thread → must still get
-         REPLY_THREAD_OWNED, not a fresh routing attempt (which would
-         manifest as REPLY_WORKING/REPLY_NO_MATCH instead, and would mean a
-         non-owner reached the self-heal delete).
+    B's routing neither repairs nor resumes A's failed session.
     """
     signer = GoogleChatJWTSigner()
     channel = _channel(client, superuser_token_headers)
     user_a, headers_a, agent_a = _make_pass1_user(client, superuser_token_headers)
-    user_b, headers_b = create_random_user_with_headers(client)
+    user_b, headers_b, agent_b = _make_pass1_user(client, superuser_token_headers)
 
     # Strip A's active environment so ingest fails with NoActiveEnvironmentError.
     env_id = agent_a["active_environment_id"]
@@ -252,40 +231,24 @@ def test_cross_user_thread_gate_declines_non_owner_even_on_failed_binding(
     resp_b, _ = _post(client, channel, signer, event_b)
 
     assert resp_b.status_code == 200
-    assert resp_b.json().get("text") == (
-        "This conversation belongs to someone else. Please start a new thread and "
-        "I'll set you up with your own assistant."
-    )
-    assert list_sessions(client, headers_b) == []
+    sessions_b = [s for s in list_sessions(client, headers_b) if s["agent_id"] == agent_b["id"]]
+    assert len(sessions_b) == 1
+    contents_b = [m["content"] for m in list_messages(client, headers_b, sessions_b[0]["id"]) if m["role"] == "user"]
+    assert contents_b == ["Hijack attempt from B"]
+    assert list_sessions(client, headers_a) == []
 
 
 # ---------------------------------------------------------------------------
-# 2. Lost-race ownership refusal
+# 2. Concurrent askers and same-asker races
 # ---------------------------------------------------------------------------
 
 
-def test_lost_race_ingest_branch_declines_the_loser(
+def test_two_askers_opening_one_thread_receive_separate_sessions(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
-    """
-    Two DIFFERENT users race to open the same brand-new thread. Both webhook
-    deliveries land before either background routing task runs, so both see
-    "no binding" synchronously and both schedule `_route_new_thread`. When
-    drained, the loser's `_upsert_binding` hits the unique-constraint
-    IntegrityError and re-reads the winner's (ACTIVE) binding —
-    `_handle_lost_race` must decline the loser rather than ingesting their
-    text into the winner's session.
+    """Queue both people before routing; each gets their own agent and session.
 
-      1. Users A and B each own exactly one eligible agent (deterministic
-         Pass 1 match, different agents — the classifier stub picks whichever
-         single candidate is on the ballot).
-      2. Both POST into the SAME new thread_key before draining.
-      3. Draining runs A's task first (webhook call order == drain order):
-         A's binding is created ACTIVE with A's own agent + session.
-      4. B's task loses the race: IntegrityError → reread A's binding → user
-         mismatch → declined (REPLY_THREAD_OWNED, delivered as a message
-         since this runs in a background task) — B's own agent's routing
-         result is discarded, B gets no session anywhere.
+    Reusing a conversation key must not cause a unique-key conflict across users.
     """
     signer = GoogleChatJWTSigner()
     channel = _channel(client, superuser_token_headers)
@@ -310,22 +273,24 @@ def test_lost_race_ingest_branch_declines_the_loser(
         assert resp_a.status_code == 200 and resp_b.status_code == 200
         drain_tasks()
 
-    # A won: exactly one session, on A's own agent.
+    # Each asker receives exactly one session on their own agent.
     sessions_a = [s for s in list_sessions(client, headers_a) if s["agent_id"] == agent_a["id"]]
     assert len(sessions_a) == 1
     user_msgs_a = [m for m in list_messages(client, headers_a, sessions_a[0]["id"]) if m["role"] == "user"]
     assert len(user_msgs_a) == 1
     assert "A's opening message" in user_msgs_a[0]["content"]
 
-    # B lost: no session anywhere — not on B's own agent, not on A's.
-    assert list_sessions(client, headers_b) == []
+    sessions_b = [s for s in list_sessions(client, headers_b) if s["agent_id"] == agent_b["id"]]
+    assert len(sessions_b) == 1
+    assert sessions_b[0]["id"] != sessions_a[0]["id"]
+    user_msgs_b = [m for m in list_messages(client, headers_b, sessions_b[0]["id"]) if m["role"] == "user"]
+    assert [m["content"] for m in user_msgs_b] == ["B's opening message"]
+    assert "B's opening message" not in user_msgs_a[0]["content"]
+    assert client.get(f"{API}/sessions/{sessions_a[0]['id']}", headers=headers_b).status_code in (400, 403, 404)
+    assert client.get(f"{API}/sessions/{sessions_b[0]['id']}", headers=headers_a).status_code in (400, 403, 404)
 
-    # B was told the thread belongs to someone else (delivered async).
-    declined_texts = [call.args[-1] for call in send_mock.await_args_list]
-    assert any("belongs to someone else" in (t or "") for t in declined_texts)
 
-
-def test_lost_race_park_branch_declines_the_loser_but_parks_same_owner(
+def test_same_asker_race_parks_both_messages_on_one_pending_install(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
     """
@@ -408,10 +373,8 @@ def test_lost_race_park_branch_declines_the_loser_but_parks_same_owner(
 
     installing_texts = [call.args[-1] for call in send_mock.await_args_list]
     assert any("Setting up" in (t or "") for t in installing_texts), installing_texts
-    # msg2 was parked (not declined): the loser's reply is the "still setting
-    # up" text, never the cross-thread decline.
+    # The second message joined this asker's existing pending install.
     assert any("Still setting up" in (t or "") for t in installing_texts), installing_texts
-    assert not any("belongs to someone else" in (t or "") for t in installing_texts)
 
     consumer_agents = client.get(f"{API}/agents/", headers=consumer_headers).json()["data"]
     installed = [a for a in consumer_agents if a["bundle_uuid"] == bundle_uuid]
@@ -438,47 +401,12 @@ def test_lost_race_park_branch_declines_the_loser_but_parks_same_owner(
     assert any("thing two" in c for c in contents)
 
 
-def test_lost_race_install_branch_declines_the_loser_from_another_user(
+def test_two_askers_auto_install_independently_in_one_thread(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
-    """Two DIFFERENT users race a brand-new thread, and BOTH reach Pass 2.
+    """Two people summon the same catalog bundle into one shared thread.
 
-    The third lost-race entry point, and the one that had no coverage:
-    `_install_and_park`'s own `if not created:` edge. The two tests above both
-    reach `_handle_lost_race` from Pass 1; this one reaches it from Pass 2,
-    *after* an auto-install has already happened. The path exists because
-    `_upsert_binding` is called a second time inside `_install_and_park`, on a
-    thread another sender may have bound while this sender's bundle was
-    installing.
-
-    Regression guard, not a new behaviour. Phase 3 of the channels & identity
-    unification threaded `policy` — the sender's own per-message reading,
-    keyword-only with no default — through every `_handle_lost_race` call site
-    but this one. The park path therefore raised
-    `TypeError: _handle_lost_race() missing 1 required keyword-only argument`,
-    which `_route_new_thread`'s outer handler swallowed into the generic
-    `REPLY_SETUP_FAILED`: B was told setup had failed (it had not), and the
-    deliberate one-person-per-thread re-check that this branch exists to
-    perform never ran at all. Both halves are asserted below — the decline is
-    delivered, and the setup-failed text is absent.
-
-    Driven deterministically, the same way as the sibling park test
-    (`drain_tasks()` runs background tasks strictly sequentially; see
-    `tests/api/server_channels/README.md`):
-
-      1. One public bundle sits on the server auto-install list. Consumers A
-         and B own nothing at all, so Pass 1 finds zero candidates for either
-         and both fall straight through to Pass 2.
-      2. Both deliveries are queued into the SAME new thread before draining,
-         so both see "no binding" synchronously.
-      3. A's task drains first: Pass 2 picks the bundle, installs it, creates
-         the `pending_install` binding, parks A's message.
-      4. B's task drains second: Pass 2 picks the same bundle and installs
-         B's own copy — then `_upsert_binding` loses the race on the thread,
-         `created=False`, and `_handle_lost_race` must find `binding.user_id
-         != B` and decline.
-      5. The flush proves A's binding survived intact: A's parked message is
-         still delivered, on A's own install.
+    Both pending installs survive and deliver only their own parked message.
     """
     publisher, publisher_headers = make_user_and_headers(client)
     promote_to_developer(client, superuser_token_headers, publisher["id"])
@@ -498,8 +426,7 @@ def test_lost_race_install_branch_declines_the_loser_from_another_user(
     add_auto_install_bundle(client, superuser_token_headers, bundle_uuid)
 
     # Neither consumer owns anything, so neither has a Pass 1 ballot at all —
-    # which is what keeps BOTH of them on the Pass 2 path and makes the loser
-    # arrive at `_install_and_park` rather than at Pass 1's race handler.
+    # which keeps BOTH on Pass 2 and creates one pending install per asker.
     consumer_a, headers_a = make_user_and_headers(client)
     consumer_b, headers_b = make_user_and_headers(client)
 
@@ -529,21 +456,11 @@ def test_lost_race_install_branch_declines_the_loser_from_another_user(
 
     texts = [call.args[-1] or "" for call in send_mock.await_args_list]
 
-    # The headline: the loser was told the thread is someone else's. Before the
-    # fix this line never ran — `_handle_lost_race` raised on the missing
-    # keyword argument before reaching its own ownership check.
-    assert any("belongs to someone else" in t for t in texts), texts
-
-    # And was NOT told setup failed. This is the exact shape the swallowed
-    # `TypeError` produced, so it is the assertion that pins the regression
-    # rather than merely covering the branch.
-    assert not any("setting up your assistant failed" in t for t in texts), texts
-
-    # B reached nobody's session — not their own, and above all not A's.
+    assert sum("Setting up" in text for text in texts) >= 2, texts
+    assert not any("setting up your assistant failed" in text for text in texts), texts
+    assert list_sessions(client, headers_a) == []
     assert list_sessions(client, headers_b) == []
 
-    # A's binding is untouched: their install is there and their message is
-    # still parked on it, delivered once the environment comes up.
     installed_a = [
         a
         for a in client.get(f"{API}/agents/", headers=headers_a).json()["data"]
@@ -552,6 +469,14 @@ def test_lost_race_install_branch_declines_the_loser_from_another_user(
     assert len(installed_a) == 1, installed_a
     agent_a = installed_a[0]
 
+    installed_b = [
+        a for a in client.get(f"{API}/agents/", headers=headers_b).json()["data"]
+        if a["bundle_uuid"] == bundle_uuid
+    ]
+    assert len(installed_b) == 1
+    agent_b = installed_b[0]
+    assert agent_b["id"] != agent_a["id"]
+    set_environment_status(db, agent_b["active_environment_id"], "running")
     set_environment_status(db, agent_a["active_environment_id"], "running")
     db.commit()
     with patch(_STREAM_TARGET, stub):
@@ -570,6 +495,12 @@ def test_lost_race_install_branch_declines_the_loser_from_another_user(
     ]
     assert any("A opens the thread" in c for c in contents), contents
     assert not any("B piles into" in c for c in contents), contents
+    sessions_b = [s for s in list_sessions(client, headers_b) if s["agent_id"] == agent_b["id"]]
+    assert len(sessions_b) == 1
+    contents_b = [m["content"] for m in list_messages(client, headers_b, sessions_b[0]["id"]) if m["role"] == "user"]
+    assert any("B piles into the same thread" in c for c in contents_b)
+    assert not any("A opens the thread" in c for c in contents_b)
+
 
 
 # ---------------------------------------------------------------------------
@@ -756,3 +687,292 @@ def test_critical_state_does_not_fail_a_pending_binding(
     fresh_env = client.get(f"{API}/environments/{env_id}", headers=consumer_headers).json()
     assert fresh_env["status"] == "running"
     assert fresh_env["critical_state"] is True
+
+
+def test_flat_space_resumes_each_askers_session_across_transport_thread_ids(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """A flat space is one conversation per person even as event thread ids vary.
+
+    A and B each ask twice, then one webhook is retried. Each session retains
+    only its own two questions and the retry creates no additional turn.
+    """
+    channel = _channel(client, superuser_token_headers)
+    signer = GoogleChatJWTSigner()
+    user_a, headers_a, agent_a = _make_pass1_user(client, superuser_token_headers)
+    user_b, headers_b, agent_b = _make_pass1_user(client, superuser_token_headers)
+    conversation = f"spaces/{random_lower_string()}"
+    final_event = None
+    for user, questions in (
+        (user_a, ("A first", "A again")),
+        (user_b, ("B first", "B again")),
+    ):
+        for question in questions:
+            event = build_message_event(
+                thread_key=f"{conversation}/threads/{random_lower_string()}",
+                text=question, sender_email=user["email"],
+            )
+            event["space"] = {
+                "name": conversation, "type": "SPACE",
+                "spaceThreadingState": "UNTHREADED_MESSAGES",
+            }
+            response, _ = _post(client, channel, signer, event)
+            assert response.status_code == 200
+            final_event = event
+
+    assert final_event is not None
+    response, _ = _post(client, channel, signer, final_event)
+    assert response.status_code == 200
+    for headers, agent, expected in (
+        (headers_a, agent_a, ["A first", "A again"]),
+        (headers_b, agent_b, ["B first", "B again"]),
+    ):
+        sessions = [s for s in list_sessions(client, headers) if s["agent_id"] == agent["id"]]
+        assert len(sessions) == 1
+        messages = list_messages(client, headers, sessions[0]["id"])
+        assert [m["content"] for m in messages if m["role"] == "user"] == expected
+
+
+def test_missing_history_access_persists_context_notice_without_losing_question(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """A quoted summon still reaches the agent with an honest metadata-only notice.
+
+    The transcript precedes the live question, reports limited access, and a
+    webhook retry neither duplicates the question nor the context notice.
+    """
+    channel = _channel(client, superuser_token_headers)
+    signer = GoogleChatJWTSigner()
+    user, headers, agent = _make_pass1_user(client, superuser_token_headers)
+    thread = f"spaces/AAA/threads/{random_lower_string()}"
+    quote_id = f"spaces/AAA/messages/{random_lower_string()}"
+    event = build_message_event(thread_key=thread, text="What does the earlier message mean?", sender_email=user["email"])
+    event["space"] = {"name": "spaces/AAA", "type": "SPACE", "spaceThreadingState": "THREADED_MESSAGES"}
+    event["message"]["threadReply"] = True
+    event["message"]["quotedMessageMetadata"] = {"name": quote_id}
+    stub = StubAgentEnvConnector(response_text="Please paste the earlier message.")
+    with patch(
+        "app.services.server_channels.adapters.google_chat.GoogleChatAdapter.resolve_read_capabilities",
+        AsyncMock(return_value={"supports_message_fetch": False, "supports_thread_history": False}),
+    ):
+        response, _ = _post(client, channel, signer, event, stream_stub=stub)
+        assert response.status_code == 200
+        sessions = [s for s in list_sessions(client, headers) if s["agent_id"] == agent["id"]]
+        assert len(sessions) == 1
+        messages = list_messages(client, headers, sessions[0]["id"])
+        notices = [m for m in messages if m["message_metadata"].get("channel_thread_context") is True]
+        assert len(notices) == 1
+        notice = notices[0]
+        assert notice["role"] == "system"
+        assert notice["message_metadata"]["included_count"] == 0
+        assert notice["message_metadata"]["degraded_reason"] == "history_unavailable"
+        assert quote_id in notice["content"]
+        assert "text unavailable" in notice["content"]
+        questions = [m for m in messages if m["role"] == "user"]
+        assert len(questions) == 1
+        assert questions[0]["content"] == event["message"]["text"]
+        assert notice["sequence_number"] < questions[0]["sequence_number"]
+        assert len(stub.stream_calls) == 1
+
+        response, _ = _post(client, channel, signer, event, stream_stub=stub)
+        assert response.status_code == 200
+        assert list_messages(client, headers, sessions[0]["id"]) == messages
+        assert len(stub.stream_calls) == 1
+
+
+def test_quoted_chain_and_history_reach_agent_once_without_polluting_user_bubble(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """A real ingestion transaction combines quoted and ambient context once.
+
+    Adapter reads are external stubs. All context building, persistence, ingest
+    ledger updates and stream payload composition execute through the webhook.
+    """
+    channel = _channel(client, superuser_token_headers)
+    signer = GoogleChatJWTSigner()
+    user, headers, agent = _make_pass1_user(client, superuser_token_headers)
+    thread = f"spaces/AAA/threads/{random_lower_string()}"
+    refs = []
+    for index, text in enumerate(("Original schedule was Monday.", "Correction: schedule is Tuesday.", "The room is ready.")):
+        refs.append(SimpleNamespace(
+            message_id=f"spaces/AAA/messages/{random_lower_string()}",
+            text=text,
+            author_display_name=f"Colleague {index + 1}",
+            author_external_id=f"users/colleague-{index + 1}",
+            created_at=datetime(2026, 9, 12, 8, index, tzinfo=timezone.utc),
+            attachments=(), is_platform_authored=False,
+            quoted_message_id=refs[0].message_id if index == 1 else None,
+        ))
+    by_id = {ref.message_id: ref for ref in refs}
+    question = "Which day should I attend?"
+    event = build_message_event(thread_key=thread, text=question, sender_email=user["email"])
+    event["space"] = {"name": "spaces/AAA", "type": "SPACE", "spaceThreadingState": "THREADED_MESSAGES"}
+    event["message"]["threadReply"] = True
+    event["message"]["quotedMessageMetadata"] = {"name": refs[1].message_id}
+    stub = StubAgentEnvConnector(response_text="Tuesday.")
+
+    async def fetch_message(_channel, message_id):
+        return by_id[message_id]
+
+    adapter = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter"
+    with patch(
+        f"{adapter}.resolve_read_capabilities",
+        AsyncMock(return_value={"supports_message_fetch": True, "supports_thread_history": True}),
+    ), patch(
+        f"{adapter}.fetch_message", AsyncMock(side_effect=fetch_message),
+    ) as fetch_quote, patch(
+        f"{adapter}.fetch_thread_history", AsyncMock(return_value=list(reversed(refs))),
+    ) as fetch_history:
+        response, _ = _post(client, channel, signer, event, stream_stub=stub)
+        assert response.status_code == 200
+        sessions = [s for s in list_sessions(client, headers) if s["agent_id"] == agent["id"]]
+        assert len(sessions) == 1
+        messages = list_messages(client, headers, sessions[0]["id"])
+        notices = [m for m in messages if m["message_metadata"].get("channel_thread_context") is True]
+        assert len(notices) == 1
+        context = notices[0]
+        assert context["message_metadata"]["included_count"] == 3
+        assert context["message_metadata"]["degraded_reason"] is None
+        assert context["message_metadata"]["truncated"] is False
+        assert len(context["content"]) <= settings.CHANNEL_CONTEXT_CHAR_BUDGET
+        assert fetch_quote.await_count == 2
+        assert fetch_history.await_count == 1
+        assert len(stub.stream_calls) == 1
+        sent = stub.stream_calls[0]["payload"]["message"]
+        assert sent.endswith(question)
+        for ref in refs:
+            assert sent.count(ref.text) == 1
+            assert context["content"].count(ref.text) == 1
+        assert sent.index(refs[0].text) < sent.index(refs[1].text) < sent.index(refs[2].text)
+        user_messages = [m for m in messages if m["role"] == "user"]
+        assert [m["content"] for m in user_messages] == [question]
+        assert context["sequence_number"] < user_messages[0]["sequence_number"]
+
+        # A fresh turn quoting the same message reuses the ingest ledger and
+        # successful-backfill marker; no repeat network read or system notice.
+        followup = build_message_event(thread_key=thread, text="Thanks, confirm the room.", sender_email=user["email"])
+        followup["space"] = event["space"]
+        followup["message"]["quotedMessageMetadata"] = {"name": refs[1].message_id}
+        response, _ = _post(client, channel, signer, followup, stream_stub=stub)
+        assert response.status_code == 200
+        assert fetch_quote.await_count == 2
+        assert fetch_history.await_count == 1
+        messages = list_messages(client, headers, sessions[0]["id"])
+        assert sum(m["message_metadata"].get("channel_thread_context") is True for m in messages) == 1
+        assert len(stub.stream_calls) == 2
+        assert stub.stream_calls[1]["payload"]["message"] == "Thanks, confirm the room."
+
+
+def test_queued_turns_keep_thread_and_reply_here_destinations_separate(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """Two accepted turns queued before streaming retain separate reply targets.
+
+    A bound asker posts normally, then requests an in-place reply before the
+    background queue drains. Each question must produce one agent call and one
+    final external message at its own destination, with no stranded notice.
+    """
+    channel = _channel(
+        client,
+        superuser_token_headers,
+        config={"project_number": "123456789012", "thread_backfill_enabled": False},
+        secrets='{"client_email": "bot@test.iam.gserviceaccount.com", "private_key": "test-only"}',
+    )
+    signer = GoogleChatJWTSigner()
+    user, headers, agent = _make_pass1_user(client, superuser_token_headers)
+    thread = f"spaces/AAA/threads/{random_lower_string()}"
+    token = signer.token(audience=channel["config"]["project_number"])
+    adapter = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter"
+
+    class TurnResponseStub(StubAgentEnvConnector):
+        async def stream_chat(self, base_url, auth_headers, payload):
+            from tests.stubs.agent_env_stub import build_simple_response_events
+
+            self.stream_calls.append({"base_url": base_url, "payload": payload})
+            for event in build_simple_response_events(
+                f"Final answer for turn {len(self.stream_calls)}."
+            ):
+                yield event
+
+    stub = TurnResponseStub()
+    # Model the external messages: editing a message cannot move its physical
+    # location. Inspect the destination where send created each message, not
+    # only the potentially stale target passed to an update later.
+    visible: dict[str, tuple[object, str]] = {}
+    next_id = 0
+
+    async def send(_channel, target, text):
+        nonlocal next_id
+        next_id += 1
+        message_id = f"spaces/AAA/messages/queued-{next_id}"
+        visible[message_id] = (target, text)
+        return message_id
+
+    async def update(_channel, _target, message_id, text):
+        original_target, _ = visible[message_id]
+        visible[message_id] = (original_target, text)
+
+    async def replace(_channel, target, message_id, text):
+        await update(_channel, target, message_id, text)
+        return SimpleNamespace(message_id=message_id, replaced=True)
+
+    async def delete(_channel, _target, message_id):
+        visible.pop(message_id, None)
+
+    def event(text):
+        result = build_message_event(
+            thread_key=thread, text=text, sender_email=user["email"],
+            sender_name="users/queued-asker",
+        )
+        result["space"] = {
+            "name": "spaces/AAA", "type": "SPACE",
+            "spaceThreadingState": "THREADED_MESSAGES",
+        }
+        result["message"]["threadReply"] = True
+        return result
+
+    with ExitStack() as stack:
+        stack.enter_context(signer.patched())
+        stack.enter_context(patch(_STREAM_TARGET, stub))
+        stack.enter_context(patch(f"{adapter}.send_message", AsyncMock(side_effect=send)))
+        stack.enter_context(patch(f"{adapter}.update_message", AsyncMock(side_effect=update)))
+        stack.enter_context(patch(f"{adapter}.replace_message", AsyncMock(side_effect=replace)))
+        stack.enter_context(patch(f"{adapter}.delete_message", AsyncMock(side_effect=delete)))
+        stack.enter_context(patch(
+            f"{adapter}.resolve_read_capabilities",
+            AsyncMock(return_value={"supports_message_fetch": False, "supports_thread_history": False}),
+        ))
+        enter_classifier_patch(stack)
+
+        response = post_webhook(client, channel["webhook_token"], event("Open my session"), bearer_token=token)
+        assert response.status_code == 200 and response.json() == {}
+        drain_tasks()
+        assert len(stub.stream_calls) == 1
+
+        # No draining between these requests: the first turn is queued but
+        # active_streaming_manager has not yet marked the session as running.
+        normal = post_webhook(client, channel["webhook_token"], event("Answer inside the thread"), bearer_token=token)
+        here = post_webhook(client, channel["webhook_token"], event("Answer in the space\nreply here"), bearer_token=token)
+        assert normal.status_code == 200 and normal.json() == {}
+        assert here.status_code == 200 and here.json() == {}
+        assert len(stub.stream_calls) == 1
+        drain_tasks()
+
+    assert [call["payload"]["message"] for call in stub.stream_calls] == [
+        "Open my session", "Answer inside the thread", "Answer in the space",
+    ]
+    sessions = [s for s in list_sessions(client, headers) if s["agent_id"] == agent["id"]]
+    assert len(sessions) == 1
+    messages = list_messages(client, headers, sessions[0]["id"])
+    assert [m["content"] for m in messages if m["role"] == "user"] == [
+        "Open my session", "Answer inside the thread", "Answer in the space",
+    ]
+    assert len(visible) == 3, visible
+    for turn, expected_mode in ((1, "thread_reply"), (2, "thread_reply"), (3, "conversation_post")):
+        replies = [(target, text) for target, text in visible.values() if text == f"Final answer for turn {turn}."]
+        assert len(replies) == 1, visible
+        target, _ = replies[0]
+        assert target.mode == expected_mode
+        assert target.conversation_key == "spaces/AAA"
+        assert target.thread_key == (thread if expected_mode == "thread_reply" else None)
+        assert target.reply_to_message_id is None

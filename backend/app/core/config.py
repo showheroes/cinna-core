@@ -1042,6 +1042,13 @@ class Settings(BaseSettings):
         """Convert GB to bytes"""
         return self.UPLOAD_MAX_USER_STORAGE_GB * 1024 * 1024 * 1024
 
+    # Conversation history is bounded separately from the live sender's text.
+    CHANNEL_CONTEXT_CHAR_BUDGET: int = Field(default=5000, ge=0)
+    CHANNEL_QUOTE_CHAIN_MAX_DEPTH: int = Field(default=5, ge=0)
+    CHANNEL_BACKFILL_MAX_MESSAGES: int = Field(default=50, ge=0)
+    CHANNEL_BACKFILL_MAX_ATTACHMENTS: int = Field(default=10, ge=0)
+    CHANNEL_CONTEXT_FETCH_TIMEOUT_SECONDS: float = Field(default=20, gt=0)
+
     # --- Server-channel inbound attachments ------------------------------
     #
     # Files arriving from *outside* the platform (Google Chat, polled email)

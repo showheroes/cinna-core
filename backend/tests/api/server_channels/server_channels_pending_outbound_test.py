@@ -243,7 +243,7 @@ def test_stream_completed_delivers_final_message_through_the_binding(
     delivered_calls = [c.args for c in send_mock.await_args_list]
     # (channel, thread_key, text) — the last positional arg is the text.
     assert any(reply_text in (args[-1] or "") for args in delivered_calls)
-    assert any(args[-2] == thread_key for args in delivered_calls)
+    assert any(getattr(args[-2], "legacy_thread_key", args[-2]) == thread_key for args in delivered_calls)
 
 
 def test_parked_cap_refuses_and_a_refused_message_is_not_deduped_away(
@@ -562,3 +562,48 @@ def test_transient_failure_while_draining_leaves_binding_active_with_messages_st
     # sender, only the binding's fate differs.
     sent_texts = [c.args[-1] for c in send_mock.await_args_list]
     assert REPLY_SETUP_FAILED in sent_texts, sent_texts
+
+
+def test_pending_followup_rechecks_binding_after_attachment_upload(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    """An upload that spans installation completion must resume, never strand."""
+    from app.services.server_channels.channel_attachment_service import (
+        ChannelAttachmentResult,
+    )
+    from app.services.server_channels.channel_inbound_service import ChannelInboundService
+
+    setup = _setup_pending_install(client, superuser_token_headers)
+    set_environment_status(db, setup["env_id"], "running")
+    db.commit()
+    advanced = []
+
+    async def materialize_while_install_finishes(**kwargs):
+        request_db = kwargs["db"]
+        # This await is the scheduler's real activation and queue drain while
+        # process_inbound still holds its pre-upload pending binding snapshot.
+        advanced.append(await ChannelInboundService.flush_pending_bindings(request_db))
+        return ChannelAttachmentResult(file_ids=[], skipped=[])
+
+    followup = "followup after upload spans install completion"
+    event = build_message_event(
+        thread_key=setup["thread_key"], text=followup,
+        sender_email=setup["consumer_email"],
+    )
+    token = setup["signer"].token(audience=setup["channel"]["config"]["project_number"])
+    with setup["signer"].patched(), patch(_STREAM_TARGET, setup["stub"]), patch(
+        _SEND_TARGET, AsyncMock(return_value="fake-ext-id")
+    ), patch(
+        "app.services.server_channels.channel_attachment_service.ChannelAttachmentService.materialize",
+        side_effect=materialize_while_install_finishes,
+    ):
+        response = post_webhook(
+            client, setup["channel"]["webhook_token"], event, bearer_token=token
+        )
+        drain_tasks()
+    assert response.status_code == 200, response.text
+    assert advanced == [1]
+    sessions = list_sessions(client, setup["consumer_headers"])
+    session = next(s for s in sessions if s["agent_id"] == setup["installed_agent"]["id"])
+    messages = list_messages(client, setup["consumer_headers"], session["id"])
+    assert sum(followup in (m["content"] or "") for m in messages if m["role"] == "user") == 1

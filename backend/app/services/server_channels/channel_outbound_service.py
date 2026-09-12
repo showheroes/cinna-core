@@ -36,34 +36,42 @@ until then a user whose reply was lost can simply ask again.
 Everything here runs as an asyncio task on the main event loop. HTTP is async
 httpx; the DB work mirrors what every other event handler on that loop does.
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
 from typing import Any
 
-from sqlmodel import Session as DBSession, select
+from sqlmodel import Session as DBSession
+from sqlmodel import select
 
 from app.models import (
     ChannelThreadBinding,
     ServerChannel,
-    Session as ChatSession,
     SessionMessage,
+)
+from app.models import (
+    Session as ChatSession,
 )
 from app.models.events.event import (
     AGENT_MESSAGE_ID_META_KEY as _AGENT_MESSAGE_ID_META_KEY,
 )
 from app.services.routing import routing_trace
-from app.services.server_channels.adapters.email import build_reply_thread_key
+from app.services.server_channels.adapters.base import ChannelReplyTarget
 from app.services.server_channels.adapters.registry import (
     get_adapter,
-    get_transport,
 )
 from app.services.server_channels.channel_debug_buffer import (
     DEBUG_REPLIED,
     DEBUG_SEND_FAILED,
     ChannelDebugBuffer,
 )
+from app.services.server_channels.channel_reply_policy import (
+    ChannelReplyPolicy,
+    legacy_binding_thread_key,
+)
+
 # Module scope, unlike the relay import below: the ledger service imports
 # nothing from this module (it reaches the relay's ``_visible`` lazily), so
 # there is no cycle to dodge here.
@@ -82,88 +90,8 @@ _LOG_PREFIX = "[ChannelOutbound]"
 def _binding_thread_key(
     binding: ChannelThreadBinding, channel: ServerChannel | None = None
 ) -> str | None:
-    """The transport-facing thread key for ``binding``, or ``None``.
-
-    **Total by construction**, and the single place a transport-facing thread
-    key is derived from a binding.
-
-    The binding-shaped sibling of
-    ``channel_inbound_service._debug_channel_key``, and it exists rather than
-    reusing it for one reason: that helper reads ``channel.id``, and there is
-    no total reader for a *binding* attribute to reuse. The hazard is
-    identical — ``binding.thread_key`` looks like a field read and is not.
-    Every path into ``_deliver`` arrives after a ``db.commit()`` (the inbound
-    pipeline commits between every progress notice; the event handlers commit
-    while resolving the session), which expires the instance, so the read is a
-    lazy reload and reloading a concurrently deleted binding raises
-    ``ObjectDeletedError``.
-
-    ``None`` means "this message cannot be addressed", and the caller declines
-    to send rather than posting to a null thread — the same bargain
-    ``_debug_channel_key`` strikes, for the same reason: a delivery aimed at
-    nothing is worse than an honest, logged non-delivery.
-
-    **``channel`` and the reply context (settled decision §2.7).** A polled
-    transport's reply needs more than a thread id: an email answer carries
-    ``In-Reply-To`` and ``References``, which name the *last* inbound message,
-    not the thread root. ``send_message(channel, thread_key, text)`` has no
-    room for them, so the polled key is a composite —
-    ``"<root-message-id>|<last-message-id>"`` — built here and parsed by the
-    transport. The **stored** ``binding.thread_key`` is untouched: it stays the
-    bare root and remains the unique key everything binds by.
-
-    ``binding.last_external_message_id`` is read **inside the same ``try``**,
-    and that placement is the whole point rather than tidiness. It is the same
-    expired-instance lazy reload ``thread_key`` is, so a read outside the guard
-    would let a concurrently deleted binding raise out of a helper whose
-    callers rely on it never raising — turning an honest declined delivery into
-    a crash on the delivery path.
-
-    ``channel`` is optional and defaults to "no reply context", which is
-    exactly right for every webhook transport (Google Chat's key is already
-    complete) and is what a caller that has no channel to hand gets. Only the
-    transport shape decides: ``inbound_mode == "polled"``. The composite's
-    format belongs to the polled transport that reads it back —
-    ``adapters.email`` defines the separator, the builder and the parser in one
-    place — so a second polled transport with a different reply shape needs
-    its own branch here, not a different spelling of this one.
-    """
-    try:
-        thread_key = str(binding.thread_key)
-        # Same reload, same guard. See the docstring.
-        last_external_message_id = binding.last_external_message_id
-    except Exception:  # noqa: BLE001 — see the docstring
-        logger.warning(
-            "%s Could not read a thread key from the binding (instance expired "
-            "and its row is gone?)",
-            _LOG_PREFIX,
-            exc_info=True,
-        )
-        return None
-
-    if channel is None:
-        return thread_key
-
-    try:
-        # ``channel.channel_type`` is a lazy reload too, and this helper may
-        # not raise. A channel we cannot classify degrades to the bare thread
-        # key rather than to ``None``: the key is still the right address, and
-        # only the threading headers are lost. (``_deliver``'s own
-        # ``get_adapter`` call raises on the same row a moment later and is
-        # handled there — this is not the place to answer for it.)
-        transport = get_transport(channel.channel_type)
-    except Exception:  # noqa: BLE001 — degrade, never raise
-        logger.warning(
-            "%s Could not resolve the transport for a delivery; sending with "
-            "the bare thread key",
-            _LOG_PREFIX,
-            exc_info=True,
-        )
-        return thread_key
-
-    if transport.inbound_mode != "polled":
-        return thread_key
-    return build_reply_thread_key(thread_key, last_external_message_id)
+    """Compatibility wrapper for callers still requiring a legacy address."""
+    return legacy_binding_thread_key(binding, channel)
 
 
 def _binding_status_message_id(binding: ChannelThreadBinding) -> str | None:
@@ -232,9 +160,7 @@ STOPPED_NOTICE = "⏹️ Stopped."
 #: because the failure handler now builds two messages out of it — the bare
 #: text, and the same text under whatever the relay had already streamed —
 #: and a second literal is how the two would drift apart.
-TURN_FAILED_TEXT = (
-    "Something went wrong while I was working on that. Please try again."
-)
+TURN_FAILED_TEXT = "Something went wrong while I was working on that. Please try again."
 
 
 #: Meta key on the terminal stream events (``STREAM_COMPLETED`` /
@@ -332,9 +258,7 @@ def _agent_message_uuid(raw_message_id: Any) -> uuid.UUID | None:
         return None
 
 
-def _agent_message_text(
-    db: DBSession, raw_message_id: Any
-) -> str | _Unreadable | None:
+def _agent_message_text(db: DBSession, raw_message_id: Any) -> str | _Unreadable | None:
     """The text of the agent message a stream event named.
 
     **Total** — it never raises, because its caller's contract is to be total.
@@ -738,9 +662,7 @@ class ChannelOutboundService:
                     # anyway is the whole bug.
                     text = None
                 else:
-                    resolved_text = _agent_message_text(
-                        db, raw_agent_message_id
-                    )
+                    resolved_text = _agent_message_text(db, raw_agent_message_id)
                     if isinstance(resolved_text, _Unreadable):
                         # The read failed, so we do not know whether this turn
                         # said anything — and every other branch here acts on
@@ -794,9 +716,7 @@ class ChannelOutboundService:
                     # always has the truthy placeholder as content, so the
                     # gate costs it nothing.
                     if text and agent_message_uuid is not None:
-                        summary = tool_only_summary_for_message(
-                            db, agent_message_uuid
-                        )
+                        summary = tool_only_summary_for_message(db, agent_message_uuid)
                         if summary is not None:
                             text = summary
 
@@ -1060,9 +980,7 @@ class ChannelOutboundService:
                     channel=channel,
                     binding=binding,
                     text=(
-                        f"{tail}\n\n{TURN_FAILED_TEXT}"
-                        if tail
-                        else TURN_FAILED_TEXT
+                        f"{tail}\n\n{TURN_FAILED_TEXT}" if tail else TURN_FAILED_TEXT
                     ),
                     into_status_notice=True,
                 )
@@ -1336,7 +1254,7 @@ class ChannelOutboundService:
     async def set_status(
         *,
         channel: ServerChannel,
-        thread_key: str,
+        thread_key: str | ChannelReplyTarget,
         message_id: str | None,
         text: str,
     ) -> str | None:
@@ -1441,7 +1359,7 @@ class ChannelOutboundService:
     async def clear_status(
         *,
         channel: ServerChannel,
-        thread_key: str,
+        thread_key: str | ChannelReplyTarget,
         message_id: str | None,
     ) -> None:
         """Delete a thread's status notice. Never raises; already-gone is fine.
@@ -1480,6 +1398,7 @@ class ChannelOutboundService:
         binding: ChannelThreadBinding,
         text: str,
         settle: bool = False,
+        target: ChannelReplyTarget | None = None,
     ) -> bool:
         """``set_status`` for a bound thread, persisting the notice id.
 
@@ -1557,7 +1476,12 @@ class ChannelOutboundService:
         it, so this signature does not grow a tuple.
         """
         delivered, _message_id = await ChannelOutboundService.set_binding_status_ex(
-            db=db, channel=channel, binding=binding, text=text, settle=settle
+            db=db,
+            channel=channel,
+            binding=binding,
+            text=text,
+            settle=settle,
+            target=target,
         )
         return delivered
 
@@ -1569,6 +1493,7 @@ class ChannelOutboundService:
         binding: ChannelThreadBinding,
         text: str,
         settle: bool = False,
+        target: ChannelReplyTarget | None = None,
     ) -> tuple[bool, str | None]:
         """:meth:`set_binding_status`, plus the id of the message it wrote.
 
@@ -1586,9 +1511,11 @@ class ChannelOutboundService:
         returns; a ledger row records it as "delivered, message unknown"
         rather than inventing one.
         """
-        thread_key = _binding_thread_key(binding, channel)
+        thread_key = target or ChannelReplyPolicy.resolve_binding(binding, channel)
         if thread_key is None:
             return False, None
+        if target is not None:
+            ChannelReplyPolicy.remember_target(binding, target)
         message_id = await ChannelOutboundService.set_status(
             channel=channel,
             thread_key=thread_key,
@@ -1628,7 +1555,7 @@ class ChannelOutboundService:
         message_id = _binding_status_message_id(binding)
         if message_id is None:
             return
-        thread_key = _binding_thread_key(binding, channel)
+        thread_key = ChannelReplyPolicy.resolve_binding(binding, channel)
         if thread_key is not None:
             await ChannelOutboundService.clear_status(
                 channel=channel, thread_key=thread_key, message_id=message_id
@@ -1637,7 +1564,10 @@ class ChannelOutboundService:
 
     @staticmethod
     def adopt_status_notice(
-        db: DBSession, binding: ChannelThreadBinding, message_id: str | None
+        db: DBSession,
+        binding: ChannelThreadBinding,
+        message_id: str | None,
+        target: ChannelReplyTarget | None = None,
     ) -> None:
         """Hand a notice posted before the binding existed over to the binding.
 
@@ -1649,11 +1579,13 @@ class ChannelOutboundService:
 
         Never raises; see :meth:`_persist_status_message_id`.
         """
+        if target is not None:
+            ChannelReplyPolicy.remember_target(binding, target)
         ChannelOutboundService._persist_status_message_id(db, binding, message_id)
 
     @staticmethod
     async def _send_notice(
-        channel: ServerChannel, thread_key: str, text: str
+        channel: ServerChannel, thread_key: str | ChannelReplyTarget, text: str
     ) -> str | None:
         """Post a notice, swallowing delivery failure. Returns its id."""
         try:
@@ -1689,7 +1621,7 @@ class ChannelOutboundService:
     @staticmethod
     def _record_notice(
         channel: ServerChannel,
-        thread_key: str,
+        thread_key: str | ChannelReplyTarget,
         text: str,
         summary: str,
         *,
@@ -1719,7 +1651,9 @@ class ChannelOutboundService:
             direction="outbound",
             kind=DEBUG_SEND_FAILED if failed else DEBUG_REPLIED,
             summary=summary,
-            thread_key=thread_key,
+            thread_key=thread_key.legacy_thread_key
+            if isinstance(thread_key, ChannelReplyTarget)
+            else thread_key,
             text=text,
         )
 
@@ -1944,7 +1878,7 @@ class ChannelOutboundService:
         # ``ImportError`` raised inside the handler would destroy the exception
         # just as surely as an attribute reload.
         debug_channel_id = _debug_channel_key(channel)
-        thread_key = _binding_thread_key(binding, channel)
+        thread_key = ChannelReplyPolicy.resolve_binding(binding, channel)
         if thread_key is None:
             # Nothing to address the message to. Sending anyway would post to a
             # null thread; the warning is already logged by the helper.
@@ -1952,9 +1886,7 @@ class ChannelOutboundService:
         # Hoisted with the rest, and for the same reason: this is a lazy reload
         # on an expired instance, and it is about to be read inside a `try`
         # whose `except` may not raise anything of its own.
-        notice_id = (
-            _binding_status_message_id(binding) if into_status_notice else None
-        )
+        notice_id = _binding_status_message_id(binding) if into_status_notice else None
         # Whether the notice was actually taken over. Bound before the ``try``
         # so the failure path below can read it without a NameError, and only
         # ever set from the adapter's own report.
@@ -1998,7 +1930,7 @@ class ChannelOutboundService:
                     direction="outbound",
                     kind=DEBUG_SEND_FAILED,
                     summary=f"Delivery failed: {failure}",
-                    thread_key=thread_key,
+                    thread_key=thread_key.legacy_thread_key,
                     text=text,
                 )
             ChannelOutboundService._record_error(db, binding, detail)
@@ -2019,7 +1951,7 @@ class ChannelOutboundService:
                     if notice_id
                     else "Agent reply delivered"
                 ),
-                thread_key=thread_key,
+                thread_key=thread_key.legacy_thread_key,
                 text=text,
             )
         if notice_id and replaced:
@@ -2034,16 +1966,12 @@ class ChannelOutboundService:
         # something other than a non-empty string is recorded as "delivered,
         # message unknown" rather than as a value nothing can use.
         external_id = (
-            written_id[:255]
-            if isinstance(written_id, str) and written_id
-            else None
+            written_id[:255] if isinstance(written_id, str) and written_id else None
         )
         return True, external_id
 
     @staticmethod
-    def _record_error(
-        db: DBSession, binding: ChannelThreadBinding, error: str
-    ) -> None:
+    def _record_error(db: DBSession, binding: ChannelThreadBinding, error: str) -> None:
         """Record a delivery failure — but never over a diagnosis. Never raises.
 
         A binding that already failed carries WHY it failed, which is far more

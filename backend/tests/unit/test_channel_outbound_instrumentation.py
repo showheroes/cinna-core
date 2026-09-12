@@ -51,6 +51,7 @@ line, on a real ``LogRecord`` captured off an explicitly un-disabled logger
 (``_unswallowed_channel_debug_key_warnings``) — the same discrimination
 ``test_channel_reply_instrumentation.py`` uses, and for the same reason.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -336,7 +337,9 @@ def test_expired_channel_does_not_replace_the_delivery_failure(monkeypatch) -> N
     detail_calls = _spy_log_detail(monkeypatch)
 
     with _unswallowed_channel_debug_key_warnings() as records:
-        delivered = _deliver(_ChannelLostMidSend(), _LiveBinding(), adapter, monkeypatch)
+        delivered = _deliver(
+            _ChannelLostMidSend(), _LiveBinding(), adapter, monkeypatch
+        )
 
     assert delivered is False
     assert adapter.attempts == 1, "the send must actually have been attempted"
@@ -368,7 +371,17 @@ def test_expired_binding_does_not_replace_the_delivery_failure(monkeypatch) -> N
     substring — see ``_spy_binding_thread_key``.
     """
     adapter = _Adapter(error=RuntimeError("nope"))
-    thread_key_calls = _spy_binding_thread_key(monkeypatch)
+    from app.services.server_channels.channel_reply_policy import ChannelReplyPolicy
+
+    thread_key_calls = []
+    original = ChannelReplyPolicy.resolve_binding
+
+    def spy(binding, channel=None):
+        result = original(binding, channel)
+        thread_key_calls.append((binding, result))
+        return result
+
+    monkeypatch.setattr(ChannelReplyPolicy, "resolve_binding", spy)
 
     delivered = _deliver(_LiveChannel(), _BindingVanished(), adapter, monkeypatch)
 
@@ -504,7 +517,9 @@ def test_successful_delivery_still_records_under_the_channel_key(monkeypatch) ->
     assert [e.kind for e in events] == [DEBUG_REPLIED]
     assert events[0].text == "all good"
     assert events[0].thread_key == binding.thread_key
-    assert adapter.calls == [(binding.thread_key, "all good")]
+    assert [(target.legacy_thread_key, text) for target, text in adapter.calls] == [
+        (binding.thread_key, "all good")
+    ]
 
 
 def test_adapter_lookup_failure_is_still_recorded(monkeypatch, caplog) -> None:
@@ -593,7 +608,9 @@ def test_record_error_never_writes_over_an_existing_diagnosis() -> None:
     """A binding that already failed carries WHY, which beats "and we also
     couldn't tell them about it". Pinned because the early return moved inside
     the ``try`` and an early return is easy to lose in a reshuffle."""
-    binding = _LiveBinding(status=CHANNEL_BINDING_FAILED, last_error="earlier diagnosis")
+    binding = _LiveBinding(
+        status=CHANNEL_BINDING_FAILED, last_error="earlier diagnosis"
+    )
     db = _FakeDB()
 
     ChannelOutboundService._record_error(db, binding, "later noise")

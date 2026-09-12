@@ -26,6 +26,7 @@ from app.models import (
     SessionSender,
 )
 from app.services.sessions.session_service import SessionService
+from app.services.server_channels.channel_conversation_context_service import ChannelContextResult
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,10 @@ class ChannelIngestionService:
         extra_session_kwargs: dict[str, Any] | None = None,
         uploader_user_id: UUID | None = None,
         redelivered_file_ids: set[UUID] | None = None,
+        context: ChannelContextResult | None = None,
+        context_binding_id: UUID | None = None,
+        external_message_id: str | None = None,
+        channel_reply_target: dict[str, Any] | None = None,
     ) -> IngestionResult:
         """Run the full inbound ingestion flow (plan §4.1).
 
@@ -194,6 +199,10 @@ class ChannelIngestionService:
             integration_type=integration_type if is_new_session else None,
             uploader_user_id=uploader_user_id,
             redelivered_file_ids=redelivered_file_ids,
+            channel_context=context,
+            context_binding_id=context_binding_id,
+            external_message_id=external_message_id,
+            channel_reply_target=channel_reply_target,
         )
 
         # Step 4: map the dict return into `IngestionResult`. `message` is a

@@ -246,6 +246,7 @@ class ServerChannelPublic(ServerChannelBase):
     webhook_url: str | None
     # True when outbound credentials are stored (never the credential itself).
     has_outbound_credentials: bool
+    conversation_capabilities: dict[str, bool] = Field(default_factory=dict)
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime

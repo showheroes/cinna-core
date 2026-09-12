@@ -8,6 +8,8 @@ import {
   type ServerChannelPublic,
   ServerChannelsService,
 } from "@/client"
+import { CopyableValue } from "@/components/Common/CopyableValue"
+import { QueryErrorAlert } from "@/components/Common/QueryErrorAlert"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +21,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { CopyableValue } from "@/components/Common/CopyableValue"
 import {
   Dialog,
   DialogContent,
@@ -88,7 +89,7 @@ export function ChannelSetupInstructionsPanel({
   // narrows on a const rather than on a property access.
   const outboundTest = meta.outboundTest
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["serverChannelSetup", channel.id],
     queryFn: () =>
       ServerChannelsService.getSetupInstructions({ channelId: channel.id }),
@@ -171,7 +172,13 @@ export function ChannelSetupInstructionsPanel({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[620px] max-h-[85vh] overflow-y-auto">
+        <DialogContent
+          className="sm:max-w-[620px] max-h-[85vh] overflow-y-auto overflow-x-hidden pr-2 [&>*]:min-w-0"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            ;(event.currentTarget as HTMLElement | null)?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Set up {channel.name}</DialogTitle>
             <DialogDescription>
@@ -184,9 +191,11 @@ export function ChannelSetupInstructionsPanel({
           </DialogHeader>
 
           {isError ? (
-            <p className="text-sm text-destructive">
-              {getErrorMessage(error, "Couldn't load setup instructions.")}
-            </p>
+            <QueryErrorAlert
+              error={error}
+              fallback="Couldn't load setup instructions."
+              onRetry={() => refetch()}
+            />
           ) : isLoading || !data ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
@@ -224,7 +233,9 @@ export function ChannelSetupInstructionsPanel({
                   <span className="text-xs font-medium">Steps</span>
                   <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
                     {(data.steps ?? []).map((step, i) => (
-                      <li key={i}>{step}</li>
+                      <li key={i} className="break-words">
+                        {step}
+                      </li>
                     ))}
                   </ol>
                 </div>
@@ -234,7 +245,7 @@ export function ChannelSetupInstructionsPanel({
                   that an admin would otherwise only learn from the adapter
                   source: what happens to a sender this channel turns away. */}
               {meta.setupNote && (
-                <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+                <p className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs text-muted-foreground">
                   {meta.setupNote}
                 </p>
               )}
@@ -342,7 +353,7 @@ export function ChannelSetupInstructionsPanel({
                     </LoadingButton>
                   </div>
                   {!channel.has_outbound_credentials && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                    <p className="text-xs text-warning">
                       {outboundTest.missingCredentialsHint}
                     </p>
                   )}
@@ -351,9 +362,7 @@ export function ChannelSetupInstructionsPanel({
                       only toasted. */}
                   {testResult &&
                     (testResult.success ? (
-                      <p className="text-xs text-green-600 dark:text-green-400">
-                        Message delivered.
-                      </p>
+                      <p className="text-xs text-success">Message delivered.</p>
                     ) : (
                       <p className="text-xs text-destructive break-all">
                         {testResult.error || "Delivery failed."}

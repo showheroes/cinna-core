@@ -1,3 +1,4 @@
+from contextvars import ContextVar
 from uuid import UUID
 from datetime import datetime, UTC
 from typing import AsyncIterator, NamedTuple
@@ -17,6 +18,10 @@ from app.models.mcp.mcp_session_meta import MCPSessionMeta
 from app.services.sessions.session_context_signer import sign_session_context
 
 logger = logging.getLogger(__name__)
+
+# Task-local terminal callback queue. Drain only after the processor stops its
+# relay, before another turn may change the address under the session lock.
+_channel_turn_event_handlers: ContextVar[list | None] = ContextVar("channel_turn_event_handlers", default=None)
 
 # Regex for matching complete <webapp_action>...</webapp_action> tags.
 # Uses non-greedy matching to handle multiple tags in one response.
@@ -396,7 +401,11 @@ async def _emit_activity_event(
 ) -> None:
     """Fire-and-forget activity event with standard error handling."""
     try:
+        from app.models.events.event import EventType
         from app.services.events.event_service import event_service
+        deferred_handlers = _channel_turn_event_handlers.get() if event_type in (
+            EventType.STREAM_COMPLETED, EventType.STREAM_ERROR, EventType.STREAM_INTERRUPTED,
+        ) else None
         await event_service.emit_event(
             event_type=event_type,
             model_id=session_id,
@@ -407,6 +416,7 @@ async def _emit_activity_event(
                 **extra_meta,
             },
             user_id=user_id,
+            **({"deferred_handlers": deferred_handlers} if deferred_handlers is not None else {}),
         )
         logger.info(f"Emitted {event_type.value if hasattr(event_type, 'value') else event_type} event for session {session_id}")
     except Exception as e:
@@ -572,6 +582,8 @@ class MessageService:
         status_message: str | None = None,
         file_ids: list[UUID] | None = None,
         sent_to_agent_status: str = "pending",
+        *,
+        commit: bool = True,
     ) -> SessionMessage:
         """Create message in session with auto-incremented sequence.
 
@@ -626,8 +638,9 @@ class MessageService:
                 )
                 session.add(message_file)
 
-        session.commit()
-        session.refresh(message)
+        if commit:
+            session.commit()
+            session.refresh(message)
         return message
 
     @staticmethod
@@ -643,6 +656,8 @@ class MessageService:
         *,
         uploader_user_id: UUID | None = None,
         redelivered_file_ids: set[UUID] | None = None,
+        agent_context_prefix: str | None = None,
+        commit: bool = True,
     ) -> tuple[SessionMessage, str]:
         """
         Prepare user message with file attachments.
@@ -691,9 +706,32 @@ class MessageService:
         Raises:
             MessageServiceError: If validation fails or upload errors
         """
-        from app.models.files.file_upload import FileUpload, MessageFile
+        agent_file_paths = await MessageService.upload_user_message_files(
+            session=session, file_ids=file_ids, environment_id=environment_id,
+            user_id=user_id, uploader_user_id=uploader_user_id,
+            redelivered_file_ids=redelivered_file_ids,
+        )
+        return MessageService.create_user_message_with_uploaded_files(
+            session=session, session_id=session_id, message_content=message_content,
+            file_ids=file_ids, agent_file_paths=agent_file_paths,
+            answers_to_message_id=answers_to_message_id, message_metadata=message_metadata,
+            agent_context_prefix=agent_context_prefix, commit=commit,
+        )
+
+    @staticmethod
+    async def upload_user_message_files(
+        *, session: Session, file_ids: list[UUID], environment_id: UUID,
+        user_id: UUID, uploader_user_id: UUID | None = None,
+        redelivered_file_ids: set[UUID] | None = None,
+    ) -> dict[UUID, str]:
+        """Validate the uploader and transfer files without writing message rows.
+
+        Channel ingestion calls this before acquiring its binding row lock;
+        blocking PostgreSQL locks must never be held over async file transfers.
+        Other callers use the composed prepare_user_message_with_files method.
+        """
+        from app.models.files.file_upload import FileUpload
         from app.services.files.file_service import FileService
-        from sqlmodel import select
 
         # Validate files exist
         statement = select(FileUpload).where(FileUpload.id.in_(file_ids))
@@ -736,9 +774,36 @@ class MessageService:
                 status_code=500,
             ) from e
 
+        return agent_file_paths
+
+    @staticmethod
+    def create_user_message_with_uploaded_files(
+        *, session: Session, session_id: UUID, message_content: str,
+        file_ids: list[UUID], agent_file_paths: dict[UUID, str],
+        answers_to_message_id: UUID | None = None,
+        message_metadata: dict | None = None,
+        agent_context_prefix: str | None = None, commit: bool = True,
+    ) -> tuple[SessionMessage, str]:
+        """Persist a previously validated transfer. Synchronous: no external I/O.
+
+        agent_file_paths comes only from upload_user_message_files, never a
+        request. Filter to the file ids surviving final context reconciliation.
+        With commit=False all writes join the caller's short ingest transaction.
+        """
+        from app.models.files.file_upload import MessageFile
+        from app.services.files.file_service import FileService
+
+        agent_file_paths = {
+            file_id: path for file_id, path in agent_file_paths.items()
+            if file_id in file_ids
+        }
         # Compose message content with file paths for agent
         file_list = "\n".join(f"- {path}" for path in agent_file_paths.values())
         message_content_for_agent = f"Uploaded files:\n{file_list}\n---\n\n{message_content}"
+
+        if agent_context_prefix:
+            message_content_for_agent = f"{agent_context_prefix}\n\n{message_content_for_agent}"
+            message_metadata = {**(message_metadata or {}), "agent_context_prefix": agent_context_prefix}
 
         # Create user message with file associations
         user_message = MessageService.create_message(
@@ -749,6 +814,7 @@ class MessageService:
             answers_to_message_id=answers_to_message_id,
             file_ids=file_ids,
             message_metadata=message_metadata,
+            commit=commit,
         )
 
         # Update message_files with agent_env_paths
@@ -759,12 +825,14 @@ class MessageService:
             if message_file.file_id in agent_file_paths:
                 message_file.agent_env_path = agent_file_paths[message_file.file_id]
 
-        session.commit()
+        if commit:
+            session.commit()
 
         # Mark files as attached
         FileService.mark_files_as_attached(
             session=session,
             file_ids=list(agent_file_paths.keys()),
+            commit=commit,
         )
 
         logger.info(f"Prepared user message with {len(file_ids)} files for session {session_id}")
@@ -959,6 +1027,9 @@ class MessageService:
             # ── Page context diff injection ────────────────────────────────────
             # The page_context is stored in message_metadata (not in message.content)
             # so the chat UI never renders it — only the agent-env sees the XML block.
+            prefix = (message.message_metadata or {}).get("agent_context_prefix")
+            if prefix:
+                agent_content = f"{prefix}\n\n{agent_content}"
             stored_page_context = (message.message_metadata or {}).get("page_context")
             if stored_page_context:
                 previous = prev_context_ref[0]
@@ -1008,6 +1079,43 @@ class MessageService:
         return concatenated_content, pending_messages
 
     @staticmethod
+    def activate_channel_reply_target(
+        db: Session, session_id: UUID, messages: list[SessionMessage],
+    ) -> None:
+        """Restore the consumed turn's internal address, never a queued successor's.
+
+        Called under the session stream lock. The metadata is authored by the
+        channel pipeline; the binding lookup stays scoped to this session.
+        """
+        target_data = next((
+            (message.message_metadata or {}).get("channel_reply_target")
+            for message in reversed(messages)
+            if (message.message_metadata or {}).get("channel_reply_target")
+        ), None)
+        if not target_data:
+            return
+        from app.models import ChannelThreadBinding
+        from app.services.server_channels.adapters.base import ChannelReplyTarget
+        from app.services.server_channels.channel_reply_policy import ChannelReplyPolicy
+
+        binding = db.exec(select(ChannelThreadBinding).where(
+            ChannelThreadBinding.session_id == session_id,
+        )).first()
+        if binding is not None:
+            saved = binding.reply_target or {}
+            placement_keys = ("conversation_key", "thread_key", "reply_to_message_id", "mode")
+            if binding.status_message_id and any(
+                saved.get(key) != target_data.get(key) for key in placement_keys
+            ):
+                # A failed previous turn may leave its notice behind. Its id
+                # cannot be adopted at a different address by the new turn.
+                binding.status_message_id = None
+                logger.warning("Released stale channel notice after reply target changed")
+            ChannelReplyPolicy.remember_target(binding, ChannelReplyTarget(**target_data))
+            db.add(binding)
+            db.commit()
+
+    @staticmethod
     def collect_pending_batches(db: Session, session_id: UUID) -> list[dict]:
         """
         Collect pending messages and partition them into contiguous same-routing batches.
@@ -1040,18 +1148,30 @@ class MessageService:
         if not pending_messages:
             return []
 
+        # A relay and its completion callbacks own one address for their whole
+        # lifetime. Leave a successor address pending for the next invocation.
+        first_target = (pending_messages[0].message_metadata or {}).get("channel_reply_target")
+        if first_target:
+            for index, message in enumerate(pending_messages[1:], 1):
+                if (message.message_metadata or {}).get("channel_reply_target") != first_target:
+                    pending_messages = pending_messages[:index]
+                    break
+
         # Partition into contiguous same-routing runs
         batches: list[dict] = []
         current_routing = (pending_messages[0].message_metadata or {}).get("routing")
+        current_target = (pending_messages[0].message_metadata or {}).get("channel_reply_target")
         current_group: list = [pending_messages[0]]
 
         for msg in pending_messages[1:]:
             routing = (msg.message_metadata or {}).get("routing")
-            if routing == current_routing:
+            target = (msg.message_metadata or {}).get("channel_reply_target")
+            if routing == current_routing and target == current_target:
                 current_group.append(msg)
             else:
                 batches.append({"routing": current_routing, "messages": list(current_group)})
                 current_routing = routing
+                current_target = target
                 current_group = [msg]
         batches.append({"routing": current_routing, "messages": list(current_group)})
 
@@ -1152,6 +1272,9 @@ class MessageService:
                     file_list = "\n".join(f"- {path}" for path in file_paths)
                     agent_content = f"Uploaded files:\n{file_list}\n---\n\n{message.content}"
 
+            prefix = (message.message_metadata or {}).get("agent_context_prefix")
+            if prefix:
+                agent_content = f"{prefix}\n\n{agent_content}"
             stored_page_context = (message.message_metadata or {}).get("page_context")
             if stored_page_context:
                 previous = prev_context_ref[0]
@@ -1445,7 +1568,7 @@ class MessageService:
                 if not chat_session:
                     logger.error(f"Session {session_id} not found")
                     return
-                pending_check, _ = MessageService.collect_pending_messages(db, session_id)
+                pending_check, pending_messages = MessageService.collect_pending_messages(db, session_id)
                 if not pending_check:
                     logger.info(f"No pending messages found for session {session_id}")
                     chat_session.pending_messages_count = 0
@@ -1456,6 +1579,14 @@ class MessageService:
                 # Read here, inside the block that already has the row loaded,
                 # rather than opening a second session for one column.
                 integration_type = chat_session.integration_type
+                # The first pending group owns the notice the relay will adopt.
+                # Queued messages cannot repoint the previous turn while it runs.
+                is_channel_turn = bool(
+                    (integration_type or "").startswith("channel_")
+                    and (pending_messages[0].message_metadata or {}).get("channel_reply_target")
+                )
+                if is_channel_turn:
+                    MessageService.activate_channel_reply_target(db, session_id, pending_messages[:1])
 
             handler = WebSocketEventHandler(session_id, get_fresh_db_session)
             # Server-channel sessions additionally stream their answer into the
@@ -1481,13 +1612,26 @@ class MessageService:
                 log_prefix="[UI]",
             )
 
+            completed = False
+            terminal_handlers: list = []
+            event_token = _channel_turn_event_handlers.set(terminal_handlers if is_channel_turn else None)
             try:
                 await processor.process()
+                completed = True
             except Exception as e:
                 logger.error(f"Error in process_pending_messages for session {session_id}: {e}", exc_info=True)
                 await handler.on_error(e)
                 raise
             finally:
+                # processor.on_complete/on_error has stopped the relay now.
+                # Deliver before releasing the lock or activating a successor;
+                # draining earlier would let the running flusher seal extra text.
+                _channel_turn_event_handlers.reset(event_token)
+                for terminal_handler, terminal_event in terminal_handlers:
+                    try:
+                        await terminal_handler(terminal_event)
+                    except Exception:
+                        logger.exception("Deferred channel terminal handler failed")
                 # Safety net: guarantee the session never stays stuck "streaming".
                 # The happy path clears interaction_status via on_complete / the
                 # terminal STREAM_* events, but a cancellation (client disconnect,
@@ -1507,6 +1651,20 @@ class MessageService:
                     logger.warning(
                         f"Defensive interaction_status clear failed for session "
                         f"{session_id}: {clear_err}"
+                    )
+
+            if completed and is_channel_turn:
+                with get_fresh_db_session() as db:
+                    remaining = db.exec(select(SessionMessage.id).where(
+                        SessionMessage.session_id == session_id,
+                        SessionMessage.role == "user",
+                        SessionMessage.sent_to_agent_status == "pending",
+                    ).limit(1)).first()
+                if remaining:
+                    from app.utils import create_task_with_error_logging
+                    create_task_with_error_logging(
+                        MessageService.process_pending_messages(session_id, get_fresh_db_session),
+                        task_name=f"channel_next_turn_{session_id}",
                     )
 
     @staticmethod

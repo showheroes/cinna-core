@@ -150,7 +150,7 @@ A grant is **access**, not enablement — being granted does not switch the chan
 Server-wide (not per-channel) auto-install candidate list. `bundle_uuid` (FK `agent_bundle.id`, `ON DELETE CASCADE`, unique — one row per bundle), `added_by` (FK `user.id`, `ON DELETE SET NULL`).
 
 ### `channel_thread_binding`
-The feature's conversation state. `server_channel_id` (FK `server_channel.id`, `ON DELETE CASCADE`), `thread_key` (channel-native thread id, e.g. `spaces/AAA/threads/BBB`; unique together with `server_channel_id` — this is the race guard for two first-messages in one new thread), `user_id` (FK `user.id`, `ON DELETE CASCADE`, indexed), `agent_id` (FK `agent.id`, `ON DELETE CASCADE` — uninstalling the agent cascades the binding away), `session_id` (FK `session.id`, `ON DELETE SET NULL`, indexed, nullable — null before first activation and after the session is deleted), `status` (`pending_install` / `active` / `failed`), `pending_messages` (JSON list of `{text, external_message_id, external_user_id, received_at}`, capped at 20 entries — mutate via reassignment + `flag_modified`, never in-place `.append()`), `last_external_message_id` (webhook redelivery dedup), `status_message_id` (nullable — the thread's live **status notice**: the single progress message the pipeline rewrites in place, and whose last rewrite is the agent's own reply. Released the moment the reply takes the slot, which is load-bearing rather than tidy: a retained id would let the next turn's "working on your message…" be patched straight over the previous answer. NULL between turns, and permanently NULL for any transport without `supports_status_notice`. Since the streaming relay it is also released **mid-turn**, at every seal — a sealed message is final, and the next draft is a fresh post — so on a long answer this column is repointed several times within one turn; it remains the only persisted pointer that feature needs, which is why it adds no migration), `last_error` (Text, nullable).
+The feature's conversation state. `server_channel_id` (FK `server_channel.id`, `ON DELETE CASCADE`), `thread_key` (channel-native thread id, e.g. `spaces/AAA/threads/BBB`; address only; `scope_key` and `user_id` provide binding identity), `user_id` (FK `user.id`, `ON DELETE CASCADE`, indexed), `agent_id` (FK `agent.id`, `ON DELETE CASCADE` — uninstalling the agent cascades the binding away), `session_id` (FK `session.id`, `ON DELETE SET NULL`, indexed, nullable — null before first activation and after the session is deleted), `status` (`pending_install` / `active` / `failed`), `pending_messages` (JSON list of `{text, external_message_id, external_user_id, received_at}`, capped at 20 entries — mutate via reassignment + `flag_modified`, never in-place `.append()`), `last_external_message_id` (webhook redelivery dedup), `status_message_id` (nullable — the thread's live **status notice**: the single progress message the pipeline rewrites in place, and whose last rewrite is the agent's own reply. Released the moment the reply takes the slot, which is load-bearing rather than tidy: a retained id would let the next turn's "working on your message…" be patched straight over the previous answer. NULL between turns, and permanently NULL for any transport without `supports_status_notice`. Since the streaming relay it is also released **mid-turn**, at every seal — a sealed message is final, and the next draft is a fresh post — so on a long answer this column is repointed several times within one turn; it remains the only persisted pointer that feature needs, which is why it adds no migration), `last_error` (Text, nullable).
 
 **`user_id` is the *sender*, never the session's owner.** Since Phase 3 of the channels & identity unification an identity-routed thread has `binding.user_id` = the sender while `session.user_id` = the identity owner, so `binding.agent_id` names an agent the binding's own user does not own. Any consumer that reads `binding.user_id` as "the session's owner" is wrong; `_handle_lost_race` and `_continue_thread` are the two places such an assumption would hide, and both compare it against the *sender* only.
 
@@ -252,8 +252,8 @@ Both routing passes live here, not on `ChannelInboundService` — [Auto Routing 
 - `handle_inbound(db, webhook_token, request, body)` — the entry point; steps 1–6 (channel resolve, verify, dedup, whitelist, user resolution, **channel policy**) run inline and cheap; everything from binding dispatch onward for a **new thread** is scheduled as a background task (`_route_new_thread`) so the webhook can ack immediately — most channels retry a non-2xx response forever, so a slow synchronous reply is treated as a correctness risk, not just a latency one. On a transport with `supports_status_notice` **and** outbound credentials configured (`_status_notice_supported(channel) and _outbound_credentials_configured(channel)`, the latter delegating to `ServerChannelService.has_outbound_credentials`) an **accepted** new-thread message acks with an empty body `{}` and the background task posts the "finding an assistant…" notice through the API instead. That is not a nicety: Chat creates the synchronous message but never returns its id, so a notice answered inline can be neither rewritten nor removed. A channel that declares `supports_status_notice` but has no outbound credential configured keeps the old `build_sync_response(REPLY_WORKING, thread_key)` sync ack instead — the notice provably cannot be posted, and answering with nothing would be strictly worse than the old synchronous reply. **Declines stay synchronous** regardless, which is what lets a channel refuse a sender before its outbound credentials exist
 - **Step 6 — channel policy — gates every path below it, not only new threads.** `ChannelPolicyService.describe(db, channel, user.id)` is resolved once, immediately after user resolution; if `not policy.is_available` the sender is declined with `REPLY_DENIED` — the exact same reply and status the whitelist-miss branch uses, on an already-bound `active` thread exactly as on a brand-new one. The resolved `.policy` (plain data) is what gets carried into `_route_new_thread` and `ChannelRoutingService.decide`; nothing re-resolves it downstream, so the decline gate and the routing decision are always answering from the same reading of the sender's settings. The debug feed (superuser-only) records which of the three conjunction terms failed via `policy_view`; the sender-facing reply never does — see Security below
 - `_route_new_thread` — the background task: calls `ChannelRoutingService.decide(...)`, then acts on the answer (bind, install, ingest, reply). Routing itself is not implemented here; see `ChannelRoutingService` above
-- `_upsert_binding` — the race guard: inserts, and on `IntegrityError` (the unique `(server_channel_id, thread_key)` constraint) rolls back and re-reads the winner's row, returning `(binding, created=False)`
-- `_handle_lost_race` / the synchronous ownership check in `handle_inbound` — both branches (an *already-bound* thread receiving a message from a different sender, and a *newly-bound* thread where this caller lost the creation race to someone else) independently re-verify `binding.user_id == sender_user_id` before doing anything with the message. Unchanged by identity: these compare the binding's user against the **sender**, never against `session.user_id`, which on an identity thread is a different person by design
+- `_upsert_binding` — the race guard: inserts, and on `IntegrityError` (the unique `(server_channel_id, scope_key, user_id)` constraint) rolls back and re-reads the winner's row, returning `(binding, created=False)`
+- `_get_binding(db, channel_id, scope_key, user_id)` isolates askers. `_handle_lost_race` handles only simultaneous messages from the same asker; its assertion preserves that invariant. Redelivery lookup uses `(server_channel_id, last_external_message_id)` before user resolution.
 - `flush_pending_bindings(db)` — scheduler/test entry point; iterates all `pending_install` bindings, each in its own try/except; delegates per-row to `_flush_one`
 - `_flush_one` — the `critical_state` divergence lives here: `status in {"error", "deprecated"}` fails the binding, `critical_state` does not (falls through to "still waiting"); a binding stuck for more than `_PENDING_MAX_AGE_SECONDS` (30 min) fails regardless of status, so a wedged build doesn't wait forever
 - `_ingest` — the actual hand-off to `ChannelIngestionService.ingest_inbound_message`, resuming by `binding.session_id` when the row still exists, otherwise creating fresh (stamping `session_metadata_extra` with `server_channel_id`, `thread_key`, `sender_external_id` on first creation only). Enforces `user.id == binding.user_id` at the top of the body rather than merely asserting it in prose — the invariant that keeps `_verify_resume_sender`'s non-identity arm sound. **Identity, since Phase 3:** the grant comes from `decide` on a thread's first message and from `_resume_identity_grant(session)` (rebuilt from the session row's three identity columns) on every later one — rebuilt, not cached, so `assert_access` re-verifies against current state each turn. When a grant is in play the ingest passes `expected_owner_id=grant.owner_id`, stamps `identity_owner_id` (consumed by `_select_session_owner_id`), `identity_caller_id`, `identity_binding_id`, `identity_binding_assignment_id`, and adds `identity_caller_name` to `session_metadata` (the same key the App MCP identity path uses, so the session view needs one branch, not two; `identity_owner_name` is deliberately *not* stamped here — on this path the owner is the session's own user). `integration_type` stays `channel_{channel_type}`. The sender's own consent is re-checked here too: `grant is not None and not policy.allow_identity_routing` raises a bare, detail-free `PermissionError`, which `_ingest_or_fail` turns into the same generic reply every other refusal gets
@@ -613,3 +613,93 @@ Named here because each one is a trade someone will otherwise try to "fix"; the 
 ## Extension Seam
 
 Adding a new **webhook** channel type is: write a module implementing `ChannelAdapter` (`validate_config`, `verify_inbound`, `send_message`, `get_setup_instructions`, plus the `capabilities` property) and add one entry to `CHANNEL_ADAPTERS` in `adapters/registry.py`. A **polled** transport (a second one after email) subclasses `PolledChannelTransport` instead, implements `poll(channel)` in place of `verify_inbound`, and declares `inbound_mode="polled"` in `capabilities` — both the subclass and the declaration are required and must agree, or `_assert_declared_modes_agree()` refuses to let the app boot. No migration and no pipeline change either way — `channel_type` is a plain indexed string column, validated against the registry only at create/update time in the service layer, not in the model, and `ChannelPollService` picks up a new polled type automatically via `channel_types_with_inbound_mode("polled")`. The admin UI follows the registry: a newly registered adapter shows up as a card in the type picker immediately and is configurable through a raw JSON config editor without a frontend change. Adding an entry to `frontend/src/components/Admin/ServerChannels/channelTypes.ts` upgrades that to a typed form (labelled, validated config fields + type-specific credential copy) — recommended, but not a prerequisite for registering the adapter.
+
+## Conversation model
+
+- `backend/app/models/server_channels/channel_thread_binding.py`: `scope_key`
+  is NOT NULL, indexed and unique with `(server_channel_id, user_id)`. It equals
+  the native thread in threaded conversations and conversation id in flat ones.
+  Nullable `conversation_key`, `conversation_kind`, `last_reply_mode` and
+  `history_backfilled_at` degrade safely for older rows. `reply_target` JSON keeps
+  the active notice's full destination, including quote timestamp and asker id.
+- `backend/app/models/server_channels/channel_thread_ingest_log.py`: one row per
+  `(binding_id, external_message_id)`, cascade-deleted with the binding; `source`
+  is live/quoted/backfill, plus contributed characters, attachments and UTC
+  injection timestamp. `is_complete` distinguishes full messages from truncated
+  text or missing attachments. Explicit quotes can retry partial messages;
+  reconciliation removes redundant results and upserts improve only partial
+  receipts, in the same transaction as the UI/user rows. Before a deleted
+  session is recreated, its binding's receipts and backfill timestamp are reset.
+- `backend/app/alembic/versions/2450acc74033_add_channel_conversation_model.py`
+  backfills `scope_key = thread_key` before NOT NULL and constraint replacement.
+  Downgrade refuses duplicate native threads transactionally; it cannot choose
+  which asker's session to discard.
+- `backend/app/alembic/versions/8ca241bf9d12_track_channel_context_completeness.py`
+  adds completeness tracking. Older historical receipts are conservatively
+  marked partial; live receipts remain complete for redelivery detection.
+- `backend/app/services/server_channels/channel_conversation_resolver.py`
+  intersects static declarations with adapter-supplied `ConversationShape`.
+  `resolve_for_channel` additionally checks runtime read access; unknown shapes
+  or failures disable optional capabilities.
+- `backend/app/services/server_channels/channel_reply_policy.py` owns the
+  thread → quote → conversation fallback and email's original composite reply
+  key. Email targets additionally carry the binding ID so recipient/session
+  selection remains specific to the asker. Legacy keys without an ID are
+  accepted only when exactly one binding matches; ambiguous threads fail closed.
+  The old outbound `_binding_thread_key` delegates for compatibility.
+- `backend/app/services/server_channels/channel_directives.py` matches and strips
+  the configured anchored trailer independently of control commands.
+- `backend/app/services/server_channels/channel_conversation_context_service.py`
+  owns ledger filtering, cycle/depth guards, fetch timeouts, shared budgets,
+  attachment materialization, safe attribution and transcript rendering.
+  `build_context` never raises; `stage_ingest` writes only in the message transaction.
+
+The adapter contract in `backend/app/services/server_channels/adapters/base.py`
+adds `ChannelConversationRef`, `ChannelMessageRef`, `ChannelReplyTarget`,
+`ConversationShape`, `EffectiveChannelCapabilities` and
+`ChannelCapabilityUnsupported`. Adapters report native facts, fetch individual
+messages/history and address replies; they do not compose transcripts or budgets.
+Registry assertions reject read capabilities with unimplemented methods.
+
+Google declares conversations, threads, quoting and read support, with history
+resolved by credential access. It cannot create threads in flat spaces. Email
+and App MCP declare no conversation features. Google get/list requests validate
+resource names and conversation boundaries; list requests filter by thread and
+paginate newest-first up to the configured limit. Quote rejection falls back
+only on definitive request rejection, avoiding duplicate sends on ambiguous errors.
+
+Configuration in `backend/app/core/config.py`: `CHANNEL_CONTEXT_CHAR_BUDGET=5000`,
+`CHANNEL_QUOTE_CHAIN_MAX_DEPTH=5`, `CHANNEL_BACKFILL_MAX_MESSAGES=50`,
+`CHANNEL_BACKFILL_MAX_ATTACHMENTS=10`, `CHANNEL_CONTEXT_FETCH_TIMEOUT_SECONDS=20`.
+Per-channel JSON adds `reply_here_phrase` and `thread_backfill_enabled`.
+`ServerChannelPublic.conversation_capabilities` reports static capabilities
+intersected with cached read-access checks; secrets are never projected.
+
+Frontend: `frontend/src/components/Admin/ServerChannels/ChannelConversationSettings.tsx`
+contains the two settings; `frontend/src/components/Admin/ServerChannels/ChannelConversationCapabilities.tsx`
+shows credential capability facts and remediation. `frontend/src/components/Chat/ChannelThreadContextMessage.tsx`
+renders `message_metadata.channel_thread_context` collapsed by default with
+included/omitted counts and degraded/truncated state. The transcript also travels
+through `agent_context_prefix` in `backend/app/services/sessions/message_service.py`
+and both pending-message reconstruction paths, so it reaches the agent's actual
+input rather than merely appearing in stored UI messages.
+
+### Concurrent turns and delivery addresses
+
+Each pending channel user message snapshots `channel_reply_target`. A stream
+invocation consumes only its leading group of messages with the same target;
+successors remain pending for a new relay. Terminal callbacks in
+`backend/app/services/events/event_service.py` can be deferred into a task-local
+list. The channel message processor drains that list after the relay stops and
+before releasing the session lock, so a successor cannot redirect the previous
+reply. Other event callers retain asynchronous dispatch.
+
+The inbound service serializes each binding's notice reservation, context build
+and enqueue with a weakly held asyncio lock. Nested ingestion in the owning task
+can reenter it; child tasks still wait. File validation and uploads finish before acquiring a
+database row lock, allowing status updates to proceed while uploads await I/O.
+The short, synchronous enqueue transaction then locks the binding, rechecks its
+ledger, removes already-ingested transcript blocks and file associations, and
+skips a duplicate live question. UI transcript, user row and ledger commit together;
+no external I/O occurs while the binding row is locked.
+The existing single-worker deployment requirement remains in force.

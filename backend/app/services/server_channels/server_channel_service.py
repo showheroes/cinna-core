@@ -323,6 +323,23 @@ class ServerChannelService:
         return f"{base}{settings.API_V1_STR}/channels/{channel.webhook_token}/inbound"
 
     @staticmethod
+    def conversation_capabilities(channel: ServerChannel) -> dict[str, bool]:
+        """Credential-aware capabilities; unproven history access fails closed."""
+        names = ("supports_conversations", "supports_threads", "supports_thread_creation",
+                 "supports_quote_reply", "supports_inbound_quote", "supports_message_fetch",
+                 "supports_thread_history", "history_requires_membership")
+        try:
+            adapter = get_adapter(channel.channel_type)
+            result = {name: bool(getattr(adapter.capabilities, name)) for name in names}
+            probe = getattr(adapter, "cached_read_capabilities", None)
+            reads = probe(channel) if probe else {}
+            for name in ("supports_message_fetch", "supports_thread_history"):
+                result[name] = result[name] and reads.get(name, False)
+            return result
+        except Exception:
+            return dict.fromkeys(names, False)
+
+    @staticmethod
     def to_public(channel: ServerChannel) -> ServerChannelPublic:
         """Admin projection. Carries no secret material by construction."""
         return ServerChannelPublic(
@@ -342,6 +359,7 @@ class ServerChannelService:
             has_outbound_credentials=(
                 ServerChannelService.has_outbound_credentials(channel)
             ),
+            conversation_capabilities=ServerChannelService.conversation_capabilities(channel),
             created_by=channel.created_by,
             created_at=channel.created_at,
             updated_at=channel.updated_at,

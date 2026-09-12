@@ -56,6 +56,13 @@ class AppMCPChannelAdapter(AuthenticatedChannelTransport):
     @property
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(
+            supports_conversations=False,
+            supports_threads=False,
+            supports_thread_creation=False,
+            supports_quote_reply=False,
+            supports_inbound_quote=False,
+            supports_message_fetch=False,
+            supports_thread_history=False,
             # No out-of-band progress notices. The MCP call is synchronous from
             # the caller's point of view; there is no second channel to push
             # "working on it" down, and the pipeline's progress hook is only

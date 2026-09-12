@@ -25822,6 +25822,13 @@ export const ServerChannelPublicSchema = {
             type: 'boolean',
             title: 'Has Outbound Credentials'
         },
+        conversation_capabilities: {
+            additionalProperties: {
+                type: 'boolean'
+            },
+            type: 'object',
+            title: 'Conversation Capabilities'
+        },
         created_by: {
             anyOf: [
                 {

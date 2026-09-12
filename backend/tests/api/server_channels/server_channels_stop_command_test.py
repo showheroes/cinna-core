@@ -3,12 +3,12 @@
 A chat thread has nowhere to render the web client's stop button, so the stop
 is a word. ``channel_control_commands`` is a registry of exactly one entry
 today, and ``ChannelInboundService.process_inbound`` consults it at step 7a —
-**below** the thread-ownership decline and below every security gate, which is
+**after** per-asker binding lookup and every security gate, which is
 the whole authorization argument for calling ``MessageService.interrupt_stream``
 without re-deriving access (that method's documented contract is "the caller
 authorizes"). Invariant 6 of the plan is precisely that ordering, and it is
-pinned here by a stranger's ``/stop`` getting the ordinary "this conversation
-belongs to someone else" decline and never reaching the command at all.
+pinned here by a second asker's first ``/stop`` leaving the existing session
+untouched, then their next ``/stop`` targeting only their own bound session.
 
 The second half of the file is the **acknowledgement**: a successful ``/stop``
 deliberately replies nothing, because ``ChannelOutboundService
@@ -52,7 +52,6 @@ from app.services.server_channels.adapters.base import (
 )
 from app.services.server_channels.channel_inbound_service import (
     REPLY_NOTHING_TO_STOP,
-    REPLY_THREAD_OWNED,
     REPLY_WORKING,
     REPLY_WORKING_ON_IT,
 )
@@ -343,59 +342,56 @@ def test_stop_with_nothing_running_says_exactly_that(
     assert len(stub.stream_calls) == 1
 
 
-def test_a_stranger_is_declined_before_stop_is_ever_a_command(
+def test_second_askers_stop_never_interrupts_first_askers_session(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
-    """Invariant 6: interception sits strictly AFTER the ownership gate.
+    """A first /stop opens B's session; the next /stop targets only B's stream.
 
-    Someone else's thread answers a stranger with the ordinary
-    ``REPLY_THREAD_OWNED`` decline, synchronously, and the command registry is
-    never consulted — ``interrupt_stream`` is patched purely so that a
-    regression which moved the interception above the gate would be caught by
-    the call count rather than by a downstream symptom.
-
-    That ordering is not cosmetic: the interception point is where the
-    authorization for ``interrupt_stream`` comes from. Above the gate, any
-    verified sender who guessed a thread key could stop somebody else's turn.
+    A and B share the external thread while their bound sessions remain private.
     """
     user, headers, agent = _sender_with_one_agent(client, superuser_token_headers)
-    stranger, stranger_headers, _ = _sender_with_one_agent(
-        client, superuser_token_headers, label="Stranger"
+    other, other_headers, other_agent = _sender_with_one_agent(
+        client, superuser_token_headers, label="Second asker"
     )
     channel = _channel(client, superuser_token_headers)
     signer = GoogleChatJWTSigner()
     thread_key = f"spaces/AAA/threads/{random_lower_string()}"
     stub = StubAgentEnvConnector(response_text="first answer")
-
     _bind_thread(client, channel, signer, user, thread_key, stub)
+    session_a = next(s for s in list_sessions(client, headers) if s["agent_id"] == agent["id"])
+    messages_a = list_messages(client, headers, session_a["id"])
 
-    chat = _Chat()
+    def interrupt_patch(stack):
+        return {"interrupt": stack.enter_context(patch(_INTERRUPT_TARGET, AsyncMock(return_value=None)))}
+
+    # B has no binding, so the command cannot discover or interrupt A's stream.
     resp, added = _post(
-        client,
-        channel,
-        signer,
-        build_message_event(
-            thread_key=thread_key, text="/stop", sender_email=stranger["email"]
-        ),
-        chat,
-        stub,
-        extras=lambda stack: {
-            "interrupt": stack.enter_context(
-                patch(_INTERRUPT_TARGET, AsyncMock(return_value=None))
-            )
-        },
+        client, channel, signer,
+        build_message_event(thread_key=thread_key, text="/stop", sender_email=other["email"]),
+        _Chat(), stub, extras=interrupt_patch,
     )
-
-    assert resp.status_code == 200
-    assert resp.json() == {
-        "text": REPLY_THREAD_OWNED,
-        "thread": {"name": thread_key},
-    }, resp.json()
+    assert resp.status_code == 200 and resp.json() == {}
     assert added["interrupt"].await_count == 0
-    # Nothing at all was written into the owner's thread.
-    assert chat.sent == [] and chat.updated == [] and chat.replaced == []
-    # And the stranger got no session out of it.
-    assert list_sessions(client, stranger_headers) == []
+    sessions_b = [s for s in list_sessions(client, other_headers) if s["agent_id"] == other_agent["id"]]
+    assert len(sessions_b) == 1
+    session_b = sessions_b[0]
+    assert session_b["id"] != session_a["id"]
+    assert list_messages(client, headers, session_a["id"]) == messages_a
+    messages_b = list_messages(client, other_headers, session_b["id"])
+
+    # Once B has a binding, /stop resolves B's session rather than the oldest
+    # binding in the shared thread.
+    resp, added = _post(
+        client, channel, signer,
+        build_message_event(thread_key=thread_key, text="/stop", sender_email=other["email"]),
+        _Chat(), stub, extras=interrupt_patch,
+    )
+    assert resp.status_code == 200 and resp.json() == {}
+    interrupt = added["interrupt"]
+    assert interrupt.await_count == 1
+    assert str(interrupt.await_args.kwargs["session_id"]) == session_b["id"]
+    assert list_messages(client, headers, session_a["id"]) == messages_a
+    assert list_messages(client, other_headers, session_b["id"]) == messages_b
 
 
 def test_a_redelivered_stop_is_acknowledged_once(

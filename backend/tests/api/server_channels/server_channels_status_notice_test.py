@@ -150,7 +150,7 @@ class _Chat:
             + list(self.replace.await_args_list)
             + list(self.delete.await_args_list)
         )
-        return {c.args[1] for c in calls}
+        return {getattr(c.args[1], "legacy_thread_key", c.args[1]) for c in calls}
 
 
 #: A service-account blob, so the channel reads as having an outbound

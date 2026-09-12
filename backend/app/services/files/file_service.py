@@ -125,6 +125,7 @@ class FileService:
         *,
         session: Session,
         file_ids: list[uuid.UUID],
+        commit: bool = True,
     ) -> None:
         """Update file status to 'attached' after successfully sending message"""
         statement = select(FileUpload).where(FileUpload.id.in_(file_ids))
@@ -134,7 +135,8 @@ class FileService:
             file.status = "attached"
             file.attached_at = datetime.now(UTC)
 
-        session.commit()
+        if commit:
+            session.commit()
 
     @staticmethod
     def mark_file_for_deletion(

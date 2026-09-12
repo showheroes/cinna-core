@@ -30,12 +30,15 @@ untranslated agent output reaches the reader as literal asterisks.
 
 Every outbound call passes the shared egress guard.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import re
 import time
+from dataclasses import replace
+from datetime import datetime
 from typing import Any, ClassVar
 
 import anyio.to_thread
@@ -57,12 +60,16 @@ from app.services.server_channels.adapters.base import (
     ChannelAttachmentRef,
     ChannelAttachmentUnavailable,
     ChannelCapabilities,
+    ChannelCapabilityUnsupported,
     ChannelConfigError,
     ChannelError,
     ChannelInboundMessage,
+    ChannelMessageRef,
     ChannelReplaceResult,
+    ChannelReplyTarget,
     ChannelSendError,
     ChannelVerificationError,
+    ConversationShape,
 )
 from app.services.server_channels.adapters.chat_text_chunking import chunk_text
 from app.services.server_channels.adapters.google_chat_format import markdown_to_chat
@@ -77,8 +84,7 @@ _LOG_PREFIX = "[GoogleChat]"
 # {kid: PEM} map that Authlib cannot decode.
 _CHAT_ISSUER = "chat@system.gserviceaccount.com"
 _CHAT_JWKS_URL = (
-    "https://www.googleapis.com/service_accounts/v1/jwk/"
-    "chat@system.gserviceaccount.com"
+    "https://www.googleapis.com/service_accounts/v1/jwk/chat@system.gserviceaccount.com"
 )
 _CHAT_API_BASE = "https://chat.googleapis.com/v1"
 # Media download base. **Hardcoded**, and the reason it is a constant rather
@@ -86,6 +92,7 @@ _CHAT_API_BASE = "https://chat.googleapis.com/v1"
 # attacker-influenced data, so it is only ever a *path segment* appended here,
 # never a URL in its own right. See :meth:`GoogleChatAdapter.fetch_attachment`.
 _CHAT_MEDIA_BASE = "https://chat.googleapis.com/v1/media"
+_CHAT_READ_SCOPE = "https://www.googleapis.com/auth/chat.app.messages.readonly"
 _CHAT_BOT_SCOPE = "https://www.googleapis.com/auth/chat.bot"
 _DEFAULT_TOKEN_URI = "https://oauth2.googleapis.com/token"
 
@@ -104,7 +111,9 @@ _SEND_BACKOFF_SECONDS = (0.5, 1.5)
 # ``/`` and no ``//`` (an authority), no ``?`` or ``#`` (query or fragment), no
 # ``%`` (an encoded separator), no whitespace, no backslash. ``..`` is refused
 # separately, since the alphabet alone would allow it.
-_MEDIA_RESOURCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_.=+~]*(?:/[A-Za-z0-9\-_.=+~]+)*$")
+_MEDIA_RESOURCE_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9\-_.=+~]*(?:/[A-Za-z0-9\-_.=+~]+)*$"
+)
 _MEDIA_RESOURCE_MAX_CHARS = 2048
 # How many redirects a media download may follow before it gives up. Chat
 # media does not serve the bytes itself — it hands out a redirect to a signed
@@ -122,6 +131,10 @@ _MAX_PARSED_ATTACHMENTS = 1000
 # Refreshed early by the skew so a token never expires mid-flight.
 _bot_token_cache: dict[str, tuple[str, float]] = {}
 _TOKEN_SKEW_SECONDS = 120
+_read_capability_cache: dict[str, tuple[bool, float]] = {}
+_READ_CAPABILITY_TTL = 300
+_app_user_cache: dict[str, str] = {}
+_read_failure_cache: dict[tuple[str, str], float] = {}
 
 
 class GoogleChatAdapter(ChannelAdapter):
@@ -133,6 +146,12 @@ class GoogleChatAdapter(ChannelAdapter):
     @property
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(
+            supports_conversations=True,
+            supports_threads=True,
+            supports_quote_reply=True,
+            supports_inbound_quote=True,
+            supports_message_fetch=True,
+            supports_thread_history=True,
             supports_progress_updates=True,
             # ``spaces.messages.patch`` and ``spaces.messages.delete``, both
             # with app auth and both restricted to messages this app posted —
@@ -181,6 +200,21 @@ class GoogleChatAdapter(ChannelAdapter):
                 "(not the project ID)."
             )
 
+        phrase = config.get("reply_here_phrase", "reply here")
+        if (
+            not isinstance(phrase, str)
+            or not phrase.strip()
+            or len(phrase) > 64
+            or phrase.strip().startswith("/")
+            or "\n" in phrase
+            or "\r" in phrase
+        ):
+            raise ChannelConfigError(
+                "'reply_here_phrase' must be 1–64 characters on one line and must not start with '/'."
+            )
+        if not isinstance(config.get("thread_backfill_enabled", True), bool):
+            raise ChannelConfigError("'thread_backfill_enabled' must be a boolean.")
+
     # ------------------------------------------------------------------
     # Inbound
     # ------------------------------------------------------------------
@@ -216,7 +250,9 @@ class GoogleChatAdapter(ChannelAdapter):
             logger.error(
                 "%s JWKS fetch failed for channel %s: %s", _LOG_PREFIX, channel.id, exc
             )
-            raise ChannelVerificationError("Unable to verify request signature") from exc
+            raise ChannelVerificationError(
+                "Unable to verify request signature"
+            ) from exc
 
         if claims is None:
             raise ChannelVerificationError("Invalid Chat request signature")
@@ -288,8 +324,28 @@ class GoogleChatAdapter(ChannelAdapter):
             # shape we don't understand, and the binding key is mandatory.
             return ChannelInboundMessage(event_kind="ignored", raw=event)
 
+        space = event.get("space") or message.get("space") or {}
+        space_type = space.get("spaceType") or space.get("type")
+        kind = (
+            "dm"
+            if space_type in ("DM", "DIRECT_MESSAGE")
+            else "group"
+            if space_type in ("SPACE", "ROOM", "GROUP_CHAT")
+            else "unknown"
+        )
         return ChannelInboundMessage(
             event_kind="message",
+            conversation_key=space.get("name"),
+            conversation_kind=kind,
+            quoted_message_id=self._same_space_quote(message, space.get("name")),
+            conversation_hints={
+                "space_threading_state": space.get("spaceThreadingState"),
+                "conversation_kind": kind,
+                "message_last_update_time": message.get("lastUpdateTime")
+                or message.get("createTime"),
+                "quote_requires_same_thread": bool(message.get("threadReply")),
+            },
+            is_thread_summon=bool(message.get("threadReply")),
             sender_email=sender_email,
             sender_display_name=(sender.get("displayName") or "").strip() or None,
             external_user_id=sender.get("name") or sender_email,
@@ -299,6 +355,190 @@ class GoogleChatAdapter(ChannelAdapter):
             attachments=attachments,
             raw=event,
         )
+
+    def interpret_conversation_hints(self, hints: dict[str, Any]) -> ConversationShape:
+        kind = hints.get("conversation_kind")
+        state = hints.get("space_threading_state") or hints.get("spaceThreadingState")
+        # A DM's existing transport thread remains the reply address.
+        threaded = state == "THREADED_MESSAGES"
+        known = (
+            state in ("THREADED_MESSAGES", "GROUPED_MESSAGES", "UNTHREADED_MESSAGES")
+            or kind == "dm"
+        )
+        return ConversationShape(
+            is_threaded=threaded or kind == "dm",
+            is_group=kind == "group",
+            can_reply_in_thread=threaded or kind == "dm",
+            can_start_thread=False,
+            is_known=known,
+        )
+
+    @staticmethod
+    def cached_read_capabilities(channel: ServerChannel) -> dict[str, bool]:
+        cached = _read_capability_cache.get(str(channel.id))
+        allowed = cached is not None and cached[1] > time.time() and cached[0]
+        return {"supports_message_fetch": allowed, "supports_thread_history": allowed}
+
+    async def resolve_read_capabilities(
+        self, channel: ServerChannel, conversation_key: str | None = None
+    ) -> dict[str, bool]:
+        failure_key = (str(channel.id), conversation_key or "")
+        if _read_failure_cache.get(failure_key, 0) > time.time():
+            return {"supports_message_fetch": False, "supports_thread_history": False}
+        cached = _read_capability_cache.get(str(channel.id))
+        if cached is not None and cached[1] > time.time():
+            return self.cached_read_capabilities(channel)
+        if conversation_key and re.fullmatch(
+            r"spaces/[A-Za-z0-9_-]+", conversation_key
+        ):
+            try:
+                await self._read_resource(
+                    channel, f"{conversation_key}/messages", {"pageSize": 1}
+                )
+            except Exception:
+                _read_failure_cache[failure_key] = time.time() + _READ_CAPABILITY_TTL
+                return {
+                    "supports_message_fetch": False,
+                    "supports_thread_history": False,
+                }
+        return self.cached_read_capabilities(channel)
+
+    async def _read_resource(
+        self,
+        channel: ServerChannel,
+        resource: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        # Only resource names validated by the caller can reach this fixed host.
+        token = await self._mint_access_token(
+            channel, self._load_credentials(channel), scope=_CHAT_READ_SCOPE
+        )
+        url = assert_url_allowed(f"{_CHAT_API_BASE}/{resource}")
+        async with httpx.AsyncClient(
+            timeout=settings.CHANNEL_CONTEXT_FETCH_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            response = await client.get(
+                url, params=params, headers={"Authorization": f"Bearer {token}"}
+            )
+            if response.status_code in (401, 403):
+                conversation_key = "/".join(resource.split("/")[:2])
+                _read_failure_cache[(str(channel.id), conversation_key)] = (
+                    time.time() + _READ_CAPABILITY_TTL
+                )
+                raise ChannelCapabilityUnsupported("history_unavailable")
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ChannelCapabilityUnsupported("history_unavailable")
+            _read_capability_cache[str(channel.id)] = (
+                True,
+                time.time() + _READ_CAPABILITY_TTL,
+            )
+            return payload
+
+    @staticmethod
+    def _same_space_quote(
+        message: dict[str, Any], conversation_key: str | None = None
+    ) -> str | None:
+        """A quote chain must stay inside the triggering conversation."""
+        quoted_id = (message.get("quotedMessageMetadata") or {}).get("name")
+        if not isinstance(quoted_id, str) or not re.fullmatch(
+            r"spaces/[A-Za-z0-9_-]+/messages/[A-Za-z0-9_.-]+", quoted_id
+        ):
+            return None
+        source_space = (
+            conversation_key or str(message.get("name", "")).split("/messages/", 1)[0]
+        )
+        return quoted_id if quoted_id.startswith(f"{source_space}/messages/") else None
+
+    def _message_ref(
+        self, message: dict[str, Any], channel: ServerChannel
+    ) -> ChannelMessageRef:
+        sender = message.get("sender") or {}
+        created = None
+        try:
+            created = datetime.fromisoformat(
+                message.get("createTime", "").replace("Z", "+00:00")
+            )
+        except (ValueError, TypeError):
+            pass
+        # Other bots are third parties too: BOT alone never proves this app authored it.
+        app_user = _app_user_cache.get(str(getattr(channel, "id", "")))
+        return ChannelMessageRef(
+            message_id=message["name"],
+            author_display_name=sender.get("displayName")
+            or sender.get("name")
+            or "Unknown",
+            author_external_id=sender.get("name") or "",
+            author_email=sender.get("email"),
+            text=message.get("text") or "",
+            created_at=created,
+            quoted_message_id=self._same_space_quote(message),
+            attachments=self._parse_attachments(message),
+            is_platform_authored=sender.get("type") == "BOT"
+            and sender.get("name") == app_user,
+        )
+
+    async def fetch_message(
+        self, channel: ServerChannel, message_id: str
+    ) -> ChannelMessageRef | None:
+        if not re.fullmatch(
+            r"spaces/[A-Za-z0-9_-]+/messages/[A-Za-z0-9_.-]+", message_id
+        ):
+            raise ChannelCapabilityUnsupported("invalid_message_reference")
+        try:
+            message = await self._read_resource(channel, message_id)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        if message.get("name") != message_id:
+            raise ChannelCapabilityUnsupported("message_reference_mismatch")
+        return self._message_ref(message, channel)
+
+    async def fetch_thread_history(
+        self,
+        channel: ServerChannel,
+        thread_key: str,
+        limit: int,
+        before_message_id: str | None = None,
+    ) -> list[ChannelMessageRef]:
+        if not re.fullmatch(
+            r"spaces/[A-Za-z0-9_-]+/threads/[A-Za-z0-9_.-]+", thread_key
+        ):
+            raise ChannelCapabilityUnsupported("invalid_thread_reference")
+        if limit <= 0:
+            return []
+        space = self._space_from_thread_key(thread_key)
+        filter_text = f"thread.name = {thread_key}"
+        if before_message_id:
+            if not before_message_id.startswith(f"{space}/messages/"):
+                raise ChannelCapabilityUnsupported("invalid_message_reference")
+            before = await self.fetch_message(channel, before_message_id)
+            if before is None or before.created_at is None:
+                raise ChannelCapabilityUnsupported("history_boundary_unavailable")
+            filter_text += f' AND createTime < "{before.created_at.isoformat()}"'
+        params: dict[str, Any] = {
+            "pageSize": min(limit, 1000),
+            "orderBy": "createTime DESC",
+            "filter": filter_text,
+        }
+        messages: list[ChannelMessageRef] = []
+        tokens: set[str] = set()
+        while len(messages) < limit:
+            page = await self._read_resource(channel, f"{space}/messages", params)
+            for message in page.get("messages", []):
+                if message.get("name") and not message.get("deleteTime"):
+                    messages.append(self._message_ref(message, channel))
+                    if len(messages) == limit:
+                        break
+            token = page.get("nextPageToken")
+            if not token or token in tokens:
+                break
+            tokens.add(token)
+            params["pageToken"] = token
+        return messages
 
     @staticmethod
     def _parse_attachments(
@@ -506,9 +746,7 @@ class GoogleChatAdapter(ChannelAdapter):
         # that happens to land back on a "same origin as the previous hop"
         # must not resurrect a credential already left behind.
         send_authorization = True
-        async with httpx.AsyncClient(
-            timeout=timeout, follow_redirects=False
-        ) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             for _ in range(_MEDIA_MAX_REDIRECTS + 1):
                 headers = (
                     {"Authorization": f"Bearer {access_token}"}
@@ -526,8 +764,8 @@ class GoogleChatAdapter(ChannelAdapter):
                         headers=headers,
                     ) as response:
                         if response.is_redirect:
-                            current, keep_authorization = (
-                                await self._resolve_redirect(response, current)
+                            current, keep_authorization = await self._resolve_redirect(
+                                response, current
                             )
                             send_authorization = (
                                 send_authorization and keep_authorization
@@ -692,7 +930,7 @@ class GoogleChatAdapter(ChannelAdapter):
     # ------------------------------------------------------------------
 
     async def send_message(
-        self, channel: ServerChannel, thread_key: str, text: str
+        self, channel: ServerChannel, thread_key: str | ChannelReplyTarget, text: str
     ) -> str | None:
         """Post ``text`` into ``thread_key``, chunking and retrying as needed.
 
@@ -708,13 +946,13 @@ class GoogleChatAdapter(ChannelAdapter):
         if not text:
             return None
         return await self._post_chunks(
-            channel, thread_key, self._chunk(markdown_to_chat(text))
+            channel, thread_key, self._addressed_chunks(text, thread_key)
         )
 
     async def replace_message(
         self,
         channel: ServerChannel,
-        thread_key: str,
+        thread_key: str | ChannelReplyTarget,
         external_message_id: str,
         text: str,
     ) -> ChannelReplaceResult:
@@ -765,7 +1003,7 @@ class GoogleChatAdapter(ChannelAdapter):
                 replaced=False,
             )
 
-        chunks = self._chunk(markdown_to_chat(text))
+        chunks = self._addressed_chunks(text, thread_key)
         try:
             await self._patch_text(channel, external_message_id, chunks[0])
         except ChannelError:
@@ -781,9 +1019,7 @@ class GoogleChatAdapter(ChannelAdapter):
             )
 
         if len(chunks) == 1:
-            return ChannelReplaceResult(
-                message_id=external_message_id, replaced=True
-            )
+            return ChannelReplaceResult(message_id=external_message_id, replaced=True)
         try:
             rest = await self._post_chunks(channel, thread_key, chunks[1:])
         except ChannelError:
@@ -809,7 +1045,7 @@ class GoogleChatAdapter(ChannelAdapter):
     async def update_message(
         self,
         channel: ServerChannel,
-        thread_key: str,
+        thread_key: str | ChannelReplyTarget,
         external_message_id: str,
         text: str,
     ) -> None:
@@ -832,11 +1068,16 @@ class GoogleChatAdapter(ChannelAdapter):
         await self._patch_text(
             channel,
             external_message_id,
-            markdown_to_chat(text)[:_MAX_MESSAGE_CHARS],
+            self._address_asker(markdown_to_chat(text), thread_key)[
+                :_MAX_MESSAGE_CHARS
+            ],
         )
 
     async def _post_chunks(
-        self, channel: ServerChannel, thread_key: str, chunks: list[str]
+        self,
+        channel: ServerChannel,
+        thread_key: str | ChannelReplyTarget,
+        chunks: list[str],
     ) -> str | None:
         """Post pre-translated, pre-chunked text. Returns the last message id.
 
@@ -844,9 +1085,29 @@ class GoogleChatAdapter(ChannelAdapter):
         *remainder* of an already-translated body without running the markdown
         translation a second time over its own output.
         """
-        space = self._space_from_thread_key(thread_key)
-        if not space:
-            raise ChannelSendError(f"Cannot derive space from thread_key {thread_key!r}")
+        target = (
+            thread_key
+            if isinstance(thread_key, ChannelReplyTarget)
+            else ChannelReplyTarget(
+                conversation_key=self._space_from_thread_key(thread_key) or "",
+                thread_key=thread_key,
+                mode="thread_reply",
+            )
+        )
+        if target.transport_hint:
+            # Old bindings and DMs retain their exact pre-conversation address.
+            target = replace(
+                target,
+                conversation_key=self._space_from_thread_key(target.transport_hint)
+                or target.conversation_key,
+                thread_key=target.transport_hint,
+                mode="thread_reply",
+            )
+        space = target.conversation_key
+        if not re.fullmatch(r"spaces/[A-Za-z0-9_-]+", space):
+            raise ChannelSendError(
+                f"Cannot derive space from thread_key {thread_key!r}"
+            )
 
         url = assert_url_allowed(f"{_CHAT_API_BASE}/{space}/messages")
         last_id: str | None = None
@@ -856,24 +1117,80 @@ class GoogleChatAdapter(ChannelAdapter):
                 channel, self._load_credentials(channel)
             )
             for chunk in chunks:
-                payload: dict[str, Any] = {
-                    "text": chunk,
-                    "thread": {"name": thread_key},
-                }
-                created = await self._request_with_retries(
-                    client=client,
-                    method="POST",
-                    url=url,
-                    params={
-                        "messageReplyOption": "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
-                    },
-                    payload=payload,
-                    access_token=access_token,
-                    channel=channel,
-                )
+                payload: dict[str, Any] = {"text": self._address_asker(chunk, target)}
+                params: dict[str, Any] = {}
+                if target.mode == "thread_reply" and target.thread_key:
+                    payload["thread"] = {"name": target.thread_key}
+                    params["messageReplyOption"] = (
+                        "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+                    )
+                elif (
+                    target.mode == "quote_reply"
+                    and target.reply_to_message_id
+                    and target.reply_to_last_update_time
+                ):
+                    payload["quotedMessageMetadata"] = {
+                        "name": target.reply_to_message_id,
+                        "lastUpdateTime": target.reply_to_last_update_time,
+                    }
+                try:
+                    created = await self._request_with_retries(
+                        client=client,
+                        method="POST",
+                        url=url,
+                        params=params,
+                        payload=payload,
+                        access_token=access_token,
+                        channel=channel,
+                    )
+                except ChannelSendError as exc:
+                    # Quotes require the current edit timestamp and may become
+                    # unavailable after the event. Keep delivery useful when
+                    # Chat rejects just the quote, never retry uncertain sends.
+                    cause = exc.__cause__
+                    if (
+                        "quotedMessageMetadata" not in payload
+                        or not isinstance(cause, httpx.HTTPStatusError)
+                        or cause.response.status_code not in (400, 403, 404)
+                    ):
+                        raise
+                    payload.pop("quotedMessageMetadata")
+                    created = await self._request_with_retries(
+                        client=client,
+                        method="POST",
+                        url=url,
+                        params=params,
+                        payload=payload,
+                        access_token=access_token,
+                        channel=channel,
+                    )
                 last_id = created.get("name") or last_id
 
         return last_id
+
+    def _addressed_chunks(
+        self, text: str, target: str | ChannelReplyTarget
+    ) -> list[str]:
+        translated = markdown_to_chat(text)
+        prefix = self._address_asker("", target)
+        if not prefix:
+            return self._chunk(translated)
+        return [
+            prefix + chunk
+            for chunk in chunk_text(translated, _MAX_MESSAGE_CHARS - len(prefix))
+        ]
+
+    @staticmethod
+    def _address_asker(text: str, target: str | ChannelReplyTarget) -> str:
+        if (
+            isinstance(target, ChannelReplyTarget)
+            and target.asker_external_id
+            and re.fullmatch(r"users/[A-Za-z0-9_-]+", target.asker_external_id)
+        ):
+            mention = f"<{target.asker_external_id}>"
+            if not text.startswith(mention):
+                return f"{mention} {text}"
+        return text
 
     @staticmethod
     def _message_url(external_message_id: str) -> str:
@@ -915,7 +1232,7 @@ class GoogleChatAdapter(ChannelAdapter):
     async def delete_message(
         self,
         channel: ServerChannel,
-        thread_key: str,
+        thread_key: str | ChannelReplyTarget,
         external_message_id: str,
     ) -> None:
         """Remove a message this app posted. Already-gone is success."""
@@ -965,7 +1282,15 @@ class GoogleChatAdapter(ChannelAdapter):
                 )
                 response.raise_for_status()
                 try:
-                    return response.json() or {}
+                    result = response.json() or {}
+                    sender = result.get("sender") or {}
+                    if (
+                        method in ("POST", "PATCH")
+                        and sender.get("type") == "BOT"
+                        and sender.get("name")
+                    ):
+                        _app_user_cache[str(channel.id)] = sender["name"]
+                    return result
                 except ValueError:
                     # DELETE answers with an empty body.
                     return {}
@@ -1038,10 +1363,16 @@ class GoogleChatAdapter(ChannelAdapter):
         return data
 
     async def _mint_access_token(
-        self, channel: ServerChannel, credentials: dict[str, Any]
+        self,
+        channel: ServerChannel,
+        credentials: dict[str, Any],
+        *,
+        scope: str = _CHAT_BOT_SCOPE,
     ) -> str:
         """Mint (or reuse) a ``chat.bot`` access token via the JWT-bearer grant."""
-        cache_key = str(channel.id)
+        cache_key = (
+            str(channel.id) if scope == _CHAT_BOT_SCOPE else f"{channel.id}:{scope}"
+        )
         now = time.time()
         cached = _bot_token_cache.get(cache_key)
         if cached is not None and cached[1] - _TOKEN_SKEW_SECONDS > now:
@@ -1060,7 +1391,7 @@ class GoogleChatAdapter(ChannelAdapter):
         assertion = pyjwt.encode(
             {
                 "iss": client_email,
-                "scope": _CHAT_BOT_SCOPE,
+                "scope": scope,
                 "aud": token_uri,
                 "iat": issued,
                 "exp": issued + 3600,
@@ -1097,6 +1428,12 @@ class GoogleChatAdapter(ChannelAdapter):
     def invalidate_token_cache(channel_id: Any) -> None:
         """Drop a cached token — called when a channel's secrets are rotated."""
         _bot_token_cache.pop(str(channel_id), None)
+        _bot_token_cache.pop(f"{channel_id}:{_CHAT_READ_SCOPE}", None)
+        _read_capability_cache.pop(str(channel_id), None)
+        _app_user_cache.pop(str(channel_id), None)
+        for failure_key in list(_read_failure_cache):
+            if failure_key[0] == str(channel_id):
+                _read_failure_cache.pop(failure_key, None)
 
     # ------------------------------------------------------------------
     # Setup / sync response
@@ -1118,6 +1455,7 @@ class GoogleChatAdapter(ChannelAdapter):
         details = {
             "Audience (GCP project number)": project_number or "(not set)",
             "Bot scope": _CHAT_BOT_SCOPE,
+            "Optional history read scope": _CHAT_READ_SCOPE,
             "Connection type": "HTTPS endpoint",
         }
         steps = [
@@ -1132,13 +1470,16 @@ class GoogleChatAdapter(ChannelAdapter):
             "should be able to reach your agents.",
             "Save, then create a service account with the Chat Bot role, download "
             "its JSON key, and paste it into this channel's service-account field.",
+            "For quoted context and thread history, obtain Google Workspace administrator approval for "
+            "chat.app.messages.readonly. Existing apps must be approved again for this added scope. "
+            "The app must be a member of the space; capability verification occurs on a message from that space.",
             "Use 'Test outbound' here to confirm the credential works, then message "
             "the bot from Google Chat.",
         ]
         return details, steps
 
     def build_sync_response(
-        self, text: str | None, thread_key: str | None = None
+        self, text: str | None, thread_key: str | ChannelReplyTarget | None = None
     ) -> dict[str, Any]:
         """Render the webhook's own HTTP response as a message.
 
@@ -1156,9 +1497,25 @@ class GoogleChatAdapter(ChannelAdapter):
         if not text:
             return {}
         body: dict[str, Any] = {
-            "text": markdown_to_chat(text)[:_MAX_MESSAGE_CHARS]
+            "text": self._address_asker(markdown_to_chat(text), thread_key)[
+                :_MAX_MESSAGE_CHARS
+            ]
         }
-        if thread_key:
+        if isinstance(thread_key, ChannelReplyTarget):
+            if thread_key.transport_hint:
+                body["thread"] = {"name": thread_key.transport_hint}
+            elif thread_key.mode == "thread_reply" and thread_key.thread_key:
+                body["thread"] = {"name": thread_key.thread_key}
+            elif (
+                thread_key.mode == "quote_reply"
+                and thread_key.reply_to_message_id
+                and thread_key.reply_to_last_update_time
+            ):
+                body["quotedMessageMetadata"] = {
+                    "name": thread_key.reply_to_message_id,
+                    "lastUpdateTime": thread_key.reply_to_last_update_time,
+                }
+        elif thread_key:
             body["thread"] = {"name": thread_key}
         return body
 

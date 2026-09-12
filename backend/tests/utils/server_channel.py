@@ -887,9 +887,11 @@ def seed_stale_draft_delivery(
     if isinstance(session_id, str):
         session_id = uuid.UUID(session_id)
 
+    thread_key = thread_key or f"status-repair-thread-{uuid.uuid4().hex[:8]}"
     binding = ChannelThreadBinding(
         server_channel_id=channel_id,
-        thread_key=thread_key or f"status-repair-thread-{uuid.uuid4().hex[:8]}",
+        thread_key=thread_key,
+        scope_key=thread_key,
         user_id=user_id,
         agent_id=agent_id,
         session_id=session_id,

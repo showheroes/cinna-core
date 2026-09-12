@@ -49,6 +49,7 @@ export function ServerChannelDialog({
 }: Props) {
   const isEdit = channel !== null
   const [selectedType, setSelectedType] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["serverChannelTypes"],
@@ -79,8 +80,13 @@ export function ServerChannelDialog({
   const Icon = meta?.icon
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px] max-h-[85vh] overflow-y-auto">
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!isSaving) onOpenChange(nextOpen)
+      }}
+    >
+      <DialogContent className="sm:max-w-[560px] max-h-[85vh] overflow-y-auto overflow-x-hidden pr-2 [&>*]:min-w-0">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit channel" : "Add channel"}</DialogTitle>
           <DialogDescription>
@@ -118,6 +124,7 @@ export function ServerChannelDialog({
                   variant="ghost"
                   size="sm"
                   className="ml-auto h-7 px-2 text-xs"
+                  disabled={isSaving}
                   onClick={() => setSelectedType(null)}
                 >
                   <ArrowLeft className="mr-1 h-3 w-3" />
@@ -135,6 +142,7 @@ export function ServerChannelDialog({
               transport={transport}
               channel={channel}
               onCancel={() => onOpenChange(false)}
+              onSavingChange={setIsSaving}
               onSaved={(created) => {
                 onOpenChange(false)
                 if (created) onCreated?.(created)

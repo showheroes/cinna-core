@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Info, AlertCircle, ExternalLink, CheckCircle2, HelpCircle, AlertTriangle, Mail, RefreshCw, Clock, Terminal, Copy, Check, XCircle } from "lucide-react"
 import { useToolApproval } from "@/hooks/useToolApproval"
 import { RecoverSessionModal } from "./RecoverSessionModal"
+import { ChannelThreadContextMessage } from "./ChannelThreadContextMessage"
 
 interface MessageBubbleProps {
   message: MessagePublic
@@ -184,6 +185,10 @@ export function MessageBubble({ message, onSendAnswer, onSendMessage, conversati
         </div>
       </div>
     )
+  }
+
+  if (isSystem && message.message_metadata?.channel_thread_context === true) {
+    return <ChannelThreadContextMessage message={message} />
   }
 
   if (isSystem && !isCommandDocument) {

@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle } from "lucide-react"
-import { useId, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { type Resolver, useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -36,6 +36,11 @@ import { Textarea } from "@/components/ui/textarea"
 import useCustomToast from "@/hooks/useCustomToast"
 import { cn } from "@/lib/utils"
 import { getErrorMessage } from "@/utils"
+import { ChannelConversationCapabilities } from "./ChannelConversationCapabilities"
+import {
+  ChannelConversationSettings,
+  type ConversationSettingsValues,
+} from "./ChannelConversationSettings"
 import {
   AGENT_SCOPE_OPTIONS,
   ALLOW_AUTO_INSTALL_HELP,
@@ -78,6 +83,7 @@ interface Props {
   channel: ServerChannelPublic | null
   onCancel: () => void
   onSaved: (created: ServerChannelPublic | null) => void
+  onSavingChange: (saving: boolean) => void
 }
 
 /**
@@ -85,7 +91,7 @@ interface Props {
  * runtime from the type's registry entry, so `z.infer` widens `config` to an
  * index signature of `unknown` and every field loses its `string` type.
  */
-interface ChannelFormValues {
+interface ChannelFormValues extends ConversationSettingsValues {
   name: string
   /** Keyed by `ChannelConfigField.key`; empty for raw-JSON types. */
   config: Record<string, string>
@@ -226,6 +232,7 @@ export function ServerChannelForm({
   channel,
   onCancel,
   onSaved,
+  onSavingChange,
 }: Props) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -288,6 +295,20 @@ export function ServerChannelForm({
         default_enabled_for_users: z.boolean(),
         default_agent_scope: z.string(),
         allow_auto_install: z.boolean(),
+        reply_here_phrase:
+          channelType === "google_chat"
+            ? z
+                .string()
+                .trim()
+                .min(1, "Reply-here phrase is required")
+                .max(64, "Use at most 64 characters")
+                .refine(
+                  (value) => !value.startsWith("/"),
+                  "The phrase cannot start with /",
+                )
+                .refine((value) => !/[\r\n]/.test(value), "Use a single line")
+            : z.string(),
+        thread_backfill_enabled: z.boolean(),
       })
       .refine(
         (values) =>
@@ -299,7 +320,7 @@ export function ServerChannelForm({
           message: 'Must be a JSON object, e.g. { "key": "value" }',
         },
       )
-  }, [configFields, isRawConfig])
+  }, [configFields, isRawConfig, channelType])
 
   const storedConfig = (channel?.config ?? {}) as Record<string, unknown>
   const storedVisibility = channel?.visibility
@@ -339,6 +360,14 @@ export function ServerChannelForm({
           ? NEW_CHANNEL_AGENT_SCOPE
           : asAgentScope(storedAgentScope),
       allow_auto_install: channel?.allow_auto_install ?? true,
+      reply_here_phrase:
+        typeof storedConfig.reply_here_phrase === "string"
+          ? storedConfig.reply_here_phrase
+          : "reply here",
+      thread_backfill_enabled:
+        typeof storedConfig.thread_backfill_enabled === "boolean"
+          ? storedConfig.thread_backfill_enabled
+          : true,
     },
   })
 
@@ -479,9 +508,16 @@ export function ServerChannelForm({
       ? values.configJson.trim()
         ? JSON.parse(values.configJson)
         : {}
-      : Object.fromEntries(
-          configFields.map((f) => [f.key, values.config[f.key].trim()]),
-        )
+      : {
+          ...storedConfig,
+          ...Object.fromEntries(
+            configFields.map((f) => [f.key, values.config[f.key].trim()]),
+          ),
+        }
+    if (channelType === "google_chat") {
+      config.reply_here_phrase = values.reply_here_phrase.trim()
+      config.thread_backfill_enabled = values.thread_backfill_enabled
+    }
     // Structurally empty for a transport whose sender controls were never
     // rendered, rather than empty because the admin left the box blank. The
     // distinction matters on an *edit*: sending back the untouched form value
@@ -530,190 +566,335 @@ export function ServerChannelForm({
   // ("*", "*, ops@corp.com", "*@a.com, *") and every one of them must warn.
   const whitelist = parseWhitelist(form.watch("email_whitelist"))
   const isSaving = createMutation.isPending || updateMutation.isPending
+  useEffect(() => {
+    onSavingChange(isSaving)
+    return () => onSavingChange(false)
+  }, [isSaving, onSavingChange])
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField
-          control={form.control}
-          name="name"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Name</FormLabel>
-              <FormControl>
-                <Input placeholder={meta.namePlaceholder} {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        {/* Absent entirely for a transport that takes no configuration.
-            `isRawConfig` (an empty typed entry) still renders the JSON escape
-            hatch — that is a type nobody has written a form for yet, not a
-            type with nothing to configure. See `ChannelTypeMeta.configFields`. */}
-        {!hasConfigSection ? null : isRawConfig ? (
+        <fieldset disabled={isSaving} className="min-w-0 space-y-4">
           <FormField
             control={form.control}
-            name="configJson"
+            name="name"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Configuration (JSON)</FormLabel>
+                <FormLabel>Name</FormLabel>
                 <FormControl>
-                  <Textarea
-                    rows={4}
-                    spellCheck={false}
-                    className="font-mono text-xs"
-                    placeholder="{ }"
-                    {...field}
-                  />
+                  <Input placeholder={meta.namePlaceholder} {...field} />
                 </FormControl>
-                <FormDescription>
-                  This channel type has no dedicated form yet — the settings its
-                  adapter expects go here as JSON.
-                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
           />
-        ) : (
-          configFields.map((cfgField) => (
+
+          {/* Absent entirely for a transport that takes no configuration.
+            `isRawConfig` (an empty typed entry) still renders the JSON escape
+            hatch — that is a type nobody has written a form for yet, not a
+            type with nothing to configure. See `ChannelTypeMeta.configFields`. */}
+          {!hasConfigSection ? null : isRawConfig ? (
             <FormField
-              key={cfgField.key}
               control={form.control}
-              name={`config.${cfgField.key}` as const}
+              name="configJson"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{cfgField.label}</FormLabel>
+                  <FormLabel>Configuration (JSON)</FormLabel>
                   <FormControl>
-                    {cfgField.picker ? (
-                      <MailServerSelect
-                        serverType={cfgField.picker.serverType}
-                        value={field.value}
-                        onChange={field.onChange}
-                      />
-                    ) : (
-                      <Input
-                        placeholder={cfgField.placeholder}
-                        inputMode={cfgField.inputMode}
-                        {...field}
-                      />
-                    )}
+                    <Textarea
+                      rows={4}
+                      spellCheck={false}
+                      className="font-mono text-xs"
+                      placeholder="{ }"
+                      {...field}
+                    />
                   </FormControl>
-                  {cfgField.description && (
-                    <FormDescription>{cfgField.description}</FormDescription>
-                  )}
+                  <FormDescription>
+                    This channel type has no dedicated form yet — the settings
+                    its adapter expects go here as JSON.
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
-          ))
-        )}
+          ) : (
+            configFields.map((cfgField) => (
+              <FormField
+                key={cfgField.key}
+                control={form.control}
+                name={`config.${cfgField.key}` as const}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{cfgField.label}</FormLabel>
+                    <FormControl>
+                      {cfgField.picker ? (
+                        <MailServerSelect
+                          serverType={cfgField.picker.serverType}
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      ) : (
+                        <Input
+                          placeholder={cfgField.placeholder}
+                          inputMode={cfgField.inputMode}
+                          {...field}
+                        />
+                      )}
+                    </FormControl>
+                    {cfgField.description && (
+                      <FormDescription>{cfgField.description}</FormDescription>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            ))
+          )}
 
-        {/* Absent for a transport that stores no channel secret. The field is
+          {/* Absent for a transport that stores no channel secret. The field is
             write-only, so offering it where nothing reads it would let an admin
             paste an SMTP password into a value that is silently ignored — see
             `ChannelTypeMeta.secrets`. */}
-        {secretsMeta && (
-          <FormField
-            control={form.control}
-            name="secrets"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{secretsMeta.label}</FormLabel>
-                <FormControl>
-                  <Textarea
-                    rows={4}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="font-mono text-xs"
-                    placeholder={
-                      isEdit && channel?.has_outbound_credentials
-                        ? "•••• credential saved — paste a new one to replace it"
-                        : secretsMeta.placeholder
-                    }
-                    {...field}
-                  />
-                </FormControl>
-                <FormDescription>
-                  {isEdit ? secretsMeta.helpEdit : secretsMeta.helpNew}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        )}
+          {secretsMeta && (
+            <FormField
+              control={form.control}
+              name="secrets"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{secretsMeta.label}</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      rows={4}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="font-mono text-xs"
+                      placeholder={
+                        isEdit && channel?.has_outbound_credentials
+                          ? "•••• credential saved — paste a new one to replace it"
+                          : secretsMeta.placeholder
+                      }
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {isEdit ? secretsMeta.helpEdit : secretsMeta.helpNew}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
 
-        {/* The whole sender block — trust warning, whitelist, fail-closed
+          {channelType === "google_chat" &&
+            (isEdit ? (
+              <section className="space-y-4 border-t pt-4">
+                <h3 className="text-sm font-medium">Conversation</h3>
+                <ChannelConversationSettings disabled={isSaving} />
+                <ChannelConversationCapabilities channel={channel} />
+              </section>
+            ) : (
+              <details className="space-y-4 border-t pt-4">
+                <summary className="cursor-pointer text-sm font-medium">
+                  Advanced conversation options
+                </summary>
+                <ChannelConversationSettings disabled={isSaving} />
+                <ChannelConversationCapabilities channel={channel} />
+              </details>
+            ))}
+
+          {/* The whole sender block — trust warning, whitelist, fail-closed
             callouts, auto-registration — exists to turn an *outside* identity
             into a platform user. A transport whose callers arrive already
             authenticated has none of that to do, and its fail-closed empty
             whitelist would read as "denies everyone" while denying nobody.
             Driven off the declared transport shape, never off `channel_type`. */}
-        {hasSenderControls && (
-          <>
-            {/* Immediately above the whitelist and the auto-register switch,
+          {hasSenderControls && (
+            <>
+              {/* Immediately above the whitelist and the auto-register switch,
             because those two controls are where an unverified sender identity
             actually costs something. */}
-            {meta.senderTrustWarning && (
-              /* Amber, not destructive: this is a permanent property of the
+              {meta.senderTrustWarning && (
+                /* Amber, not destructive: this is a permanent property of the
              transport, not something this admin has misconfigured, and the red
              variant below is reserved for the whitelist state they *can* get
              wrong. Red on every email channel forever would teach them to skip
              both. */
-              <Alert className="border-amber-500/50 text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>Sender identity is not verified</AlertTitle>
-                <AlertDescription>{meta.senderTrustWarning}</AlertDescription>
-              </Alert>
-            )}
+                <Alert className="border-warning/50 text-warning">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Sender identity is not verified</AlertTitle>
+                  <AlertDescription>{meta.senderTrustWarning}</AlertDescription>
+                </Alert>
+              )}
+
+              <FormField
+                control={form.control}
+                name="email_whitelist"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Allowed senders</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        rows={2}
+                        spellCheck={false}
+                        className="font-mono text-xs"
+                        placeholder="*@example.com, devops.*@support.com"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>{WHITELIST_HELP}</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* Fail-closed semantics, stated rather than implied. An admin who
+            reads "empty = open" into a blank box has made a security
+            mistake; both non-obvious states get an explicit callout. */}
+              {whitelist.isEmpty ? (
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>{WHITELIST_EMPTY_WARNING}</AlertDescription>
+                </Alert>
+              ) : whitelist.hasWildcard ? (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    {WHITELIST_WILDCARD_WARNING}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+
+              <FormField
+                control={form.control}
+                name="auto_register_users"
+                render={({ field }) => (
+                  <FormItem className="flex items-start justify-between gap-4 rounded-lg border p-3">
+                    <div className="space-y-0.5">
+                      <FormLabel>Auto-register senders</FormLabel>
+                      <FormDescription>{AUTO_REGISTER_HELP}</FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </>
+          )}
+
+          {/* ---------------------------------------------------------------
+            Availability policy. Everything in this block is a *default* for
+            users who have never opened Settings → Channels — except
+            `visibility`, which is access and applies to everyone. The section
+            says so once, so each control does not have to.
+            --------------------------------------------------------------- */}
+          <div className="space-y-4 rounded-lg border p-3">
+            <div className="space-y-0.5">
+              <h4 className="text-sm font-medium">Availability</h4>
+              <p className="text-xs text-muted-foreground">
+                Who may use this channel, and what a user who has never changed
+                their own settings gets.
+              </p>
+            </div>
 
             <FormField
               control={form.control}
-              name="email_whitelist"
+              name="visibility"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Allowed senders</FormLabel>
+                  <FormLabel>Who can use it</FormLabel>
                   <FormControl>
-                    <Textarea
-                      rows={2}
-                      spellCheck={false}
-                      className="font-mono text-xs"
-                      placeholder="*@example.com, devops.*@support.com"
-                      {...field}
+                    <SegmentedField
+                      value={field.value}
+                      onChange={field.onChange}
+                      options={VISIBILITY_OPTIONS}
+                      legend="Who can use it"
                     />
                   </FormControl>
-                  <FormDescription>{WHITELIST_HELP}</FormDescription>
+                  <FormDescription>{VISIBILITY_HELP}</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
-            {/* Fail-closed semantics, stated rather than implied. An admin who
-            reads "empty = open" into a blank box has made a security
-            mistake; both non-obvious states get an explicit callout. */}
-            {whitelist.isEmpty ? (
-              <Alert>
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>{WHITELIST_EMPTY_WARNING}</AlertDescription>
-              </Alert>
-            ) : whitelist.hasWildcard ? (
+            {isRestricted && grantsUnreadable ? (
+              /* Without this branch a failed fetch collapses to `grants = []`
+               and the block below asserts NO_GRANTS_WARNING — "nobody can use
+               it" — which is a positive claim about who has access, made from
+               a request that failed. The admin would then start adding people,
+               and every grant they cannot see would be revoked on Save. */
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>
-                  {WHITELIST_WILDCARD_WARNING}
+                  Couldn't load who is granted this channel. This is a failed
+                  request, not an empty list — reopen this dialog before
+                  changing anything, or you would save over grants you can't
+                  see.
                 </AlertDescription>
               </Alert>
+            ) : isRestricted && !grantsReady ? (
+              <Skeleton className="h-9 w-full" />
+            ) : isRestricted ? (
+              <div className="space-y-2">
+                <UserAllowlistPicker
+                  // Gated on the picker being on screen: without this the search
+                  // query would run for a channel whose visibility is public and
+                  // whose picker is not rendered at all.
+                  enabled={isRestricted}
+                  includeSelf
+                  selected={grants}
+                  label={
+                    <Label className="text-xs text-muted-foreground">
+                      Granted users
+                    </Label>
+                  }
+                  searchPlaceholder="Search users to grant..."
+                  onAdd={(u) =>
+                    setGrantDraft([
+                      ...grants,
+                      {
+                        id: u.id,
+                        userId: u.id,
+                        fallbackLabel: u.full_name || u.email,
+                      },
+                    ])
+                  }
+                  onRemove={(item) =>
+                    setGrantDraft(
+                      grants.filter((g) => g.userId !== item.userId),
+                    )
+                  }
+                  emptyHint="Nobody granted yet."
+                />
+                {/* Deliberately a count of the pills we render, and nothing to
+                  do with the `count` on the user-search response — that is the
+                  page size of the search, not a total, and has been rendered
+                  as "N users" by mistake before. */}
+                {grants.length === 0 ? (
+                  <Alert>
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>{NO_GRANTS_WARNING}</AlertDescription>
+                  </Alert>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Saved with the channel when you press{" "}
+                    {isEdit ? "Save" : "Create channel"}.
+                  </p>
+                )}
+              </div>
             ) : null}
 
             <FormField
               control={form.control}
-              name="auto_register_users"
+              name="default_enabled_for_users"
               render={({ field }) => (
-                <FormItem className="flex items-start justify-between gap-4 rounded-lg border p-3">
+                <FormItem className="flex items-start justify-between gap-4">
                   <div className="space-y-0.5">
-                    <FormLabel>Auto-register senders</FormLabel>
-                    <FormDescription>{AUTO_REGISTER_HELP}</FormDescription>
+                    <FormLabel>On by default</FormLabel>
+                    <FormDescription>{DEFAULT_ENABLED_HELP}</FormDescription>
                   </div>
                   <FormControl>
                     <Switch
@@ -724,116 +905,57 @@ export function ServerChannelForm({
                 </FormItem>
               )}
             />
-          </>
-        )}
 
-        {/* ---------------------------------------------------------------
-            Availability policy. Everything in this block is a *default* for
-            users who have never opened Settings → Channels — except
-            `visibility`, which is access and applies to everyone. The section
-            says so once, so each control does not have to.
-            --------------------------------------------------------------- */}
-        <div className="space-y-4 rounded-lg border p-3">
-          <div className="space-y-0.5">
-            <h4 className="text-sm font-medium">Availability</h4>
-            <p className="text-xs text-muted-foreground">
-              Who may use this channel, and what a user who has never changed
-              their own settings gets.
-            </p>
+            <FormField
+              control={form.control}
+              name="default_agent_scope"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Agents reachable by default</FormLabel>
+                  <FormControl>
+                    <SegmentedField
+                      value={field.value}
+                      onChange={field.onChange}
+                      options={AGENT_SCOPE_OPTIONS}
+                      legend="Agents reachable by default"
+                    />
+                  </FormControl>
+                  <FormDescription>{DEFAULT_AGENT_SCOPE_HELP}</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="allow_auto_install"
+              render={({ field }) => (
+                <FormItem className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <FormLabel>Allow auto-install</FormLabel>
+                    <FormDescription>{ALLOW_AUTO_INSTALL_HELP}</FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
           </div>
 
           <FormField
             control={form.control}
-            name="visibility"
+            name="enabled"
             render={({ field }) => (
-              <FormItem>
-                <FormLabel>Who can use it</FormLabel>
-                <FormControl>
-                  <SegmentedField
-                    value={field.value}
-                    onChange={field.onChange}
-                    options={VISIBILITY_OPTIONS}
-                    legend="Who can use it"
-                  />
-                </FormControl>
-                <FormDescription>{VISIBILITY_HELP}</FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          {isRestricted && grantsUnreadable ? (
-            /* Without this branch a failed fetch collapses to `grants = []`
-               and the block below asserts NO_GRANTS_WARNING — "nobody can use
-               it" — which is a positive claim about who has access, made from
-               a request that failed. The admin would then start adding people,
-               and every grant they cannot see would be revoked on Save. */
-            <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>
-                Couldn't load who is granted this channel. This is a failed
-                request, not an empty list — reopen this dialog before changing
-                anything, or you would save over grants you can't see.
-              </AlertDescription>
-            </Alert>
-          ) : isRestricted && !grantsReady ? (
-            <Skeleton className="h-9 w-full" />
-          ) : isRestricted ? (
-            <div className="space-y-2">
-              <UserAllowlistPicker
-                // Gated on the picker being on screen: without this the search
-                // query would run for a channel whose visibility is public and
-                // whose picker is not rendered at all.
-                enabled={isRestricted}
-                includeSelf
-                selected={grants}
-                label={
-                  <Label className="text-xs text-muted-foreground">
-                    Granted users
-                  </Label>
-                }
-                searchPlaceholder="Search users to grant..."
-                onAdd={(u) =>
-                  setGrantDraft([
-                    ...grants,
-                    {
-                      id: u.id,
-                      userId: u.id,
-                      fallbackLabel: u.full_name || u.email,
-                    },
-                  ])
-                }
-                onRemove={(item) =>
-                  setGrantDraft(grants.filter((g) => g.userId !== item.userId))
-                }
-                emptyHint="Nobody granted yet."
-              />
-              {/* Deliberately a count of the pills we render, and nothing to
-                  do with the `count` on the user-search response — that is the
-                  page size of the search, not a total, and has been rendered
-                  as "N users" by mistake before. */}
-              {grants.length === 0 ? (
-                <Alert>
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertDescription>{NO_GRANTS_WARNING}</AlertDescription>
-                </Alert>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Saved with the channel when you press{" "}
-                  {isEdit ? "Save" : "Create channel"}.
-                </p>
-              )}
-            </div>
-          ) : null}
-
-          <FormField
-            control={form.control}
-            name="default_enabled_for_users"
-            render={({ field }) => (
-              <FormItem className="flex items-start justify-between gap-4">
+              <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-3">
                 <div className="space-y-0.5">
-                  <FormLabel>On by default</FormLabel>
-                  <FormDescription>{DEFAULT_ENABLED_HELP}</FormDescription>
+                  <FormLabel>Enabled</FormLabel>
+                  <FormDescription>
+                    A disabled channel stops accepting inbound messages.
+                  </FormDescription>
                 </div>
                 <FormControl>
                   <Switch
@@ -845,75 +967,15 @@ export function ServerChannelForm({
             )}
           />
 
-          <FormField
-            control={form.control}
-            name="default_agent_scope"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Agents reachable by default</FormLabel>
-                <FormControl>
-                  <SegmentedField
-                    value={field.value}
-                    onChange={field.onChange}
-                    options={AGENT_SCOPE_OPTIONS}
-                    legend="Agents reachable by default"
-                  />
-                </FormControl>
-                <FormDescription>{DEFAULT_AGENT_SCOPE_HELP}</FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="allow_auto_install"
-            render={({ field }) => (
-              <FormItem className="flex items-start justify-between gap-4">
-                <div className="space-y-0.5">
-                  <FormLabel>Allow auto-install</FormLabel>
-                  <FormDescription>{ALLOW_AUTO_INSTALL_HELP}</FormDescription>
-                </div>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </FormItem>
-            )}
-          />
-        </div>
-
-        <FormField
-          control={form.control}
-          name="enabled"
-          render={({ field }) => (
-            <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-3">
-              <div className="space-y-0.5">
-                <FormLabel>Enabled</FormLabel>
-                <FormDescription>
-                  A disabled channel stops accepting inbound messages.
-                </FormDescription>
-              </div>
-              <FormControl>
-                <Switch
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                />
-              </FormControl>
-            </FormItem>
-          )}
-        />
-
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <LoadingButton type="submit" loading={isSaving}>
-            {isEdit ? "Save" : "Create channel"}
-          </LoadingButton>
-        </DialogFooter>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <LoadingButton type="submit" loading={isSaving}>
+              {isEdit ? "Save" : "Create channel"}
+            </LoadingButton>
+          </DialogFooter>
+        </fieldset>
       </form>
     </Form>
   )

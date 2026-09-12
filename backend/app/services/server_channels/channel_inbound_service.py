@@ -73,37 +73,54 @@ at the next thread. What does **not** change is the thread binding: it stays the
 sender's, because "this thread belongs to this person" is what stops one member
 of a group space from posting into another's conversation.
 """
+
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from weakref import WeakValueDictionary
 
 from fastapi import Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
-from sqlmodel import Session as DBSession, select
+from sqlmodel import Session as DBSession
+from sqlmodel import select
 
 from app.core.config import settings
 from app.models import (
-    Agent,
-    AgentBundle,
-    AgentEnvironment,
     CHANNEL_BINDING_ACTIVE,
     CHANNEL_BINDING_FAILED,
     CHANNEL_BINDING_PENDING_INSTALL,
+    Agent,
+    AgentBundle,
+    AgentEnvironment,
     ChannelAccessPolicy,
     ChannelThreadBinding,
+    ChannelThreadIngestLog,
     IdentityGrant,
     SecurityEventCreate,
     ServerChannel,
+    SessionMessage,
     SessionSender,
     User,
 )
 from app.models.events import security_event as security_event_constants
 from app.models.files.file_upload import FileUpload
 from app.services.common.email_patterns import match_email_pattern
+from app.services.routing import routing_trace
+from app.services.server_channels.adapters.base import (
+    ChannelAdapter,
+    ChannelInboundMessage,
+    ChannelReplyTarget,
+    ChannelVerificationError,
+)
+from app.services.server_channels.adapters.registry import get_adapter
 from app.services.server_channels.channel_attachment_service import (
     ChannelAttachmentResult,
     ChannelAttachmentService,
@@ -112,6 +129,12 @@ from app.services.server_channels.channel_attachment_service import (
 from app.services.server_channels.channel_control_commands import (
     execute_control_command,
     match_control_command,
+)
+from app.services.server_channels.channel_conversation_context_service import (
+    ChannelConversationContextService,
+)
+from app.services.server_channels.channel_conversation_resolver import (
+    ChannelConversationResolver,
 )
 from app.services.server_channels.channel_debug_buffer import (
     DEBUG_INSTALLING,
@@ -123,18 +146,7 @@ from app.services.server_channels.channel_debug_buffer import (
     DEBUG_SEND_FAILED,
     ChannelDebugBuffer,
 )
-from app.services.routing import routing_trace
-from app.services.sessions.channel_ingestion_service import (
-    ChannelDecline,
-    ChannelIngestionService,
-    NoActiveEnvironmentError,
-)
-from app.services.server_channels.adapters.base import (
-    ChannelAdapter,
-    ChannelInboundMessage,
-    ChannelVerificationError,
-)
-from app.services.server_channels.adapters.registry import get_adapter
+from app.services.server_channels.channel_directives import strip_reply_here
 from app.services.server_channels.channel_outbound_service import (
     ChannelOutboundService,
 )
@@ -142,10 +154,16 @@ from app.services.server_channels.channel_policy_service import (
     ChannelPolicyService,
     ResolvedChannelPolicy,
 )
+from app.services.server_channels.channel_reply_policy import ChannelReplyPolicy
 from app.services.server_channels.channel_routing_service import (
     ChannelRoutingService,
 )
 from app.services.server_channels.server_channel_service import ServerChannelService
+from app.services.sessions.channel_ingestion_service import (
+    ChannelDecline,
+    ChannelIngestionService,
+    NoActiveEnvironmentError,
+)
 from app.services.users.user_service import UserService
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -154,6 +172,41 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 logger = logging.getLogger(__name__)
 
 _LOG_PREFIX = "[ChannelInbound]"
+
+
+class _BindingTurnLock:
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.owner: asyncio.Task[Any] | None = None
+
+
+# Idle bindings leave no process-global lock behind. A waiting coroutine owns
+# a strong reference, keeping all in-flight arrivals on the same lock.
+_ingest_locks: WeakValueDictionary[uuid.UUID, _BindingTurnLock] = WeakValueDictionary()
+
+
+@asynccontextmanager
+async def _binding_turn(binding_id: uuid.UUID) -> AsyncIterator[None]:
+    """Reserve a binding's notice and enqueue atomically within this worker.
+
+    A continue can drain and ingest recursively in the same task. Ownership is
+    the actual Task, never an inherited ContextVar that could admit a child.
+    This async lock is separate from the short final database transaction.
+    """
+    state = _ingest_locks.get(binding_id)
+    if state is None:
+        state = _BindingTurnLock()
+        _ingest_locks[binding_id] = state
+    task = asyncio.current_task()
+    if task is not None and state.owner is task:
+        yield
+        return
+    async with state.lock:
+        state.owner = task
+        try:
+            yield
+        finally:
+            state.owner = None
 
 
 def _decision_detail(decision_id: uuid.UUID | None) -> dict[str, str]:
@@ -325,8 +378,7 @@ _PENDING_MAX_AGE_SECONDS = 30 * 60
 # Static, deliberately uninformative replies. None of these tell an
 # unauthenticated caller anything they didn't already know.
 REPLY_DENIED = (
-    "Sorry, you don't have access to this assistant. "
-    "Please contact your administrator."
+    "Sorry, you don't have access to this assistant. Please contact your administrator."
 )
 REPLY_WELCOME = (
     "Hi! Send me a message describing what you need and I'll find the right "
@@ -355,16 +407,11 @@ REPLY_READY = "💬 Your assistant is ready — working on your message…"
 # transport that would leave it standing forever is better off silent.
 REPLY_WORKING_ON_IT = "💬 Working on your message…"
 REPLY_SETUP_FAILED = (
-    "Sorry — setting up your assistant failed. Please contact your "
-    "administrator."
+    "Sorry — setting up your assistant failed. Please contact your administrator."
 )
 REPLY_TOO_MANY_QUEUED = (
     "I've got a lot queued up for you already — I'll work through those first, "
     "then you can send this again."
-)
-REPLY_THREAD_OWNED = (
-    "This conversation belongs to someone else. Please start a new thread and "
-    "I'll set you up with your own assistant."
 )
 # The `/stop` decline — see ``channel_control_commands.handle_stop``. It is
 # reached only after the ownership gate, so the person asking is the person who
@@ -506,8 +553,7 @@ def _reason_phrase(reason: str) -> str:
         "invalid_handle": "the attachment reference wasn't usable",
         # ---- Guidance, not just a refusal (§6.5) ----
         "drive_file": (
-            "I can't open Google Drive attachments — please attach the file "
-            "directly"
+            "I can't open Google Drive attachments — please attach the file directly"
         ),
         # Nothing broke: the fetch was still queued on the limiter and never
         # issued a request, so there is no fault for an operator to find —
@@ -539,8 +585,7 @@ def _reason_phrase(reason: str) -> str:
         # place in this mapping where that advice is true, so it is said
         # plainly rather than folded into a generic failure.
         "poll_budget_exhausted": (
-            "the mail server was handling too much at once — please send the "
-            "file again"
+            "the mail server was handling too much at once — please send the file again"
         ),
     }
     return phrases.get(reason, _UNKNOWN_REASON_PHRASE)
@@ -590,8 +635,7 @@ def _compose_inbound_text(text: str, skipped: list[SkippedAttachment]) -> str:
         return text
     noun = "attachment" if len(skipped) == 1 else "attachments"
     note = (
-        f"⚠️ {len(skipped)} {noun} could not be accepted: "
-        f"{_describe_skipped(skipped)}"
+        f"⚠️ {len(skipped)} {noun} could not be accepted: {_describe_skipped(skipped)}"
     )
     return f"{text}\n\n{note}" if text else note
 
@@ -984,7 +1028,7 @@ class ChannelInboundService:
         sync HTTP response. For a polled transport it is **inert**:
         ``PolledChannelTransport`` does not override ``build_sync_response``
         and the base default returns ``{}``, so every denial below —
-        ``REPLY_DENIED``, ``REPLY_THREAD_OWNED`` and the rest — collapses to
+        ``REPLY_DENIED`` and the rest — collapses to
         the same empty body as the branches that ack in silence.
 
         Every sync response that *is* rendered carries the thread the message
@@ -1042,6 +1086,26 @@ class ChannelInboundService:
             },
         )
 
+        # Conversation directives never run on email's forwarded body.
+        if adapter.capabilities.supports_conversations:
+            cleaned, reply_here = strip_reply_here(
+                inbound.text,
+                (channel.config or {}).get("reply_here_phrase", "reply here"),
+            )
+            inbound = replace(
+                inbound,
+                text=cleaned,
+                conversation_hints={
+                    **inbound.conversation_hints,
+                    "reply_here": reply_here,
+                },
+            )
+        scope_key = ChannelConversationResolver.scope_key(adapter, inbound)
+
+        sync_target = (
+            ChannelInboundService._turn_target(channel, inbound) or inbound.thread_key
+        )
+
         if not inbound.sender_email:
             # Authentic event, but the platform gave us no address to identify
             # the sender by (a consumer-Gmail user on Google Chat). There is
@@ -1057,51 +1121,23 @@ class ChannelInboundService:
                 thread_key=inbound.thread_key,
                 detail={"stage": "sender_identity"},
             )
-            return adapter.build_sync_response(REPLY_DENIED, inbound.thread_key)
+            return adapter.build_sync_response(REPLY_DENIED, sync_target)
         if not inbound.thread_key:
             # No binding key means nothing can be bound; ack and drop.
             return {}
 
-        # ---- 3. Redelivery dedup ----
-        binding = ChannelInboundService._get_binding(
-            db, channel.id, inbound.thread_key
-        )
+        # Durable redelivery detection does not require resolving the asker.
         if (
-            binding is not None
-            and inbound.external_message_id
-            and binding.last_external_message_id == inbound.external_message_id
+            inbound.external_message_id
+            and db.exec(
+                select(ChannelThreadBinding.id).where(
+                    ChannelThreadBinding.server_channel_id == channel.id,
+                    ChannelThreadBinding.last_external_message_id
+                    == inbound.external_message_id,
+                )
+            ).first()
+            is not None
         ):
-            logger.info(
-                "%s Duplicate delivery of message %s on channel %s — acking",
-                _LOG_PREFIX,
-                inbound.external_message_id,
-                channel.id,
-            )
-            return {}
-
-        # First contact has no binding to dedup against, and a redelivery there
-        # is the expensive one: two routing calls and possibly two installs.
-        #
-        # Deliberately gated on `binding is None`. Once a binding exists the
-        # durable stamp above is the only dedup, and it is stamped ONLY after a
-        # successful ingest — so a redelivery of a message we failed to process
-        # is a recovery opportunity. Running this in-process check there would
-        # ack and drop that redelivery (it records the key at webhook time,
-        # before processing), silently defeating the recovery path
-        # `_continue_thread` and `_park_message` are written to preserve.
-        if (
-            binding is None
-            and inbound.external_message_id
-            and ChannelInboundService._seen_recently(
-                f"{channel.id}:{inbound.external_message_id}"
-            )
-        ):
-            logger.info(
-                "%s Duplicate pre-binding delivery of %s on channel %s — acking",
-                _LOG_PREFIX,
-                inbound.external_message_id,
-                channel.id,
-            )
             return {}
 
         # ---- 4. Whitelist — fails closed ----
@@ -1137,7 +1173,7 @@ class ChannelInboundService:
                     "whitelist": channel.email_whitelist or "(empty)",
                 },
             )
-            return adapter.build_sync_response(REPLY_DENIED, inbound.thread_key)
+            return adapter.build_sync_response(REPLY_DENIED, sync_target)
 
         # ---- 5. User resolution (auto-register only if opted in) ----
         user = await ChannelInboundService._resolve_user(
@@ -1157,7 +1193,29 @@ class ChannelInboundService:
                 thread_key=inbound.thread_key,
                 detail={"stage": "user_resolution"},
             )
-            return adapter.build_sync_response(REPLY_DENIED, inbound.thread_key)
+            return adapter.build_sync_response(REPLY_DENIED, sync_target)
+
+        binding = ChannelInboundService._get_binding(db, channel.id, scope_key, user.id)
+        if binding is None and scope_key != inbound.thread_key:
+            # Preserve pre-migration sessions as their flat conversation becomes known.
+            binding = db.exec(
+                select(ChannelThreadBinding).where(
+                    ChannelThreadBinding.server_channel_id == channel.id,
+                    ChannelThreadBinding.user_id == user.id,
+                    ChannelThreadBinding.thread_key == inbound.thread_key,
+                    ChannelThreadBinding.conversation_key.is_(None),
+                )
+            ).first()
+        # First-contact retries can arrive while routing is still in flight.
+        # Established bindings retain retries after failed ingestion.
+        if (
+            binding is None
+            and inbound.external_message_id
+            and ChannelInboundService._seen_recently(
+                f"{channel.id}:{inbound.external_message_id}"
+            )
+        ):
+            return {}
 
         # ---- 6. Channel policy — resolved once, for every path below ----
         #
@@ -1222,7 +1280,34 @@ class ChannelInboundService:
             # channel is switched off" must be one answer to an unauthenticated
             # sender, or the reply becomes an oracle that enumerates a server's
             # channel configuration one probe at a time.
-            return adapter.build_sync_response(REPLY_DENIED, inbound.thread_key)
+            return adapter.build_sync_response(REPLY_DENIED, sync_target)
+
+        if (
+            binding is not None
+            and inbound.conversation_key
+            and (
+                binding.scope_key != scope_key
+                or binding.conversation_key != inbound.conversation_key
+                or binding.conversation_kind != inbound.conversation_kind
+            )
+        ):
+            # Only admitted live senders can fill legacy conversation metadata.
+            # The savepoint preserves the outer transaction if another delivery
+            # promotes the same flat scope while this one is in flight.
+            savepoint = db.begin_nested()
+            try:
+                binding.scope_key = scope_key
+                binding.conversation_key = inbound.conversation_key
+                binding.conversation_kind = inbound.conversation_kind
+                db.add(binding)
+                db.flush()
+                savepoint.commit()
+            except IntegrityError:
+                savepoint.rollback()
+                binding = ChannelInboundService._get_binding(
+                    db, channel.id, scope_key, user.id
+                )
+            db.commit()
 
         # ---- 6.5. Attachments — refs become FileUpload rows ----
         #
@@ -1276,13 +1361,11 @@ class ChannelInboundService:
         # retries — straight into the duplicate-materialisation window the
         # comment above just described.
         #
-        # Read here, while both instances are fresh, and used as plain values
-        # from this line on. ``binding`` itself is still handed to the writers
-        # below, which need the live instance; what must not happen is a
-        # *decision* being made on a reloaded attribute.
+        # Read identifiers here while both instances are fresh. The mutable
+        # binding status is deliberately reloaded under its reservation after
+        # materialization: a scheduler can advance it during the upload await.
         debug_channel_id = _debug_channel_key(channel)
         binding_user_id = binding.user_id if binding is not None else None
-        binding_status = binding.status if binding is not None else None
         binding_id = binding.id if binding is not None else None
         # ``user`` and ``channel`` are expired by the same commit, and every
         # read of them below step 6.5 is on the synchronous webhook path. The
@@ -1351,9 +1434,7 @@ class ChannelInboundService:
         # ingest raised" — an attachment-only rejection ingests perfectly
         # happily, which is precisely how it stayed invisible.
         all_attachments_rejected = (
-            not inbound.has_sender_text
-            and not file_ids
-            and bool(inbound.attachments)
+            not inbound.has_sender_text and not file_ids and bool(inbound.attachments)
         )
 
         if (
@@ -1453,7 +1534,7 @@ class ChannelInboundService:
                     channel_id,
                     exc_info=True,
                 )
-            return adapter.build_sync_response(rejection_reply, inbound.thread_key)
+            return adapter.build_sync_response(rejection_reply, sync_target)
 
         # ---- 7. Binding dispatch ----
         #
@@ -1464,31 +1545,8 @@ class ChannelInboundService:
         # fresh routing pass is the safe direction, where an unchecked
         # ``binding_id`` would put ``None`` into a background task.
         if binding is not None and binding_id is not None:
-            # A thread belongs to exactly one person. In a group space another
-            # whitelisted member can post into a thread already bound to
-            # someone else's session — injecting their text into a stranger's
-            # agent session, whose reply would then be posted where they can
-            # read it. Multi-user rooms need a participant model and an
-            # owner-approval flow (a listed future enhancement); until then the
-            # correct behaviour is to decline, not to silently route.
-            #
-            # ``binding_user_id`` / ``binding_status`` / ``binding_id`` rather
-            # than the instance attributes: step 6.5 committed, so every read
-            # off ``binding`` here would be a reload. See the hoist above.
-            # ``inbound.thread_key`` replaces ``binding.thread_key`` for the
-            # same reason and is the same value by construction — the binding
-            # was looked up by it.
-            if binding_user_id != user_id:
-                logger.warning(
-                    "%s User %s posted into thread %s bound to user %s — declining",
-                    _LOG_PREFIX,
-                    user_id,
-                    inbound.thread_key,
-                    binding_user_id,
-                )
-                return adapter.build_sync_response(
-                    REPLY_THREAD_OWNED, inbound.thread_key
-                )
+            # Sender-scoped lookup is the authority for control and resume.
+            assert binding_user_id == user_id
 
             # ---- 7a. Channel control commands ----
             #
@@ -1498,8 +1556,7 @@ class ChannelInboundService:
             # See ``channel_control_commands``.
             #
             # **Placement is the security argument.** Below the ownership
-            # decline above, so the person stopping a stream is the person the
-            # thread belongs to; below step 6, so a sender whose access was
+            # lookup above, so the person stopping a stream is its asker; below step 6, so a sender whose access was
             # revoked cannot reach it; below the whitelist, the verification
             # and the rate limit, like everything else at step 7.
             # ``interrupt_stream``'s documented contract is "the caller must
@@ -1596,50 +1653,65 @@ class ChannelInboundService:
                 # status notice, a failed one through ``_reply``.
                 return {}
 
-            if binding_status == CHANNEL_BINDING_ACTIVE:
-                ChannelInboundService._schedule(
-                    ChannelInboundService._continue_thread(
-                        binding_id=binding_id,
-                        text=text,
-                        # Plain uuids, like every other value crossing into
-                        # this background task. The rows they name are already
-                        # committed and ``temporary``; nothing ORM-shaped
-                        # makes the hop.
-                        file_ids=file_ids,
-                        redelivered_file_ids=redelivered_file_ids,
-                        external_message_id=inbound.external_message_id,
-                        # Carried, not re-resolved — the same reasoning as the
-                        # new-thread hop below. An existing identity thread is
-                        # re-checked against ``allow_identity_routing`` on every
-                        # message (see ``_ingest``), and it has to be checked
-                        # against *this* message's reading of the sender's
-                        # settings, which the decline gate above already made.
-                        policy=policy,
-                    ),
-                    "channel_continue_thread",
-                )
-                # Silent ack: the agent's real reply arrives via the outbound
-                # path, and a "working on it" here would double every turn.
-                return {}
+            # Attachment materialization awaited above. The scheduler may have
+            # activated and drained this binding meanwhile: choose from fresh
+            # state under the same reservation used by every queue drain.
+            async with _binding_turn(binding_id):
+                binding = db.exec(
+                    select(ChannelThreadBinding)
+                    .where(ChannelThreadBinding.id == binding_id)
+                    .execution_options(populate_existing=True)
+                ).first()
+                if binding is not None:
+                    if binding.status == CHANNEL_BINDING_ACTIVE:
+                        ChannelInboundService._schedule(
+                            ChannelInboundService._continue_thread(
+                                inbound=inbound,
+                                binding_id=binding_id,
+                                text=text,
+                                # Plain uuids, like every other value crossing into
+                                # this background task. The rows they name are already
+                                # committed and ``temporary``; nothing ORM-shaped
+                                # makes the hop.
+                                file_ids=file_ids,
+                                redelivered_file_ids=redelivered_file_ids,
+                                external_message_id=inbound.external_message_id,
+                                # Carried, not re-resolved — the same reasoning as the
+                                # new-thread hop below. An existing identity thread is
+                                # re-checked against ``allow_identity_routing`` on every
+                                # message (see ``_ingest``), and it has to be checked
+                                # against *this* message's reading of the sender's
+                                # settings, which the decline gate above already made.
+                                policy=policy,
+                            ),
+                            "channel_continue_thread",
+                        )
+                        # Silent ack: the agent's real reply arrives via the outbound
+                        # path, and a "working on it" here would double every turn.
+                        return {}
 
-            if binding_status == CHANNEL_BINDING_PENDING_INSTALL:
-                accepted = ChannelInboundService._park_message(
-                    db, binding, inbound, text=text, file_ids=file_ids
-                )
-                # Tell the truth when the queue is full: "I'll answer shortly"
-                # would be a promise about a message we just dropped.
-                return adapter.build_sync_response(
-                    REPLY_STILL_SETTING_UP if accepted else REPLY_TOO_MANY_QUEUED,
-                    inbound.thread_key,
-                )
+                    if binding.status == CHANNEL_BINDING_PENDING_INSTALL:
+                        accepted = ChannelInboundService._park_message(
+                            db, binding, inbound, text=text, file_ids=file_ids
+                        )
+                        # Tell the truth when the queue is full: "I'll answer shortly"
+                        # would be a promise about a message we just dropped.
+                        return adapter.build_sync_response(
+                            REPLY_STILL_SETTING_UP
+                            if accepted
+                            else REPLY_TOO_MANY_QUEUED,
+                            sync_target,
+                        )
 
-            # `failed` — self-heal: drop the binding and route again from
-            # scratch. A transient build failure must not wedge the thread.
-            logger.info(
-                "%s Clearing failed binding %s — re-routing", _LOG_PREFIX, binding_id
-            )
-            db.delete(binding)
-            db.commit()
+                    # `failed` — self-heal: drop the binding and route again from
+                    # scratch. A transient build failure must not wedge the thread.
+                    logger.info(
+                        "%s Clearing failed binding %s — re-routing",
+                        _LOG_PREFIX,
+                        binding_id,
+                    )
+                    db.delete(binding)
+                    db.commit()
 
         # ---- 8-10. New thread: route (and possibly install) off-request ----
         #
@@ -1681,6 +1753,7 @@ class ChannelInboundService:
 
         ChannelInboundService._schedule(
             ChannelInboundService._route_new_thread(
+                inbound=inbound,
                 channel_id=channel_id,
                 user_id=user_id,
                 # Carried, not re-resolved. The background task opens its own
@@ -1748,7 +1821,7 @@ class ChannelInboundService:
         # Transports that cannot run a notice — and channels that could but have
         # nothing to post it with — keep the sync reply, which is still the
         # fastest acknowledgement available to them.
-        return adapter.build_sync_response(REPLY_WORKING, inbound.thread_key)
+        return adapter.build_sync_response(REPLY_WORKING, sync_target)
 
     # ==================================================================
     # Step 5 — user resolution
@@ -1841,6 +1914,30 @@ class ChannelInboundService:
         external_message_id: str | None = None,
         file_ids: list[uuid.UUID] | None = None,
         redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
+    ) -> None:
+        """Reserve the notice before any await, through the completed enqueue."""
+        async with _binding_turn(binding_id):
+            await ChannelInboundService._continue_thread_unlocked(
+                binding_id=binding_id,
+                text=text,
+                policy=policy,
+                external_message_id=external_message_id,
+                file_ids=file_ids,
+                redelivered_file_ids=redelivered_file_ids,
+                inbound=inbound,
+            )
+
+    @staticmethod
+    async def _continue_thread_unlocked(
+        *,
+        binding_id: uuid.UUID,
+        text: str,
+        policy: ResolvedChannelPolicy,
+        external_message_id: str | None = None,
+        file_ids: list[uuid.UUID] | None = None,
+        redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
     ) -> None:
         """Feed a message into the session an active binding already owns.
 
@@ -1870,6 +1967,22 @@ class ChannelInboundService:
             if channel is None or agent is None or user is None:
                 return
 
+            # The message/ledger commit can precede the latest-message stamp.
+            # A retry in that window must not open a notice for a turn that
+            # durable ingestion will skip (there would be no stream to clear it).
+            if (
+                external_message_id
+                and db.exec(
+                    select(ChannelThreadIngestLog.id).where(
+                        ChannelThreadIngestLog.binding_id == binding.id,
+                        ChannelThreadIngestLog.external_message_id
+                        == external_message_id,
+                    )
+                ).first()
+                is not None
+            ):
+                return
+
             # Any messages left parked by an interrupted drain go first, so the
             # conversation stays in order.
             if binding.pending_messages:
@@ -1890,7 +2003,13 @@ class ChannelInboundService:
                 db.refresh(binding)
                 if binding.pending_messages:
                     accepted = ChannelInboundService._append_parked(
-                        db, binding, text, external_message_id, None, file_ids
+                        db,
+                        binding,
+                        text,
+                        external_message_id,
+                        None,
+                        file_ids,
+                        inbound=inbound,
                     )
                     binding.updated_at = datetime.now(UTC)
                     db.add(binding)
@@ -1906,6 +2025,35 @@ class ChannelInboundService:
                         )
                     return
 
+            from app.services.sessions.active_streaming_manager import (
+                active_streaming_manager,
+            )
+
+            already_streaming = bool(
+                binding.session_id
+                and await active_streaming_manager.is_streaming(binding.session_id)
+            )
+            # A previous question can be queued before its processing task has
+            # registered a stream. It already owns the notice and destination.
+            if binding.session_id and not already_streaming:
+                already_streaming = (
+                    db.exec(
+                        select(SessionMessage.id)
+                        .where(
+                            SessionMessage.session_id == binding.session_id,
+                            SessionMessage.role == "user",
+                            SessionMessage.sent_to_agent_status == "pending",
+                        )
+                        .limit(1)
+                    ).first()
+                    is not None
+                )
+            target = ChannelInboundService._turn_target(channel, inbound, binding)
+            if target is not None and not already_streaming:
+                ChannelReplyPolicy.remember_target(binding, target)
+                db.add(binding)
+                db.commit()
+
             # A bound thread used to say nothing at all while it worked — the
             # webhook acked in silence and the next thing the person saw was
             # the answer, however long that took. It can say something now
@@ -1917,12 +2065,13 @@ class ChannelInboundService:
             # ``supports_progress_updates``: a transport that can post but not
             # delete would leave one of these standing on every single turn,
             # which is worse than the silence it replaced.
-            if _status_notice_supported(channel):
+            if _status_notice_supported(channel) and not already_streaming:
                 await ChannelOutboundService.set_binding_status(
                     db=db, channel=channel, binding=binding, text=REPLY_WORKING_ON_IT
                 )
 
             delivered = await ChannelInboundService._ingest_or_fail(
+                inbound=inbound,
                 db=db,
                 channel=channel,
                 binding=binding,
@@ -1981,6 +2130,7 @@ class ChannelInboundService:
         classification_text: str | None = None,
         file_ids: list[uuid.UUID] | None = None,
         redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
     ) -> None:
         """``decide()`` → bind → ingest.
 
@@ -2034,6 +2184,10 @@ class ChannelInboundService:
             user = db.get(User, user_id)
             if channel is None or user is None:
                 return
+
+            reply_target = (
+                ChannelInboundService._turn_target(channel, inbound) or thread_key
+            )
 
             # Every scalar the diagnostic records below need, read HERE — while
             # both instances are freshly loaded, and before the first
@@ -2118,7 +2272,7 @@ class ChannelInboundService:
 
                 status_message_id = await ChannelOutboundService.set_status(
                     channel=channel,
-                    thread_key=thread_key,
+                    thread_key=reply_target,
                     message_id=None,
                     text=REPLY_WORKING,
                 )
@@ -2260,6 +2414,7 @@ class ChannelInboundService:
                         },
                     )
                     binding, created = ChannelInboundService._upsert_binding(
+                        inbound=inbound,
                         db=db,
                         channel=channel,
                         user=user,
@@ -2281,6 +2436,7 @@ class ChannelInboundService:
                         # behind would strand a second "finding an assistant…"
                         # on the thread that nothing owns and nothing rewrites.
                         await ChannelInboundService._handle_lost_race(
+                            inbound=inbound,
                             db=db,
                             channel=channel,
                             binding=binding,
@@ -2295,57 +2451,64 @@ class ChannelInboundService:
                             redelivered_file_ids=redelivered_file_ids,
                         )
                         return
-                    # The thread has a binding now, so the notice gets an owner
-                    # — and its last state before the answer: "working on it".
-                    had_notice = status_message_id is not None
-                    ChannelOutboundService.adopt_status_notice(
-                        db, binding, status_message_id
-                    )
-                    # Recorded IMMEDIATELY after the adopt, and above the
-                    # announcement rather than below it. Ownership transfers at
-                    # the adopt — the id is on the row from that statement on —
-                    # so the bookkeeping has to transfer there too. It used to
-                    # sit under ``set_binding_status``, which is a full network
-                    # round trip and is NOT never-raise (see ``set_status``: the
-                    # adapter lookup is a lazy reload on an expired instance).
-                    # A raise inside that window left ``bound`` at ``None``
-                    # while the row already held the id, so the handler at the
-                    # bottom settled the stale local and the flush loop found
-                    # the row's id minutes later and patched "ready" over
-                    # whatever the sender had last been shown.
-                    # See ``bound`` above for why the local is cleared rather
-                    # than left as a second copy.
-                    bound = binding
-                    status_message_id = None
-                    if had_notice:
-                        await ChannelOutboundService.set_binding_status(
+                    async with _binding_turn(binding.id):
+                        # The thread has a binding now, so the notice gets an owner
+                        # — and its last state before the answer: "working on it".
+                        target = ChannelInboundService._turn_target(
+                            channel, inbound, binding
+                        )
+                        if target is not None:
+                            ChannelReplyPolicy.remember_target(binding, target)
+                        had_notice = status_message_id is not None
+                        ChannelOutboundService.adopt_status_notice(
+                            db, binding, status_message_id
+                        )
+                        # Recorded IMMEDIATELY after the adopt, and above the
+                        # announcement rather than below it. Ownership transfers at
+                        # the adopt — the id is on the row from that statement on —
+                        # so the bookkeeping has to transfer there too. It used to
+                        # sit under ``set_binding_status``, which is a full network
+                        # round trip and is NOT never-raise (see ``set_status``: the
+                        # adapter lookup is a lazy reload on an expired instance).
+                        # A raise inside that window left ``bound`` at ``None``
+                        # while the row already held the id, so the handler at the
+                        # bottom settled the stale local and the flush loop found
+                        # the row's id minutes later and patched "ready" over
+                        # whatever the sender had last been shown.
+                        # See ``bound`` above for why the local is cleared rather
+                        # than left as a second copy.
+                        bound = binding
+                        status_message_id = None
+                        if had_notice:
+                            await ChannelOutboundService.set_binding_status(
+                                db=db,
+                                channel=channel,
+                                binding=binding,
+                                text=REPLY_WORKING_ON_IT,
+                            )
+                        await ChannelInboundService._ingest_or_fail(
+                            inbound=inbound,
                             db=db,
                             channel=channel,
                             binding=binding,
-                            text=REPLY_WORKING_ON_IT,
+                            agent=agent,
+                            user=user,
+                            text=text,
+                            file_ids=file_ids,
+                            external_message_id=external_message_id,
+                            external_user_id=external_user_id,
+                            # Set only when Stage 1 chose a *person* and Stage 2
+                            # picked one of their agents (plan §2.3). It is what
+                            # permits a session on an agent this sender does not
+                            # own — and it is a claim, re-read in full by
+                            # ``assert_access`` before anything is created.
+                            # ``None`` on every other branch, which leaves the
+                            # channel invariant exactly as strict as it was.
+                            identity_grant=decision.identity_grant,
+                            policy=policy,
+                            redelivered_file_ids=redelivered_file_ids,
                         )
-                    await ChannelInboundService._ingest_or_fail(
-                        db=db,
-                        channel=channel,
-                        binding=binding,
-                        agent=agent,
-                        user=user,
-                        text=text,
-                        file_ids=file_ids,
-                        external_message_id=external_message_id,
-                        external_user_id=external_user_id,
-                        # Set only when Stage 1 chose a *person* and Stage 2
-                        # picked one of their agents (plan §2.3). It is what
-                        # permits a session on an agent this sender does not
-                        # own — and it is a claim, re-read in full by
-                        # ``assert_access`` before anything is created.
-                        # ``None`` on every other branch, which leaves the
-                        # channel invariant exactly as strict as it was.
-                        identity_grant=decision.identity_grant,
-                        policy=policy,
-                        redelivered_file_ids=redelivered_file_ids,
-                    )
-                    return
+                        return
 
                 # ---- Pass 2 outcome: server-wide auto-install catalog ----
                 # Already run inside ``decide`` above; from here on this method
@@ -2466,12 +2629,13 @@ class ChannelInboundService:
                     # afterwards — there is no binding, and the message is
                     # meant to stay.
                     await ChannelInboundService._settle_notice(
-                        db, channel, thread_key, status_message_id, REPLY_NO_MATCH
+                        db, channel, reply_target, status_message_id, REPLY_NO_MATCH
                     )
                     return
 
                 try:
                     bound = await ChannelInboundService._install_and_park(
+                        inbound=inbound,
                         db=db,
                         channel=channel,
                         user=user,
@@ -2556,7 +2720,7 @@ class ChannelInboundService:
                     )
                 else:
                     await ChannelInboundService._settle_notice(
-                        db, channel, thread_key, status_message_id, REPLY_SETUP_FAILED
+                        db, channel, reply_target, status_message_id, REPLY_SETUP_FAILED
                     )
 
     @staticmethod
@@ -2609,6 +2773,42 @@ class ChannelInboundService:
         status_message_id: str | None = None,
         file_ids: list[uuid.UUID] | None = None,
         redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
+    ) -> None:
+        async with _binding_turn(binding.id):
+            db.refresh(binding)
+            await ChannelInboundService._handle_lost_race_unlocked(
+                db=db,
+                channel=channel,
+                binding=binding,
+                sender_user_id=sender_user_id,
+                thread_key=thread_key,
+                text=text,
+                external_message_id=external_message_id,
+                external_user_id=external_user_id,
+                policy=policy,
+                status_message_id=status_message_id,
+                file_ids=file_ids,
+                redelivered_file_ids=redelivered_file_ids,
+                inbound=inbound,
+            )
+
+    @staticmethod
+    async def _handle_lost_race_unlocked(
+        *,
+        db: DBSession,
+        channel: ServerChannel,
+        binding: ChannelThreadBinding,
+        sender_user_id: uuid.UUID,
+        thread_key: str,
+        text: str,
+        external_message_id: str | None,
+        external_user_id: str | None,
+        policy: ResolvedChannelPolicy,
+        status_message_id: str | None = None,
+        file_ids: list[uuid.UUID] | None = None,
+        redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
     ) -> None:
         """Deliver this message via the binding that won the creation race.
 
@@ -2628,33 +2828,20 @@ class ChannelInboundService:
         binding already names an agent, and creating a session on a different
         one would leave the binding permanently lying about who is answering.
 
-        The same one-person-per-thread rule the synchronous path enforces
-        applies here, and it must be re-checked rather than assumed. Two
-        members of a group space can @-mention the bot in the same new thread;
-        both see no binding, both run a full routing pass — the window is LLM
-        latency, seconds — and both try to create it. Without this check the
-        loser's message would be ingested into (or parked onto) the *winner's*
-        session, putting one external user's text in another's history. Since
-        this runs in a background task, the refusal is delivered as a message
-        rather than a sync reply.
+        Only two messages from the same asker and scope can race. Different
+        askers have different unique keys and independently routed sessions.
         """
-        if binding.user_id != sender_user_id:
-            logger.warning(
-                "%s User %s lost the binding race for thread %s to user %s — "
-                "declining rather than delivering into their session",
-                _LOG_PREFIX,
-                sender_user_id,
-                thread_key,
-                binding.user_id,
-            )
-            await ChannelInboundService._settle_notice(
-                db, channel, thread_key, status_message_id, REPLY_THREAD_OWNED
-            )
-            return
+        assert binding.user_id == sender_user_id
 
         if binding.status == CHANNEL_BINDING_PENDING_INSTALL:
             accepted = ChannelInboundService._append_parked(
-                db, binding, text, external_message_id, external_user_id, file_ids
+                db,
+                binding,
+                text,
+                external_message_id,
+                external_user_id,
+                file_ids,
+                inbound=inbound,
             )
             db.add(binding)
             db.commit()
@@ -2681,6 +2868,7 @@ class ChannelInboundService:
         if agent is None or user is None:
             return
         await ChannelInboundService._ingest_or_fail(
+            inbound=inbound,
             db=db,
             channel=channel,
             binding=binding,
@@ -2712,6 +2900,7 @@ class ChannelInboundService:
         identity_grant: IdentityGrant | None = None,
         file_ids: list[uuid.UUID] | None = None,
         redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
     ) -> bool:
         """Ingest, leaving the binding in a coherent state on every outcome.
 
@@ -2753,6 +2942,7 @@ class ChannelInboundService:
         """
         try:
             await ChannelInboundService._ingest(
+                inbound=inbound,
                 db=db,
                 channel=channel,
                 binding=binding,
@@ -2804,9 +2994,7 @@ class ChannelInboundService:
             )
             return False
         except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "%s Ingest failed for binding %s", _LOG_PREFIX, binding.id
-            )
+            logger.exception("%s Ingest failed for binding %s", _LOG_PREFIX, binding.id)
             # Everything that could raise is resolved before the recording
             # calls below, and the thread key is read off the binding while the
             # instance is still usable — the same discipline ``_drain_parked``
@@ -2904,6 +3092,7 @@ class ChannelInboundService:
         status_message_id: str | None = None,
         file_ids: list[uuid.UUID] | None = None,
         redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
     ) -> ChannelThreadBinding | None:
         """Install the matched bundle and park the message until the env is up.
 
@@ -2948,6 +3137,7 @@ class ChannelInboundService:
         )
 
         binding, created = ChannelInboundService._upsert_binding(
+            inbound=inbound,
             db=db,
             channel=channel,
             user=user,
@@ -2963,6 +3153,7 @@ class ChannelInboundService:
             # handed down to be settled with the refusal; the winner's binding
             # owns the thread's notice from here.
             await ChannelInboundService._handle_lost_race(
+                inbound=inbound,
                 db=db,
                 channel=channel,
                 binding=binding,
@@ -2981,38 +3172,48 @@ class ChannelInboundService:
             # owns it now, and nothing should rewrite it again.
             return None
 
-        ChannelInboundService._append_parked(
-            db, binding, text, external_message_id, external_user_id, file_ids
-        )
-        db.add(binding)
-        db.commit()
+        async with _binding_turn(binding.id):
+            ChannelInboundService._append_parked(
+                db,
+                binding,
+                text,
+                external_message_id,
+                external_user_id,
+                file_ids,
+                inbound=inbound,
+            )
+            db.add(binding)
+            db.commit()
 
-        # Announced only now: before the binding is confirmed ours, a lost race
-        # would have told the sender "setting up X for you" and then declined
-        # them in the next breath.
-        #
-        # The notice is adopted first so the announcement rewrites it in place
-        # — and so the flush loop, which runs minutes later in a different task
-        # with nothing but this row to go on, can find it and carry it through
-        # "ready" to deletion.
-        #
-        # Between the adopt and the ``return`` the row owns the notice and the
-        # caller does not know it yet: ``bound`` is only assigned from the
-        # return value. That window is safe ONLY because both statements below
-        # are total — ``adopt_status_notice`` by its own contract, and
-        # ``set_binding_status`` because ``set_status`` guards its adapter
-        # lookup against every exception rather than just ``ChannelError``.
-        # Narrow that guard back and this window reopens: the caller's handler
-        # would settle a local it no longer owns and leave the row's id for the
-        # flush loop to patch "ready" over the failure the sender was shown.
-        ChannelOutboundService.adopt_status_notice(db, binding, status_message_id)
-        await ChannelOutboundService.set_binding_status(
-            db=db,
-            channel=channel,
-            binding=binding,
-            text=REPLY_INSTALLING.format(agent_name=bundle.display_name),
-        )
-        return binding
+            # Announced only now: before the binding is confirmed ours, a lost race
+            # would have told the sender "setting up X for you" and then declined
+            # them in the next breath.
+            #
+            # The notice is adopted first so the announcement rewrites it in place
+            # — and so the flush loop, which runs minutes later in a different task
+            # with nothing but this row to go on, can find it and carry it through
+            # "ready" to deletion.
+            #
+            # Between the adopt and the ``return`` the row owns the notice and the
+            # caller does not know it yet: ``bound`` is only assigned from the
+            # return value. That window is safe ONLY because both statements below
+            # are total — ``adopt_status_notice`` by its own contract, and
+            # ``set_binding_status`` because ``set_status`` guards its adapter
+            # lookup against every exception rather than just ``ChannelError``.
+            # Narrow that guard back and this window reopens: the caller's handler
+            # would settle a local it no longer owns and leave the row's id for the
+            # flush loop to patch "ready" over the failure the sender was shown.
+            target = ChannelInboundService._turn_target(channel, inbound, binding)
+            if target is not None:
+                ChannelReplyPolicy.remember_target(binding, target)
+            ChannelOutboundService.adopt_status_notice(db, binding, status_message_id)
+            await ChannelOutboundService.set_binding_status(
+                db=db,
+                channel=channel,
+                binding=binding,
+                text=REPLY_INSTALLING.format(agent_name=bundle.display_name),
+            )
+            return binding
 
     # ==================================================================
     # Pending flush (scheduler entry point)
@@ -3060,6 +3261,14 @@ class ChannelInboundService:
 
     @staticmethod
     async def _flush_one(db: DBSession, binding: ChannelThreadBinding) -> bool:
+        async with _binding_turn(binding.id):
+            db.refresh(binding)
+            if binding.status != CHANNEL_BINDING_PENDING_INSTALL:
+                return False
+            return await ChannelInboundService._flush_one_unlocked(db, binding)
+
+    @staticmethod
+    async def _flush_one_unlocked(db: DBSession, binding: ChannelThreadBinding) -> bool:
         channel = db.get(ServerChannel, binding.server_channel_id)
         agent = db.get(Agent, binding.agent_id)
         user = db.get(User, binding.user_id)
@@ -3096,10 +3305,11 @@ class ChannelInboundService:
         elif status not in _ENV_READY:
             # Still building/starting/suspended. Bounded: a binding that never
             # becomes ready fails rather than retrying indefinitely.
-            if ChannelInboundService._binding_age_seconds(binding) > _PENDING_MAX_AGE_SECONDS:
-                failure = (
-                    f"Environment did not become ready in time (status={status})"
-                )
+            if (
+                ChannelInboundService._binding_age_seconds(binding)
+                > _PENDING_MAX_AGE_SECONDS
+            ):
+                failure = f"Environment did not become ready in time (status={status})"
             else:
                 return False
 
@@ -3239,6 +3449,7 @@ class ChannelInboundService:
             if not parked:
                 return
             entry = parked[0] or {}
+            inbound = ChannelInboundService._inbound_for_binding(binding, entry)
             text = entry.get("text") or ""
             # ``.get`` and never ``entry["file_ids"]``: a binding parked
             # BEFORE this feature deployed is drained after it, and a KeyError
@@ -3263,6 +3474,7 @@ class ChannelInboundService:
             if text or file_ids:
                 try:
                     await ChannelInboundService._ingest(
+                        inbound=inbound,
                         db=db,
                         channel=channel,
                         binding=binding,
@@ -3432,6 +3644,49 @@ class ChannelInboundService:
         identity_grant: IdentityGrant | None = None,
         file_ids: list[uuid.UUID] | None = None,
         redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
+    ) -> None:
+        if user.id != binding.user_id:
+            raise ChannelDecline(
+                "channel ingest sender does not own the binding: "
+                f"user.id={user.id}, binding.user_id={binding.user_id}"
+            )
+        # Fetching and file preparation await external I/O. Serialize same-worker
+        # arrivals before the synchronous DB row lock in session ingestion, so
+        # another coroutine cannot block the event loop waiting for this one.
+        async with _binding_turn(binding.id):
+            # A previous arrival may have created the session while we waited.
+            db.refresh(binding)
+            await ChannelInboundService._ingest_unlocked(
+                db=db,
+                channel=channel,
+                binding=binding,
+                agent=agent,
+                user=user,
+                text=text,
+                policy=policy,
+                sender_external_id=sender_external_id,
+                identity_grant=identity_grant,
+                file_ids=file_ids,
+                redelivered_file_ids=redelivered_file_ids,
+                inbound=inbound,
+            )
+
+    @staticmethod
+    async def _ingest_unlocked(
+        *,
+        db: DBSession,
+        channel: ServerChannel,
+        binding: ChannelThreadBinding,
+        agent: Agent,
+        user: User,
+        text: str,
+        policy: ResolvedChannelPolicy,
+        sender_external_id: str | None = None,
+        identity_grant: IdentityGrant | None = None,
+        file_ids: list[uuid.UUID] | None = None,
+        redelivered_file_ids: set[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
     ) -> None:
         """Hand the message to the canonical ingestion service.
 
@@ -3577,8 +3832,7 @@ class ChannelInboundService:
         # an external sender which gate closed.
         if grant is not None and not policy.allow_identity_routing:
             raise ChannelDecline(
-                "identity routing is switched off for this sender on this "
-                "channel"
+                "identity routing is switched off for this sender on this channel"
             )
 
         extra_session_kwargs: dict[str, Any] | None = None
@@ -3588,9 +3842,7 @@ class ChannelInboundService:
                 "thread_key": binding.thread_key,
                 "sender_external_id": sender.external_id,
             }
-            extra_session_kwargs = {
-                "session_metadata_extra": session_metadata_extra
-            }
+            extra_session_kwargs = {"session_metadata_extra": session_metadata_extra}
             if grant is not None:
                 # Attribution for the person who did not start this
                 # conversation. The session opens in the identity OWNER's
@@ -3605,8 +3857,8 @@ class ChannelInboundService:
                 # session's own user, so it would be telling the reader their
                 # own name.
                 session_metadata_extra["identity_caller_name"] = (
-                    (user.full_name or "").strip() or user.email
-                )
+                    user.full_name or ""
+                ).strip() or user.email
                 extra_session_kwargs.update(
                     {
                         # Consumed by `_select_session_owner_id`: the session is
@@ -3621,12 +3873,51 @@ class ChannelInboundService:
                     }
                 )
 
+        access_policy = ChannelAccessPolicy(
+            expected_owner_id=grant.owner_id if grant is not None else user.id,
+            identity_grant=grant,
+        )
+        # Historical reads only follow the same fresh authorization as ingest.
+        ChannelIngestionService.assert_access(
+            db=db, agent=agent, sender=sender, policy=access_policy
+        )
+        context = None
+        if (
+            inbound is not None
+            and get_adapter(channel.channel_type).capabilities.supports_conversations
+        ):
+            if thread_key is None:
+                ChannelConversationContextService.reset_for_new_session(
+                    db=db, binding=binding,
+                )
+            adapter = get_adapter(channel.channel_type)
+            effective_caps = await ChannelConversationResolver.resolve_for_channel(
+                adapter, channel, inbound
+            )
+            context = await ChannelConversationContextService.build_context(
+                db=db,
+                channel=channel,
+                adapter=adapter,
+                binding=binding,
+                inbound=inbound,
+                effective_caps=effective_caps,
+            )
+
+        turn_target = ChannelInboundService._turn_target(channel, inbound, binding)
         result = await ChannelIngestionService.ingest_inbound_message(
             db=db,
             agent=agent,
             sender=sender,
             thread_key=thread_key,
             content=text,
+            context=context,
+            channel_reply_target=asdict(turn_target)
+            if turn_target is not None and context is not None
+            else None,
+            context_binding_id=binding.id if context is not None else None,
+            external_message_id=inbound.external_message_id
+            if inbound is not None
+            else None,
             file_ids=file_ids or None,
             # ``binding.user_id`` and not ``user.id``, though the guard at the
             # top of this method has just made them equal: the parameter's
@@ -3639,7 +3930,9 @@ class ChannelInboundService:
             # an ownership check on the platform (§5.5), and a widening that
             # travels on every channel message is a wider blast radius than its
             # own docstring claims. It rides with the files or not at all.
-            uploader_user_id=binding.user_id if file_ids else None,
+            uploader_user_id=binding.user_id
+            if file_ids or (context and context.file_ids)
+            else None,
             # **The narrow half of the redelivery fix.** ``materialize``
             # deliberately REUSES the rows an earlier delivery of this same
             # external message already created — that is what stops a retry
@@ -3763,7 +4056,7 @@ class ChannelInboundService:
                 pass
 
     @staticmethod
-    def _resume_identity_grant(session: "ChatSession") -> IdentityGrant | None:
+    def _resume_identity_grant(session: ChatSession) -> IdentityGrant | None:
         """Rebuild the identity claim for a session being resumed.
 
         ``None`` for an ordinary channel session — every column below is NULL
@@ -3806,13 +4099,55 @@ class ChannelInboundService:
     # ==================================================================
 
     @staticmethod
+    def _inbound_for_binding(
+        binding: ChannelThreadBinding, entry: dict
+    ) -> ChannelInboundMessage:
+        conversation = entry.get("conversation") or {}
+        return ChannelInboundMessage(
+            event_kind="message",
+            text=entry.get("text") or "",
+            external_message_id=entry.get("external_message_id"),
+            external_user_id=entry.get("external_user_id"),
+            thread_key=conversation.get("thread_key") or binding.thread_key,
+            conversation_key=conversation.get("conversation_key")
+            or binding.conversation_key,
+            conversation_kind=conversation.get("conversation_kind")
+            or binding.conversation_kind,
+            quoted_message_id=conversation.get("quoted_message_id"),
+            conversation_hints=conversation.get("conversation_hints") or {},
+            is_thread_summon=bool(conversation.get("is_thread_summon")),
+        )
+
+    @staticmethod
+    def _turn_target(
+        channel: ServerChannel,
+        inbound: ChannelInboundMessage | None,
+        binding: ChannelThreadBinding | None = None,
+    ):
+        if inbound is None:
+            return (
+                ChannelReplyPolicy.resolve_binding(binding, channel)
+                if binding
+                else None
+            )
+        adapter = get_adapter(channel.channel_type)
+        return ChannelReplyPolicy.resolve(
+            inbound=inbound,
+            effective_caps=ChannelConversationResolver.resolve(adapter, inbound),
+            binding=binding,
+            channel=channel,
+            reply_here=bool(inbound.conversation_hints.get("reply_here")),
+        )
+
+    @staticmethod
     def _get_binding(
-        db: DBSession, channel_id: uuid.UUID, thread_key: str
+        db: DBSession, channel_id: uuid.UUID, scope_key: str, user_id: uuid.UUID
     ) -> ChannelThreadBinding | None:
         return db.exec(
             select(ChannelThreadBinding).where(
                 ChannelThreadBinding.server_channel_id == channel_id,
-                ChannelThreadBinding.thread_key == thread_key,
+                ChannelThreadBinding.scope_key == scope_key,
+                ChannelThreadBinding.user_id == user_id,
             )
         ).first()
 
@@ -3826,12 +4161,13 @@ class ChannelInboundService:
         thread_key: str,
         status: str,
         external_message_id: str | None,
+        inbound: ChannelInboundMessage | None = None,
     ) -> tuple[ChannelThreadBinding, bool]:
         """Create the binding, tolerating a concurrent first-message race.
 
         Returns ``(binding, created)``. Two messages arriving simultaneously in
         one brand-new thread both reach routing; the unique constraint on
-        (server_channel_id, thread_key) lets exactly one insert win, and the
+        (server_channel_id, scope_key, user_id) lets exactly one insert win, and the
         loser catches IntegrityError and re-reads the winner's row (the
         ``ServerConfigService.get_or_create`` idiom).
 
@@ -3839,9 +4175,20 @@ class ChannelInboundService:
         than proceeding with its own routing result, or the binding ends up
         naming one agent while its session belongs to another.
         """
+        scope_key = (
+            ChannelConversationResolver.scope_key(
+                get_adapter(channel.channel_type), inbound
+            )
+            if inbound is not None
+            else thread_key
+        )
+        channel_id, asker_id = channel.id, user.id
         binding = ChannelThreadBinding(
             server_channel_id=channel.id,
             thread_key=thread_key,
+            scope_key=scope_key,
+            conversation_key=inbound.conversation_key if inbound else None,
+            conversation_kind=inbound.conversation_kind if inbound else None,
             user_id=user.id,
             agent_id=agent.id,
             status=status,
@@ -3852,7 +4199,9 @@ class ChannelInboundService:
             db.commit()
         except IntegrityError:
             db.rollback()
-            existing = ChannelInboundService._get_binding(db, channel.id, thread_key)
+            existing = ChannelInboundService._get_binding(
+                db, channel_id, scope_key, asker_id
+            )
             if existing is None:
                 raise
             logger.info(
@@ -3893,6 +4242,7 @@ class ChannelInboundService:
             inbound.external_message_id,
             inbound.external_user_id,
             file_ids,
+            inbound=inbound,
         )
         # Only claim delivery for a message we actually kept. Stamping a
         # message the cap refused would mark it deduped, so a redelivery would
@@ -3912,6 +4262,7 @@ class ChannelInboundService:
         external_message_id: str | None,
         external_user_id: str | None = None,
         file_ids: list[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
     ) -> bool:
         """Append to the parked queue. Returns False when the cap refused it.
 
@@ -3945,8 +4296,21 @@ class ChannelInboundService:
                 "text": text,
                 "file_ids": [str(file_id) for file_id in file_ids or []],
                 "external_message_id": external_message_id,
-                "external_user_id": external_user_id,
+                "external_user_id": external_user_id
+                or (inbound.external_user_id if inbound else None),
                 "received_at": datetime.now(UTC).isoformat(),
+                "conversation": (
+                    {
+                        "thread_key": inbound.thread_key,
+                        "conversation_key": inbound.conversation_key,
+                        "conversation_kind": inbound.conversation_kind,
+                        "quoted_message_id": inbound.quoted_message_id,
+                        "conversation_hints": inbound.conversation_hints,
+                        "is_thread_summon": inbound.is_thread_summon,
+                    }
+                    if inbound
+                    else None
+                ),
             }
         )
         binding.pending_messages = parked
@@ -3954,9 +4318,7 @@ class ChannelInboundService:
         return True
 
     @staticmethod
-    def _fail_binding(
-        db: DBSession, binding: ChannelThreadBinding, error: str
-    ) -> None:
+    def _fail_binding(db: DBSession, binding: ChannelThreadBinding, error: str) -> None:
         binding.status = CHANNEL_BINDING_FAILED
         binding.last_error = (error or "")[:2000]
         binding.updated_at = datetime.now(UTC)
@@ -4007,7 +4369,10 @@ class ChannelInboundService:
 
     @staticmethod
     async def _reply(
-        db: DBSession, channel: ServerChannel, thread_key: str, text: str
+        db: DBSession,
+        channel: ServerChannel,
+        thread_key: str | ChannelReplyTarget,
+        text: str,
     ) -> None:
         """Post a standalone message into a thread that may have no binding."""
         # §11a Rule 2, at the one instrumentation point in this file that sits
@@ -4039,7 +4404,9 @@ class ChannelInboundService:
                     direction="outbound",
                     kind=DEBUG_REPLIED,
                     summary="Pipeline notice delivered",
-                    thread_key=thread_key,
+                    thread_key=thread_key.legacy_thread_key
+                    if isinstance(thread_key, ChannelReplyTarget)
+                    else thread_key,
                     text=text,
                 )
         except Exception as exc:  # noqa: BLE001 — best effort
@@ -4066,7 +4433,9 @@ class ChannelInboundService:
                     direction="outbound",
                     kind=DEBUG_SEND_FAILED,
                     summary=f"Notice delivery failed: {failure}",
-                    thread_key=thread_key,
+                    thread_key=thread_key.legacy_thread_key
+                    if isinstance(thread_key, ChannelReplyTarget)
+                    else thread_key,
                     text=text,
                 )
             logger.warning(
@@ -4114,7 +4483,9 @@ class ChannelInboundService:
                 ),
             )
         except Exception:  # noqa: BLE001
-            logger.exception("%s Failed to write security event %s", _LOG_PREFIX, event_type)
+            logger.exception(
+                "%s Failed to write security event %s", _LOG_PREFIX, event_type
+            )
 
     @staticmethod
     async def _audit_throttled(

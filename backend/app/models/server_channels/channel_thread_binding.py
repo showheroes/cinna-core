@@ -1,34 +1,15 @@
-"""ChannelThreadBinding — the (channel, thread) → (user, agent, session) map.
+"""One (channel, scope, asker) binding pins an agent and session.
 
-This is the conversation state of the Server Channels feature. One row per
-external thread; ``thread_key`` is always the channel-native thread identity
-(Google Chat: ``message.thread.name``, e.g. ``spaces/AAA/threads/BBB``).
-
-Why a dedicated table rather than a column on ``Session`` (the approach the
-email integration takes): the binding exists *before* the session does — it
-is created the moment an auto-install starts, while the environment is still
-building and inbound messages have to be parked. It also makes resume
-routing-free: a thread that already has a binding never re-runs the router,
-the same fixed-agent-per-context principle App MCP uses.
-
-Lifecycle::
-
-    pending_install ──(env running, messages flushed)──▶ active
-            │
-            └──(env build / install failed)──▶ failed
-                     │
-                     └──(next inbound message deletes the row and re-routes)
-
-``failed`` is terminal only until the next message: self-heal by deletion +
-re-routing, so a transient build failure never wedges a thread permanently.
-FK cascades are part of the design: uninstalling the agent or deleting the
-channel drops the binding (next message re-routes); deleting the session
-nulls ``session_id`` (next message opens a fresh session on the same agent).
+A threaded conversation uses its native thread as scope; a flat conversation
+uses its room/space. Each asker is independently routed and authorized.
+``user_id`` is the asker, while identity-routed sessions belong to the identity
+owner. Deleting a failed binding lets that asker route and backfill afresh.
 """
+
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Text, UniqueConstraint
 from sqlmodel import Column, Field, SQLModel
 
 # Binding status values. Plain constants (not an Enum) to match the codebase's
@@ -50,7 +31,10 @@ class ChannelThreadBinding(SQLModel, table=True):
     __tablename__ = "channel_thread_binding"
     __table_args__ = (
         UniqueConstraint(
-            "server_channel_id", "thread_key", name="uq_channel_thread_binding_thread"
+            "server_channel_id",
+            "scope_key",
+            "user_id",
+            name="uq_channel_thread_binding_scope",
         ),
     )
 
@@ -58,23 +42,21 @@ class ChannelThreadBinding(SQLModel, table=True):
     server_channel_id: uuid.UUID = Field(
         foreign_key="server_channel.id", ondelete="CASCADE"
     )
-    # Channel-native thread identity. Unique per channel (see __table_args__).
+    # Native thread is an address, not the session identity.
     thread_key: str = Field(max_length=512)
-    # The resolved platform user — the external sender's own account. This is
-    # **thread ownership**: "this thread belongs to this person", the fact that
-    # stops another member of a group space from posting into a conversation
-    # that is not theirs. It is re-checked on the synchronous path and again in
-    # `_handle_lost_race`, and it never changes for the life of the row.
-    #
-    # It is NOT session ownership, and since Phase 3 of the channels & identity
-    # unification the two genuinely diverge. On an identity-routed thread
-    # `agent_id` is an agent belonging to somebody else — the identity owner —
-    # and the session runs in *their* space, so `session.user_id` is the owner
-    # while this column stays the sender. `session.identity_caller_id` is then
-    # the sender, and it is what the resume path matches against. Read this
-    # column for "whose thread is this"; read the session for "whose workspace
-    # is answering". Any consumer that treats them as one value is asking a
-    # question one of them cannot answer.
+    scope_key: str = Field(max_length=512, index=True)
+    conversation_key: str | None = Field(default=None, max_length=512, index=True)
+    conversation_kind: str | None = Field(default=None, max_length=16)
+    last_reply_mode: str | None = Field(default=None, max_length=24)
+    history_backfilled_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    # Full address of the current notice/turn, including quote timestamp and
+    # asker attribution. Resume and repair must patch the same destination.
+    reply_target: dict | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    # The live asker; never the identity owner or a historical message author.
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
     # Uninstalling the agent cascades the binding away ⇒ next message re-routes.
     # On an identity thread that is the *identity owner's* agent, so the owner

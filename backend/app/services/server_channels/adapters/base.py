@@ -39,11 +39,13 @@ Google-signed JWT; email's comes out of a ``From:`` header and is spoofable.
 Both feed the same pipeline, so each transport must say which tier it offers
 where an admin can read it.
 """
+
 from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, ClassVar, Literal
 
 from fastapi import Request
@@ -71,6 +73,10 @@ class UnknownChannelTypeError(ChannelError):
 
 class ChannelConfigError(ChannelError):
     """Adapter config failed ``validate_config``."""
+
+
+class ChannelCapabilityUnsupported(ChannelError):
+    """The transport or credential cannot perform a conversation read."""
 
 
 class ChannelSendError(ChannelError):
@@ -188,6 +194,73 @@ class ChannelAttachmentRef:
 
 
 @dataclass(frozen=True)
+class ChannelConversationRef:
+    conversation_key: str
+    conversation_kind: Literal["dm", "group", "unknown"] = "unknown"
+    thread_key: str | None = None
+
+
+@dataclass(frozen=True)
+class ConversationShape:
+    is_threaded: bool = False
+    is_group: bool = False
+    can_reply_in_thread: bool = False
+    can_start_thread: bool = False
+    is_known: bool = False
+
+    @classmethod
+    def unknown(cls) -> ConversationShape:
+        return cls()
+
+
+@dataclass(frozen=True)
+class EffectiveChannelCapabilities:
+    shape: ConversationShape = field(default_factory=ConversationShape.unknown)
+    supports_conversations: bool = False
+    supports_threads: bool = False
+    supports_thread_creation: bool = False
+    supports_quote_reply: bool = False
+    supports_inbound_quote: bool = False
+    supports_message_fetch: bool = False
+    supports_thread_history: bool = False
+    history_requires_membership: bool = True
+    can_reply_in_thread: bool = False
+    can_start_thread: bool = False
+
+
+@dataclass(frozen=True)
+class ChannelMessageRef:
+    message_id: str
+    author_display_name: str = "Unknown"
+    author_external_id: str = ""
+    author_email: str | None = None
+    text: str = ""
+    created_at: datetime | None = None
+    quoted_message_id: str | None = None
+    attachments: tuple[ChannelAttachmentRef, ...] = ()
+    is_platform_authored: bool = False
+
+
+@dataclass(frozen=True)
+class ChannelReplyTarget:
+    conversation_key: str
+    thread_key: str | None = None
+    reply_to_message_id: str | None = None
+    mode: Literal["thread_reply", "quote_reply", "conversation_post"] = (
+        "conversation_post"
+    )
+    transport_hint: str | None = None
+    reply_to_last_update_time: str | None = None
+    asker_external_id: str | None = None
+    # Internal identity for transports whose recipient comes from the binding.
+    binding_id: str | None = None
+
+    @property
+    def legacy_thread_key(self) -> str:
+        return self.transport_hint or self.thread_key or self.conversation_key
+
+
+@dataclass(frozen=True)
 class ChannelInboundMessage:
     """One normalized inbound event.
 
@@ -240,6 +313,11 @@ class ChannelInboundMessage:
     #: it: parsing the wrapper back out would relocate the fragility to the
     #: next person who edits the marker strings.
     sender_text_empty: bool | None = None
+    conversation_key: str | None = None
+    conversation_kind: Literal["dm", "group", "unknown"] | None = None
+    quoted_message_id: str | None = None
+    conversation_hints: dict[str, Any] = field(default_factory=dict)
+    is_thread_summon: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -308,6 +386,15 @@ class ChannelCapabilities:
     denial inline and must stay silent rather than leak that the token is
     valid through a side channel.
     """
+
+    supports_conversations: bool = False
+    supports_threads: bool = False
+    supports_thread_creation: bool = False
+    supports_quote_reply: bool = False
+    supports_inbound_quote: bool = False
+    supports_message_fetch: bool = False
+    supports_thread_history: bool = False
+    history_requires_membership: bool = True
 
     supports_progress_updates: bool = False
     supports_message_edit: bool = False
@@ -422,9 +509,7 @@ class ChannelAdapter(ABC):
         on create and update, before anything is persisted.
         """
 
-    def validate_config_references(
-        self, db: DBSession, config: dict[str, Any]
-    ) -> None:
+    def validate_config_references(self, db: DBSession, config: dict[str, Any]) -> None:
         """Validate config values that point at *other rows*. Default: no-op.
 
         Split from :meth:`validate_config` rather than folded into it because
@@ -463,6 +548,31 @@ class ChannelAdapter(ABC):
         sender identity. Returning an ``ignored`` message is for *authentic*
         events the pipeline doesn't act on — never for auth failures.
         """
+
+    def interpret_conversation_hints(self, hints: dict[str, Any]) -> ConversationShape:
+        return ConversationShape.unknown()
+
+    async def resolve_read_capabilities(
+        self, channel: ServerChannel, conversation_key: str | None = None
+    ) -> dict[str, bool]:
+        return {
+            "supports_message_fetch": self.capabilities.supports_message_fetch,
+            "supports_thread_history": self.capabilities.supports_thread_history,
+        }
+
+    async def fetch_message(
+        self, channel: ServerChannel, message_id: str
+    ) -> ChannelMessageRef | None:
+        raise ChannelCapabilityUnsupported("message_fetch_unavailable")
+
+    async def fetch_thread_history(
+        self,
+        channel: ServerChannel,
+        thread_key: str,
+        limit: int,
+        before_message_id: str | None = None,
+    ) -> list[ChannelMessageRef]:
+        raise ChannelCapabilityUnsupported("history_unavailable")
 
     def has_outbound_credentials(self, channel: ServerChannel) -> bool:
         """Whether an outbound credential has been configured for ``channel``.
@@ -531,7 +641,7 @@ class ChannelAdapter(ABC):
 
     @abstractmethod
     async def send_message(
-        self, channel: ServerChannel, thread_key: str, text: str
+        self, channel: ServerChannel, thread_key: str | ChannelReplyTarget, text: str
     ) -> str | None:
         """Deliver ``text`` into ``thread_key``. Returns the platform message id.
 
@@ -856,7 +966,7 @@ class AuthenticatedChannelTransport(ChannelAdapter):
         )
 
     async def send_message(
-        self, channel: ServerChannel, thread_key: str, text: str
+        self, channel: ServerChannel, thread_key: str | ChannelReplyTarget, text: str
     ) -> str | None:
         """Refuse: this transport has no outbound path to deliver into.
 
@@ -889,6 +999,12 @@ __all__ = [
     "PolledChannelTransport",
     "AuthenticatedChannelTransport",
     "ChannelCapabilities",
+    "ChannelConversationRef",
+    "ChannelMessageRef",
+    "ChannelReplyTarget",
+    "ConversationShape",
+    "EffectiveChannelCapabilities",
+    "ChannelCapabilityUnsupported",
     "ChannelReplaceResult",
     "ChannelInboundMessage",
     "ChannelEventKind",

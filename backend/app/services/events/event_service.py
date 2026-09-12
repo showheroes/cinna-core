@@ -224,7 +224,10 @@ class EventService:
         self._backend_handlers[event_type].append(handler)
         logger.info(f"Registered backend handler for event type: {event_type}")
 
-    async def _call_backend_handlers(self, event_type: str, event_data: dict[str, Any]):
+    async def _call_backend_handlers(
+        self, event_type: str, event_data: dict[str, Any], *,
+        deferred_handlers: list[tuple[EventHandler, dict[str, Any]]] | None = None,
+    ):
         """Call all registered backend handlers for an event type.
 
         Args:
@@ -236,6 +239,12 @@ class EventService:
             return
 
         logger.debug(f"Calling {len(handlers)} backend handler(s) for event type: {event_type}")
+
+        if deferred_handlers is not None:
+            # A channel processor drains terminal callbacks after its relay is
+            # stopped, while still holding the session lock and current address.
+            deferred_handlers.extend((handler, event_data) for handler in handlers)
+            return
 
         # Call all handlers in background tasks (non-blocking)
         for i, handler in enumerate(handlers):
@@ -257,6 +266,8 @@ class EventService:
         meta: dict[str, Any] | None = None,
         user_id: UUID | None = None,
         room: str | None = None,
+        *,
+        deferred_handlers: list[tuple[EventHandler, dict[str, Any]]] | None = None,
     ):
         """Emit an event to connected clients and backend handlers.
 
@@ -267,6 +278,8 @@ class EventService:
             meta: Additional metadata
             user_id: Target specific user (will send to user_{user_id} room)
             room: Target specific room (alternative to user_id)
+            deferred_handlers: Internal channel terminal callbacks, drained by
+                the session processor after its relay stops and before its lock releases.
         """
         event = EventPublic(
             type=event_type,
@@ -279,8 +292,12 @@ class EventService:
 
         event_data = event.model_dump(mode="json")
 
-        # Call backend handlers (non-blocking)
-        await self._call_backend_handlers(event_type, event_data)
+        # Ordinary events schedule handlers immediately. A channel terminal
+        # event can defer them until its processor has stopped the live relay.
+        if deferred_handlers is None:
+            await self._call_backend_handlers(event_type, event_data)
+        else:
+            await self._call_backend_handlers(event_type, event_data, deferred_handlers=deferred_handlers)
 
         # Determine target room
         target_room = room

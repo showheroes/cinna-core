@@ -32,9 +32,9 @@ What this file pins, and why each one is here rather than assumed:
     (``GET /sessions/`` is owner-scoped, ``GET /external/sessions`` matches
     ``identity_caller_id`` too) is a decision on record rather than a future
     bug report.
-  - **Thread ownership is unchanged** — the binding still belongs to the
-    sender even though the session does not — on both the synchronous and the
-    lost-race path.
+  - **Per-asker isolation** — two people in one conversation receive their
+    independently routed sessions, including an identity session owned by a
+    third person. Queueing both before routing must preserve this separation.
   - **An absent grant still bites.** The recovery branch in
     ``ChannelInboundService._ingest`` deliberately re-creates a session with no
     grant, and on a foreign agent that must be refused rather than repaired.
@@ -74,7 +74,6 @@ from tests.utils.utils import random_lower_string
 
 API = settings.API_V1_STR
 
-_REPLY_THREAD_OWNED_SNIPPET = "belongs to someone else"
 _REPLY_SETUP_FAILED_SNIPPET = "setting up your assistant failed"
 
 
@@ -264,7 +263,7 @@ def test_hr_story_routes_into_the_owners_workspace_and_the_reply_comes_back(
     delivered = [c.args for c in send_mock.await_args_list]
     assert any(answer in (args[-1] or "") for args in delivered), delivered
     assert any(
-        args[-2] == thread_key and answer in (args[-1] or "") for args in delivered
+        args[-2].thread_key == thread_key and answer in (args[-1] or "") for args in delivered
     ), delivered
 
 
@@ -461,37 +460,23 @@ def test_session_visibility_is_pinned_on_all_three_surfaces(
 
 
 # ---------------------------------------------------------------------------
-# 9. Thread ownership is still the sender's
+# 9. Conversation members route independently
 # ---------------------------------------------------------------------------
 
 
-def test_a_second_user_cannot_post_into_an_identity_routed_thread(
+def test_second_asker_gets_own_session_beside_an_identity_routed_session(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
-    """The binding belongs to the sender even though the session does not.
+    """An identity-routed asker's session never receives another asker's turn.
 
-    That asymmetry is what this phase introduces, and it is exactly where a
-    `binding.user_id == session.user_id` assumption would hide. Both gates are
-    exercised:
-
-      - **Synchronously**, in `handle_inbound`: a second whitelisted user
-        posting into the bound thread is declined with `REPLY_THREAD_OWNED`.
-      - **Via the lost-race path**, in `_handle_lost_race`: two users open the
-        SAME brand-new thread before either background task runs; the loser is
-        declined rather than delivered into the winner's session — which here
-        is a session inside a THIRD person's workspace, the worst version of
-        that leak.
-
-    The lost-race half follows the deterministic recipe from
-    `server_channels_security_invariants_test.py`: `drain_tasks()` runs
-    collected tasks strictly sequentially, so queueing both deliveries before
-    the drain reproduces the race without real concurrency.
+    Check an existing thread and two deliveries queued before routing. The
+    second asker owns a separate agent and receives a separate session there.
     """
     channel = _channel(client, superuser_token_headers)
     signer = GoogleChatJWTSigner()
     cast = _hr_story(client, superuser_token_headers, channel=channel)
 
-    # ── Phase 1: synchronous decline on an already-bound thread ────────────
+    # ── Phase 1: independent routing on an already-bound thread ───────────
     bound_thread = f"spaces/AAA/threads/{random_lower_string()}"
     _send(client, channel, signer, cast, "ask HR about leave", thread_key=bound_thread)
     assert len(_hr_sessions(client, cast, cast["hr_agent"]["id"])) == 1
@@ -503,22 +488,20 @@ def test_a_second_user_cannot_post_into_an_identity_routed_thread(
     )
 
     token = signer.token(audience=channel["config"]["project_number"])
-    with signer.patched():
-        resp = post_webhook(
-            client,
-            channel["webhook_token"],
-            build_message_event(
-                thread_key=bound_thread,
-                text="me too please",
-                sender_email=intruder["email"],
-            ),
-            bearer_token=token,
-        )
+    resp, _ = post_channel_message(
+        client, channel, signer,
+        build_message_event(
+            thread_key=bound_thread, text="me too please",
+            sender_email=intruder["email"],
+        ),
+    )
     assert resp.status_code == 200
-    assert _REPLY_THREAD_OWNED_SNIPPET in (resp.json().get("text") or ""), resp.json()
-    # Nothing was created for the intruder, and HR still has exactly one.
-    assert list_sessions(client, intruder_headers) == []
-    assert len(_hr_sessions(client, cast, cast["hr_agent"]["id"])) == 1
+    own_sessions = [s for s in list_sessions(client, intruder_headers) if s["agent_id"] == intruder_agent["id"]]
+    assert len(own_sessions) == 1
+    hr_sessions = _hr_sessions(client, cast, cast["hr_agent"]["id"])
+    assert len(hr_sessions) == 1
+    assert all("me too please" not in m["content"] for m in list_messages(client, cast["owner_headers"], hr_sessions[0]["id"]))
+    assert client.get(f"{API}/sessions/{hr_sessions[0]['id']}", headers=intruder_headers).status_code in (400, 403, 404)
 
     # ── Phase 2: the lost-race branch on a brand-new thread ────────────────
     race_thread = f"spaces/AAA/threads/{random_lower_string()}"
@@ -560,12 +543,23 @@ def test_a_second_user_cannot_post_into_an_identity_routed_thread(
         assert r1.status_code == 200 and r2.status_code == 200
         drain_tasks()
 
-    # The sender won: a second session in HR's workspace, on HR's agent.
-    assert len(_hr_sessions(client, cast, cast["hr_agent"]["id"])) == 2
-    # The loser got nothing — not on their own agent, not on HR's.
-    assert list_sessions(client, intruder_headers) == []
-    declined = [c.args[-1] or "" for c in send_mock.await_args_list]
-    assert any(_REPLY_THREAD_OWNED_SNIPPET in t for t in declined), declined
+    hr_sessions = _hr_sessions(client, cast, cast["hr_agent"]["id"])
+    assert len(hr_sessions) == 2
+    own_sessions = [s for s in list_sessions(client, intruder_headers) if s["agent_id"] == intruder_agent["id"]]
+    assert len(own_sessions) == 2
+    own_questions = [
+        m["content"] for session in own_sessions
+        for m in list_messages(client, intruder_headers, session["id"])
+        if m["role"] == "user"
+    ]
+    assert sorted(own_questions) == ["and set up mine", "me too please"]
+    hr_questions = [
+        m["content"] for session in hr_sessions
+        for m in list_messages(client, cast["owner_headers"], session["id"])
+        if m["role"] == "user"
+    ]
+    assert all("me too please" not in text and "and set up mine" not in text for text in hr_questions)
+    assert len(stub.stream_calls) == 2
 
 
 # ---------------------------------------------------------------------------

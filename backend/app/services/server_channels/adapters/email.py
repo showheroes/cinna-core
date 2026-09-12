@@ -36,6 +36,7 @@ They stay in ``mail_server_config.encrypted_password``, backend-only,
 superuser-owned, never near an agent — which is why this transport declares
 ``needs_outbound_credentials=False``.
 """
+
 from __future__ import annotations
 
 import functools
@@ -47,7 +48,8 @@ from typing import Any, ClassVar
 
 import anyio.to_thread
 from sqlalchemy import func, update
-from sqlmodel import Session as DBSession, select
+from sqlmodel import Session as DBSession
+from sqlmodel import select
 
 from app.core.config import settings
 from app.models import ServerChannel
@@ -67,6 +69,7 @@ from app.services.server_channels.adapters.base import (
     ChannelCapabilities,
     ChannelConfigError,
     ChannelInboundMessage,
+    ChannelReplyTarget,
     ChannelSendError,
     PolledChannelTransport,
 )
@@ -174,6 +177,13 @@ class EmailChannelAdapter(PolledChannelTransport):
     @property
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(
+            supports_conversations=False,
+            supports_threads=False,
+            supports_thread_creation=False,
+            supports_quote_reply=False,
+            supports_inbound_quote=False,
+            supports_message_fetch=False,
+            supports_thread_history=False,
             # No progress notices. The pipeline narrates unconditionally
             # (``ChannelOutboundService.set_status`` and friends), and a
             # transport that answered would mail the sender "working on it",
@@ -224,9 +234,7 @@ class EmailChannelAdapter(PolledChannelTransport):
             try:
                 uuid.UUID(raw)
             except (TypeError, ValueError):
-                raise ChannelConfigError(
-                    f"'{key}' must be a mail server id."
-                ) from None
+                raise ChannelConfigError(f"'{key}' must be a mail server id.") from None
 
         for key in (_CFG_INCOMING_MAILBOX, _CFG_FROM_ADDRESS):
             value = str(cfg.get(key) or "").strip()
@@ -257,9 +265,7 @@ class EmailChannelAdapter(PolledChannelTransport):
         """
         return bool(str((channel.config or {}).get(_CFG_OUTGOING_SERVER) or "").strip())
 
-    def validate_config_references(
-        self, db: DBSession, config: dict[str, Any]
-    ) -> None:
+    def validate_config_references(self, db: DBSession, config: dict[str, Any]) -> None:
         """Both referenced mail servers must exist and be of the right kind.
 
         A wrong id here does not fail loudly at configuration time — it
@@ -279,9 +285,7 @@ class EmailChannelAdapter(PolledChannelTransport):
                 # first — but this method is public on the adapter contract,
                 # and a bad id must be an admin-readable refusal here too, not
                 # a ValueError escaping as a 500.
-                raise ChannelConfigError(
-                    f"'{key}' must be a mail server id."
-                ) from None
+                raise ChannelConfigError(f"'{key}' must be a mail server id.") from None
             server = db.get(MailServerConfig, server_id)
             if server is None:
                 raise ChannelConfigError(
@@ -366,9 +370,7 @@ class EmailChannelAdapter(PolledChannelTransport):
         from app.core.db import create_session
 
         with create_session() as db:
-            resolved = MailServerService.get_mail_server_with_credentials(
-                db, server_id
-            )
+            resolved = MailServerService.get_mail_server_with_credentials(db, server_id)
         if resolved is None:
             logger.error(
                 "%s Channel %s references mail server %s, which no longer exists",
@@ -656,9 +658,7 @@ class EmailChannelAdapter(PolledChannelTransport):
             sender_display_name=parsed.get("sender_display_name") or None,
             external_user_id=sender,
             thread_key=root_id,
-            text=EmailPollingService.format_email_as_message(
-                _email_row(parsed)
-            ),
+            text=EmailPollingService.format_email_as_message(_email_row(parsed)),
             external_message_id=own_id,
             attachments=_attachment_refs(parsed),
             # Declared, because on this transport ``text`` cannot answer it.
@@ -686,7 +686,7 @@ class EmailChannelAdapter(PolledChannelTransport):
     # ------------------------------------------------------------------
 
     async def send_message(
-        self, channel: ServerChannel, thread_key: str, text: str
+        self, channel: ServerChannel, thread_key: str | ChannelReplyTarget, text: str
     ) -> str | None:
         """Enqueue the reply. Does **not** send — ``sending_scheduler`` does.
 
@@ -718,6 +718,14 @@ class EmailChannelAdapter(PolledChannelTransport):
         if not text:
             return None
 
+        binding_id = None
+        if isinstance(thread_key, ChannelReplyTarget):
+            if thread_key.binding_id:
+                try:
+                    binding_id = uuid.UUID(thread_key.binding_id)
+                except ValueError as exc:
+                    raise ChannelSendError("Invalid email binding identity") from exc
+            thread_key = thread_key.legacy_thread_key
         root_id, last_id = parse_reply_thread_key(thread_key)
 
         cfg = channel.config or {}
@@ -733,12 +741,16 @@ class EmailChannelAdapter(PolledChannelTransport):
         from app.core.db import create_session
 
         with create_session() as db:
-            binding = db.exec(
-                select(ChannelThreadBinding).where(
-                    ChannelThreadBinding.server_channel_id == channel.id,
-                    ChannelThreadBinding.thread_key == root_id,
-                )
-            ).first()
+            statement = select(ChannelThreadBinding).where(
+                ChannelThreadBinding.server_channel_id == channel.id,
+                ChannelThreadBinding.thread_key == root_id,
+            )
+            if binding_id is not None:
+                statement = statement.where(ChannelThreadBinding.id == binding_id)
+            bindings = db.exec(statement.limit(2)).all()
+            if len(bindings) > 1:
+                raise ChannelSendError("Ambiguous email thread: binding identity required")
+            binding = bindings[0] if bindings else None
             if binding is None:
                 raise ChannelSendError(
                     f"No thread binding for {root_id!r} on channel {channel.id}"
@@ -874,9 +886,7 @@ class EmailChannelAdapter(PolledChannelTransport):
                 )
                 return
 
-            resolved = MailServerService.get_mail_server_with_credentials(
-                db, server_id
-            )
+            resolved = MailServerService.get_mail_server_with_credentials(db, server_id)
             if resolved is None:
                 logger.warning(
                     "%s Channel %s references mail server %s, which no longer "
@@ -952,9 +962,7 @@ class EmailChannelAdapter(PolledChannelTransport):
             return default
         try:
             row = db.exec(
-                select(EmailMessage).where(
-                    EmailMessage.email_message_id == message_id
-                )
+                select(EmailMessage).where(EmailMessage.email_message_id == message_id)
             ).first()
         except Exception:  # noqa: BLE001 — a subject is not worth the notice
             logger.debug("Could not read the arrival row for a notice subject")
@@ -996,8 +1004,7 @@ class EmailChannelAdapter(PolledChannelTransport):
         steps = [
             "Add the IMAP and SMTP servers under Admin → Server Configuration "
             "→ Mail servers, and test both connections there first.",
-            "Select them above as the incoming and outgoing servers for this "
-            "channel.",
+            "Select them above as the incoming and outgoing servers for this channel.",
             "Set the polled mailbox to the address people will write to, and "
             "the reply-from address the answers should come from.",
             "This channel has no inbound URL — nothing is pushed to the "
@@ -1140,7 +1147,6 @@ def _stored_root_expr():
         func.nullif(EmailMessage.in_reply_to, ""),
         EmailMessage.email_message_id,
     )
-
 
 
 __all__ = [

@@ -271,6 +271,8 @@ class SessionStreamProcessor:
         webapp_context_injected = False
 
         for batch_idx, batch in enumerate(batches):
+            with self.get_fresh_db_session() as db:
+                MessageService.activate_channel_reply_target(db, self.session_id, batch["messages"])
             routing = batch["routing"]
 
             if routing == "command_stream":

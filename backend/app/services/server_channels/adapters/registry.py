@@ -12,6 +12,7 @@ transport?" is answered. The answer always comes from the adapter's declared
 needs to branch on transport shape asks here instead of reaching through
 ``adapter.capabilities`` and inventing its own default.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -169,6 +170,17 @@ def _assert_declared_modes_agree() -> None:
     """
     for channel_type, adapter in CHANNEL_ADAPTERS.items():
         capabilities = adapter.capabilities
+        for capability, method in (
+            ("supports_conversations", "interpret_conversation_hints"),
+            ("supports_message_fetch", "fetch_message"),
+            ("supports_thread_history", "fetch_thread_history"),
+        ):
+            if getattr(capabilities, capability) and getattr(
+                type(adapter), method
+            ) is getattr(ChannelAdapter, method):
+                raise RuntimeError(
+                    f"Channel adapter {channel_type!r} declares {capability} but does not implement {method}()"
+                )
         mode = capabilities.inbound_mode
         for base, declared_mode in (
             (PolledChannelTransport, "polled"),
