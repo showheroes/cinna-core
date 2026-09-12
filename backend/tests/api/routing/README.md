@@ -1,7 +1,7 @@
 # Auto Routing Tuning tests
 
 API-level tests for the Auto Routing Tuning feature
-(`docs/plans/auto_routing_tuning_plan.md`): a durable, superuser-only record
+(`docs/application/routing_tuning/routing_tuning.md`): a durable, superuser-only record
 of every routing decision (which agents/bundles were candidates, which stage
 matched, why the rest were excluded), read back through
 `GET/DELETE /api/v1/admin/routing/traces` — plus the interactive half:
@@ -38,7 +38,7 @@ Same stack as `tests/api/server_channels/conftest.py` — session-proxy,
 environment-adapter, background-task, and external-service stubs, plus
 `patch_anyio_to_thread` — because most scenarios here drive a real webhook
 delivery through `ChannelInboundService` (the only wired producer of routing
-traces today; see `docs/plans/auto_routing_tuning_plan.md` §10) and channel
+traces today) and channel
 routing offloads its two passes onto `anyio.to_thread.run_sync`. See that
 domain's own `README.md` for what each stub is for.
 

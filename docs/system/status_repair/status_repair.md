@@ -68,7 +68,7 @@ A task a human manually set to `in_progress`, whose connected sessions are simpl
 
 ### What is intentionally not covered
 
-- A cold, multi-worker-only hazard: a very long image build produces no heartbeat for its whole duration (the one operation the heartbeat design cannot see into), and the safeguard for it (an in-flight-build check) only works within a single worker process. This is currently safe only because the platform is deployed with a single backend worker — see the tech doc and the plan doc for the reasoning behind not adding a startup guard.
+- A cold, multi-worker-only hazard: a very long image build produces no heartbeat for its whole duration (the one operation the heartbeat design cannot see into), and the safeguard for it (an in-flight-build check) only works within a single worker process. This is currently safe only because the platform is deployed with a single backend worker — see the tech doc's multi-worker caveat for the reasoning behind not adding a startup guard.
 - Several less-common paths (a build-in-flight veto, notice settlement, a mid-probe re-claim race, a task with zero connected sessions, and a live-relay veto) are implemented and reasoned about but not yet covered by automated tests — see the tech doc's Test Surface section.
 
 ## Architecture Overview

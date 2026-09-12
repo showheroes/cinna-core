@@ -82,7 +82,7 @@ This is also the pass functions' entire test surface: because the `TESTING` gate
 
 **Claim re-verification (`_claim_still_held`)** compares both `status` and `status_changed_at` against the original claim immediately before every write — status alone is insufficient because `_set_status` stamps unconditionally, so a user manually retrying a stuck `starting` environment re-claims it with the identical status string and a fresh timestamp.
 
-**Build-in-flight veto.** For `_BUILD_STATUSES` candidates only, `template_image_service.is_build_in_flight(env_name)` is checked before probing; a positive match defers the row unconditionally. This is the documented, deliberate gap-filler for the one operation that writes no heartbeat during its own execution (`docker build`) — see the plan doc §6 for why this veto is process-local and therefore not a complete fix in a multi-worker deployment.
+**Build-in-flight veto.** For `_BUILD_STATUSES` candidates only, `template_image_service.is_build_in_flight(env_name)` is checked before probing; a positive match defers the row unconditionally. This is the documented, deliberate gap-filler for the one operation that writes no heartbeat during its own execution (`docker build`) — see [the multi-worker caveat](#the-multi-worker-caveat-on-pass-as-build-in-flight-veto) for why this veto is process-local and therefore not a complete fix in a multi-worker deployment.
 
 **Container probe (`_probe`)**, via `EnvironmentService.get_lifecycle_manager().get_adapter(environment).get_status()`, which already folds in the health check: `"running"` → licenses repair to `running`; `"stopped"` → licenses repair to `error`; anything else (still booting, up-but-unhealthy, daemon unreachable) → `_PROBE_INCONCLUSIVE`, which alone never licenses a write. An environment with no allocated port (`environment.config["port"] is None`) is treated as hard evidence of `_PROBE_GONE` without invoking the adapter at all (allocating one to probe would leak a port from the in-memory pool).
 
@@ -170,6 +170,12 @@ This is the reconciler's main architectural cost — it verifies against live in
 
 **A vacuity note on the test suite itself:** `test_stuck_environment_with_inconclusive_probe_repairs_nothing` only actually proves something in combination with its two sibling Pass A tests in the same file (the healthy-repair and dead-repair cases) — read in isolation, it would pass identically against a Pass A implementation that always did nothing.
 
-## Related
+## The multi-worker caveat on Pass A's build-in-flight veto
 
-- Plan doc (design rationale, side findings, multi-worker caveat): [docs/plans/system_status_repair_plan.md](../../plans/system_status_repair_plan.md)
+Safe today only by a pinned config value, and worth knowing before anyone changes how the backend is launched.
+
+Pass A's heartbeat (`status_changed_at`) cannot see into a `docker build`'s own duration — nothing is written while it runs — and the veto that fills that gap (`template_image_service.is_build_in_flight`) is a **process-local** in-memory registry. With more than one backend worker process, a build started on worker 1 is invisible to worker 2; if worker 2 holds the leader lock while a cold template build has been running for longer than `STATUS_REPAIR_ENV_BUILDING_MAX_AGE_MINUTES` (60 min default), it sees no heartbeat, no in-flight marker, and no container (the image isn't built yet) — and once the container probe returns "gone" rather than merely inconclusive, it reaps a build that is still legitimately running. That is the "container gone" repair-to-`error` path in the table above, fired on a false positive.
+
+**Why this is safe today:** `docker-compose.yml` pins `command: ["fastapi", "run", "--workers", "1", "app/main.py"]`, so there is only ever one worker and the process-local registry is complete. `backend/Dockerfile`, however, defaults to `CMD ["fastapi", "run", "--workers", "4", "app/main.py"]` — one config change (dropping the compose override) away from this being a real exposure rather than a theoretical one.
+
+**Why no startup guard was added to catch that misconfiguration:** `--workers` is a CLI argument to `fastapi run`/`uvicorn`, and uvicorn's spawn model means the worker count is not introspectable from inside a running worker — there is no in-process API for "how many siblings do I have." `WEB_CONCURRENCY` is only consulted when `--workers` is *absent* from the command line, so an env-var check inside the app would read a reassuring "1 worker" in precisely the 4-worker case that matters, which is worse than no check at all. Closing this for real needs either a build registry that is not process-local (e.g. a DB row) or a genuine multi-worker liveness signal for `docker build`.

@@ -1,6 +1,6 @@
 # Server Channels tests
 
-API-level tests for the Server Channels feature (`docs/application/server_channels/server_channels_tech.md` — business logic in the sibling `server_channels.md`; `docs/plans/server_channels_plan.md` is the original implementation plan, now a historical artifact rather than a description of what was built):
+API-level tests for the Server Channels feature (`docs/application/server_channels/server_channels_tech.md` — business logic in the sibling `server_channels.md`):
 admin-configured channels (Google Chat first) that let external people reach
 platform agents from outside the platform, routed and bound per-thread to a
 session.
