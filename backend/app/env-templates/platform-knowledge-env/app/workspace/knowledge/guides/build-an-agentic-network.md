@@ -174,21 +174,21 @@ placeholder prompt is enough to register the team; you can iterate afterwards).
 > **conflict** on those files (both the DB-seeded env copy and your local copy
 > changed), which you then have to resolve.
 >
-> **Fix / correct path — bulk-write the config, then sync it into the env:**
+> **Fix / correct path — edit the config as files, then push it:**
 > ```bash
-> # 1. Author the full set locally (description + the prompt fields).
+> # 1. Pull the prompts into prompts/<agent-slug>/ and edit them there.
 > #    See authoring-agent-prompts.md for what each of the six fields is for.
-> cinna api PUT agents/<agent_id> --data @agents/<name>/prompts.json
-> # 2. Push the doc-backed prompts into the already-running env immediately
-> #    (otherwise they seed DB→env only on the next env start):
-> cinna api POST agents/<agent_id>/sync-prompts
+> cinna agent prompts pull <name>
+> # 2. One bulk write; also pushes the doc prompts into a running env
+> #    (otherwise they arrive on the next env start):
+> cinna agent prompts push <name>
 > # 3. Verify what the runtime actually reads:
 > cinna agent show <name> --prompts
 > ```
-> Pick **one** path — the bulk write **or** hand-editing `docs/*.md`, never both
-> at once (editing both sides forces a three-way, last-writer-wins merge of the
-> doc prompts). For the account orchestrator, the bulk write is the recommended
-> single path. Full field reference and the finalize checklist:
+> Pick **one** path — `cinna agent prompts` **or** hand-editing `docs/*.md`, never
+> both at once (editing both sides forces a three-way, last-writer-wins merge of
+> the doc prompts). For the account orchestrator, `cinna agent prompts` is the
+> recommended single path. Full field reference and the finalize checklist:
 > [authoring-agent-prompts.md](authoring-agent-prompts.md).
 
 One important note for crm-agent: its REST API only works when

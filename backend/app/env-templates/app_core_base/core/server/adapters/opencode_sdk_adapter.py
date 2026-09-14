@@ -154,12 +154,14 @@ class OpenCodeAdapter(BaseSDKAdapter):
     def __init__(self, config: SDKConfig):
         super().__init__(config)
 
-        self.prompt_generator = PromptGenerator(
-            self.workspace_dir, supports_skills=self.SUPPORTS_SKILLS
-        )
-
         # Agent env service for plugin management (mirrors ClaudeCodeAdapter)
         self.agent_env_service = AgentEnvService(self.workspace_dir)
+
+        self.prompt_generator = PromptGenerator(
+            self.workspace_dir,
+            supports_skills=self.SUPPORTS_SKILLS,
+            active_plugins_for_mode=self.agent_env_service.get_active_plugins_for_mode,
+        )
 
         # Server process — started lazily on first send_message_stream call
         self._server_process: Optional[asyncio.subprocess.Process] = None

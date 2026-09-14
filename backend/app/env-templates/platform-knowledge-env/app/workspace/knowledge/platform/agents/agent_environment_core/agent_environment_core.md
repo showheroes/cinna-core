@@ -76,7 +76,7 @@ Server-verified metadata injected into system prompts for integration-aware beha
 1. Backend creates session with `mode="conversation"`
 2. User sends message (e.g., "Process my inbox for invoices")
 3. Backend sends HTTP POST to `/chat/stream` on the environment container
-4. Prompt generator loads: WORKFLOW_PROMPT.md + scripts/README.md + optional session context
+4. Prompt generator loads: WORKFLOW_PROMPT.md + scripts/README.md (only when `./scripts/` holds a real script) + a `## Skill Scripts` block (only when a valid skill ships a `scripts/` folder) + optional session context
 5. SDK manager creates Claude client with Haiku model and lightweight prompt
 6. Agent executes using pre-built scripts
 7. Response events streamed to user in real-time

@@ -104,6 +104,7 @@ my-cinna/
     guides/              # end-to-end worked walkthroughs (Phase 4)
       build-an-agentic-network.md   # how to build a delegating multi-agent network
       authoring-agent-prompts.md    # how to author prompts and finalize the description
+      skills-with-credentials.md    # how to build a skill whose script needs a credential
     local-kit/            # Local Agent Kit, rendered for this instance (see below)
   agents/
     crm-agent/           # 100% standard cinna per-agent workspace
@@ -641,51 +642,33 @@ end with a colon — use an em dash (`Investigate this URL — <url>`) or the ex
 route-level `prompt_examples`. Full rationale, ✅/❌ table and self-check list:
 `context/guides/authoring-agent-prompts.md`.
 
-**The bulk workflow** — keep a local `agents/<name>/prompts.json` holding only the
-prompt subset, and push it in one atomic write:
-
-```jsonc
-// agents/billing-agent/prompts.json
-{
-  "description": "Reconciles Stripe payouts against the ledger and flags mismatches.",
-  "workflow_prompt": "You reconcile Stripe payouts. Run reconcile.py for the requested period, parse the JSON output, ...",
-  "entrypoint_prompt": "Reconcile this week's payouts.",
-  "refiner_prompt": "If no period is given, default to the current week. Always capture account id and currency.",
-  "router_trigger_prompt": "Reconciles Stripe payouts and flags ledger mismatches.",
-  "example_prompts": [
-    "reconcile last week",
-    "show failed payouts",
-    "Reconcile payouts for account <account id>"
-  ]
-}
-```
+**Prompts as files** — `cinna agent prompts pull|diff|push` keeps each field in
+its own file under `prompts/<agent-slug>/` at the account root (`workflow.md`,
+`entrypoint.md`, `refiner.md`, `router_trigger.md`, `description.md`,
+`example_prompts.json`), so Markdown backticks never pass through a shell:
 
 ```bash
-# 1. Bulk write — the agent's config (DB) is the authoritative source of truth
-cinna api PUT agents/<agent_id> --data @agents/billing-agent/prompts.json
-
-# 2. Verify what actually landed
-cinna agent show billing-agent --prompts
+cinna agent prompts pull billing-agent     # write the files + record a baseline
+cinna agent prompts diff billing-agent     # local edits vs the platform
+cinna agent prompts push billing-agent     # one bulk write of the edited fields
+cinna agent show billing-agent --prompts   # verify what landed
 ```
 
-All fields are optional — omitted keys are left unchanged. `agents/*` is not on
-the escape-hatch denylist (only `agents/create-flow-stream` and `agents/create-flow`
-are excluded), so `PUT /agents/{id}`, `POST /agents/{id}/sync-prompts`, and
-`POST /agents/{id}/generate-router-trigger-prompt` are all reachable via
-`cinna api` — no new backend endpoints or CLI verbs were needed.
+The verbs are client-side over existing routes: `pull` reads `GET /agents/{id}`,
+`push` writes `PUT /agents/{id}` with only the fields edited since the pull (a
+field the platform changed since then is left alone, or refused when edited on
+both sides unless `--force`), and then calls `POST /agents/{id}/sync-prompts`
+when a doc-backed field changed (`--no-sync-env` skips it; a stopped environment
+picks the prompts up on its next start). Without the verbs, the same two routes
+remain reachable through `cinna api` — `agents/*` is not on the escape-hatch
+denylist (only `agents/create-flow-stream` and `agents/create-flow` are excluded).
 
 **How it reaches the running environment:** the three document-backed prompts
-(`workflow_prompt`, `entrypoint_prompt`, `refiner_prompt`) are seeded into the
-container's `docs/*.md` automatically on the next environment start (`SEED_PUSH`
-when the env files are empty — the fresh-agent case). If the environment is
-**already running** and you want the doc prompts pushed immediately:
-
-```bash
-cinna api POST agents/<agent_id>/sync-prompts
-```
-
-`router_trigger_prompt`, `example_prompts`, and `description` are config-only and
-take effect immediately after the write.
+(`workflow_prompt`, `entrypoint_prompt`, `refiner_prompt`) go into the
+container's `docs/*.md` through the push's `sync-prompts` call, or automatically
+on the next environment start (`SEED_PUSH` when the env files are empty — the
+fresh-agent case). `router_trigger_prompt`, `example_prompts`, and `description`
+are config-only and take effect immediately after the write.
 
 **Optional — let the platform generate the router trigger** from the agent's name
 and description:
@@ -697,11 +680,11 @@ cinna api POST agents/<agent_id>/generate-router-trigger-prompt
 **The finalize step (end of every build):**
 
 1. Confirm all functionality works (scripts, connections, API spec, team wiring).
-2. Author the full prompt set from what you *actually built*. Rewrite
-   `description` explicitly in the same payload — do not rely on auto-derivation.
-3. `cinna api PUT agents/<id> --data @agents/<name>/prompts.json`
+2. `cinna agent prompts pull <name>`, then author the full prompt set from what
+   you *actually built*. Rewrite `description.md` explicitly in the same push —
+   do not rely on auto-derivation.
+3. `cinna agent prompts push <name>` (also syncs a running env's `docs/*.md`).
 4. `cinna agent show <name> --prompts` to confirm.
-5. If the env is already running: `cinna api POST agents/<id>/sync-prompts`.
 
 **The guide** (`context/guides/authoring-agent-prompts.md`) ships in
 `knowledge/guides/` inside the `platform-knowledge-env` template (survives
@@ -1322,7 +1305,8 @@ This document covers **Phases 1 through 5** — all phases are now shipped:
   Integrations → Agent status card uses). See
   [agent_status_tracking.md](../../agents/agent_status_tracking/agent_status_tracking.md)
 - **agent_prompts** (Phase 4 / flow 7b) — the bulk-prompt authoring workflow
-  (`cinna api PUT agents/{id}`) targets the standard `PUT /agents/{id}` route,
+  (`cinna agent prompts push`, or `cinna api PUT agents/{id}` without the verbs)
+  targets the standard `PUT /agents/{id}` route,
   which is not on the escape-hatch denylist. `POST /agents/{id}/sync-prompts`
   (force-push DB→env) and `POST /agents/{id}/generate-router-trigger-prompt`
   (AI-generate routing sentence) are also reachable via `cinna api`. The

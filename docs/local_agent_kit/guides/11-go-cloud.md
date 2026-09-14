@@ -205,12 +205,18 @@ cinna agent sync <slug>
 
 ```bash
 # 3. Write the prompts and metadata in ONE bulk write.
-#    Build agents/<slug>/prompts.json from cinna-agent.json + the docs/*.md files:
+#    Build <slug>-prompts.json at the workspace root (not under agents/, which
+#    is the synced agent tree) from cinna-agent.json + the docs/*.md files:
 #    description, workflow_prompt, entrypoint_prompt, refiner_prompt,
 #    router_trigger_prompt, example_prompts.
-cinna api PUT agents/<agent_id> --data @agents/<slug>/prompts.json
+cinna api PUT agents/<agent_id> --data @<slug>-prompts.json
 cinna agent show <slug> --prompts        # verify what landed
 ```
+
+If this CLI has `cinna agent prompts`, use it instead of the raw call:
+`cinna agent prompts pull <slug>`, copy the manifest's values into the files under
+`prompts/<slug>/`, then `cinna agent prompts push <slug>`. It sends each field from
+its own file, so no JSON is built in the shell.
 
 ```bash
 # 4. Copy the tree, applying the contract's exclude list — layout.json's

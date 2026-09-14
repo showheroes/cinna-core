@@ -37,7 +37,7 @@ by a **different system at a different moment** — do not conflate them.
   ready-to-use task suggestions surfaced for the agent (e.g. in the A2A /
   external agent catalog). It is also one of the two fields the routing
   classifier reads, so writing it well makes the agent easier to reach, not
-  just easier to start. Set it via the bulk write below.
+  just easier to start. Set it with `cinna agent prompts` (below).
 - **`prompt_examples`** is a *different*, **binding-level** field. It survives
   on `IdentityAgentBinding` only (surfaced in MCP `prompts/list`); the App MCP
   routes that used to carry it are gone. It is not part of agent prompt
@@ -129,74 +129,91 @@ by schedulers and triggers, with no human to complete it, so it must be fully
 self-contained and rely on `refiner_prompt` defaults — never put a placeholder
 there.
 
-## The bulk workflow
+## Editing prompts as files
 
-Keep a single local artifact, `agents/<name>/prompts.json`, holding only the
-prompt subset, and push it in **one atomic write**:
+Edit prompts with `cinna agent prompts`, run from the account workspace root.
+Each field lives in its own file, so a prompt's Markdown backticks never pass
+through a shell, and a push never silently reverts a change someone made on the
+platform after you pulled.
 
-```jsonc
-// agents/billing-agent/prompts.json
-{
-  "description": "Reconciles Stripe payouts against the ledger and flags mismatches.",
-  "workflow_prompt": "You reconcile Stripe payouts. Run reconcile.py for the requested period, parse the JSON output, and present mismatches as a table. If everything matches, say so plainly. ...",
-  "entrypoint_prompt": "Reconcile this week's payouts.",
-  "refiner_prompt": "If no period is given, default to the current week. Always capture the account id and currency.",
-  "router_trigger_prompt": "Reconciles Stripe payouts and flags ledger mismatches.",
-  "example_prompts": [
-    "reconcile last week",
-    "show failed payouts",
-    "Reconcile payouts for account <account id>"
-  ]
-}
+```bash
+# 1. Pull the current values into prompts/<agent-slug>/
+cinna agent prompts pull billing-agent
+
+# 2. Edit the files (layout below)
+
+# 3. Review your edits, and see whether the platform changed a field since the pull
+cinna agent prompts diff billing-agent
+
+# 4. One bulk write of the edited fields; the doc prompts reach the running environment too
+cinna agent prompts push billing-agent
+
+# 5. Verify what actually landed
+cinna agent show billing-agent --prompts
+```
+
+`pull` writes one file per field:
+
+| File | Field |
+|------|-------|
+| `workflow.md` | `workflow_prompt` |
+| `entrypoint.md` | `entrypoint_prompt` |
+| `refiner.md` | `refiner_prompt` |
+| `router_trigger.md` | `router_trigger_prompt` |
+| `description.md` | `description` |
+| `example_prompts.json` | `example_prompts` — a JSON list of strings |
+
+For example, `prompts/billing-agent/example_prompts.json`:
+
+```json
+[
+  "reconcile last week",
+  "show failed payouts",
+  "Reconcile payouts for account <account id>"
+]
 ```
 
 Note the third entry: the task genuinely needs an account, so it ships as a
 template the user finishes — not as the test account you reconciled during the
 build. See [Writing `example_prompts`](#writing-example_prompts-templates-not-a-replay-of-your-build).
 
-```bash
-# 1. One bulk write → the agent's config (DB is authoritative)
-cinna api PUT agents/<agent_id> --data @agents/billing-agent/prompts.json
+`push` sends only the fields whose file you edited since the pull. A field the
+platform changed since the pull is left alone when you did not edit it, and
+refused when you did: `diff` shows both sides, `pull --force` takes the
+platform's version and `push --force` keeps yours. Delete a file to leave its
+field untouched, use `push --dry-run` to see what would be sent, and `--dir` to
+keep the files somewhere other than `prompts/<agent-slug>/`.
 
-# 2. Verify what actually landed
-cinna agent show billing-agent --prompts
-```
-
-All fields are optional — keys you omit are left unchanged. You may also pass
-the payload inline with `--json '{...}'` instead of `--data @file`, but a
-persisted `prompts.json` is easier to iterate.
-
-### How it reaches the environment (you don't have to push it)
+### How it reaches the environment
 
 The three document-backed prompts (`workflow_prompt`, `entrypoint_prompt`,
 `refiner_prompt`) exist twice — as fields of the agent config and as the
-container's `docs/*.md` files — and the platform reconciles the two **in both
-directions**: a change on one side flows to the other, and when both changed
-since the last reconcile the later write wins. Writing the fields is enough: they
-reach `docs/*.md` automatically on the next environment start/activation (or at
-once with `sync-prompts`, below), and an edit to the synced docs flows back into
-the config the same way. That is why this guide calls the config authoritative
-while the Local Agent Kit calls `docs/WORKFLOW_PROMPT.md` "the single source":
-both hold, as long as each change takes **one** path (see the one-path rule).
-`router_trigger_prompt`, `example_prompts`, and `description` are config-only and
-take effect immediately.
-
-If the environment is **already running** and you want the doc prompts pushed in
-*right now* instead of on next start:
-
-```bash
-cinna api POST agents/<agent_id>/sync-prompts
-```
-
-(That call requires a running environment; if there isn't one, just rely on the
-automatic seed on next start.)
+container's `docs/*.md` files. When a push changes one of them, it also pushes
+them into the running environment's `docs/*.md` (`--no-sync-env` skips that). If
+the environment is not running, the push still saves them and they arrive on its
+next start. `router_trigger_prompt`, `example_prompts`, and `description` are
+config-only and take effect immediately.
 
 ### One-path rule
 
-Author prompts **either** through this bulk write **or** by hand-editing the
-synced `agents/<name>/workspace/docs/*.md` files — not both at once. Editing both
-sides puts the three doc prompts into a three-way merge (last-writer-wins). For
-the account orchestrator, the bulk write is the recommended single path.
+The agent's config (the database) is authoritative. `cinna agent prompts push`
+writes it and refreshes the environment's `docs/*.md`, which then mirror down to
+the synced agent workspace. The platform reconciles the config and those files
+in both directions, and when both changed since the last reconcile the later
+write wins — so hand-editing the synced `workspace/docs/*.md` as well as the
+prompt files is a race that one of the two edits loses. Change a prompt through
+`cinna agent prompts` **or** through the synced docs, never both at once; for the
+account orchestrator, `cinna agent prompts` is the path. (That is also why this
+guide calls the config authoritative while the Local Agent Kit calls
+`docs/WORKFLOW_PROMPT.md` "the single source": both hold, as long as each change
+takes one path.)
+
+> **Without the prompt verbs** (an older CLI), the same write is
+> `cinna api PUT agents/<agent_id> --data @<file>.json` with a JSON object of just
+> the fields to change, then `cinna api POST agents/<agent_id>/sync-prompts` for a
+> running environment. Keep that file outside `agents/` — that tree is the synced
+> workspace — and never build the JSON inline in the shell: zsh
+> command-substitutes the backticks in Markdown prompts.
 
 ## Optional: let the platform generate the router trigger
 
@@ -209,8 +226,9 @@ cinna api POST agents/<agent_id>/generate-router-trigger-prompt
 
 This derives the trigger from the agent's name **and description**, so it
 requires a `description` to already be set on the agent (it errors out if none
-is set) — call it *after* you've set the description, or rely on it during the
-finalize bulk write where the description is included.
+is set) — call it *after* you've pushed the description. It writes
+`router_trigger_prompt` on the platform directly; run
+`cinna agent prompts pull <agent>` afterwards so `router_trigger.md` shows it.
 
 This only generates the routing sentence. The other prompts and the description
 are yours to author — you have the full build context and are the better author.
@@ -219,7 +237,8 @@ are yours to author — you have the full build context and are the better autho
 
 1. Confirm all functionality works (scripts run, connections resolve, the API
    spec harvests, etc.).
-2. Author the full prompt set **from what you actually built**:
+2. `cinna agent prompts pull <name>`, then author the full prompt set in the
+   files **from what you actually built**:
    - `workflow_prompt` describes the *real* scripts/flow you created;
    - `entrypoint_prompt` matches the *real* trigger;
    - `refiner_prompt` matches the *real* task fields;
@@ -228,12 +247,11 @@ are yours to author — you have the full build context and are the better autho
      every URL, id, path, and date you used while building (run the self-check
      in [Writing `example_prompts`](#writing-example_prompts-templates-not-a-replay-of-your-build));
    - **`description` is rewritten to accurately describe the finished agent.**
-     Set it explicitly in the same payload — don't rely on auto-derivation.
-3. `cinna api PUT agents/<id> --data @agents/<name>/prompts.json`
+     Write it in `description.md` for the same push — don't rely on auto-derivation.
+3. `cinna agent prompts diff <name>`, then `cinna agent prompts push <name>` —
+   which also puts the doc prompts into a running environment.
 4. `cinna agent show <name> --prompts` to confirm.
-5. If the env is already running and you want the docs live immediately,
-   `cinna api POST agents/<id>/sync-prompts`.
-6. If the agent has recorded test scenarios (`docs/test_scenarios/`), re-run them
+5. If the agent has recorded test scenarios (`docs/test_scenarios/`), re-run them
    with `cinna chat` — a prompt edit is a behaviour change, and so is a model or
    provider switch. How to record and run them:
    `context/local-kit/guides/13-design-patterns.md` §9.

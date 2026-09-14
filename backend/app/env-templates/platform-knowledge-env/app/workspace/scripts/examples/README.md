@@ -12,7 +12,7 @@ These scripts use `platform_helper.py` for authenticated requests.
 | create_workspace.py | Create a workspace | POST /workspaces/ |
 | list_workspaces.py | List workspaces | GET /workspaces/ |
 | create_agent.py | Create a new agent | POST /agents/ |
-| update_agent_prompts.py | Update agent prompts and sync | PUT /agents/{id}, POST /agents/{id}/sync-prompts |
+| update_agent_prompts.py | Update agent prompts and sync (from the account CLI, use `cinna agent prompts pull/push` instead) | PUT /agents/{id}, POST /agents/{id}/sync-prompts |
 | create_session_and_send_message.py | Create session for an agent | POST /sessions/ |
 | list_credentials.py | List available credentials | GET /credentials/ |
 | link_credential_to_agent.py | Link credential to agent | POST /agents/{id}/credentials |

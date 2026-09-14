@@ -139,9 +139,14 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
     def __init__(self, config: SDKConfig):
         super().__init__(config)
 
-        # Initialize prompt generator
+        # Initialize agent env service for plugin management
+        self.agent_env_service = AgentEnvService(self.workspace_dir)
+
+        # Initialize prompt generator (plugin skills come from the active plugins)
         self.prompt_generator = PromptGenerator(
-            self.workspace_dir, supports_skills=self.SUPPORTS_SKILLS
+            self.workspace_dir,
+            supports_skills=self.SUPPORTS_SKILLS,
+            active_plugins_for_mode=self.agent_env_service.get_active_plugins_for_mode,
         )
 
         # Initialize event logger (shared JSONL format, same as OpenCode)
@@ -150,9 +155,6 @@ class ClaudeCodeAdapter(BaseSDKAdapter):
         self.event_logger = SessionEventLogger(
             logs_dir, prefix="claude_code_session", enabled=dump_llm_session,
         )
-
-        # Initialize agent env service for plugin management
-        self.agent_env_service = AgentEnvService(self.workspace_dir)
 
         # Event transformer — translates raw Claude SDK messages to SDKEvents
         self._event_transformer = ClaudeCodeEventTransformer()

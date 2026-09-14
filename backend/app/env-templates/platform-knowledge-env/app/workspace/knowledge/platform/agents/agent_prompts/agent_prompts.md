@@ -41,7 +41,7 @@ System prompt construction for agent environments. Each agent environment operat
 ### Executing a Workflow (Conversation Mode)
 
 1. User (or scheduler) sends a message to a conversation mode session
-2. System prompt assembles: WORKFLOW_PROMPT.md + scripts/README.md + credentials/README.md + knowledge topics + environment context + session context + task context (if session is linked to a task) + handover instructions (if any handovers are configured)
+2. System prompt assembles: WORKFLOW_PROMPT.md + scripts/README.md (only when `./scripts/` holds a script) + Skill Scripts block (only when a valid skill ships a `scripts/` folder) + credentials/README.md + knowledge topics + environment context + session context + task context (if session is linked to a task) + handover instructions (if any handovers are configured)
 3. Conversation agent executes scripts, parses outputs (JSON, CSV), rephrases results in natural language
 4. Agent communicates results to user conversationally
 
@@ -69,6 +69,7 @@ System prompt construction for agent environments. Each agent environment operat
 - **Human-Like Entrypoints** - ENTRYPOINT_PROMPT.md must be conversational (e.g., "What is my time-off balance?"), not technical (e.g., "Query Odoo API and return JSON")
 - **Mandatory Documentation Updates** - scripts/README.md must be updated immediately after every script creation/modification. Failure means future sessions lose script awareness
 - **Conversation Agent as Bridge** - The conversation agent executes scripts, parses outputs, rephrases results in natural language, and communicates with users. It is not just a script runner
+- **Skill Scripts Are Part of the Skill** - In conversation mode the platform names the skills that ship scripts and states that running a loaded skill's bundled script is part of using the skill, and that a script error (e.g. a missing credential) is relayed verbatim. The untouched `scripts/README.md` template ("No scripts created yet") is left out of the conversation prompt, because small models read it as a ban on running any script — which left a skill's credential check unexercised. Both are platform text in `prompt_generator.py`, so they reach an environment only after it is rebuilt
 
 ### Personal Memory Injection
 
@@ -174,7 +175,8 @@ Building Mode:
 
 Conversation Mode:
   docs/WORKFLOW_PROMPT.md (main prompt)
-    + scripts/README.md (available tools)
+    + scripts/README.md (available tools — only when ./scripts/ holds a script)
+    + ## Skill Scripts block (skills that ship scripts — only when any do)
     + credentials/README.md (available credentials)
     + knowledge/ topic names
     + environment context (documents ./app-data/memory/ location)

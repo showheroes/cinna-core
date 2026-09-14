@@ -103,6 +103,11 @@ no slots. Quote a slot made entirely of digits so it remains text.
 **A declaration carries no secret.** It names a slot and a type; the credential
 itself is resolved at publish and provisioned at install.
 
+The bundled guide `context/guides/skills-with-credentials.md` (shipped in every
+account workspace's `context/` tree) walks through finding or assigning the
+slot, declaring it here, reading it in the script, telling the model when to
+run the script, and verifying readiness end to end.
+
 ### Three sources, one index
 
 | Source | Where the files live | How they arrive |
@@ -730,7 +735,7 @@ regex.
 | Feature | How agent skills touch it |
 |---------|---------------------------|
 | [agent_environment_core](../agent_environment_core/agent_environment_core.md) | New `skills_projection` module and vendored parser; `sdk_manager` projects before every message; both adapters take a `skills_changed` signal; new `GET /config/skills` |
-| [agent_prompts](../agent_prompts/agent_prompts.md) | `BUILDING_AGENT.md` gains the authoring section. No change to the three synced prompt docs or their reconcile. The prompt generator's `## Agent Skills` fallback block is a **no-op for both shipped engines** — it only fires for an adapter that sets `SUPPORTS_SKILLS = False` |
+| [agent_prompts](../agent_prompts/agent_prompts.md) | `BUILDING_AGENT.md` gains the authoring section. No change to the three synced prompt docs or their reconcile. The prompt generator's `## Agent Skills` fallback block is a **no-op for both shipped engines** — it only fires for an adapter that sets `SUPPORTS_SKILLS = False`. Conversation mode also appends a `## Skill Scripts` block naming every valid skill that ships a `scripts/` folder, stating that running a loaded skill's script is part of using it and that a script error is relayed verbatim — reaches an environment only after it is rebuilt |
 | [agent_addons](../agent_addons/agent_addons.md) | The index is one of the two inputs to the addons projection; the Skills card moved into the Addons tab; `visibility=users` + `SkillPackageAccessGrant` extend the catalog; `cinna skills list|publish` |
 | [agent_plugins](../agent_plugins/agent_plugins.md) | `skills` left the OpenCode "unsupported" list; each active plugin's `skills/` is registered as an OpenCode `skills.paths` entry; new `PluginSource.catalog` with archive coordinates; the per-mode OpenCode server is stopped after a real manifest change |
 | [agent_bundles](../agent_bundles/agent_bundles.md) | `skills/` is captured by the existing denylist walk (no change); derived `skills_summary` in manifest, revision and catalog entry; publish hard-blocks on invalid or secret-bearing skills; skill and bundle revisions share one credential-spec schema and one install-time provisioner |

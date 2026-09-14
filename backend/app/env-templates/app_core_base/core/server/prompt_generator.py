@@ -1,11 +1,36 @@
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Callable, Optional, Dict, Any, List, Tuple
 
 from .skill_manifest import scan_skills_root
 
 logger = logging.getLogger(__name__)
+
+# Scaffolding files that sit in a ``scripts/`` folder without being a script.
+_NON_SCRIPT_FILE_NAMES = frozenset({"README.md", ".gitkeep"})
+_NON_SCRIPT_DIR_NAMES = frozenset({"__pycache__", "node_modules"})
+
+
+def _holds_scripts(directory: Path) -> bool:
+    """Whether ``directory`` holds at least one script file.
+
+    Hidden files and folders, caches and the scaffolding above don't count.
+    Excluded folders are pruned before descending and symlinks are not
+    followed, so a large ``.venv`` costs nothing; the walk stops at the first
+    hit. A missing directory is ``False``.
+    """
+    for _dir_path, dir_names, file_names in os.walk(directory, followlinks=False):
+        dir_names[:] = [
+            name
+            for name in dir_names
+            if not name.startswith(".") and name not in _NON_SCRIPT_DIR_NAMES
+        ]
+        for name in file_names:
+            if not name.startswith(".") and name not in _NON_SCRIPT_FILE_NAMES:
+                return True
+    return False
 
 # Total character budget for inline personal-memory injection (App Data tier).
 # Caps how much of ``app-data/memory/*.md`` we inline into the system prompt so
@@ -43,7 +68,12 @@ class PromptGenerator:
     - Cache loaded prompts for performance
     """
 
-    def __init__(self, workspace_dir: str, supports_skills: bool = True):
+    def __init__(
+        self,
+        workspace_dir: str,
+        supports_skills: bool = True,
+        active_plugins_for_mode: Optional[Callable[[str], List[dict]]] = None,
+    ):
         """
         Initialize PromptGenerator.
 
@@ -54,9 +84,14 @@ class PromptGenerator:
                 shipped engines do, so the default is a no-op; an adapter that
                 does not gets the degraded ``## Agent Skills`` prompt block
                 instead (see :meth:`_get_agent_skills_section`).
+            active_plugins_for_mode: The adapter's
+                ``AgentEnvService.get_active_plugins_for_mode``. Catalog and
+                marketplace skills live under a plugin's ``skills/`` folder, so
+                without it only the agent's own ``skills/`` are seen.
         """
         self.workspace_dir = Path(workspace_dir)
         self.supports_skills = supports_skills
+        self.active_plugins_for_mode = active_plugins_for_mode
 
         # Load static prompts that don't change during runtime
         self.building_agent_prompt = self._load_building_agent_prompt()
@@ -112,6 +147,21 @@ class PromptGenerator:
         else:
             logger.debug(f"scripts/README.md not found at {scripts_readme_path}")
             return None
+
+    def _has_workspace_scripts(self) -> bool:
+        """Whether ``./scripts/`` holds anything besides its catalog.
+
+        Every workspace ships ``scripts/README.md`` as a template reading "No
+        scripts created yet". Put under an "Available Scripts" heading in
+        conversation mode, that template is a platform statement that the agent
+        has no scripts at all, and models read it as a ban on running the
+        scripts a loaded skill ships.
+        """
+        try:
+            return _holds_scripts(self.workspace_dir / "scripts")
+        except Exception as e:  # noqa: BLE001 — never break prompt generation
+            logger.warning(f"Could not scan scripts/ for the prompt: {e}")
+            return False
 
     def _load_workflow_prompt(self) -> Optional[str]:
         """
@@ -653,6 +703,63 @@ class PromptGenerator:
         logger.info(f"Included agent skills fallback block ({len(entries)} skill(s))")
         return "\n".join(lines)
 
+    def _get_skill_scripts_section(self) -> Optional[str]:
+        """Say that a loaded skill's bundled scripts may be run (conversation mode).
+
+        Engine-native skill tools only list names and descriptions, and the
+        workflow prompt is the owner's text — often restrictive ("do not perform
+        any task that is not X"). Without a platform sentence, small models treat
+        a skill's script as a separate task and improvise the result instead, so
+        the script — and the credential check inside it — never runs.
+
+        Covers the agent's own ``skills/`` and the ``skills/`` folder of every
+        plugin active in conversation mode (catalog and marketplace installs).
+        ``None`` (zero tokens) unless at least one valid, model-invocable skill
+        holds a script.
+        """
+        skill_roots = [self.workspace_dir / "skills"]
+        if self.active_plugins_for_mode is not None:
+            try:
+                for plugin in self.active_plugins_for_mode("conversation"):
+                    if plugin.get("path"):
+                        root = Path(plugin["path"]) / "skills"
+                        if root not in skill_roots:
+                            skill_roots.append(root)
+            except Exception as e:  # noqa: BLE001 — local skills still count
+                logger.warning(f"Could not enumerate plugin skills for scripts: {e}")
+
+        names: List[str] = []
+        for root in skill_roots:
+            try:
+                for entry in scan_skills_root(root):
+                    if (
+                        entry.is_valid
+                        and entry.model_invocable
+                        and entry.name not in names
+                        and _holds_scripts(root / entry.name / "scripts")
+                    ):
+                        names.append(entry.name)
+            except Exception as e:  # noqa: BLE001 — never break prompt generation
+                logger.warning(f"Could not scan skills in {root} for scripts: {e}")
+
+        if not names:
+            return None
+
+        skill_list = ", ".join(f"`{name}`" for name in names)
+        logger.info(f"Included skill scripts block ({len(names)} skill(s))")
+        return (
+            "\n\n---\n\n## Skill Scripts\n\n"
+            f"These skills ship their own scripts in the skill's `scripts/` folder: {skill_list}.\n\n"
+            "- Running a loaded skill's bundled script is part of using that skill, not a separate task. "
+            "When the skill's instructions call for one of its scripts, run it with your shell tool as the "
+            "skill describes and use its output.\n"
+            "- If the script exits with an error, relay the error message it prints for the user (for example a "
+            "missing or unconfigured credential, naming the slot and the fix) verbatim instead of producing the "
+            "result yourself. Never paste a traceback or a credential value into the reply.\n"
+            "- If the script writes a file the user asked for, attach that file with a `<cinna_attach>` tag "
+            "instead of pasting its contents."
+        )
+
     def _get_environment_context(self) -> str:
         """
         Get environment context section for both building and conversation modes.
@@ -847,8 +954,10 @@ class PromptGenerator:
         else:
             logger.warning("WORKFLOW_PROMPT.md not found, conversation mode will have minimal context")
 
-        # Append scripts README to give context about available scripts
-        scripts_readme = self._load_scripts_readme()
+        # Append scripts README to give context about available scripts — only
+        # when scripts exist, so the untouched "No scripts created yet" template
+        # never reads as "this agent may not run scripts".
+        scripts_readme = self._load_scripts_readme() if self._has_workspace_scripts() else None
         if scripts_readme:
             conversation_prompt_parts.append(
                 f"\n\n---\n\n## Available Scripts\n\n"
@@ -856,6 +965,10 @@ class PromptGenerator:
                 f"```markdown\n{scripts_readme}\n```"
             )
             logger.info("Included scripts/README.md in conversation mode prompt")
+
+        skill_scripts_section = self._get_skill_scripts_section()
+        if skill_scripts_section:
+            conversation_prompt_parts.append(skill_scripts_section)
 
         # Append credentials README to give context about available credentials
         credentials_readme = self._load_credentials_readme()

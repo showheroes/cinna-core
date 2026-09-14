@@ -96,6 +96,8 @@ whose type is not `agent_api`.
 
 Both keys sit outside `credential_data` on purpose, so the per-type whitelist and the README redaction — which act on `credential_data` alone — can never drop or mask them. The synthetic `current_user` / `owner_identity_token` entries carry neither key and never satisfy a slot. Using the SDK helpers requires an environment rebuilt since they shipped; a pre-feature container still receives both keys in the file, it simply has no helper to read them with.
 
+The bundled guide `context/guides/skills-with-credentials.md` (shipped in every account workspace's `context/` tree) walks through the full build for a skill script that needs a slot: finding or assigning the credential, declaring the slot in `SKILL.md`, reading it with these helpers, and verifying readiness with `cinna skills list`.
+
 ### Email SMTP Credential Usage in Agent Scripts
 
 1. User creates an `email_smtp` credential with SMTP server settings
