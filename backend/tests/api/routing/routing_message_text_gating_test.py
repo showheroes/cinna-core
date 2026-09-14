@@ -46,6 +46,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 from app.core.config import settings
 from tests.utils.agent import (
@@ -742,3 +743,163 @@ def test_pass_2_not_run_code_survives_the_gate_that_withholds_its_sentence(
     assert stage_written_off["not_run_code"] == "auto_install_off", stage_written_off
     # ...and anything missing was never written.
     assert stage_written_off.get("reason") is None, stage_written_off
+
+
+# ── The quoted message rides the same gate; the quoted agent id does not ───
+
+
+def test_the_quoted_message_is_gated_with_message_text_and_the_quoted_agent_id_is_not(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    """Quote-aware channel routing stores what the sender replied to beside what
+    they wrote (plan D6, user decision U1): `quoted_message_text` and
+    `quoted_message_author` are a THIRD PARTY's words and name label, so they
+    follow `ROUTING_TRACE_STORE_MESSAGE_TEXT` exactly as `message_text` does.
+    `quoted_agent_id` is an id the platform resolved from its delivery ledger,
+    and is served either way.
+
+    The decision is a real one, through the webhook: another person's agent
+    wrote the quoted reply (so the ledger names it, the sender cannot reach it,
+    and the classifier genuinely runs), and the provider is mocked at classifier
+    depth with a reply whose `reason` echoes the quote — so `stages[].prompt`,
+    `raw_response` and `reason` all hold something to withhold.
+
+      0. Gate ON at capture and read: the quote and its label are stored and
+         served; `message_sha256` is the digest of the sender's own words only.
+      1. Read path: the SAME row read with the gate OFF — the quote, the label,
+         the prompt, the raw response and the reason are withheld; the quoted
+         agent id is still served; the quote appears nowhere in the response.
+      2. Write path: captured with the gate OFF, read back with it ON, so the
+         read projection cannot be what hides anything — both columns are NULL
+         at rest.
+    """
+    from tests.utils.channel_quote import (
+        CHANNEL_SECRETS,
+        deliver_channel_event,
+        final_reply_message_id,
+        rendered_prompts,
+    )
+
+    channel = create_server_channel(
+        client,
+        superuser_token_headers,
+        auto_register_users=False,
+        email_whitelist="*",
+        secrets=CHANNEL_SECRETS,
+    )
+    signer = GoogleChatJWTSigner()
+
+    # ── The quoted reply: another person's agent, on this channel ─────────
+    owner, owner_headers = create_random_user_with_headers(client)
+    promote_to_developer(client, superuser_token_headers, owner["id"])
+    create_random_ai_credential(client, owner_headers, set_default=True)
+    foreign = create_agent_via_api(client, owner_headers, name=f"Foreign-{random_lower_string()[:6]}")
+    drain_tasks()
+    set_router_trigger_prompt(client, owner_headers, foreign["id"], "Tell jokes on request")
+    owner_thread = f"spaces/AAA/threads/{random_lower_string()}"
+    resp, _, _ = deliver_channel_event(
+        client,
+        channel,
+        signer,
+        build_message_event(thread_key=owner_thread, text="tell me a joke", sender_email=owner["email"]),
+    )
+    assert resp.status_code == 200
+    reply_id = final_reply_message_id(db, channel["id"], owner_thread)
+
+    # ── The sender: two eligible agents of their own ─────────────────────
+    sender, sender_headers = create_random_user_with_headers(client)
+    promote_to_developer(client, superuser_token_headers, sender["id"])
+    create_random_ai_credential(client, sender_headers, set_default=True)
+    mine = create_agent_via_api(client, sender_headers, name=f"Mine-{random_lower_string()[:6]}")
+    other = create_agent_via_api(client, sender_headers, name=f"Other-{random_lower_string()[:6]}")
+    drain_tasks()
+    set_router_trigger_prompt(client, sender_headers, mine["id"], "Tell jokes on request")
+    set_router_trigger_prompt(client, sender_headers, other["id"], "Weather forecasts")
+
+    marker = f"QUOTED-WORDS-{random_lower_string()}"
+    label = f"Label-{random_lower_string()}"
+    quoted_text = f"would be fun to hear {marker}"
+
+    def _post(store_text: bool) -> tuple[str, str]:
+        before = {
+            r["id"]
+            for r in list_routing_traces(client, superuser_token_headers, channel_id=channel["id"])["data"]
+        }
+        sender_text = f"can u? {random_lower_string()[:8]}"
+        event = build_message_event(
+            thread_key=f"spaces/AAA/threads/{random_lower_string()}",
+            text=sender_text,
+            sender_email=sender["email"],
+            quoted_message_name=reply_id,
+            quoted_text=quoted_text,
+            quoted_sender=label,
+        )
+        resp, _, provider = deliver_channel_event(
+            client,
+            channel,
+            signer,
+            event,
+            provider_reply={
+                "agent_id": mine["id"],
+                "message": None,
+                "confidence": 0.8,
+                "reason": f"they quoted {marker}",
+            },
+            settings_overrides={"ROUTING_TRACE_STORE_MESSAGE_TEXT": store_text},
+        )
+        assert resp.status_code == 200
+        # The real renderer was handed the quote; otherwise nothing below has
+        # anything to withhold.
+        [prompt] = rendered_prompts(provider)
+        assert marker in prompt and label in prompt
+        page = list_routing_traces(client, superuser_token_headers, channel_id=channel["id"])
+        new_rows = [r for r in page["data"] if r["id"] not in before]
+        assert len(new_rows) == 1, page["data"]
+        # Detail only: the list summary never carries the quote.
+        assert "quoted_message_text" not in new_rows[0], new_rows[0]
+        return new_rows[0]["id"], sender_text
+
+    def _pass1(detail: dict) -> dict:
+        return next(s for s in detail["stages"] if s["stage"] == "pass_1")
+
+    # ── 0. Gate ON: stored and served ─────────────────────────────────────
+    on_id, on_text = _post(store_text=True)
+    with patch(_SETTING, True):
+        detail_on = get_routing_trace(client, superuser_token_headers, on_id)
+    assert detail_on["match_method"] == "ai", detail_on
+    assert detail_on["selected_agent_id"] == mine["id"], detail_on
+    assert detail_on["message_text"] == on_text, detail_on
+    assert detail_on["message_sha256"] == hashlib.sha256(on_text.encode("utf-8")).hexdigest()
+    assert detail_on["quoted_message_text"] == quoted_text, detail_on
+    assert detail_on["quoted_message_author"] == label, detail_on
+    assert detail_on["quoted_agent_id"] == foreign["id"], detail_on
+    stage_on = _pass1(detail_on)
+    assert stage_on["prompt"], stage_on
+    assert marker in stage_on["raw_response"], stage_on
+    assert marker in stage_on["reason"], stage_on
+
+    # ── 1. Read path: the same row with the gate OFF ──────────────────────
+    with patch(_SETTING, False):
+        detail_off = get_routing_trace(client, superuser_token_headers, on_id)
+    assert detail_off["message_text"] is None, detail_off
+    assert detail_off["message_sha256"] == detail_on["message_sha256"]
+    assert detail_off["quoted_message_text"] is None, detail_off
+    assert detail_off["quoted_message_author"] is None, detail_off
+    assert detail_off["quoted_agent_id"] == foreign["id"], detail_off
+    stage_off = _pass1(detail_off)
+    assert stage_off.get("prompt") is None, stage_off
+    assert stage_off.get("raw_response") is None, stage_off
+    assert stage_off.get("reason") is None, stage_off
+    assert marker not in json.dumps(detail_off), detail_off
+    assert label not in json.dumps(detail_off), detail_off
+
+    # ── 2. Write path: captured OFF, read back ON ─────────────────────────
+    off_id, off_text = _post(store_text=False)
+    with patch(_SETTING, True):
+        written_off = get_routing_trace(client, superuser_token_headers, off_id)
+    assert written_off["quoted_message_text"] is None, written_off
+    assert written_off["quoted_message_author"] is None, written_off
+    assert written_off["quoted_agent_id"] == foreign["id"], written_off
+    assert written_off["message_sha256"] == hashlib.sha256(off_text.encode("utf-8")).hexdigest()
+    assert marker not in json.dumps(written_off), written_off
+    assert label not in json.dumps(written_off), written_off

@@ -15,6 +15,17 @@ delivery's own handler down with it. A lost ledger write costs observability,
 never a reply — so every entry point swallows, logs, and returns a value that
 tells the caller "no ledger" rather than propagating.
 
+**One exception, and it is a read:**
+:meth:`ChannelTurnDeliveryLedger.platform_agent_for_message`. Neither of its
+callers is on the delivery path, and each owns its recovery. The
+conversation-context builder asks "did this platform write the quoted message,
+and which agent?" and rolls back and degrades. The routing path
+(``ChannelInboundService._quoted_platform_agent_id``) asks which agent to prefer,
+on a short-lived session of its own, and reads any failure as "no preference".
+Any further caller must own recovery the same way. Swallowing a failed
+``SELECT`` here would hand a caller a session whose transaction is already
+aborted, disguised as the ordinary answer "not ours".
+
 **Commit discipline is copied from ``_persist_status_message_id``**: each
 function owns its write, commits it, and rolls back inside its own guard on
 failure. Callers hand in the session they already have — the relay's per-flush
@@ -30,6 +41,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -42,6 +54,8 @@ from app.models import (
     CHANNEL_DELIVERY_FAILED,
     CHANNEL_DELIVERY_FINAL,
     CHANNEL_DELIVERY_SEALED,
+    Agent,
+    ChannelThreadBinding,
     ChannelTurnDelivery,
 )
 
@@ -150,6 +164,18 @@ def _commit(db: DBSession, what: str) -> bool:
         logger.warning("%s Could not persist %s", _LOG_PREFIX, what, exc_info=True)
         _recover(db, "a failed ledger write")
         return False
+
+
+@dataclass(frozen=True)
+class PlatformAuthoredMessage:
+    """The agent whose channel turn wrote a given external message.
+
+    Plain data — an id and a name copied out of the reading session — so it can
+    cross a session or thread boundary without an ORM instance behind it.
+    """
+
+    agent_id: uuid.UUID
+    agent_name: str
 
 
 class ChannelTurnDeliveryLedger:
@@ -617,5 +643,56 @@ class ChannelTurnDeliveryLedger:
             return
         _commit(db, "a diverged delivery row")
 
+    # ------------------------------------------------------------------
+    # Provenance read (conversation context and quote-aware routing)
+    # ------------------------------------------------------------------
 
-__all__ = ["ChannelTurnDeliveryLedger", "visible_digest"]
+    @staticmethod
+    def platform_agent_for_message(
+        db: DBSession,
+        *,
+        channel_id: uuid.UUID,
+        external_message_id: str | None,
+    ) -> PlatformAuthoredMessage | None:
+        """Which agent's turn on ``channel_id`` wrote ``external_message_id``.
+
+        ``None`` when no delivery row on this channel names that message, and
+        also when the rows name **more than one** distinct agent: an ambiguous
+        answer is not an attribution, so it fails closed rather than picking
+        one. ``None`` too for a blank id.
+
+        For a transport's quoted-message *snapshot* this is the only evidence
+        of platform authorship — the snapshot's sender label proves nothing —
+        and for any message it is the only source of *which* agent wrote it. A
+        message the adapter fetched may carry its own authorship flag from the
+        platform's verified sender, but that says "this app", never "this
+        agent".
+
+        Coverage is the ledger's: turns delivered before it existed, or whose
+        transport reported no message id, have no row and read as ``None``.
+
+        **Not total** — see the module docstring for why this one read raises.
+        """
+        if not isinstance(external_message_id, str) or not external_message_id.strip():
+            return None
+        rows = db.exec(
+            select(Agent.id, Agent.name)
+            .join(ChannelThreadBinding, ChannelThreadBinding.agent_id == Agent.id)
+            .join(
+                ChannelTurnDelivery,
+                ChannelTurnDelivery.binding_id == ChannelThreadBinding.id,
+            )
+            .where(
+                ChannelThreadBinding.server_channel_id == channel_id,
+                ChannelTurnDelivery.external_message_id == external_message_id,
+            )
+            .distinct()
+            .limit(2)
+        ).all()
+        if len(rows) != 1:
+            return None
+        agent_id, agent_name = rows[0]
+        return PlatformAuthoredMessage(agent_id=agent_id, agent_name=agent_name or "")
+
+
+__all__ = ["ChannelTurnDeliveryLedger", "PlatformAuthoredMessage", "visible_digest"]

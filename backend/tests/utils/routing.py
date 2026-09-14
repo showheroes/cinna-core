@@ -369,9 +369,17 @@ def simulate_routing(
     as_user_id: str,
     channel_id: str | None = None,
     include_catalog: bool = True,
+    quoted_message_text: str | None = None,
+    quoted_message_author: str | None = None,
+    quoted_agent_id: str | None = None,
     expected_status: int = 200,
 ) -> Any:
     """POST /admin/routing/simulate. Returns the trace (a RoutingDecisionPublic).
+
+    ``quoted_message_text`` / ``quoted_message_author`` / ``quoted_agent_id``
+    reproduce a channel message that quoted another one (quote-aware routing).
+    Like ``channel_id``, each key is sent only when given, so every older call
+    site keeps sending the exact body it always has.
 
     The response is the *same shape* ``get_routing_trace`` returns, because the
     route returns ``RoutingTraceService.get``'s output rather than projecting
@@ -393,6 +401,13 @@ def simulate_routing(
     }
     if channel_id is not None:
         body["channel_id"] = channel_id
+    for key, value in (
+        ("quoted_message_text", quoted_message_text),
+        ("quoted_message_author", quoted_message_author),
+        ("quoted_agent_id", quoted_agent_id),
+    ):
+        if value is not None:
+            body[key] = value
     r = client.post(
         f"{API}/admin/routing/simulate",
         headers=token_headers,

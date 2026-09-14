@@ -49,11 +49,16 @@ def event(state="THREADED_MESSAGES", kind="SPACE", reply=False):
     [
         ("Question\nREPLY HERE!  ", "Question", True),
         ("Question? Reply here.", "Question?", True),
+        ("tell me a joke, reply here", "tell me a joke", True),
+        ("tell me a joke - reply here", "tell me a joke", True),
+        ("tell me a joke reply here", "tell me a joke", True),
+        ("tell me a joke (reply here)", "tell me a joke (reply here)", False),
         ("Can you reply here or in DM?", "Can you reply here or in DM?", False),
-        ("Please reply here", "Please reply here", False),
+        ("Don't preply here", "Don't preply here", False),
+        ("reply here", "", True),
     ],
 )
-def test_anchored_directive(text, expected, matched):
+def test_trailing_directive(text, expected, matched):
     assert strip_reply_here(text) == (expected, matched)
 
 

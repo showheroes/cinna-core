@@ -70,6 +70,7 @@ from app.models.routing.routing_decision import (
 )
 from app.models import ServerChannel
 from app.services.routing import routing_trace
+from app.services.routing.agent_classifier import QuotedContext
 from app.services.routing.routing_trace_service import RoutingTraceService
 from app.services.server_channels.channel_policy_service import (
     ChannelPolicyService,
@@ -116,6 +117,15 @@ class ReplaySource:
     user_id: uuid.UUID
     channel_id: uuid.UUID | None
     thread_key: str | None
+    #: The quote the original decision was given, so a replay re-renders it.
+    #: Read off the row under the same gate as ``message`` (see
+    #: :meth:`RoutingTuningService.replay_source`'s 409).
+    quoted_text: str | None = None
+    quoted_author: str | None = None
+    #: ``None`` when the original had none, or when the quoted agent has since
+    #: been deleted (the column is SET NULL) — the replay then runs without
+    #: the preference, and its diff shows what that changed.
+    quoted_agent_id: uuid.UUID | None = None
 
 
 class RoutingTuningService:
@@ -133,8 +143,19 @@ class RoutingTuningService:
         include_catalog: bool = True,
         channel_id: uuid.UUID | None = None,
         thread_key: str | None = None,
+        quoted_text: str | None = None,
+        quoted_author: str | None = None,
+        quoted_agent_id: uuid.UUID | None = None,
     ) -> RoutingDecisionPublic:
         """Route ``message`` for ``user_id`` with no effects; return the trace.
+
+        ``quoted_text`` / ``quoted_author`` / ``quoted_agent_id`` reproduce a
+        channel message that replied to another one: the quote is given to
+        every classifier call as context, and the quoted agent is preferred
+        when it is on the target's ballot. They obey
+        ``CHANNEL_QUOTE_ROUTING_ENABLED`` exactly as the real path does — with
+        the switch off the webhook passes no quote, so neither does this, and
+        the returned trace's quote fields are empty to show it.
 
         The decision is persisted with ``origin="simulate"`` and
         ``actor_user_id`` set, then read back through
@@ -154,9 +175,16 @@ class RoutingTuningService:
         that routed over a different candidate set than the webhook would is
         not a simulation of anything.
         """
+        from app.core.config import settings
+
         policy = RoutingTuningService._policy_for(
             db, user_id=user_id, channel_id=channel_id
         )
+        quoted: QuotedContext | None = None
+        if not settings.CHANNEL_QUOTE_ROUTING_ENABLED:
+            quoted_agent_id = None
+        elif quoted_text:
+            quoted = QuotedContext(text=quoted_text, author=quoted_author)
         try:
             decision = await ChannelRoutingService.decide(
                 user_id=user_id,
@@ -167,6 +195,8 @@ class RoutingTuningService:
                 channel_id=channel_id,
                 thread_key=thread_key,
                 actor_user_id=actor_user_id,
+                quoted=quoted,
+                quoted_agent_id=quoted_agent_id,
             )
         except Exception as exc:  # noqa: BLE001
             # ``decide`` re-raises whatever the routing pass raised, and it does
@@ -300,7 +330,9 @@ class RoutingTuningService:
         - no ``user_id`` → 409. The sender's account is gone, and "route this
           for nobody" is not a question with an answer.
 
-        Returns a detached :class:`ReplaySource`, never the row.
+        Returns a detached :class:`ReplaySource`, never the row. It carries the
+        stored quote too, which the first refusal already covers: with the gate
+        off nothing is re-run, quote included.
         """
         from app.core.config import settings
 
@@ -337,6 +369,9 @@ class RoutingTuningService:
             user_id=row.user_id,
             channel_id=row.channel_id,
             thread_key=row.thread_key,
+            quoted_text=row.quoted_message_text,
+            quoted_author=row.quoted_message_author,
+            quoted_agent_id=row.quoted_agent_id,
         )
 
     @staticmethod

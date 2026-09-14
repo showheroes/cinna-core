@@ -24390,6 +24390,40 @@ export const RoutingDecisionPublicSchema = {
             type: 'array',
             title: 'Stages'
         },
+        quoted_message_text: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Message Text'
+        },
+        quoted_message_author: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Message Author'
+        },
+        quoted_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Agent Id'
+        },
         diagnosis: {
             anyOf: [
                 {
@@ -25150,6 +25184,42 @@ export const RoutingSimulateRequestSchema = {
             type: 'boolean',
             title: 'Include Catalog',
             default: true
+        },
+        quoted_message_text: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Message Text'
+        },
+        quoted_message_author: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 120
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Message Author'
+        },
+        quoted_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Agent Id'
         }
     },
     type: 'object',

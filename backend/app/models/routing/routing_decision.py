@@ -24,6 +24,12 @@ Two shape decisions worth knowing before editing this file:
   both, from that one definition. With the gate off the hash still supports
   replay and dedupe, and the candidate set plus the verdict still answer the
   question that matters most — which agents were even considered.
+- **The quoted message is gated with ``message_text``.** A channel message can
+  reply to an earlier one, and the classifier is given that quote as context.
+  ``quoted_message_text`` and ``quoted_message_author`` hold a *third party's*
+  words and name label, so they are written and served under exactly the same
+  ``ROUTING_TRACE_STORE_MESSAGE_TEXT`` rule. ``quoted_agent_id`` is an id the
+  platform resolved, not sender text, and is not gated.
 
 Rows are disposable. ``routing_trace_scheduler`` purges past
 ``ROUTING_TRACE_RETENTION_DAYS``; nothing references a decision row, and losing
@@ -62,6 +68,9 @@ MAX_MATCH_METHOD_CHARS = 32
 #: silently return "no such message" instead of failing. Over-long input is
 #: dropped instead.
 MAX_MESSAGE_SHA256_CHARS = 64
+#: The quoted message's author label — a display name, never an identity. Same
+#: bound the channel adapter and the classifier apply.
+MAX_QUOTED_AUTHOR_CHARS = 120
 
 # NOTE — ``GATED_STAGE_TEXT_FIELDS`` used to live here: a denylist of the
 # ``stages[]`` fields ``ROUTING_TRACE_STORE_MESSAGE_TEXT`` blanked. It has been
@@ -174,10 +183,32 @@ class RoutingDecision(SQLModel, table=True):
         sa_column=Column(String(MAX_MESSAGE_SHA256_CHARS), nullable=True),
     )
 
+    # The message the sender replied to, as the classifier was given it: its
+    # text, clamped to ``ROUTING_TRACE_TEXT_MAX_CHARS``, and its author's
+    # display label. A third party's words, so both are written only when
+    # ``ROUTING_TRACE_STORE_MESSAGE_TEXT`` is on (the same rule, App MCP
+    # narrowing included, that ``message_text`` follows) and withheld on read
+    # while it is off. Never part of ``message_sha256``. NULL on every decision
+    # that had no quote, including every row written before quotes were read.
+    quoted_message_text: str | None = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    quoted_message_author: str | None = Field(
+        default=None,
+        sa_column=Column(String(MAX_QUOTED_AUTHOR_CHARS), nullable=True),
+    )
+    # The agent whose reply the sender quoted, resolved by the platform from
+    # its delivery ledger. Recorded whether or not the quoted-reply preference
+    # applied, so a trace shows what the quote pointed at. An id, so not gated;
+    # SET NULL like ``selected_agent_id``.
+    quoted_agent_id: uuid.UUID | None = Field(
+        default=None, foreign_key="agent.id", ondelete="SET NULL"
+    )
+
     # ``routed`` | ``no_match`` | ``error`` | ``parked_install``.
     outcome: str = Field(sa_column=Column(String(MAX_OUTCOME_CHARS), nullable=False))
 
-    # ``pattern`` | ``ai`` | ``only_one``.
+    # ``pattern`` | ``ai`` | ``only_one`` | ``pinned`` | ``quoted_reply``.
     #
     # **"How the last stage matched", not "how the decision was reached."** It
     # deliberately survives a ``no_match``: a row reading
@@ -359,6 +390,16 @@ class RoutingDecisionPublic(RoutingDecisionSummary):
     """Full detail — the summary plus the stage trace."""
 
     stages: list[Any] = Field(default_factory=list)
+    #: The message the sender replied to, as the classifier was given it.
+    #: Withheld — ``None`` — while ``ROUTING_TRACE_STORE_MESSAGE_TEXT`` is off,
+    #: exactly like ``message_text`` (``message_text_hidden`` says so).
+    quoted_message_text: str | None = None
+    #: The quoted message's author display label. Same gate.
+    quoted_message_author: str | None = None
+    #: The agent whose reply the sender quoted, when the platform wrote it. Not
+    #: gated: an id, not sender text. ``match_method="quoted_reply"`` says
+    #: whether it decided the routing.
+    quoted_agent_id: uuid.UUID | None = None
     #: Attached by ``RoutingTraceService.get`` rather than by the route, so a
     #: simulate response carries it for the same reason it carries everything
     #: else: it is the *same function*, not a matching projection. ``None`` only
@@ -396,6 +437,9 @@ class RoutingDecisionsPublic(SQLModel):
 #: cap never truncates something the recorder would have stored in full — it
 #: only stops an admin pasting a novel into a provider request.
 MAX_SIMULATE_MESSAGE_CHARS = 8_000
+#: Ceiling on a hand-typed quoted message — the bound the classifier renders a
+#: quote to, so nothing past it could reach the provider anyway.
+MAX_SIMULATE_QUOTED_TEXT_CHARS = 1_000
 
 
 class RoutingSimulateRequest(SQLModel):
@@ -435,6 +479,22 @@ class RoutingSimulateRequest(SQLModel):
     #: question "would this have matched something they already have?", which
     #: is usually the one being asked when an install went somewhere odd.
     include_catalog: bool = True
+    #: The message ``message`` replies to, as a channel quote would carry it.
+    #: Context only: the classifier reads it beside the message and never as
+    #: an instruction. Blank is treated as no quote.
+    quoted_message_text: str | None = Field(
+        default=None, max_length=MAX_SIMULATE_QUOTED_TEXT_CHARS
+    )
+    #: The quoted message's author label. Context only; ignored without
+    #: ``quoted_message_text``.
+    quoted_message_author: str | None = Field(
+        default=None, max_length=MAX_QUOTED_AUTHOR_CHARS
+    )
+    #: The agent whose reply is being quoted. Routes to that agent without a
+    #: classifier call only when it is already on ``as_user_id``'s ballot (or
+    #: a reachable agent of an identity on it) — it never adds a candidate.
+    #: Must name an existing agent (404 otherwise).
+    quoted_agent_id: uuid.UUID | None = None
 
 
 class RoutingReplayRequest(SQLModel):

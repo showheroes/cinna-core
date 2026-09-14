@@ -6037,6 +6037,9 @@ export type RoutingDecisionPublic = {
     provider?: (string | null);
     model?: (string | null);
     stages?: Array<unknown>;
+    quoted_message_text?: (string | null);
+    quoted_message_author?: (string | null);
+    quoted_agent_id?: (string | null);
     diagnosis?: (RoutingDiagnosisPublic | null);
 };
 
@@ -6215,6 +6218,9 @@ export type RoutingSimulateRequest = {
     as_user_id: string;
     channel_id?: (string | null);
     include_catalog?: boolean;
+    quoted_message_text?: (string | null);
+    quoted_message_author?: (string | null);
+    quoted_agent_id?: (string | null);
 };
 
 /**

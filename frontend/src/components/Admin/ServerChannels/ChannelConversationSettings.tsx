@@ -36,7 +36,7 @@ export function ChannelConversationSettings({
               <Input {...field} maxLength={64} disabled={disabled} />
             </FormControl>
             <FormDescription>
-              Put this phrase on the final line to request a reply in the group
+              End a message with this phrase to request a reply in the group
               conversation. It is removed from the question. In direct messages,
               it does not change where the reply goes.
             </FormDescription>

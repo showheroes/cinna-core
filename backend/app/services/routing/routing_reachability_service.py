@@ -139,7 +139,10 @@ from app.models.routing.routing_decision import (
     RoutingNearMiss,
 )
 from app.services.routing import routing_trace, text_similarity
-from app.services.routing.channel_candidate_provider import example_prompt_text
+from app.services.routing.channel_candidate_provider import (
+    SOURCE_OWNED,
+    example_prompt_text,
+)
 from app.services.server_channels.channel_policy_service import ChannelPolicyService
 
 logger = logging.getLogger(__name__)
@@ -905,6 +908,13 @@ def _general_verdict(
     did rather than about which surface it ran on, so neither needs a
     per-profile counterpart: only a channel pipeline records ``pinned`` at all.
 
+    A quoted-reply decision splits the same two ways, for the same reasons.
+    Under ``routed``, when the selected agent is the quoted one, no classifier
+    chose it. Below the terminal-verdict branches, when Pass 1's re-load found
+    the quoted agent gone or no longer the sender's, no classifier ran, and the
+    generic candidate verdicts would prescribe trigger-prompt changes that could
+    not have mattered. Only a channel pipeline records ``quoted_reply`` either.
+
     ``db`` is here for exactly one branch — the ``no_candidates`` one, and only
     under a profile that reads channel policy, where it asks
     :func:`_channel_pass_2_block` whether this sender's channel policy is what
@@ -929,9 +939,38 @@ def _general_verdict(
             or trace.selected_bundle_name
             or "the selected agent"
         )
+        if (
+            trace.match_method == routing_trace.MATCH_QUOTED_REPLY
+            and trace.quoted_agent_id is not None
+            and trace.selected_agent_id == trace.quoted_agent_id
+        ):
+            # Same code, another sentence, for the pin's reason below: the
+            # generic remedy (tighten the winner's trigger prompt) is inert
+            # here too. No classifier chose this agent — the sender quoted its
+            # reply, and it was already one they could address.
+            #
+            # Gated on the selection too, not on ``match_method`` alone. If an
+            # identity binding changes between the reachability check and
+            # Stage 2, Stage 2 classifies instead, records no match method of
+            # its own, and the row keeps ``quoted_reply`` — while the agent it
+            # names may not be the quoted one. That decision gets the generic
+            # sentence below, because a classifier did choose it.
+            return (
+                CODE_ROUTED,
+                f"This message went to {chosen} because the sender quoted one "
+                f"of its earlier replies in this conversation, and it was "
+                f"already an agent they could address: no classifier chose it.",
+                "Nothing to fix here. Quoting an agent's reply routes to that "
+                "agent whenever the sender can already address it — one of "
+                "their own candidates, or a reachable agent of a person on "
+                "their list — so trigger prompts do not decide these messages. "
+                "CHANNEL_QUOTE_ROUTING_ENABLED turns this preference off for "
+                "the whole server.",
+            )
         if trace.match_method == routing_trace.MATCH_PINNED:
-            # Same code, second sentence — the one place this file does that,
-            # and the reasoning is the comment above the codes: a code names a
+            # Same code, second sentence — one of the two places this file does
+            # that (the quoted-reply sentence above is the other), and the
+            # reasoning is the comment above the codes: a code names a
             # *finding*, and the finding here is the same one ("it routed, and
             # here is what to"). What differs is the remedy's subject, and a
             # remedy is the half that must never be wrong. The generic sentence
@@ -992,6 +1031,49 @@ def _general_verdict(
             "Nothing else will change this outcome — a pin is consulted before "
             "the candidate list is even built, and the auto-install pass is "
             "skipped for a pinned channel too.",
+        )
+
+    quoted_row = (
+        _find_candidate(candidates, str(trace.quoted_agent_id))
+        if trace.outcome == routing_trace.OUTCOME_NO_MATCH
+        and trace.match_method == routing_trace.MATCH_QUOTED_REPLY
+        and trace.quoted_agent_id is not None
+        else None
+    )
+    if (
+        quoted_row is not None
+        # Owned rows only. Stage 2 also records an identity binding's agent
+        # under its bare id (source ``identity``), and the same delete race can
+        # flip that row. The sentence below is about the sender's OWN agent,
+        # so an identity-arm miss falls through to the generic verdicts.
+        and quoted_row.get("source") == SOURCE_OWNED
+        and quoted_row.get("skip_reason")
+        in (routing_trace.SKIP_AGENT_MISSING, routing_trace.SKIP_FOREIGN_OWNER)
+    ):
+        # The quoted-reply sibling of the failed pin above, and it needs saying
+        # for the same reason. Pass 1 settled on the agent whose reply the
+        # sender quoted, and re-loading it found it deleted or no longer
+        # theirs: a race, not a wording problem. The shapes below would read
+        # the skipped row as a candidate scan and prescribe trigger-prompt
+        # changes, but Pass 1 never asked the classifier.
+        #
+        # Keyed on the quoted agent's own skipped row, not on ``match_method``
+        # alone. ``quoted_reply`` also survives an identity-arm Stage 2 that
+        # classified and matched nothing, and that decision does belong to the
+        # generic sentences below. Same code as the failed pin, for the same
+        # reason: the one candidate routing settled on was excluded.
+        name = _agent_label(quoted_row, None, str(trace.quoted_agent_id))
+        return (
+            CODE_ALL_CANDIDATES_SKIPPED,
+            f"The sender quoted an earlier reply from {name}, one of their own "
+            f"agents, so routing went straight to it without asking the "
+            f"classifier. When it was loaded it no longer existed, or it was "
+            f"no longer theirs, so this decision ended with no match.",
+            "Nothing on any agent's wording would have changed this: the agent "
+            "was deleted or moved to another account while the message was "
+            "being routed. The next message routes normally, because that "
+            "agent is no longer one of this sender's candidates, and replaying "
+            "this decision runs without the preference for the same reason.",
         )
 
     if not candidates:

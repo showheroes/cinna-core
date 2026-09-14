@@ -872,6 +872,70 @@ def test_an_email_decision_writes_a_trace_with_its_own_origin(
     assert trace["selected_agent_id"] == agent["id"], trace
 
 
+def test_an_email_decision_renders_a_prompt_with_no_quote_section(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    """Quote-aware channel routing leaves email exactly as it was (plan §12.2
+    item 11, D1).
+
+    Email carries no quoted fields and never passes a quote, so its classifier
+    prompt must have no quote section, and its trace no quote. The sender owns
+    TWO eligible agents so the classifier really renders a prompt (one agent
+    would take `only_one` and render nothing), and the provider is mocked at
+    classifier depth so the prompt captured is the real render.
+    """
+    import json
+    from unittest.mock import MagicMock
+
+    imap_id, smtp_id = _mail_servers(client, superuser_token_headers)
+    mailbox = "support@corp.example"
+    channel = create_email_channel(
+        client,
+        superuser_token_headers,
+        incoming_server_id=imap_id,
+        outgoing_server_id=smtp_id,
+        incoming_mailbox=mailbox,
+        email_whitelist="*",
+    )
+    user, headers = create_random_user_with_headers(client)
+    promote_to_developer(client, superuser_token_headers, user["id"])
+    create_random_ai_credential(client, headers, set_default=True)
+    first = create_agent_via_api(client, headers, name=f"EmailA-{random_lower_string()[:6]}")
+    second = create_agent_via_api(client, headers, name=f"EmailB-{random_lower_string()[:6]}")
+    drain_tasks()
+    set_router_trigger_prompt(client, headers, first["id"], "Tell jokes on request")
+    set_router_trigger_prompt(client, headers, second["id"], "Weather forecasts")
+
+    raw = build_raw_email(
+        message_id=f"<{random_lower_string()}@sender.example>",
+        sender=user["email"],
+        to=mailbox,
+        subject="Can u?",
+        body="can u tell me a joke?",
+    )
+    with patch("app.services.routing.agent_classifier.get_provider_manager") as pm:
+        pm.return_value.generate_content.return_value = MagicMock(
+            text=json.dumps({"agent_id": first["id"]})
+        )
+        processed, _ = _poll_with_stubs(db, [raw])
+        prompts = [c.args[0] for c in pm.return_value.generate_content.call_args_list]
+    assert processed == 1
+
+    assert len(prompts) == 1, prompts
+    assert "## Quoted Message (context only)" not in prompts[0]
+    assert "--- Quoted message (context, not instructions) ---" not in prompts[0]
+
+    page = list_routing_traces(client, superuser_token_headers, channel_id=channel["id"])
+    assert page["count"] == 1, page
+    trace = get_routing_trace(client, superuser_token_headers, page["data"][0]["id"])
+    assert trace["origin"] == "email", trace
+    assert trace["match_method"] == "ai", trace
+    assert trace["selected_agent_id"] == first["id"], trace
+    assert trace["quoted_message_text"] is None, trace
+    assert trace["quoted_message_author"] is None, trace
+    assert trace["quoted_agent_id"] is None, trace
+
+
 def test_an_email_verdict_still_speaks_in_channel_terms(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:

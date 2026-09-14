@@ -18,10 +18,8 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.models import (
-    Agent,
     ChannelThreadBinding,
     ChannelThreadIngestLog,
-    ChannelTurnDelivery,
     ServerChannel,
 )
 from app.services.server_channels.adapters.base import (
@@ -32,6 +30,10 @@ from app.services.server_channels.adapters.base import (
 )
 from app.services.server_channels.channel_attachment_service import (
     ChannelAttachmentService,
+)
+from app.services.server_channels.channel_turn_delivery_service import (
+    ChannelTurnDeliveryLedger,
+    PlatformAuthoredMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -137,6 +139,32 @@ class ChannelConversationContextService:
         ).all()}
 
     @staticmethod
+    def _snapshot_ref(
+        inbound: ChannelInboundMessage, *, platform_authored: bool
+    ) -> ChannelMessageRef | None:
+        """The first quoted message as the transport's snapshot described it.
+
+        ``None`` unless the inbound message carries both the quoted id and its
+        snapshot text. The ref has no timestamp (renders "time unknown"), no
+        quote of its own (the chain ends here) and no attachments.
+
+        ``platform_authored`` must come from the delivery ledger and nothing
+        else — the snapshot's author is a display label that proves nothing —
+        so a human's quote is never labelled as a platform agent's.
+        """
+        if not inbound.quoted_message_id or not inbound.quoted_message_text:
+            return None
+        return ChannelMessageRef(
+            message_id=inbound.quoted_message_id,
+            author_display_name=inbound.quoted_message_author or "Unknown author",
+            text=inbound.quoted_message_text,
+            created_at=None,
+            quoted_message_id=None,
+            attachments=(),
+            is_platform_authored=platform_authored,
+        )
+
+    @staticmethod
     async def build_context(
         *, db: Session, channel: ServerChannel, adapter: ChannelAdapter,
         binding: ChannelThreadBinding, inbound: ChannelInboundMessage,
@@ -197,7 +225,19 @@ class ChannelConversationContextService:
         )
         if not quote_enabled and not backfill_enabled:
             return ChannelContextResult.empty()
-        if not effective_caps.supports_message_fetch and not effective_caps.supports_thread_history:
+        # The transport's own snapshot of the FIRST quoted message. A fallback
+        # only: used where that message cannot be fetched, never in place of a
+        # fetch that worked, and never past the first hop (a snapshot carries
+        # no quote of its own). With history on it is gathered before the
+        # backfill, so it keeps its claim on the budget, and a complete copy of
+        # the same id arriving in the backfill then replaces it in place.
+        # Content, never authority, like all history here.
+        has_snapshot = bool(quote_enabled and inbound.quoted_message_text)
+        if (
+            not effective_caps.supports_message_fetch
+            and not effective_caps.supports_thread_history
+            and not has_snapshot
+        ):
             result = ChannelContextResult.empty(degraded_reason="history_unavailable")
             if quote_enabled:
                 # The contract promises only an id here, never invent who/when.
@@ -220,47 +260,124 @@ class ChannelConversationContextService:
         fetch_limit_reached = False
         selected_ids: set[str] = set()
 
-        def include(ref: ChannelMessageRef, source: str) -> bool:
-            nonlocal remaining, omitted, truncated
-            if ref.message_id in seen or ref.message_id in selected_ids:
+        authored_by_id: dict[str, PlatformAuthoredMessage | None] = {}
+
+        def platform_author(message_id: str) -> PlatformAuthoredMessage | None:
+            # Delivery provenance identifies an agent without importing its
+            # session content or using any historical sender as authority.
+            # Memoised: a snapshot of an agent's reply asks twice — once to mark
+            # the ref platform-authored, once to label it.
+            if message_id not in authored_by_id:
+                authored_by_id[message_id] = ChannelTurnDeliveryLedger.platform_agent_for_message(
+                    db, channel_id=channel.id, external_message_id=message_id,
+                )
+            return authored_by_id[message_id]
+
+        # Where the snapshot sits in ``gathered`` while it stands in for the
+        # first quoted hop: (message id, index, budget it holds). A complete
+        # copy of the same message gathered later (the backfill) replaces it in
+        # place instead of being dropped as a duplicate. Set only by
+        # ``include_snapshot``, so an event without a snapshot never reaches
+        # the replacement branch below.
+        snapshot_slot: tuple[str, int, int] | None = None
+        # Whether the snapshot's own cut is the ONLY truncation so far in this
+        # build. A complete copy replacing the snapshot then clears
+        # ``truncated`` as well, so the header does not announce a cut that no
+        # longer exists. Any other cut clears this flag. Nothing after the
+        # snapshot can truncate except ``include`` itself (the quote chain has
+        # already stopped), so its two truncation sites are the only places
+        # that need to.
+        snapshot_sole_truncation = False
+
+        def include(ref: ChannelMessageRef, source: str, *, complete: bool = True) -> bool:
+            # ``complete=False`` records the entry as partial even when its text
+            # fits, so a later message quoting the same id with read access can
+            # fetch the real message and upgrade the receipt.
+            nonlocal remaining, omitted, truncated, snapshot_slot, snapshot_sole_truncation
+            if ref.message_id in seen:
                 return True
+            replace_at: int | None = None
+            refund = 0
+            if ref.message_id in selected_ids:
+                if not complete or snapshot_slot is None or snapshot_slot[0] != ref.message_id:
+                    return True
+                # A readable copy of the message the snapshot stood in for. It
+                # may spend the snapshot's own reservation as well as what is
+                # left, and it replaces the snapshot only when it fits whole: a
+                # cut copy is no better than the snapshot already gathered.
+                _, replace_at, refund = snapshot_slot
             name = _safe(ref.author_display_name or ref.author_external_id or "Unknown author", single_line=True)[:120]
             if ref.is_platform_authored:
                 name = "Agent on this platform (possibly a different agent)"
-                # Delivery provenance identifies an agent without importing its
-                # session content or using any historical sender as authority.
-                agent_name = db.exec(select(Agent.name).join(
-                    ChannelThreadBinding, ChannelThreadBinding.agent_id == Agent.id,
-                ).join(ChannelTurnDelivery, ChannelTurnDelivery.binding_id == ChannelThreadBinding.id).where(
-                    ChannelThreadBinding.server_channel_id == channel.id,
-                    ChannelTurnDelivery.external_message_id == ref.message_id,
-                )).first()
-                if agent_name:
-                    name = f"Agent {_safe(agent_name, single_line=True)[:120]} on this platform"
+                authored = platform_author(ref.message_id)
+                if authored is not None and authored.agent_name:
+                    name = f"Agent {_safe(authored.agent_name, single_line=True)[:120]} on this platform"
             stamp = ref.created_at.isoformat() if ref.created_at else "time unknown"
             attribution = f"{name} [{stamp}]:\n"
             # Bound attachment names before allocating space. Their final status
             # replaces this placeholder without exceeding its reservation.
             attachment_reserve = min(len(ref.attachments), settings.CHANNEL_BACKFILL_MAX_ATTACHMENTS + 1) * 160
-            room = min(max(0, remaining - len(attribution) - attachment_reserve - 2), max(0, budget // 2))
+            room = min(max(0, remaining + refund - len(attribution) - attachment_reserve - 2), max(0, budget // 2))
             if room < 2:
+                if replace_at is not None:
+                    return True  # keep the snapshot
                 omitted += 1
                 truncated = True
+                snapshot_sole_truncation = False
                 return False
             text = _safe(ref.text)
-            complete = len(text) <= room
-            if len(text) > room:
+            fits = len(text) <= room
+            if replace_at is not None and not fits:
+                return True  # keep the snapshot
+            if not fits:
                 text = text[:room - 1] + "…"
                 truncated = True
+                snapshot_sole_truncation = False
             block = attribution + text
-            remaining -= len(block) + attachment_reserve + 2
-            gathered.append((ref, source, block, len(text), complete))
+            remaining += refund - (len(block) + attachment_reserve + 2)
+            if replace_at is not None:
+                # Same slot, so the same gather index, and the snapshot's
+                # source ("quoted"): it is still the message the sender quoted.
+                gathered[replace_at] = (ref, gathered[replace_at][1], block, len(text), fits and complete)
+                snapshot_slot = None
+                if snapshot_sole_truncation:
+                    # The only cut in this build was the snapshot's, and the
+                    # complete copy that replaced it is not cut.
+                    truncated = False
+                    snapshot_sole_truncation = False
+                return True
+            gathered.append((ref, source, block, len(text), fits and complete))
             selected_ids.add(ref.message_id)
+            return True
+
+        def include_snapshot() -> bool:
+            """Gather the unreadable first hop from its snapshot. False if none."""
+            nonlocal snapshot_slot, snapshot_sole_truncation
+            if not has_snapshot or not inbound.quoted_message_id:
+                return False
+            if inbound.quoted_message_id in seen or inbound.quoted_message_id in selected_ids:
+                return True  # already delivered or gathered: no ledger read needed
+            # An ambiguous ledger answer (two agents on one id) reads as None,
+            # so the snapshot keeps its own author label and makes no platform
+            # claim at all — failing closed.
+            ref = ChannelConversationContextService._snapshot_ref(
+                inbound,
+                platform_authored=platform_author(inbound.quoted_message_id) is not None,
+            )
+            if ref is None:
+                return False
+            gathered_before, remaining_before, truncated_before = len(gathered), remaining, truncated
+            include(ref, "quoted", complete=False)
+            if len(gathered) > gathered_before:
+                snapshot_slot = (ref.message_id, len(gathered) - 1, remaining_before - remaining)
+                # An appended snapshot can only have truncated by cutting its
+                # own text, so a flip from False to True here is its cut alone.
+                snapshot_sole_truncation = truncated and not truncated_before
             return True
 
         visited: set[str] = set()
         if quote_enabled and effective_caps.supports_message_fetch:
-            for _ in range(settings.CHANNEL_QUOTE_CHAIN_MAX_DEPTH):
+            for hop in range(settings.CHANNEL_QUOTE_CHAIN_MAX_DEPTH):
                 if not quote_id or quote_id in seen or quote_id in visited:
                     break
                 visited.add(quote_id)
@@ -276,7 +393,11 @@ class ChannelConversationContextService:
                 except Exception:
                     ref = None
                 if ref is None:
-                    degraded = "quoted_message_unavailable"
+                    # The snapshot describes the message the sender quoted, so
+                    # it can stand in for the first hop only; a later hop that
+                    # fails keeps today's degraded flag.
+                    if hop > 0 or not include_snapshot():
+                        degraded = "quoted_message_unavailable"
                     break
                 if not include(ref, "quoted"):
                     break
@@ -286,7 +407,10 @@ class ChannelConversationContextService:
                     omitted += 1
                     truncated = True
         elif quote_enabled:
-            degraded = "history_unavailable"
+            # No message fetch (with or without history): the snapshot stands
+            # in for the quoted message when the event carried one.
+            if not include_snapshot():
+                degraded = "history_unavailable"
 
         if backfill_enabled and effective_caps.supports_thread_history:
             try:
@@ -303,6 +427,12 @@ class ChannelConversationContextService:
                     # The adapter cannot report a total count. Never invent an
                     # omitted message when the limit may equal the whole history.
                     fetch_limit_reached = True
+            except SQLAlchemyError:
+                # ``include`` reads the delivery ledger to label an agent's
+                # reply. A failed read has aborted the transaction, so it must
+                # reach ``build_context``'s rollback-and-degrade rather than be
+                # swallowed here as a transport failure.
+                raise
             except Exception:
                 degraded = "history_fetch_failed"
         elif backfill_enabled:

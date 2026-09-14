@@ -79,6 +79,26 @@ session, and the row it resolves from would then have to cross too. Every
 inherit rule lives in exactly one place (that service's docstring says so),
 and this module deliberately cannot re-derive one.
 
+**A quoted message arrives as a value too, and it is never authority.**
+``decide`` takes an optional ``QuotedContext`` — the text and author label of
+the message the sender replied to, as the transport carried it — built by the
+caller from the inbound message. It is a frozen dataclass of strings (the
+purity test pins it as plain data), and it goes to exactly one kind of place:
+the classifier calls, as a fenced, context-only prompt section. It never
+touches the ballot, the pin, the policy or an identity grant; ``text`` — and
+the trace's ``message_text`` and ``message_sha256`` — stay the sender's own
+words; and without it every prompt is byte-identical to an unquoted message's.
+The rendered prompt does carry the quote, so ``stages[].prompt`` (and any model
+echo in ``raw_response`` / ``reason``) can hold quoted text on the trace, under
+the same ``ROUTING_TRACE_STORE_MESSAGE_TEXT`` gate as the sender's own text.
+
+``quoted_agent_id`` arrives the same way: a plain UUID naming the agent whose
+channel turn wrote the quoted message. The caller resolves it from the delivery
+ledger, a join through the thread-binding table this module may not name. It
+lets Pass 1 take an agent that is **already on this sender's ballot** (or a
+reachable agent of an identity that is) without classifying; it never puts an
+agent on the ballot.
+
 The only write the routing pass makes is the routing trace itself, and on the
 **happy path** it is deliberately outside ``decide``: the caller persists,
 because only the caller knows whether Pass 1 was the whole decision or its first
@@ -127,7 +147,7 @@ from app.services.routing.routing_trace import RoutingTrace
 from app.services.routing.routing_trace_service import RoutingTraceService
 
 if TYPE_CHECKING:  # pragma: no cover — annotations only, see PEP 563
-    from app.services.routing.agent_classifier import Candidate
+    from app.services.routing.agent_classifier import Candidate, QuotedContext
     from app.services.server_channels.channel_policy_service import (
         ResolvedChannelPolicy,
     )
@@ -401,8 +421,25 @@ class ChannelRoutingService:
         channel_id: uuid.UUID | None = None,
         thread_key: str | None = None,
         actor_user_id: uuid.UUID | None = None,
+        quoted: QuotedContext | None = None,
+        quoted_agent_id: uuid.UUID | None = None,
     ) -> RoutingDecisionResult:
         """Route ``text`` for ``user_id``. No binding, session, install or reply.
+
+        ``quoted`` is what the sender replied to, when the caller has one — the
+        context every classifier call in this decision is given (Pass 1,
+        identity Stage 2, Pass 2), rendered beside ``text`` and never merged
+        into it. ``None`` leaves every prompt exactly as it was before quotes
+        were read. It rides both thread targets as a trailing positional
+        argument with a ``None`` default, after the pre-existing ones, because
+        ``run_in_thread`` forwards positionals only; later additions go after
+        it.
+
+        ``quoted_agent_id`` is the agent whose reply the sender quoted, when
+        the caller found one — see :meth:`_route_quoted_reply` for what Pass 1
+        does with it and why it can only narrow. It follows ``quoted`` on both
+        thread targets under the same positional rule; Pass 2 receives it for
+        the trace only.
 
         Pass 2 runs only when Pass 1 found nothing *and* ``include_catalog`` is
         set — the simulate form exposes that toggle so an admin can ask "would
@@ -488,6 +525,8 @@ class ChannelRoutingService:
             origin,
             actor_user_id,
             include_catalog,
+            quoted,
+            quoted_agent_id,
         )
         if (
             agent_id is not None
@@ -520,6 +559,8 @@ class ChannelRoutingService:
             origin,
             actor_user_id,
             ballot,
+            quoted,
+            quoted_agent_id,
         )
         return RoutingDecisionResult(
             bundle_uuid=bundle_uuid,
@@ -615,7 +656,8 @@ class ChannelRoutingService:
         """Run a blocking callable off the event loop.
 
         **Public on purpose**, despite living on this class. Two other modules
-        call it — ``channel_inbound_service`` for its four trace writes and
+        call it — ``channel_inbound_service`` for its four trace writes and its
+        quoted-message authorship lookup, and
         ``routing_tuning_service`` for simulate's — so an underscore name here
         would be a private symbol that three modules depend on, and the next
         person to change its signature would grep only this file. That is §11a
@@ -674,6 +716,8 @@ class ChannelRoutingService:
         origin: str = routing_trace.ORIGIN_SERVER_CHANNEL,
         actor_user_id: uuid.UUID | None = None,
         include_catalog: bool = True,
+        quoted: QuotedContext | None = None,
+        quoted_agent_id: uuid.UUID | None = None,
     ) -> tuple[
         uuid.UUID | None,
         RoutingTrace | None,
@@ -723,10 +767,19 @@ class ChannelRoutingService:
                     actor_user_id=actor_user_id,
                     thread_key=thread_key,
                     message=text,
+                    quoted_text=quoted.text if quoted is not None else None,
+                    quoted_author=quoted.author if quoted is not None else None,
+                    quoted_agent_id=quoted_agent_id,
                     stage=routing_trace.STAGE_PASS_1,
                 ) as trace:
                     agent, ballot, identity = ChannelRoutingService._route_installed(
-                        db, user, text, policy=policy, include_catalog=include_catalog
+                        db,
+                        user,
+                        text,
+                        policy=policy,
+                        include_catalog=include_catalog,
+                        quoted=quoted,
+                        quoted_agent_id=quoted_agent_id,
                     )
                     agent_id = agent.id if agent is not None else None
                     if agent_id is None and include_catalog and identity is None:
@@ -838,6 +891,8 @@ class ChannelRoutingService:
         origin: str = routing_trace.ORIGIN_SERVER_CHANNEL,
         actor_user_id: uuid.UUID | None = None,
         ballot: CatalogBallot | None = None,
+        quoted: QuotedContext | None = None,
+        quoted_agent_id: uuid.UUID | None = None,
     ) -> tuple[uuid.UUID | None, RoutingTrace | None]:
         """Thread target for Pass 2. Owns its session; returns (bundle id, trace).
 
@@ -876,10 +931,16 @@ class ChannelRoutingService:
                     actor_user_id=actor_user_id,
                     thread_key=thread_key,
                     message=text,
+                    # Carried on Pass 2's capture as well as Pass 1's: when the
+                    # two merge into one row, ``persist`` reads these off the
+                    # terminal trace, which is this one.
+                    quoted_text=quoted.text if quoted is not None else None,
+                    quoted_author=quoted.author if quoted is not None else None,
+                    quoted_agent_id=quoted_agent_id,
                     stage=routing_trace.STAGE_PASS_2,
                 ) as trace:
                     bundle = ChannelRoutingService._route_catalog(
-                        db, user, text, ballot=ballot
+                        db, user, text, ballot=ballot, quoted=quoted
                     )
                     bundle_uuid = bundle.id if bundle is not None else None
             except Exception:
@@ -902,8 +963,17 @@ class ChannelRoutingService:
         *,
         policy: ResolvedChannelPolicy,
         include_catalog: bool = True,
+        quoted: QuotedContext | None = None,
+        quoted_agent_id: uuid.UUID | None = None,
     ) -> tuple[Agent | None, CatalogBallot | None, IdentitySelection | None]:
         """Pass 1 — route the message over what the sender may address.
+
+        **Order of the model-free answers:** the pin, then (once the ballot
+        exists and is non-empty) the quoted-reply preference
+        (:meth:`_route_quoted_reply`), then the single-candidate probe. A pin is
+        the sender's standing instruction and outranks a quote; a quote points
+        at one agent on the ballot, so there is nothing for the probe to weigh
+        it against.
 
         Returns ``(agent, ballot, identity)``. The ballot is Pass 2's candidate
         set when the single-candidate probe below computed one, and ``None``
@@ -1107,6 +1177,23 @@ class ChannelRoutingService:
                 routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
                 return None, None, None
 
+            if quoted_agent_id is not None:
+                # After the ballot, so the preference can only choose among
+                # what the sender's policy already admitted; before the probe,
+                # so a quoted agent is taken without a catalog scan. ``None``
+                # means it did not apply, and routing carries on unchanged.
+                preferred = ChannelRoutingService._route_quoted_reply(
+                    db,
+                    user,
+                    candidates,
+                    quoted_agent_id,
+                    message=text,
+                    quoted=quoted,
+                )
+                if preferred is not None:
+                    agent, identity = preferred
+                    return agent, None, identity
+
             if len(candidates) == 1:
                 # The ONLY branch that probes. See the docstring: with two or
                 # more candidates the choice space is already bigger than one,
@@ -1122,11 +1209,11 @@ class ChannelRoutingService:
                 )
                 if not ballot.offers_an_alternative:
                     agent, identity = ChannelRoutingService._route_only_candidate(
-                        db, user, candidates[0], message=text
+                        db, user, candidates[0], message=text, quoted=quoted
                     )
                     return agent, ballot, identity
 
-            result = AgentClassifier.classify(candidates, text)
+            result = AgentClassifier.classify(candidates, text, quoted=quoted)
         except Exception as exc:  # noqa: BLE001 — router outage must not 500 the webhook
             logger.exception("%s Pass 1 routing failed", _LOG_PREFIX)
             routing_trace.record_error(exc)
@@ -1175,6 +1262,7 @@ class ChannelRoutingService:
                 # naming the *person* competes with the wording naming their
                 # *agent*. ``None`` whenever nothing was stripped.
                 message=result.transformed_message or text,
+                quoted=quoted,
             )
             return agent, ballot, identity
 
@@ -1387,8 +1475,194 @@ class ChannelRoutingService:
         return agent
 
     @staticmethod
+    def _route_quoted_reply(
+        db: DBSession,
+        user: User,
+        candidates: list[Candidate],
+        quoted_agent_id: uuid.UUID,
+        *,
+        message: str,
+        quoted: QuotedContext | None = None,
+    ) -> tuple[Agent | None, IdentitySelection | None] | None:
+        """The sender quoted an agent's reply: route to it if they may address it.
+
+        ``quoted_agent_id`` names the agent whose channel turn wrote the quoted
+        message. The caller read it from the channel's delivery ledger; the
+        quoted *text* plays no part in it. It is a fact about the conversation,
+        not a permission, so it may only **narrow** the ballot this pass built
+        under the sender's policy and never add to it.
+
+        Returns ``None`` when the preference does not apply, and Pass 1 carries
+        on exactly as it would have: the single-candidate probe, then the
+        classifier with the quote as context. A tuple is terminal for Pass 1,
+        in the shape :meth:`_route_only_candidate` returns.
+
+        Two arms:
+
+        - **Owned.** The quoted agent is one of the sender's own candidates. It
+          is re-loaded and re-checked as the single-candidate branch does
+          (:meth:`_reload_own_agent`), so a concurrent delete ends as a
+          recorded ``no_match``, and Pass 2 may still run after it.
+        - **Identity.** The agent belongs to somebody whose ``identity:``
+          candidate is on this ballot — so the sender's identity consent is on
+          and that person is addressable — and it is one of that person's
+          bindings the sender can reach
+          (:meth:`IdentityRoutingService.agent_reachable`). Stage 2 then runs
+          with the agent as its preference and re-reads the bindings itself,
+          and ``assert_access`` re-verifies the grant before any session opens.
+          If Stage 2's own read disagrees (a binding switched off in between),
+          it selects among the reachable bindings as usual, and the decision's
+          ``match_method`` reads whatever Stage 2 last recorded: ``only_one``
+          from its single-binding shortcut, or still ``quoted_reply`` after a
+          classification (which records none). The reachability verdict tells
+          the latter apart by comparing ``selected_agent_id`` with
+          ``quoted_agent_id``.
+
+        **A miss records nothing.** An owned agent missing from the ballot was
+        excluded by scope or eligibility, and the skip that explains it is
+        already on the trace. A foreign agent without an identity candidate
+        leaves no candidate or skip rows, which keeps the consent-off inversion
+        :meth:`_route_installed` describes. (The trace still stores
+        ``quoted_agent_id``: the ledger's answer to who wrote the quoted
+        message, not a list of the people this sender could reach.)
+        """
+        from app.services.identity.identity_routing_service import (
+            IdentityRoutingService,
+        )
+        from app.services.routing.identity_candidate_provider import (
+            parse_identity_ref,
+        )
+
+        ballot_refs = {candidate.ref_id for candidate in candidates}
+        quoted_ref = str(quoted_agent_id)
+
+        # A bare agent UUID is only ever an owned candidate's ref: identity
+        # candidates are namespaced ``identity:{owner_id}`` and cannot match it.
+        if quoted_ref in ballot_refs:
+            routing_trace.record_match(method=routing_trace.MATCH_QUOTED_REPLY)
+            agent = ChannelRoutingService._reload_own_agent(
+                db,
+                user,
+                agent_uuid=quoted_agent_id,
+                ref_id=quoted_ref,
+                route="quoted-reply preference",
+            )
+            if agent is None:
+                return None, None
+            logger.info(
+                "%s Pass 1 routed to quoted agent %s for user %s without "
+                "classifying (the sender quoted its reply)",
+                _LOG_PREFIX,
+                quoted_agent_id,
+                user.id,
+            )
+            return agent, None
+
+        # Only an identity candidate can make somebody else's agent
+        # addressable. Without one on the ballot there is nothing to look up.
+        ballot_owner_ids = {
+            owner for owner in map(parse_identity_ref, ballot_refs) if owner is not None
+        }
+        if not ballot_owner_ids:
+            logger.debug(
+                "%s Quoted agent %s is not on user %s's ballot — classifying",
+                _LOG_PREFIX,
+                quoted_agent_id,
+                user.id,
+            )
+            return None
+
+        owner_id = db.exec(
+            select(Agent.owner_id).where(Agent.id == quoted_agent_id)
+        ).first()
+        if (
+            owner_id is None
+            or owner_id == user.id
+            or owner_id not in ballot_owner_ids
+            or not IdentityRoutingService.agent_reachable(
+                db_session=db,
+                owner_id=owner_id,
+                caller_user_id=user.id,
+                agent_id=quoted_agent_id,
+            )
+        ):
+            logger.debug(
+                "%s Quoted agent %s is not addressable by user %s — classifying",
+                _LOG_PREFIX,
+                quoted_agent_id,
+                user.id,
+            )
+            return None
+
+        routing_trace.record_match(method=routing_trace.MATCH_QUOTED_REPLY)
+        logger.info(
+            "%s Pass 1 prefers quoted agent %s of identity %s for user %s",
+            _LOG_PREFIX,
+            quoted_agent_id,
+            owner_id,
+            user.id,
+        )
+        return ChannelRoutingService._route_identity(
+            db,
+            user,
+            owner_id,
+            message=message,
+            quoted=quoted,
+            preferred_agent_id=quoted_agent_id,
+        )
+
+    @staticmethod
+    def _reload_own_agent(
+        db: DBSession,
+        user: User,
+        *,
+        agent_uuid: uuid.UUID,
+        ref_id: str,
+        route: str,
+    ) -> Agent | None:
+        """Re-load one of the sender's own ballot agents, or record why not.
+
+        The two postconditions every model-free Pass-1 route applies to an
+        owned candidate before handing it back: a concurrent delete, which is
+        genuinely reachable, and a foreign owner, which is defence in depth
+        against a candidate provider that stopped scoping to the sender. Each
+        marks the candidate skipped and settles ``no_match``, so ``None`` is
+        terminal for Pass 1. ``route`` names the caller in the error log.
+        """
+        agent = db.get(Agent, agent_uuid)
+        if agent is None:
+            routing_trace.mark_candidate_skipped(
+                ref_id=ref_id, reason=routing_trace.SKIP_AGENT_MISSING
+            )
+            routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
+            return None
+        if agent.owner_id != user.id:
+            routing_trace.mark_candidate_skipped(
+                ref_id=ref_id, reason=routing_trace.SKIP_FOREIGN_OWNER
+            )
+            routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
+            logger.error(
+                "%s Pass 1 %s picked agent %s owned by %s for sender %s — "
+                "rejected. Unreachable by construction (non-identity candidates "
+                "come from WHERE owner_id = sender, and an identity candidate "
+                "returns before this guard)",
+                _LOG_PREFIX,
+                route,
+                agent.id,
+                agent.owner_id,
+                user.id,
+            )
+            return None
+        return agent
+
+    @staticmethod
     def _route_only_candidate(
-        db: DBSession, user: User, candidate: Candidate, *, message: str
+        db: DBSession,
+        user: User,
+        candidate: Candidate,
+        *,
+        message: str,
+        quoted: QuotedContext | None = None,
     ) -> tuple[Agent | None, IdentitySelection | None]:
         """Route to the one eligible candidate without asking a model.
 
@@ -1415,12 +1689,13 @@ class ChannelRoutingService:
 
         Re-loads the agent by id in this session rather than trusting the
         candidate: the ballot is a projection built moments ago, and this is the
-        same ``db.get`` the classifier branch does. The two guards below are the
-        same two it applies, for the same reasons — a concurrent delete is
-        genuinely reachable, and the ownership check is defence in depth against
-        a candidate provider that stopped scoping. Both are on the
-        **non-identity** path only; the identity dispatch above them carries its
-        own postcondition (:meth:`_route_identity`).
+        same ``db.get`` the classifier branch does. The two guards
+        (:meth:`_reload_own_agent`) are the same two it applies, for the same
+        reasons — a concurrent delete is genuinely reachable, and the ownership
+        check is defence in depth against a candidate provider that stopped
+        scoping. Both are on the **non-identity** path only; the identity
+        dispatch above them carries its own postcondition
+        (:meth:`_route_identity`).
         """
         from app.services.routing.identity_candidate_provider import (
             parse_identity_ref,
@@ -1437,7 +1712,7 @@ class ChannelRoutingService:
         owner_id = parse_identity_ref(candidate.ref_id)
         if owner_id is not None:
             return ChannelRoutingService._route_identity(
-                db, user, owner_id, message=message
+                db, user, owner_id, message=message, quoted=quoted
             )
 
         try:
@@ -1454,28 +1729,14 @@ class ChannelRoutingService:
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
             return None, None
 
-        agent = db.get(Agent, agent_uuid)
+        agent = ChannelRoutingService._reload_own_agent(
+            db,
+            user,
+            agent_uuid=agent_uuid,
+            ref_id=candidate.ref_id,
+            route="single-candidate short-circuit",
+        )
         if agent is None:
-            routing_trace.mark_candidate_skipped(
-                ref_id=candidate.ref_id, reason=routing_trace.SKIP_AGENT_MISSING
-            )
-            routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            return None, None
-        if agent.owner_id != user.id:
-            routing_trace.mark_candidate_skipped(
-                ref_id=candidate.ref_id, reason=routing_trace.SKIP_FOREIGN_OWNER
-            )
-            routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            logger.error(
-                "%s Pass 1 short-circuited to agent %s owned by %s for sender %s "
-                "— rejected. Unreachable by construction (non-identity candidates "
-                "come from WHERE owner_id = sender, and an identity candidate "
-                "returns before this guard)",
-                _LOG_PREFIX,
-                agent.id,
-                agent.owner_id,
-                user.id,
-            )
             return None, None
 
         logger.info(
@@ -1489,9 +1750,20 @@ class ChannelRoutingService:
 
     @staticmethod
     def _route_identity(
-        db: DBSession, user: User, owner_id: uuid.UUID, *, message: str
+        db: DBSession,
+        user: User,
+        owner_id: uuid.UUID,
+        *,
+        message: str,
+        quoted: QuotedContext | None = None,
+        preferred_agent_id: uuid.UUID | None = None,
     ) -> tuple[Agent | None, IdentitySelection]:
         """Stage 2 — Stage 1 chose a person; pick one of *their* agents.
+
+        ``preferred_agent_id`` is forwarded to Stage 2, which honours it only
+        when it names one of that person's bindings the sender can reach (see
+        :meth:`_route_quoted_reply`). Every postcondition below applies to a
+        preferred agent exactly as to a classified one.
 
         Always returns an :class:`IdentitySelection`, because "the sender
         addressed a person" is true of every branch here and is what stops
@@ -1541,6 +1813,8 @@ class ChannelRoutingService:
                     owner_id=owner_id,
                     caller_user_id=user.id,
                     message=message,
+                    quoted=quoted,
+                    preferred_agent_id=preferred_agent_id,
                 )
         except Exception as exc:  # noqa: BLE001 — see "Total" above
             logger.exception(
@@ -1946,6 +2220,7 @@ class ChannelRoutingService:
         text: str,
         *,
         ballot: CatalogBallot | None = None,
+        quoted: QuotedContext | None = None,
     ) -> AgentBundle | None:
         """Pass 2 — classify against the server-wide auto-install list.
 
@@ -1974,7 +2249,7 @@ class ChannelRoutingService:
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
             return None
 
-        result = AgentClassifier.classify(ballot.candidates, text)
+        result = AgentClassifier.classify(ballot.candidates, text, quoted=quoted)
         if result is None or not result.agent_id:
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
             return None

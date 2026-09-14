@@ -44,6 +44,14 @@ nobody opened a capture. Before the channels & identity unification nobody ever
 did on this path, so every recorder call here was dead instrumentation; the
 channel Pass-1 capture is now open around it.
 
+**A preference is not a grant.** ``route_within_identity`` may be handed a
+``preferred_agent_id`` — on the channel path, the agent whose reply the sender
+quoted. It is honoured only when that agent is one of the bindings this caller
+can already reach with an assignment, which is the set every other branch here
+chooses among, so a preference can pick and never widen.
+:meth:`IdentityRoutingService.agent_reachable` asks that question for a caller
+deciding whether to pass one, with the same reads and without recording.
+
 **Glob pre-matching is gone.** ``IdentityAgentBinding.message_patterns`` is no
 longer read here (settled decision §2.9 of the channels/identity unification
 master plan): a second routing mechanism with silently higher priority than the
@@ -61,7 +69,11 @@ from app.models import Agent
 from app.models.identity.identity_models import IdentityAgentBinding, IdentityBindingAssignment
 from app.services.identity.identity_service import IdentityService
 from app.services.routing import routing_trace
-from app.services.routing.agent_classifier import AgentClassifier, Candidate
+from app.services.routing.agent_classifier import (
+    AgentClassifier,
+    Candidate,
+    QuotedContext,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +94,7 @@ class IdentityRoutingResult:
     session_mode: str
     binding_id: uuid.UUID
     binding_assignment_id: uuid.UUID
-    match_method: str  # "only_one" | "ai"
+    match_method: str  # "only_one" | "ai" | "quoted_reply"
     # Message transformation (only set when AI routing stripped a routing prefix)
     transformed_message: str | None = None
 
@@ -99,16 +111,30 @@ class IdentityRoutingService:
         owner_id: uuid.UUID,
         caller_user_id: uuid.UUID,
         message: str,
+        *,
+        quoted: QuotedContext | None = None,
+        preferred_agent_id: uuid.UUID | None = None,
     ) -> IdentityRoutingResult | None:
         """Select the best agent from owner's identity, filtered by caller's access.
+
+        ``quoted`` is the message the sender replied to, passed through to the
+        classifier as context only (plain strings; never authority). Only the
+        channel path supplies one.
+
+        ``preferred_agent_id`` is an agent the caller already has reason to
+        route to — on the channel path, the agent whose reply the sender
+        quoted. It is taken without a classifier call **only** when it is one of
+        the caller's reachable bindings with an assignment; otherwise the steps
+        below run unchanged. Only the channel path supplies one.
 
         Algorithm:
         1. Get active bindings accessible to ``caller_user_id``
         2. If none → return ``None``
-        3. If one → use directly (no classifier call)
-        4. Otherwise classify
+        3. If ``preferred_agent_id`` is one of them, with an assignment → use it
+        4. If one → use directly (no classifier call)
+        5. Otherwise classify
 
-        The **single-binding shortcut** in step 3 stays a Stage-2 property and
+        The **single-binding shortcut** in step 4 stays a Stage-2 property and
         is not flattened into Stage 1 (master plan §2.15): Stage 1 chose a
         *person*, and whether that person happens to have exactly one reachable
         agent is not a fact Stage 1's ballot can hold without re-deriving the
@@ -147,7 +173,69 @@ class IdentityRoutingService:
                 owner_id=owner_id,
                 caller_user_id=caller_user_id,
                 message=message,
+                quoted=quoted,
+                preferred_agent_id=preferred_agent_id,
             )
+
+    @staticmethod
+    def agent_reachable(
+        db_session: DBSession,
+        owner_id: uuid.UUID,
+        caller_user_id: uuid.UUID,
+        agent_id: uuid.UUID,
+    ) -> bool:
+        """Would Stage 2 honour ``agent_id`` as a preference for this caller?
+
+        The same two reads :meth:`_select` makes — the caller's active bindings
+        on ``owner_id`` and their assignments — answered for one agent, so a
+        caller deciding whether to hand Stage 2 a preference asks the question
+        Stage 2 will answer rather than a look-alike of it.
+
+        Records nothing on the trace and writes nothing (fact 2). Takes an open
+        read session, as :meth:`_select` does: it is a helper for a routing pass
+        that already holds one, not an entry point (fact 1 is about
+        :meth:`route_within_identity`). A race between this answer and Stage 2's
+        own reads degrades to ordinary Stage 2 selection, which still chooses
+        only among this caller's reachable bindings.
+        """
+        bindings = [
+            binding
+            for binding in IdentityService.get_active_bindings_for_user(
+                db_session=db_session,
+                owner_id=owner_id,
+                target_user_id=caller_user_id,
+            )
+            if binding.agent_id == agent_id
+        ]
+        if not bindings:
+            return False
+        assignments = IdentityRoutingService._get_binding_assignments(
+            db_session, bindings, caller_user_id
+        )
+        return (
+            IdentityRoutingService._reachable_binding(bindings, assignments, agent_id)
+            is not None
+        )
+
+    @staticmethod
+    def _reachable_binding(
+        bindings: list[IdentityAgentBinding],
+        binding_assignments: dict[uuid.UUID, uuid.UUID],
+        agent_id: uuid.UUID,
+    ) -> IdentityAgentBinding | None:
+        """The binding naming ``agent_id`` that has an assignment for the caller.
+
+        At most one can exist: ``uq_identity_agent_binding`` makes a binding
+        unique per (owner, agent).
+        """
+        return next(
+            (
+                binding
+                for binding in bindings
+                if binding.agent_id == agent_id and binding_assignments.get(binding.id)
+            ),
+            None,
+        )
 
     @staticmethod
     def _select(
@@ -155,6 +243,8 @@ class IdentityRoutingService:
         owner_id: uuid.UUID,
         caller_user_id: uuid.UUID,
         message: str,
+        quoted: QuotedContext | None = None,
+        preferred_agent_id: uuid.UUID | None = None,
     ) -> IdentityRoutingResult | None:
         """The decision itself, on an already-open read session."""
         bindings = IdentityService.get_active_bindings_for_user(
@@ -191,6 +281,32 @@ class IdentityRoutingService:
             caller_user_id,
         )
 
+        # The caller's preference, when it names a binding this caller can
+        # reach. After the ballot capture, so the trace still lists every
+        # binding that was in contention; before the single-binding shortcut,
+        # because a preference that is honoured is the more specific answer.
+        # A preference that is not reachable is ignored — never an error — and
+        # the ordinary steps below choose among the same bindings.
+        if preferred_agent_id is not None:
+            preferred = IdentityRoutingService._reachable_binding(
+                bindings, binding_assignments, preferred_agent_id
+            )
+            if preferred is not None:
+                agent = db_session.get(Agent, preferred.agent_id)
+                logger.info(
+                    "[Stage2] Preferred agent %s is reachable — using directly",
+                    preferred.agent_id,
+                )
+                routing_trace.record_match(method=routing_trace.MATCH_QUOTED_REPLY)
+                return IdentityRoutingResult(
+                    agent_id=preferred.agent_id,
+                    agent_name=agent.name if agent else "",
+                    session_mode=preferred.session_mode,
+                    binding_id=preferred.id,
+                    binding_assignment_id=binding_assignments[preferred.id],
+                    match_method=routing_trace.MATCH_QUOTED_REPLY,
+                )
+
         # Single binding — use directly
         if len(bindings) == 1:
             binding = bindings[0]
@@ -214,7 +330,9 @@ class IdentityRoutingService:
                 match_method="only_one",
             )
 
-        ai_result = IdentityRoutingService._ai_classify(message, bindings, db_session)
+        ai_result = IdentityRoutingService._ai_classify(
+            message, bindings, db_session, quoted=quoted
+        )
         if ai_result:
             ai_matched, ai_transformed_message = ai_result
             agent = db_session.get(Agent, ai_matched.agent_id)
@@ -339,6 +457,7 @@ class IdentityRoutingService:
         message: str,
         bindings: list[IdentityAgentBinding],
         db_session: DBSession,
+        quoted: QuotedContext | None = None,
     ) -> tuple[IdentityAgentBinding, str | None] | None:
         """Use AI classification to pick the best binding for the message.
 
@@ -351,7 +470,7 @@ class IdentityRoutingService:
         """
         candidates = IdentityRoutingService._binding_candidates(db_session, bindings)
 
-        routing_result = AgentClassifier.classify(candidates, message)
+        routing_result = AgentClassifier.classify(candidates, message, quoted=quoted)
 
         if not routing_result:
             return None

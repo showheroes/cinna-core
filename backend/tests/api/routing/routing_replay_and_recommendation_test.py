@@ -203,6 +203,234 @@ def test_replay_is_refused_when_the_message_text_gate_is_off(
     assert "simulate" in r.json()["detail"]
 
 
+def _quote_cast(client, superuser_headers, db, *, agents: int):
+    """A channel, a sender with `agents` eligible agents, and one real reply.
+
+    The reply is the LAST agent's, on its own thread, so a later message can
+    quote a platform-authored message the delivery ledger knows. Returns
+    `(channel, signer, sender, headers, agent_list, reply_id, answer)`.
+    """
+    from tests.utils.channel_quote import (
+        CHANNEL_SECRETS,
+        deliver_channel_event,
+        final_reply_message_id,
+    )
+    from tests.stubs.agent_env_stub import StubAgentEnvConnector
+
+    channel = create_server_channel(
+        client,
+        superuser_headers,
+        auto_register_users=False,
+        email_whitelist="*",
+        secrets=CHANNEL_SECRETS,
+    )
+    signer = GoogleChatJWTSigner()
+    user, headers = create_random_user_with_headers(client)
+    promote_to_developer(client, superuser_headers, user["id"])
+    create_random_ai_credential(client, headers, set_default=True)
+    made = [
+        create_agent_via_api(client, headers, name=f"Quote{i}-{random_lower_string()[:6]}")
+        for i in range(agents)
+    ]
+    drain_tasks()
+    for i, agent in enumerate(made):
+        set_router_trigger_prompt(client, headers, agent["id"], f"Handle topic {i}")
+
+    answer = f"Sunny tomorrow. {random_lower_string()[:6]}"
+    thread_key = f"spaces/AAA/threads/{random_lower_string()}"
+    resp, _, _ = deliver_channel_event(
+        client,
+        channel,
+        signer,
+        build_message_event(thread_key=thread_key, text="weather?", sender_email=user["email"]),
+        stream_stub=StubAgentEnvConnector(response_text=answer),
+        classify_result=classification(made[-1]["id"]),
+    )
+    assert resp.status_code == 200
+    reply_id = final_reply_message_id(db, channel["id"], thread_key)
+    return channel, signer, user, headers, made, reply_id, answer
+
+
+def _deliver_and_get_trace(client, superuser_headers, channel, signer, event, **kwargs) -> dict:
+    from tests.utils.channel_quote import deliver_channel_event
+    from tests.utils.routing import list_routing_traces
+
+    before = {
+        r["id"] for r in list_routing_traces(client, superuser_headers, channel_id=channel["id"])["data"]
+    }
+    resp, _, _ = deliver_channel_event(client, channel, signer, event, **kwargs)
+    assert resp.status_code == 200
+    new = {
+        r["id"] for r in list_routing_traces(client, superuser_headers, channel_id=channel["id"])["data"]
+    } - before
+    assert len(new) == 1, new
+    return get_routing_trace(client, superuser_headers, new.pop())
+
+
+def test_replay_of_a_quoted_decision_re_renders_the_quote_and_re_applies_the_preference(
+    client: TestClient, superuser_token_headers: dict[str, str], db, monkeypatch
+) -> None:
+    """
+    Replay needs the quote the original decision was given — the stored
+    `stages[].prompt` is clamped inside the template and can never supply it —
+    so the trace stores it (plan D6) and replay carries it back in.
+
+      1. **Preference re-applied.** A decision routed by `quoted_reply` replays
+         to the same agent with NO classifier call (the refusal stub is
+         installed), carrying the quote and the quoted agent, and says
+         nothing changed.
+      2. **Quote re-rendered.** A decision that classified with a human quote
+         replays through the real renderer: the captured prompt holds the quote
+         section with the stored text and author, and the User Message is the
+         original words. The audit row carries the quote's length, not its body.
+      3. With `ROUTING_TRACE_STORE_MESSAGE_TEXT` off, a quoted trace is still a
+         409 — the quote is never re-run from a withheld row.
+    """
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from tests.utils.channel_quote import (
+        PROVIDER_TARGET,
+        QUOTED_SECTION_HEADING,
+        user_message_section,
+    )
+
+    channel, signer, user, headers, (jokes, weather), reply_id, answer = _quote_cast(
+        client, superuser_token_headers, db, agents=2
+    )
+
+    # ── Phase 1: a quoted_reply decision replays as one ───────────────────
+    preferred = _deliver_and_get_trace(
+        client,
+        superuser_token_headers,
+        channel,
+        signer,
+        build_message_event(
+            thread_key=f"spaces/AAA/threads/{random_lower_string()}",
+            text="and the day after?",
+            sender_email=user["email"],
+            quoted_message_name=reply_id,
+            quoted_text=answer,
+            quoted_sender="DoBot",
+        ),
+    )
+    assert preferred["match_method"] == "quoted_reply", preferred
+
+    with patched_routing_externals():
+        result = replay_routing_trace(client, superuser_token_headers, preferred["id"])
+    replay = result["replay"]
+    assert replay["match_method"] == "quoted_reply", replay
+    assert replay["selected_agent_id"] == weather["id"], replay
+    assert replay["quoted_agent_id"] == weather["id"], replay
+    assert replay["quoted_message_text"] == answer, replay
+    assert replay["quoted_message_author"] == "DoBot", replay
+    assert result["diff"]["changed"] is False, result["diff"]
+
+    # ── Phase 2: a classified decision replays with the quote rendered ────
+    human_quote = f"would be fun to hear a dad joke {random_lower_string()[:6]}"
+    classified = _deliver_and_get_trace(
+        client,
+        superuser_token_headers,
+        channel,
+        signer,
+        build_message_event(
+            thread_key=f"spaces/AAA/threads/{random_lower_string()}",
+            text="can u?",
+            sender_email=user["email"],
+            quoted_message_name=f"spaces/AAA/messages/{random_lower_string()}",
+            quoted_text=human_quote,
+            quoted_sender="Bob Human",
+        ),
+        classify_result=classification(jokes["id"]),
+    )
+    assert classified["match_method"] == "ai", classified
+
+    with patched_routing_externals(classify_via_provider=True), patch(PROVIDER_TARGET) as pm:
+        pm.return_value.generate_content.return_value = MagicMock(
+            text=json.dumps({"agent_id": jokes["id"]})
+        )
+        result = replay_routing_trace(client, superuser_token_headers, classified["id"])
+        prompts = [c.args[0] for c in pm.return_value.generate_content.call_args_list]
+
+    assert len(prompts) == 1, prompts
+    assert QUOTED_SECTION_HEADING in prompts[0]
+    assert f"Author: Bob Human\n> {human_quote}" in prompts[0]
+    assert user_message_section(prompts[0]) == "can u?"
+    assert result["replay"]["quoted_message_text"] == human_quote, result["replay"]
+    assert result["replay"]["selected_agent_id"] == jokes["id"], result["replay"]
+    assert result["diff"]["changed"] is False, result["diff"]
+
+    events = [
+        e
+        for e in find_security_events(client, superuser_token_headers, "ROUTING_SIMULATE_RUN")
+        if e["details"].get("source_trace_id") == classified["id"]
+    ]
+    assert len(events) == 1, events
+    assert events[0]["details"]["quoted_chars"] == len(human_quote)
+    assert human_quote not in json.dumps(events[0]["details"])
+
+    # ── Phase 3: the text gate still refuses ──────────────────────────────
+    monkeypatch.setattr(settings, "ROUTING_TRACE_STORE_MESSAGE_TEXT", False)
+    r = client.post(
+        f"{API}/admin/routing/traces/{preferred['id']}/replay",
+        headers=superuser_token_headers,
+        json={"include_catalog": True},
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_replay_after_the_quoted_agent_is_deleted_runs_without_the_preference(
+    client: TestClient, superuser_token_headers: dict[str, str], db
+) -> None:
+    """
+    `routing_decision.quoted_agent_id` is SET NULL when that agent is deleted.
+    A replay then has no agent to prefer: it classifies among what is left,
+    still carrying the quote, and the diff reports what changed — the match
+    method, the selection, and the candidate that is gone.
+    """
+    channel, signer, user, headers, (jokes, news, weather), reply_id, answer = _quote_cast(
+        client, superuser_token_headers, db, agents=3
+    )
+    original = _deliver_and_get_trace(
+        client,
+        superuser_token_headers,
+        channel,
+        signer,
+        build_message_event(
+            thread_key=f"spaces/AAA/threads/{random_lower_string()}",
+            text="and the day after?",
+            sender_email=user["email"],
+            quoted_message_name=reply_id,
+            quoted_text=answer,
+        ),
+    )
+    assert original["match_method"] == "quoted_reply", original
+    assert original["quoted_agent_id"] == weather["id"], original
+
+    r = client.delete(f"{API}/agents/{weather['id']}", headers=headers)
+    assert r.status_code == 200, r.text
+    after_delete = get_routing_trace(client, superuser_token_headers, original["id"])
+    assert after_delete["quoted_agent_id"] is None, after_delete
+    assert after_delete["quoted_message_text"] == answer, after_delete
+
+    with patched_routing_externals(classify_result=classification(jokes["id"])):
+        result = replay_routing_trace(client, superuser_token_headers, original["id"])
+
+    replay = result["replay"]
+    assert replay["match_method"] == "ai", replay
+    assert replay["selected_agent_id"] == jokes["id"], replay
+    assert replay["quoted_agent_id"] is None, replay
+    assert replay["quoted_message_text"] == answer, replay
+
+    diff = result["diff"]
+    assert diff["changed"] is True, diff
+    assert diff["match_method_changed"] is True, diff
+    assert diff["original_match_method"] == "quoted_reply", diff
+    assert diff["replay_match_method"] == "ai", diff
+    assert diff["selection_changed"] is True, diff
+    assert weather["name"] in diff["candidates_removed"], diff
+
+
 def test_replay_is_superuser_only_and_audited(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:

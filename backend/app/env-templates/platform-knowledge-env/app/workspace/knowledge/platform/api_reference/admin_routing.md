@@ -49,6 +49,9 @@ Auto-generated from OpenAPI spec. Tag: `admin-routing`
   - `as_user_id`: uuid (required)
   - `channel_id`: string | null
   - `include_catalog`: boolean
+  - `quoted_message_text`: string | null
+  - `quoted_message_author`: string | null
+  - `quoted_agent_id`: string | null
 
 **Response:** `RoutingDecisionPublic`
 

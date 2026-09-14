@@ -56,6 +56,8 @@ from app.models import ServerChannel
 from app.services.common.egress_guard import EgressBlockedError, assert_url_allowed
 from app.services.files.file_storage_service import FileStorageService
 from app.services.server_channels.adapters.base import (
+    QUOTED_SNAPSHOT_AUTHOR_MAX_CHARS,
+    QUOTED_SNAPSHOT_MAX_CHARS,
     ChannelAdapter,
     ChannelAttachmentRef,
     ChannelAttachmentUnavailable,
@@ -135,6 +137,11 @@ _read_capability_cache: dict[str, tuple[bool, float]] = {}
 _READ_CAPABILITY_TTL = 300
 _app_user_cache: dict[str, str] = {}
 _read_failure_cache: dict[tuple[str, str], float] = {}
+
+
+def _clamp_with_ellipsis(value: str, limit: int) -> str:
+    """``value`` cut to ``limit`` characters, the last one ``…`` when cut."""
+    return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
 class GoogleChatAdapter(ChannelAdapter):
@@ -333,11 +340,15 @@ class GoogleChatAdapter(ChannelAdapter):
             if space_type in ("SPACE", "ROOM", "GROUP_CHAT")
             else "unknown"
         )
+        quoted_id = self._same_space_quote(message, space.get("name"))
+        quoted_text, quoted_author = self._quoted_snapshot(message, quoted_id)
         return ChannelInboundMessage(
             event_kind="message",
             conversation_key=space.get("name"),
             conversation_kind=kind,
-            quoted_message_id=self._same_space_quote(message, space.get("name")),
+            quoted_message_id=quoted_id,
+            quoted_message_text=quoted_text,
+            quoted_message_author=quoted_author,
             conversation_hints={
                 "space_threading_state": space.get("spaceThreadingState"),
                 "conversation_kind": kind,
@@ -441,8 +452,14 @@ class GoogleChatAdapter(ChannelAdapter):
     def _same_space_quote(
         message: dict[str, Any], conversation_key: str | None = None
     ) -> str | None:
-        """A quote chain must stay inside the triggering conversation."""
-        quoted_id = (message.get("quotedMessageMetadata") or {}).get("name")
+        """A quote chain must stay inside the triggering conversation.
+
+        A ``quotedMessageMetadata`` that is not an object reads as "no quote",
+        like any other shape this does not expect: the quote is optional
+        context and must never fail the parse of the message carrying it.
+        """
+        metadata = message.get("quotedMessageMetadata")
+        quoted_id = metadata.get("name") if isinstance(metadata, dict) else None
         if not isinstance(quoted_id, str) or not re.fullmatch(
             r"spaces/[A-Za-z0-9_-]+/messages/[A-Za-z0-9_.-]+", quoted_id
         ):
@@ -451,6 +468,53 @@ class GoogleChatAdapter(ChannelAdapter):
             conversation_key or str(message.get("name", "")).split("/messages/", 1)[0]
         )
         return quoted_id if quoted_id.startswith(f"{source_space}/messages/") else None
+
+    @staticmethod
+    def _quoted_snapshot(
+        message: dict[str, Any], quoted_id: str | None
+    ) -> tuple[str | None, str | None]:
+        """``(text, author)`` from the event's quoted-message snapshot, bounded.
+
+        Google sends ``quotedMessageMetadata.quotedMessageSnapshot`` with the
+        quoted message's ``text`` and ``sender``. ``sender`` is the author's
+        display *name* — a string with no email, type or stable id — so it is
+        kept as a label only and never used to identify anyone.
+
+        Returns ``(None, None)`` unless the id already passed the same-space
+        rule (``quoted_id`` is what :meth:`_same_space_quote` accepted), the
+        quote is a reply rather than a ``FORWARD`` (forwards are cross-space by
+        nature), and the snapshot carries non-blank text. The author is ``None``
+        whenever the text is.
+
+        **Total.** A payload shape this does not expect is "no snapshot", which
+        is exactly today's behaviour; it must never cost the message itself.
+        """
+        if not quoted_id:
+            return None, None
+        try:
+            metadata = message.get("quotedMessageMetadata")
+            if not isinstance(metadata, dict):
+                return None, None
+            snapshot = metadata.get("quotedMessageSnapshot")
+            if not isinstance(snapshot, dict):
+                return None, None
+            if metadata.get("quoteType") not in (None, "QUOTE_TYPE_UNSPECIFIED", "REPLY"):
+                return None, None
+            raw_text = snapshot.get("text")
+            if not isinstance(raw_text, str) or not raw_text.strip():
+                return None, None
+            text = _clamp_with_ellipsis(raw_text.strip(), QUOTED_SNAPSHOT_MAX_CHARS)
+            raw_author = snapshot.get("sender")
+            author = (
+                _clamp_with_ellipsis(
+                    " ".join(raw_author.split()), QUOTED_SNAPSHOT_AUTHOR_MAX_CHARS
+                )
+                if isinstance(raw_author, str)
+                else ""
+            )
+            return text, author or None
+        except Exception:  # noqa: BLE001 — see "Total" above
+            return None, None
 
     def _message_ref(
         self, message: dict[str, Any], channel: ServerChannel

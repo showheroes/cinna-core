@@ -34,6 +34,7 @@ from sqlmodel import Session as DBSession
 from app.api.deps import SessionDep, get_current_active_superuser
 from app.core.config import settings
 from app.models import (
+    Agent,
     Message,
     RoutingDecisionPublic,
     RoutingDecisionsPublic,
@@ -393,6 +394,20 @@ async def simulate_routing(
         and session.get(ServerChannel, data.channel_id) is None
     ):
         raise HTTPException(status_code=404, detail="Channel not found")
+    # Same reason as the channel check: ``routing_decision.quoted_agent_id`` is
+    # a foreign key, so an id naming no agent would classify (real spend) and
+    # then fail the trace INSERT.
+    if (
+        data.quoted_agent_id is not None
+        and session.get(Agent, data.quoted_agent_id) is None
+    ):
+        raise HTTPException(status_code=404, detail="Quoted agent not found")
+    # Blank quoted text is no quote, and an author label means nothing without
+    # the text it would attribute.
+    quoted_text = (data.quoted_message_text or "").strip() or None
+    quoted_author = (
+        ((data.quoted_message_author or "").strip() or None) if quoted_text else None
+    )
 
     # Read before the audit's commit expires the instance — the same Rule 2
     # hoist the routing pipeline makes, for the same reason: an argument
@@ -428,6 +443,16 @@ async def simulate_routing(
             # the superuser-only trace API and its text gate. The length is
             # enough to correlate an audit row with a run.
             "message_chars": len(message),
+            # The quote is a third party's words: its length only, for the
+            # same reason. The quoted agent is an id and changes the decision.
+            "quoted_chars": len(quoted_text) if quoted_text else 0,
+            "quoted_agent_id": (
+                str(data.quoted_agent_id) if data.quoted_agent_id else None
+            ),
+            # With the switch off, ``RoutingTuningService.simulate`` drops the
+            # quote as the real path would, so the two fields above describe
+            # the request rather than the run. This says which.
+            "quote_routing_enabled": settings.CHANNEL_QUOTE_ROUTING_ENABLED,
         },
     )
     try:
@@ -437,6 +462,9 @@ async def simulate_routing(
             actor_user_id=current_user.id,
             message=message,
             include_catalog=data.include_catalog,
+            quoted_text=quoted_text,
+            quoted_author=quoted_author,
+            quoted_agent_id=data.quoted_agent_id,
             # Already checked to exist above, and that check is not
             # redundant with ``_policy_for``'s degrade. ``_policy_for`` was
             # written for replay, whose channel id comes off a stored trace
@@ -512,6 +540,11 @@ async def replay_routing_trace(
             "target_user_email": target_email,
             "include_catalog": data.include_catalog if data else True,
             "message_chars": len(source.message),
+            "quoted_chars": len(source.quoted_text) if source.quoted_text else 0,
+            "quoted_agent_id": (
+                str(source.quoted_agent_id) if source.quoted_agent_id else None
+            ),
+            "quote_routing_enabled": settings.CHANNEL_QUOTE_ROUTING_ENABLED,
         },
     )
     try:
@@ -521,6 +554,11 @@ async def replay_routing_trace(
             actor_user_id=current_user.id,
             message=source.message,
             include_catalog=data.include_catalog if data else True,
+            # The quote the original was given, so the replay re-renders it and
+            # re-applies the quoted-reply preference against current state.
+            quoted_text=source.quoted_text,
+            quoted_author=source.quoted_author,
+            quoted_agent_id=source.quoted_agent_id,
             # Carried from the original so the replay lands on the same
             # channel's filtered view. ``origin="simulate"`` is what keeps it
             # distinguishable from a real decision, not the absence of a

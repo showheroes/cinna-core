@@ -39,7 +39,10 @@ them is wrong for the other for the same reason:
   ``TRACE_TEXT_MAX_CHARS`` before the user message is appended, and a privacy
   property must not rest on the byte length of a markdown file. With the gate
   off, ``message_sha256`` plus the candidate set and verdict still answer "which
-  agents were even considered".
+  agents were even considered". The same flag, written and read the same way,
+  governs ``quoted_message_text`` and ``quoted_message_author`` — the message a
+  channel sender replied to, which is a third party's words — while
+  ``quoted_agent_id`` (a resolved id) is served regardless.
 
 Neither gate erases. Both hide, and both say so, naming the two things that do
 erase — retention expiry and the trace-clear endpoint.
@@ -84,6 +87,7 @@ from app.models.routing.routing_decision import (
     MAX_MESSAGE_SHA256_CHARS,
     MAX_ORIGIN_CHARS,
     MAX_OUTCOME_CHARS,
+    MAX_QUOTED_AUTHOR_CHARS,
     MAX_THREAD_KEY_CHARS,
     TRACING_DISABLED_NOTICE,
     RoutingDecision,
@@ -234,12 +238,21 @@ class RoutingTraceService:
             prior_match_method: str | None = None
             prior_error: str | None = None
             started_at = trace.created_at
+            # The quote both passes were given. Both captures carry the same
+            # values on the channel path, so the terminal trace's are the
+            # row's; the earlier pass's fill in only what the later one lacks.
+            quoted_text = trace.quoted_message_text
+            quoted_author = trace.quoted_message_author
+            quoted_agent_id = trace.quoted_agent_id
             if preceded_by is not None:
                 stages.extend(preceded_by.stages_payload())
                 prior_latency = preceded_by.latency_ms
                 prior_match_method = preceded_by.match_method
                 prior_error = preceded_by.error
                 started_at = preceded_by.created_at
+                quoted_text = quoted_text or preceded_by.quoted_message_text
+                quoted_author = quoted_author or preceded_by.quoted_message_author
+                quoted_agent_id = quoted_agent_id or preceded_by.quoted_agent_id
             stages.extend(trace.stages_payload())
 
             outcome = trace.outcome or routing_trace.OUTCOME_NO_MATCH
@@ -310,6 +323,21 @@ class RoutingTraceService:
                 message_sha256=_fit_exact(
                     trace.message_sha256, MAX_MESSAGE_SHA256_CHARS
                 ),
+                # A third party's words and name label, so the same write gate
+                # as ``message_text`` — the ``store_text`` local, App MCP
+                # narrowing included. Withheld from the database, not only from
+                # the API.
+                quoted_message_text=(
+                    RoutingTraceService._clamp_text(quoted_text)
+                    if store_text
+                    else None
+                ),
+                quoted_message_author=(
+                    _fit(quoted_author, MAX_QUOTED_AUTHOR_CHARS)
+                    if store_text
+                    else None
+                ),
+                quoted_agent_id=_as_uuid(quoted_agent_id),
                 # Clamped to the column widths even though every value written
                 # today is a module constant. A vocabulary string that outgrew
                 # its column would raise a DataError inside the never-raises
@@ -343,6 +371,18 @@ class RoutingTraceService:
             # Its own session, so nothing here can commit or discard work the
             # caller is holding. Closed before we return.
             with create_session() as db:
+                # ``quoted_agent_id`` is a foreign key to an agent the delivery
+                # ledger resolved before the status notice and the LLM call, a
+                # window a deletion can land in, and it is stored even for an
+                # agent nobody routed to. An INSERT naming a deleted agent
+                # would fail and lose the whole row, so the id is dropped
+                # instead: the decision matters more than its pointer. One
+                # primary-key read, and only when the id is set.
+                if (
+                    row.quoted_agent_id is not None
+                    and db.get(Agent, row.quoted_agent_id) is None
+                ):
+                    row.quoted_agent_id = None
                 db.add(row)
                 db.commit()
             # No ``refresh``: the id was assigned client-side, so re-SELECTing
@@ -480,13 +520,18 @@ class RoutingTraceService:
         # claimed it was withheld. A response that actively asserts something
         # false is worse than one that merely omits.
         stages = list(row.stages or [])
+        # One read of the flag for every gated field on this response, so the
+        # stages, the quote and ``message_text_hidden`` cannot disagree.
+        show_text = bool(settings.ROUTING_TRACE_STORE_MESSAGE_TEXT)
         public = RoutingDecisionPublic(
             **summary.model_dump(),
-            stages=(
-                stages
-                if settings.ROUTING_TRACE_STORE_MESSAGE_TEXT
-                else _project_safe_stages(stages)
-            ),
+            stages=stages if show_text else _project_safe_stages(stages),
+            # Same read gate as ``message_text``: rows written while the flag
+            # was on keep the quote at rest, and it is not served while it is
+            # off.
+            quoted_message_text=row.quoted_message_text if show_text else None,
+            quoted_message_author=row.quoted_message_author if show_text else None,
+            quoted_agent_id=row.quoted_agent_id,
         )
         public.diagnosis = RoutingReachabilityService.diagnose(
             db, public, expected_agent_id=expected_agent_id

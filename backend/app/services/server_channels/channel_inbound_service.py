@@ -114,6 +114,7 @@ from app.models.events import security_event as security_event_constants
 from app.models.files.file_upload import FileUpload
 from app.services.common.email_patterns import match_email_pattern
 from app.services.routing import routing_trace
+from app.services.routing.agent_classifier import QuotedContext
 from app.services.server_channels.adapters.base import (
     ChannelAdapter,
     ChannelInboundMessage,
@@ -2176,6 +2177,21 @@ class ChannelInboundService:
         # thing it is rather than as a conditional buried in an argument list.
         if classification_text is None:
             classification_text = text
+        # What the sender replied to, as classifier context only. Plain data
+        # built from the inbound value (no read, cannot raise); stored content
+        # and ``classification_text`` stay the sender's own words.
+        quoted = ChannelInboundService._quoted_context(inbound)
+        # The agent whose reply the sender quoted, when this platform wrote it.
+        # Keyed on the quoted id, so it applies without a snapshot. It is a
+        # blocking read, so it runs off the event loop like the routing passes
+        # do. It is resolved here, before the outer session below is opened, so
+        # its own short-lived session never holds a second pooled connection
+        # beside that one. An unquoted message skips the thread hop entirely.
+        quoted_agent_id: uuid.UUID | None = None
+        if inbound is not None and inbound.quoted_message_id:
+            quoted_agent_id = await ChannelRoutingService.run_in_thread(
+                ChannelInboundService._quoted_platform_agent_id, channel_id, inbound
+            )
 
         from app.core.db import create_session
 
@@ -2354,6 +2370,8 @@ class ChannelInboundService:
                     channel_id=channel_id,
                     thread_key=thread_key,
                     origin=origin,
+                    quoted=quoted,
+                    quoted_agent_id=quoted_agent_id,
                 )
                 pass1_trace = decision.pass1_trace
                 pass2_trace = decision.pass2_trace
@@ -4103,6 +4121,13 @@ class ChannelInboundService:
         binding: ChannelThreadBinding, entry: dict
     ) -> ChannelInboundMessage:
         conversation = entry.get("conversation") or {}
+        quoted_message_id = conversation.get("quoted_message_id")
+        # Entries parked before the quote snapshot existed lack both keys and
+        # rebuild with ``None``. The snapshot is only meaningful beside the id
+        # it belongs to, so it is dropped when the id is absent.
+        quoted_message_text = (
+            conversation.get("quoted_message_text") if quoted_message_id else None
+        )
         return ChannelInboundMessage(
             event_kind="message",
             text=entry.get("text") or "",
@@ -4113,10 +4138,109 @@ class ChannelInboundService:
             or binding.conversation_key,
             conversation_kind=conversation.get("conversation_kind")
             or binding.conversation_kind,
-            quoted_message_id=conversation.get("quoted_message_id"),
+            quoted_message_id=quoted_message_id,
+            quoted_message_text=quoted_message_text,
+            quoted_message_author=(
+                conversation.get("quoted_message_author")
+                if quoted_message_text
+                else None
+            ),
             conversation_hints=conversation.get("conversation_hints") or {},
             is_thread_summon=bool(conversation.get("is_thread_summon")),
         )
+
+    @staticmethod
+    def _quoted_context(
+        inbound: ChannelInboundMessage | None,
+    ) -> QuotedContext | None:
+        """The quote the router may read as context, or ``None``.
+
+        ``None`` — and so prompts byte-identical to an unquoted message's —
+        unless ``CHANNEL_QUOTE_ROUTING_ENABLED`` is on and the transport carried
+        both the same-conversation quoted id and its snapshot text. A quote id
+        without a snapshot gives the classifier nothing to read.
+
+        Content, never authority: the snapshot may be a third party's words,
+        and ``decide`` gives it to the classifier and to nothing else.
+
+        Not a gate for anything keyed on the quoted **id**: a quote Google sent
+        without a snapshot returns ``None`` here, so an id-based lookup must
+        read ``CHANNEL_QUOTE_ROUTING_ENABLED`` and ``quoted_message_id``
+        directly rather than reuse this.
+        """
+        if (
+            not settings.CHANNEL_QUOTE_ROUTING_ENABLED
+            or inbound is None
+            or not inbound.quoted_message_id
+            or not inbound.quoted_message_text
+        ):
+            return None
+        return QuotedContext(
+            text=inbound.quoted_message_text,
+            author=inbound.quoted_message_author,
+        )
+
+    @staticmethod
+    def _quoted_platform_agent_id(
+        channel_id: uuid.UUID,
+        inbound: ChannelInboundMessage | None,
+    ) -> uuid.UUID | None:
+        """The agent whose turn on this channel wrote the quoted message.
+
+        ``decide`` takes this as a plain id for its quoted-reply preference.
+        The delivery ledger answers it through a join on
+        ``ChannelThreadBinding``, a name the routing module may not reference
+        (``tests/architecture/channel_routing_purity_test.py``), so the read
+        lives here in the effect half.
+
+        Keyed on the quoted **id** alone: a quote Google sent without a
+        snapshot still names the message, and the preference needs nothing
+        else. So this reads ``CHANNEL_QUOTE_ROUTING_ENABLED`` and
+        ``quoted_message_id`` directly instead of going through
+        :meth:`_quoted_context`. The id already passed the adapter's
+        same-conversation rule, and the lookup is scoped to this channel.
+
+        **Blocking**: a session checkout and a ``SELECT``. The async caller
+        runs it through ``ChannelRoutingService.run_in_thread``, never inline
+        on the event loop. It takes plain values only, so it closes over no
+        caller session.
+
+        **Total, on a session of its own.**
+        ``platform_agent_for_message`` raises on a database error by design,
+        and a failed ``SELECT`` on a caller's session would leave its
+        transaction aborted underneath the rows the caller goes on to use. Any
+        failure here means "no preference": routing proceeds exactly as it
+        would for a quote this platform did not write. Logged with ids only.
+        """
+        if (
+            not settings.CHANNEL_QUOTE_ROUTING_ENABLED
+            or inbound is None
+            or not inbound.quoted_message_id
+        ):
+            return None
+
+        from app.core.db import create_session
+        from app.services.server_channels.channel_turn_delivery_service import (
+            ChannelTurnDeliveryLedger,
+        )
+
+        quoted_message_id = inbound.quoted_message_id
+        try:
+            with create_session() as lookup_db:
+                authored = ChannelTurnDeliveryLedger.platform_agent_for_message(
+                    lookup_db,
+                    channel_id=channel_id,
+                    external_message_id=quoted_message_id,
+                )
+        except Exception:  # noqa: BLE001 — see "Total" above
+            logger.debug(
+                "%s Quoted-message authorship lookup failed for channel %s",
+                _LOG_PREFIX,
+                channel_id,
+                exc_info=True,
+            )
+            return None
+        return authored.agent_id if authored is not None else None
 
     @staticmethod
     def _turn_target(
@@ -4305,6 +4429,12 @@ class ChannelInboundService:
                         "conversation_key": inbound.conversation_key,
                         "conversation_kind": inbound.conversation_kind,
                         "quoted_message_id": inbound.quoted_message_id,
+                        # The snapshot must survive an install wait: the
+                        # ingestion fallback reads it when the parked message
+                        # drains. Stored at rest exactly as the sender's own
+                        # text beside it already is.
+                        "quoted_message_text": inbound.quoted_message_text,
+                        "quoted_message_author": inbound.quoted_message_author,
                         "conversation_hints": inbound.conversation_hints,
                         "is_thread_summon": inbound.is_thread_summon,
                     }

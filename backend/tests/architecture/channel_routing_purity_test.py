@@ -182,6 +182,12 @@ _IDENTITY_MODULE = (
 _POLICY_MODULE = (
     _BACKEND_ROOT / "app" / "services" / "server_channels" / "channel_policy_service.py"
 )
+#: Both guarded entry points also take a `QuotedContext` (the message the sender
+#: replied to) across the same boundary, so its fields are walked as plain data
+#: for each of them.
+_CLASSIFIER_MODULE = (
+    _BACKEND_ROOT / "app" / "services" / "routing" / "agent_classifier.py"
+)
 
 
 class _GuardedModule(NamedTuple):
@@ -208,13 +214,17 @@ _GUARDED: tuple[_GuardedModule, ...] = (
         path=_ROUTING_MODULE,
         entry_point="decide",
         result_class="RoutingDecisionResult",
-        also_plain_data=((_POLICY_MODULE, "ResolvedChannelPolicy"),),
+        also_plain_data=(
+            (_POLICY_MODULE, "ResolvedChannelPolicy"),
+            (_CLASSIFIER_MODULE, "QuotedContext"),
+        ),
     ),
     _GuardedModule(
         id="identity-stage-2",
         path=_IDENTITY_MODULE,
         entry_point="route_within_identity",
         result_class="IdentityRoutingResult",
+        also_plain_data=((_CLASSIFIER_MODULE, "QuotedContext"),),
     ),
 )
 

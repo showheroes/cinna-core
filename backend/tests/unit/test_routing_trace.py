@@ -772,3 +772,73 @@ def test_summarize_and_stages_payload_stay_total_over_a_poisoned_trace() -> None
             payload = trace.stages_payload()
             assert isinstance(payload, list)
             assert isinstance(rt.summarize(trace), str)
+
+
+# --- The quoted message on the trace (quote-aware channel routing) -------
+
+
+def test_capture_survives_poisoned_quoted_fields() -> None:
+    """The three quote inputs ride the same constructor as ``message`` and the
+    ids, so they get the same totality proof: a poisoned quote costs the quote
+    fields, never the routing pass."""
+    for field in ("quoted_text", "quoted_author", "quoted_agent_id"):
+        for poison in _every_poison():
+            with rt.RoutingTrace.capture(
+                origin=rt.ORIGIN_SERVER_CHANNEL, message="can u?", **{field: poison}
+            ) as trace:
+                rt.record_outcome(rt.OUTCOME_NO_MATCH)
+            assert trace.outcome == rt.OUTCOME_NO_MATCH
+            for value in (
+                trace.quoted_message_text,
+                trace.quoted_message_author,
+                trace.quoted_agent_id,
+            ):
+                assert value is None or isinstance(value, str)
+
+
+def test_message_sha256_is_the_digest_of_the_senders_words_alone() -> None:
+    """The quote is captured beside the sender's words and never mixed in:
+    ``message_text`` and ``message_sha256`` are identical with and without it."""
+    import hashlib
+
+    agent_id = uuid.uuid4()
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SERVER_CHANNEL,
+        message="can u?",
+        quoted_text="would be fun to hear a dad joke",
+        quoted_author="Bob Smith",
+        quoted_agent_id=agent_id,
+    ) as quoted:
+        rt.record_outcome(rt.OUTCOME_NO_MATCH)
+    with rt.RoutingTrace.capture(origin=rt.ORIGIN_SERVER_CHANNEL, message="can u?") as plain:
+        rt.record_outcome(rt.OUTCOME_NO_MATCH)
+
+    assert quoted.message_sha256 == hashlib.sha256(b"can u?").hexdigest()
+    assert quoted.message_sha256 == plain.message_sha256
+    assert quoted.message_text == plain.message_text == "can u?"
+
+    assert quoted.quoted_message_text == "would be fun to hear a dad joke"
+    assert quoted.quoted_message_author == "Bob Smith"
+    assert quoted.quoted_agent_id == str(agent_id)
+    assert plain.quoted_message_text is None
+    assert plain.quoted_message_author is None
+    assert plain.quoted_agent_id is None
+
+
+def test_the_quoted_author_is_hard_cut_to_its_column_and_the_text_is_clamped() -> None:
+    long_text = "t" * (rt.TRACE_TEXT_MAX_CHARS + 500)
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SERVER_CHANNEL,
+        message="can u?",
+        quoted_text=long_text,
+        quoted_author="a" * (rt.QUOTED_AUTHOR_MAX_CHARS * 4),
+    ) as trace:
+        rt.record_outcome(rt.OUTCOME_NO_MATCH)
+
+    # Exactly the column width, and no "(truncated)" marker: the column is that
+    # wide, so a marker would only be cut off again at persist.
+    assert trace.quoted_message_author == "a" * rt.QUOTED_AUTHOR_MAX_CHARS
+    # The text follows ``clamp`` like every other free-text field.
+    assert trace.quoted_message_text is not None
+    assert trace.quoted_message_text.startswith("t" * rt.TRACE_TEXT_MAX_CHARS)
+    assert "truncated" in trace.quoted_message_text

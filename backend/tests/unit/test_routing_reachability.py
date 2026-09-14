@@ -749,3 +749,93 @@ def test_the_identity_unavailable_base_entry_speaks_in_app_mcp_voice() -> None:
     # and differ only in which screen they send the reader to.
     assert "MCP Server card" in diagnosis.verdict, diagnosis
     assert "was already on" not in diagnosis.verdict, diagnosis
+
+
+# ── Quote-aware routing: the quoted-reply sentence under CODE_ROUTED ─────
+
+
+def _routed_trace(
+    *, match_method: str, selected: uuid.UUID, quoted: uuid.UUID | None
+) -> RoutingDecisionPublic:
+    other = uuid.uuid4()
+    return RoutingDecisionPublic(
+        id=uuid.uuid4(),
+        created_at=datetime.now(UTC),
+        origin=routing_trace.ORIGIN_SERVER_CHANNEL,
+        outcome=routing_trace.OUTCOME_ROUTED,
+        match_method=match_method,
+        selected_agent_id=selected,
+        selected_agent_name="Joke Bot",
+        quoted_agent_id=quoted,
+        message_text="another one please",
+        stages=[
+            {
+                "stage": routing_trace.STAGE_PASS_1,
+                "candidates": [
+                    _candidate(str(selected), "Joke Bot"),
+                    _candidate(str(other), "Weather"),
+                ],
+            }
+        ],
+    )
+
+
+_QUOTED_REPLY_VERDICT = (
+    "This message went to Joke Bot because the sender quoted one of its earlier "
+    "replies in this conversation, and it was already an agent they could "
+    "address: no classifier chose it."
+)
+_QUOTED_REPLY_ACTION = (
+    "Nothing to fix here. Quoting an agent's reply routes to that agent whenever "
+    "the sender can already address it — one of their own candidates, or a "
+    "reachable agent of a person on their list — so trigger prompts do not "
+    "decide these messages. CHANNEL_QUOTE_ROUTING_ENABLED turns this preference "
+    "off for the whole server."
+)
+
+
+def test_a_quoted_reply_routing_gets_its_own_routed_sentence() -> None:
+    """Same code as any routing, another sentence — the pin's reasoning: the
+    generic remedy (tighten the winner's trigger prompt) is inert when no
+    classifier chose the agent. No new verdict code."""
+    agent = uuid.uuid4()
+    diagnosis = RoutingReachabilityService.diagnose(
+        _DB(),
+        _routed_trace(
+            match_method=routing_trace.MATCH_QUOTED_REPLY, selected=agent, quoted=agent
+        ),
+    )
+
+    assert diagnosis.code == "routed", diagnosis
+    assert diagnosis.action == _QUOTED_REPLY_ACTION, diagnosis
+    assert diagnosis.verdict == f"{_QUOTED_REPLY_VERDICT} {_QUOTED_REPLY_ACTION}"
+
+
+def test_quoted_reply_naming_a_different_selection_keeps_the_generic_sentence() -> None:
+    """A Stage-2 race can leave ``quoted_reply`` on the row while a classifier
+    picked a different agent; that decision must not be told no classifier
+    chose it. Same for a row with no quoted agent recorded."""
+    for quoted in (uuid.uuid4(), None):
+        diagnosis = RoutingReachabilityService.diagnose(
+            _DB(),
+            _routed_trace(
+                match_method=routing_trace.MATCH_QUOTED_REPLY,
+                selected=uuid.uuid4(),
+                quoted=quoted,
+            ),
+        )
+        assert diagnosis.code == "routed", diagnosis
+        assert "no classifier chose it" not in diagnosis.verdict, diagnosis
+        assert "chosen from" in diagnosis.verdict, diagnosis
+
+
+def test_a_pinned_routing_keeps_the_pin_sentence_even_with_a_quoted_agent() -> None:
+    """The pin outranks the quote in routing, and its sentence is not shadowed."""
+    agent = uuid.uuid4()
+    diagnosis = RoutingReachabilityService.diagnose(
+        _DB(),
+        _routed_trace(match_method=routing_trace.MATCH_PINNED, selected=agent, quoted=agent),
+    )
+    assert diagnosis.code == "routed", diagnosis
+    assert "pinned it to this channel" in diagnosis.verdict, diagnosis
+    assert "quoted one of its earlier replies" not in diagnosis.verdict, diagnosis

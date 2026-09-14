@@ -1048,6 +1048,23 @@ class Settings(BaseSettings):
     CHANNEL_BACKFILL_MAX_MESSAGES: int = Field(default=50, ge=0)
     CHANNEL_BACKFILL_MAX_ATTACHMENTS: int = Field(default=10, ge=0)
     CHANNEL_CONTEXT_FETCH_TIMEOUT_SECONDS: float = Field(default=20, gt=0)
+    # Quote-aware channel routing: everything a quote does to the routing
+    # DECISION. Off, a quoted message routes exactly as it did before quotes
+    # were read. It gates both halves:
+    # - the quoted text given to every classifier call as fenced context
+    #   (Pass 1, identity Stage 2, Pass 2);
+    # - the quoted-reply preference: quoting a reply this platform's agent
+    #   wrote routes to that agent without classifying when the sender can
+    #   already address it (match_method=quoted_reply), including the
+    #   delivery-ledger lookup behind it. Keyed on the quoted message id, so
+    #   it applies even when the event carried no snapshot text.
+    # Admin simulate and replay honour it as well, so they keep reproducing
+    # the webhook path; their audit rows record the value they ran under.
+    # It does NOT gate capturing the snapshot or the ingestion transcript's
+    # snapshot fallback — those are bounded by CHANNEL_QUOTE_CHAIN_MAX_DEPTH
+    # and CHANNEL_CONTEXT_CHAR_BUDGET above. The operator's one-line way back
+    # if quote-aware routing misroutes in practice.
+    CHANNEL_QUOTE_ROUTING_ENABLED: bool = True
 
     # --- Server-channel inbound attachments ------------------------------
     #

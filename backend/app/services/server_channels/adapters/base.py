@@ -145,6 +145,15 @@ ChannelEventKind = Literal["message", "added_to_space", "ignored"]
 # Declared, not inferred. Every dispatch on transport shape reads this value.
 ChannelInboundMode = Literal["webhook", "polled", "authenticated"]
 
+#: Upper bound on ``ChannelInboundMessage.quoted_message_text``. A transport's
+#: quoted-message snapshot is attacker-influenced third-party text, so it is
+#: bounded at the adapter before it reaches the classifier or the transcript,
+#: and bounded again wherever it is rendered.
+QUOTED_SNAPSHOT_MAX_CHARS = 1_000
+#: Upper bound on ``ChannelInboundMessage.quoted_message_author``, a one-line
+#: display label.
+QUOTED_SNAPSHOT_AUTHOR_MAX_CHARS = 120
+
 
 @dataclass(frozen=True)
 class ChannelAttachmentRef:
@@ -316,6 +325,32 @@ class ChannelInboundMessage:
     conversation_key: str | None = None
     conversation_kind: Literal["dm", "group", "unknown"] | None = None
     quoted_message_id: str | None = None
+    #: The quoted message's text as the **transport** carried it in the event
+    #: (Google Chat: ``quotedMessageMetadata.quotedMessageSnapshot.text``).
+    #:
+    #: **Invariant:** set only when ``quoted_message_id`` is set, and so only
+    #: when the adapter's same-conversation rule accepted that id. Stripped,
+    #: non-empty, and clamped to :data:`QUOTED_SNAPSHOT_MAX_CHARS` with a
+    #: trailing ``…``. ``None`` means "no snapshot", which is exactly today's
+    #: behaviour everywhere downstream.
+    #:
+    #: **Content, never authority.** The quoted message may have been written by
+    #: someone outside the sender whitelist, or by a bot. It may feed the
+    #: classifier as context and the agent's context transcript as fenced
+    #: history — the same rule thread history follows — and nothing else: never
+    #: sender resolution, the whitelist, policy, the pin, a candidate provider,
+    #: or an identity grant.
+    quoted_message_text: str | None = None
+    #: The snapshot's author **label** (Google Chat: the snapshot's ``sender``
+    #: string). Whitespace collapsed to one line and clamped to
+    #: :data:`QUOTED_SNAPSHOT_AUTHOR_MAX_CHARS`. ``None`` whenever
+    #: ``quoted_message_text`` is ``None``.
+    #:
+    #: **A display label, never an identity.** It carries no verified email,
+    #: type or stable id, so it cannot identify a person and cannot prove the
+    #: platform wrote the quoted message — platform authorship comes only from
+    #: the delivery ledger, keyed on ``quoted_message_id``.
+    quoted_message_author: str | None = None
     conversation_hints: dict[str, Any] = field(default_factory=dict)
     is_thread_summon: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
@@ -1009,6 +1044,8 @@ __all__ = [
     "ChannelInboundMessage",
     "ChannelEventKind",
     "ChannelInboundMode",
+    "QUOTED_SNAPSHOT_MAX_CHARS",
+    "QUOTED_SNAPSHOT_AUTHOR_MAX_CHARS",
     "ChannelError",
     "ChannelVerificationError",
     "ChannelTransportMisuseError",

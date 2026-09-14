@@ -168,7 +168,12 @@ class ChannelTurnDelivery(SQLModel, table=True):
     # where the transport delivered without telling us which message it wrote:
     # an honest unknown beats a fabricated id, since the only consumer of this
     # column is a human diagnosing a thread.
-    external_message_id: str | None = Field(default=None, max_length=255)
+    #
+    # Indexed: quote-aware channel routing looks a quoted message up by this id
+    # (``ChannelTurnDeliveryLedger.platform_agent_for_message``) for every new
+    # thread whose first message quotes something, as does the conversation
+    # context builder when it labels a quoted agent reply.
+    external_message_id: str | None = Field(default=None, max_length=255, index=True)
     # How far into the turn's **visible** text this row's delivery reached.
     # Visible space is the relay's ``_visible()`` — the agent's markdown with
     # the control tags finalize strips already removed — and stripping is

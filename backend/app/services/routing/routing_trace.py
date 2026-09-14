@@ -87,6 +87,10 @@ logger = logging.getLogger(__name__)
 # it takes effect on what is *stored* even though the in-memory trace used this
 # constant.
 TRACE_TEXT_MAX_CHARS = 2_000
+#: Bound on the quoted message's author label. The same 120 the adapter and the
+#: classifier apply, and the width of ``routing_decision.quoted_message_author``
+#: (the recorder hard-cuts to it).
+QUOTED_AUTHOR_MAX_CHARS = 120
 
 # Upper bound on the one-line human summary handed to the debug buffer. That
 # buffer clamps its own ``text`` field but not ``summary``.
@@ -191,6 +195,19 @@ MATCH_ONLY_ONE = "only_one"
 #: different remedies: widening a trigger prompt is the answer to a bad
 #: ``only_one`` and is inert against a pin.
 MATCH_PINNED = "pinned"
+#: The sender's message quoted a reply this platform's agent wrote in the same
+#: conversation, and that agent was already on the sender's own ballot (or is a
+#: reachable agent of an identity on it), so it was taken without a classifier
+#: call. The quoted agent comes from the channel's delivery ledger, never from
+#: the quoted text; the preference only narrows a ballot built under the
+#: sender's policy and never adds to it.
+#:
+#: Ranked below ``MATCH_PINNED`` (a pin is the sender's standing instruction, a
+#: quote is a reference inside one message) and above ``MATCH_ONLY_ONE`` (the
+#: sender pointed at the agent, so there is no alternative worth probing for).
+#: Written on the ``pass_1`` stage, and on the ``identity_stage2`` stage too when
+#: the quoted agent belongs to an identity.
+MATCH_QUOTED_REPLY = "quoted_reply"
 
 SKIP_ALREADY_INSTALLED = "already_installed"
 SKIP_NOT_INSTALLABLE = "not_installable"
@@ -677,6 +694,9 @@ class RoutingTrace:
         actor_user_id: uuid.UUID | str | None = None,
         thread_key: str | None = None,
         message: str | None = None,
+        quoted_text: str | None = None,
+        quoted_author: str | None = None,
+        quoted_agent_id: uuid.UUID | str | None = None,
         stage: str = STAGE_PASS_1,
     ) -> None:
         self.trace_id: str = str(uuid.uuid4())
@@ -691,6 +711,10 @@ class RoutingTrace:
         self.user_id: str | None = _str_or_none(user_id)
         self.channel_id: str | None = _str_or_none(channel_id)
         self.actor_user_id: str | None = _str_or_none(actor_user_id)
+        # The agent whose reply the sender quoted, when the caller resolved
+        # one. An id, not sender text, so it is not behind the message-text
+        # gate.
+        self.quoted_agent_id: str | None = _str_or_none(quoted_agent_id)
         self.thread_key: str | None = thread_key
         # Both derive from caller-supplied text and both call str() on it, so a
         # value with a raising __str__/__bool__ must not throw out of
@@ -698,13 +722,29 @@ class RoutingTrace:
         # inbound message. clamp() and _sha256() are each total on their own
         # now; this try stays as the belt to their braces, because what it
         # protects is a routing pass and the cost of keeping it is nothing.
+        #
+        # The quoted message (text and author label) is the classifier's
+        # context, captured beside the sender's words and never mixed into
+        # them: ``message_sha256`` stays the digest of ``message`` alone. It is
+        # a third party's text, so whoever persists this trace applies the same
+        # message-text gate to it as to ``message_text``.
         try:
             self.message_text: str | None = clamp(message)
             self.message_sha256: str | None = _sha256(message)
+            self.quoted_message_text: str | None = clamp(quoted_text)
+            # Hard-cut rather than ``clamp``'s "… (truncated)" marker: the
+            # column is exactly this wide, so the marker would only be cut off
+            # again at persist.
+            author = clamp(quoted_author)
+            self.quoted_message_author: str | None = (
+                author[:QUOTED_AUTHOR_MAX_CHARS] if author else None
+            )
         except Exception:  # noqa: BLE001
             logger.debug("Routing trace message capture failed", exc_info=True)
             self.message_text = None
             self.message_sha256 = None
+            self.quoted_message_text = None
+            self.quoted_message_author = None
         self.created_at: datetime = datetime.now(UTC)
 
         self.default_stage: str = stage
@@ -743,6 +783,9 @@ class RoutingTrace:
         actor_user_id: uuid.UUID | str | None = None,
         thread_key: str | None = None,
         message: str | None = None,
+        quoted_text: str | None = None,
+        quoted_author: str | None = None,
+        quoted_agent_id: uuid.UUID | str | None = None,
         stage: str = STAGE_PASS_1,
     ) -> Iterator[RoutingTrace]:
         """Open a capture span. Everything recorded inside lands on the trace.
@@ -763,6 +806,9 @@ class RoutingTrace:
             actor_user_id=actor_user_id,
             thread_key=thread_key,
             message=message,
+            quoted_text=quoted_text,
+            quoted_author=quoted_author,
+            quoted_agent_id=quoted_agent_id,
             stage=stage,
         )
         token = _CURRENT.set(trace)
@@ -1374,6 +1420,7 @@ __all__ = [
     "SAFE_STAGE_FIELDS",
     "SUMMARY_MAX_CHARS",
     "TRACE_TEXT_MAX_CHARS",
+    "QUOTED_AUTHOR_MAX_CHARS",
     "ORIGIN_APP_MCP",
     "ORIGIN_EMAIL",
     "ORIGIN_IDENTITY",
@@ -1390,6 +1437,7 @@ __all__ = [
     "MATCH_ONLY_ONE",
     "MATCH_PATTERN",
     "MATCH_PINNED",
+    "MATCH_QUOTED_REPLY",
     "NOT_RUN_AUTO_INSTALL_OFF",
     "NOT_RUN_CHANNEL_SCOPE",
     "NOT_RUN_CODES",

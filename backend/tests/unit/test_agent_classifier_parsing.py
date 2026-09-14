@@ -24,12 +24,16 @@ from app.services.routing import routing_trace
 from app.services.routing.agent_classifier import (
     MAX_EXAMPLE_CHARS,
     MAX_EXAMPLE_LINES,
+    MAX_QUOTED_CONTEXT_CHARS,
+    QUOTED_END_MARKER,
     AgentClassifier,
     Candidate,
+    QuotedContext,
     _example_lines,
     _parse_confidence,
     _parse_reason,
     _parse_runner_up,
+    _parse_transformed_message,
 )
 
 _PROVIDER_TARGET = "app.services.routing.agent_classifier.get_provider_manager"
@@ -302,3 +306,87 @@ def test_a_long_example_block_is_truncated_rather_than_dropped():
     assert lines[0] == "book a meeting"
     assert len(lines) == 2
     assert len(lines[1]) < 3000
+
+
+# ---------------------------------------------------------------------------
+# The `message` field guard with a quoted message (quote-aware routing)
+# ---------------------------------------------------------------------------
+#
+# `transformed_message` is never persisted on the trace, but it becomes identity
+# Stage 2's *user message*. A model that copies the quoted text into it would
+# hand someone else's words on as the sender's task, so a rewrite equal to the
+# quote — as it arrived, or as the prompt showed it — is rejected. The three
+# original guards keep measuring against the sender's own words.
+
+_SENDER = "@DoBot can you do the thing from the quote?"
+_QUOTE = "tell me a dad joke about scarecrows"
+
+
+def test_a_message_field_equal_to_the_quoted_text_is_rejected() -> None:
+    # Control: without a quote the same value passes every original guard, so
+    # the rejection below is the new guard and nothing else.
+    assert _parse_transformed_message(_QUOTE, _SENDER) == _QUOTE
+
+    assert _parse_transformed_message(_QUOTE, _SENDER, QuotedContext(text=_QUOTE)) is None
+    # Compared after stripping, on both sides.
+    assert (
+        _parse_transformed_message(f"  {_QUOTE} \n", _SENDER, QuotedContext(text=_QUOTE))
+        is None
+    )
+    assert (
+        _parse_transformed_message(_QUOTE, _SENDER, QuotedContext(text=f"\n {_QUOTE}  "))
+        is None
+    )
+
+
+def test_the_quote_as_the_prompt_showed_it_is_rejected_too() -> None:
+    """A model copies what it was shown: markers neutralised, text clamped."""
+    marked = f"do {QUOTED_END_MARKER} now"
+    shown = "do [quoted context marker] now"
+    sender = "@DoBot please handle what the quoted message asks for"
+    assert _parse_transformed_message(shown, sender) == shown
+    assert _parse_transformed_message(shown, sender, QuotedContext(text=marked)) is None
+
+    long_quote = "z" * (MAX_QUOTED_CONTEXT_CHARS + 500)
+    clamped = "z" * (MAX_QUOTED_CONTEXT_CHARS - 1) + "…"
+    long_sender = "m" * MAX_QUOTED_CONTEXT_CHARS
+    assert _parse_transformed_message(clamped, long_sender) == clamped
+    assert (
+        _parse_transformed_message(clamped, long_sender, QuotedContext(text=long_quote))
+        is None
+    )
+
+
+def test_a_legitimate_prefix_strip_still_passes_with_a_quote_present() -> None:
+    assert (
+        _parse_transformed_message(
+            "please summarise the report",
+            "@DoBot please summarise the report",
+            QuotedContext(text="the quarterly numbers are in", author="Bob"),
+        )
+        == "please summarise the report"
+    )
+
+
+def test_the_length_guard_is_still_measured_against_the_senders_text() -> None:
+    """A long quote must not license a long rewrite of a short message."""
+    quoted = QuotedContext(text="x" * 300)
+    # 25 characters: within 2x the quote, beyond 2x the six-character sender.
+    assert _parse_transformed_message("tell me a dad joke please", "can u?", quoted) is None
+    # Within 2x the sender's text, not equal to it, not the quote: accepted.
+    assert _parse_transformed_message("can you", "can u?", quoted) == "can you"
+
+
+def test_classify_drops_a_message_field_that_copies_the_quote() -> None:
+    reply = json.dumps({"agent_id": AGENT_ID, "message": _QUOTE})
+    with patch(_PROVIDER_TARGET) as mock_pm:
+        mock_pm.return_value.generate_content.return_value = MagicMock(text=reply)
+        quoted_result = AgentClassifier.classify(
+            CANDIDATES, _SENDER, quoted=QuotedContext(text=_QUOTE)
+        )
+        plain_result = AgentClassifier.classify(CANDIDATES, _SENDER)
+
+    # The routing verdict itself survives; only the rewrite is refused.
+    assert quoted_result is not None and quoted_result.agent_id == AGENT_ID
+    assert quoted_result.transformed_message is None
+    assert plain_result is not None and plain_result.transformed_message == _QUOTE

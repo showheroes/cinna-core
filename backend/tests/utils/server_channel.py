@@ -331,6 +331,10 @@ def build_message_event(
     sender_type: str = "HUMAN",
     message_name: str | None = None,
     attachments: list[dict] | None = None,
+    quoted_message_name: str | None = None,
+    quoted_text: str | None = None,
+    quoted_sender: str | None = None,
+    quote_type: str | None = None,
 ) -> dict:
     """A Google Chat ``MESSAGE`` interaction event.
 
@@ -338,6 +342,12 @@ def build_message_event(
     ``build_message_attachment`` below — is only included on the payload when
     given, so every pre-attachments-feature test keeps constructing the exact
     same event shape it always has.
+
+    ``quoted_message_name`` adds ``message.quotedMessageMetadata`` (a quote of
+    that message id). The metadata is included **only** when a name is given,
+    for the same reason. ``quoted_text`` / ``quoted_sender`` fill its
+    ``quotedMessageSnapshot`` (omitted when both are ``None``), and
+    ``quote_type`` sets ``quoteType`` (omitted when ``None``).
     """
     message: dict[str, Any] = {
         "name": message_name or f"spaces/AAA/messages/{uuid.uuid4()}",
@@ -353,6 +363,18 @@ def build_message_event(
     }
     if attachments is not None:
         message["attachment"] = attachments
+    if quoted_message_name is not None:
+        metadata: dict[str, Any] = {"name": quoted_message_name}
+        if quote_type is not None:
+            metadata["quoteType"] = quote_type
+        if quoted_text is not None or quoted_sender is not None:
+            snapshot: dict[str, Any] = {}
+            if quoted_text is not None:
+                snapshot["text"] = quoted_text
+            if quoted_sender is not None:
+                snapshot["sender"] = quoted_sender
+            metadata["quotedMessageSnapshot"] = snapshot
+        message["quotedMessageMetadata"] = metadata
     return {"type": "MESSAGE", "message": message}
 
 
