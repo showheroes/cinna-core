@@ -485,6 +485,10 @@ blocks it. Instead:
 - the script fails with a message naming the slot and the fix, which the agent
   can relay to the user verbatim.
 
+A local skill's row, and a plugin's, is judged the same way on the slots its
+`SKILL.md` declares: the agent's credentials are checked for every declared
+slot, not only for catalog installs.
+
 The readiness gate therefore ignores a credential that a catalog skill
 provisioned — **unless the agent's bundle claims it too**. Claiming errs wide on
 purpose: a linked credential of a bundle spec's type that no recorded pick
