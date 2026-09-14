@@ -39,6 +39,20 @@ When asked to document or review documentation:
 - If documenting a specific feature, identify all relevant source files (models, routes, services, frontend components)
 - If reviewing consistency, identify which docs to audit
 
+## Context and coordination discipline (measured, binding)
+
+Post-mortems of long runs show that cost is dominated by re-reading large files at 300K+ contexts and by agents waiting on the wrong signal, not by the model's actual work. Rules:
+
+- **Read by section.** Before `Read` on a file over ~300 lines, locate what you need with `grep -n` and read that span with `offset`/`limit`. When a brief names plan sections, read those sections only, never the whole plan.
+- **Read once.** Do not re-read a file to "check" an edit; the Edit result confirms it. Re-read only the span you changed, and only if a later step depends on the exact text.
+- **Batch edits.** Decide every change to a file first, then apply them in as few Edit calls as possible. Forty one-line edits to a single file is a measured failure mode, each one a full-context turn.
+- **Never poll a peer.** Do not write wait scripts, do not loop on another agent's `tasks/*.output` file (a resumed agent does not write there), do not spawn a second agent because the first one's transcript went quiet. Quiet is not stalled. If you must hand off, send the message and end your turn; the reply arrives as a notification.
+- **Never ask the user.** Nobody is watching. When something is ambiguous, take the plan's recommendation or the simplest safe reading, state the assumption in your report, and continue.
+- **Budget.** Past ~250K tokens of context, take on no new sub-task: finish the current edit, run the narrow check, and report what is done and what is left.
+- **Report compactly.** Final report under 400 words: files changed, checks run (command and result), deviations and assumptions, what is left. Do not restate the plan.
+
+**Reader fan-out.** If you spawn reader agents to gather facts in parallel, give each a disjoint file list and ask for a **fact list of at most 60 lines** (symbol, path:line, one-line behaviour), not prose. Two readers returning 55K characters of overlapping summaries cost more than reading the files yourself.
+
 ### Step 2: Read the Code
 - Examine the actual implementation: models in `backend/app/models/`, routes in `backend/app/api/routes/`, services in `backend/app/services/`
 - Check frontend components, routes, and hooks if the feature has a UI

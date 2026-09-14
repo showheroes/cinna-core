@@ -86,11 +86,16 @@ Before finalizing any test file, verify:
 - [ ] `ScriptedAgentEnvConnector` used when test involves MCP tool calls during agent stream
 - [ ] No source code workarounds needed — if they are, flag the source code issue
 
-## Running Tests — Delegate to `cinna-core-test-runner`
+## Running Tests — exact files yourself, regression by `cinna-core-test-runner`
 
-**Do NOT run tests yourself.** After writing tests, delegate ALL test execution to the `cinna-core-test-runner` agent using the Agent tool. This keeps your context slim and focused on writing code.
+**Run the exact test files you wrote yourself**, quietly, after checking that no other pytest is running in the container:
+```bash
+docker compose exec -T backend sh -c 'ps aux | grep -c "[p]ytest"'   # must print 0 (or 1 counting the grep itself, depending on the image)
+docker compose exec -T backend python -m pytest tests/path/new_test.py -q -p no:cacheprovider -rfE 2>&1 | tail -30
+```
+Iterating on a new file through a separate agent costs a full agent spawn per failure; a `-q` run of your own files costs one tool call. Never use `-v` for your own runs, never run a directory yourself.
 
-**After writing tests, you MUST spawn the `cinna-core-test-runner` agent to execute the following chain:**
+**Group regression is the test-runner's job.** If your brief says the manager will run regression, skip this step and say so in your report. Otherwise, once your files are green, spawn `cinna-core-test-runner` once with the following chain:
 
 1. **Run the exact test file(s) you wrote** — if green, continue
 2. **Run the topic group directory** the file lives in (e.g., `tests/api/agents/webapp/`) — this is the final step. In a domain that is *not* split into topic groups, the group directory and the domain directory are the same thing, so this step runs the domain.
@@ -116,9 +121,28 @@ Do NOT run the full backend test suite — the user runs `make test-backend` man
 Report a concise summary of each step."
 ```
 
-**On failure:** Read the test-runner's summary, fix the failing tests in your context, then spawn the test-runner agent again to re-run the chain from the beginning.
+**On failure:** read the test-runner's summary, fix the failing tests, re-run the exact files yourself, then spawn the test-runner once more for the group.
 
-**Important:** Do NOT run `docker compose exec`, `pytest`, or `make test-backend` commands yourself. Always delegate to the test-runner agent. This separation keeps your context focused on test writing and code fixes while the test-runner handles execution and reporting.
+**Important:** never run a whole domain or `make test-backend` yourself.
+
+## Reading discipline for test writing
+
+- Read `backend/tests/README.md` and the domain README once. Read the plan's test checklist section (§12 or whatever the brief names) and the behaviour sections the brief names, by `offset`/`limit`; never the whole plan.
+- For the code under test, `grep -n "def <name>"` and read the function span. Do not read whole 1,000-line services; a measured test-writing run reached 450K tokens of context this way before writing its first file.
+- One existing test file per pattern you need (fixtures, drain_tasks, scripted connector), read once.
+- Write each test file in a single `Write` call. If a behaviour change arrives by message mid-run, patch the affected assertions with a few `Edit` calls; do not rewrite the file.
+
+## Context and coordination discipline (measured, binding)
+
+Post-mortems of long runs show that cost is dominated by re-reading large files at 300K+ contexts and by agents waiting on the wrong signal, not by the model's actual work. Rules:
+
+- **Read by section.** Before `Read` on a file over ~300 lines, locate what you need with `grep -n` and read that span with `offset`/`limit`. When a brief names plan sections, read those sections only, never the whole plan.
+- **Read once.** Do not re-read a file to "check" an edit; the Edit result confirms it. Re-read only the span you changed, and only if a later step depends on the exact text.
+- **Batch edits.** Decide every change to a file first, then apply them in as few Edit calls as possible. Forty one-line edits to a single file is a measured failure mode, each one a full-context turn.
+- **Never poll a peer.** Do not write wait scripts, do not loop on another agent's `tasks/*.output` file (a resumed agent does not write there), do not spawn a second agent because the first one's transcript went quiet. Quiet is not stalled. If you must hand off, send the message and end your turn; the reply arrives as a notification.
+- **Never ask the user.** Nobody is watching. When something is ambiguous, take the plan's recommendation or the simplest safe reading, state the assumption in your report, and continue.
+- **Budget.** Past ~250K tokens of context, take on no new sub-task: finish the current edit, run the narrow check, and report what is done and what is left.
+- **Report compactly.** Final report under 400 words: files changed, checks run (command and result), deviations and assumptions, what is left. Do not restate the plan.
 
 ## Testing Agent Streaming and MCP Tool Flows
 
