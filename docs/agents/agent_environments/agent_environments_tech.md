@@ -23,6 +23,9 @@
 - `server/adapters/opencode_event_transformer.py` - `OpenCodeEventTransformer` — OpenCode SSE → SDKEvent
 - `scripts/get_session_context.py` - Stdlib-only helper for agent scripts to query session context
 - `prompts/BUILDING_AGENT.md` - Building mode system prompt
+- `prompts/AGENT_DESIGN_PATTERNS.md` - Agent design patterns, generated from `docs/local_agent_kit/guides/13-design-patterns.md` by `make sync-platform-knowledge` (read on demand)
+- `prompts/COMPLEX_AGENT_DESIGN.md` - Multi-skill layout, cache and SQLite state, side-effect guards, OK pattern (read on demand)
+- `prompts/REST_API_BUILDING.md` - Producer agent API and response design (read on demand)
 - `prompts/WEBAPP_BUILDING.md` - Webapp building instructions (read by agent on demand)
 - `main.py` - FastAPI entry point
 

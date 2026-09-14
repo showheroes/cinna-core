@@ -64,6 +64,28 @@ built against 1.0.0 keeps operating a 1.1.0 folder, because the majors match.
   role, manifest field or validation rule moved, which is why this sits under
   contract 1.1.0 rather than bumping it.
 
+- **A `design` rung, and guide 13 on the patterns behind it.**
+  `guides/13-design-patterns.md` lifts the house style of agents running in
+  production into one guide: the prompt routes and skills execute; an external
+  credential lives in one narrow producer, even for a private agent; one
+  pre-computed payload per question, so the model never does arithmetic; durable
+  state in SQLite under `app-data/storage/`; side effects behind a confirmation
+  gate, `--dry-run`, an idempotency key and an audit log; recorded test scenarios
+  under `docs/test_scenarios/`, re-run after any prompt, model or provider change;
+  a strong building model and a small conversation model; and a
+  `docs/AGENT_DEVELOPMENT.md` with a defects log. Its §0 is an advisor table: the
+  assistant *recommends* a pattern, with the reason, when its trigger fires, and
+  then builds what the user chooses. `kit.json`'s ladder gains the `design` rung
+  after `scripts` (`README.md` restates it), `START.md`, `templates/root/AGENTS.md`
+  and guide 01 carry the advisory duty in a sentence each, and
+  `templates/agent/docs/WORKFLOW_PROMPT.md` gains a scope stanza and an optional,
+  commented-out routing table. `kit.py list` reports the rung once an agent has
+  `docs/AGENT_DEVELOPMENT.md` or `docs/test_scenarios/`. Guidance only: both are
+  domain docs under the existing `docs/` role, nothing validates them, and no
+  folder role, manifest field or validation rule moved — contract 1.1.0 stands.
+  The same guide ships to cloud building sessions as
+  `/app/core/prompts/AGENT_DESIGN_PATTERNS.md`.
+
 ### Changed
 
 - **`docs/` is no longer where a local skill is documented.** Its `layout.json`

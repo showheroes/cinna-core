@@ -2834,6 +2834,13 @@ def _rungs_present(agent_dir: Path, manifest: dict) -> list[str]:
         if own_scripts:
             rungs.append("scripts")
 
+    # "Design patterns" is advice first, so its only artefacts are the record of
+    # that advice and the regression set it asks for. Either one adopts the rung;
+    # the scaffold ships neither, so a fresh agent never reports it.
+    docs_dir = agent_dir / "docs"
+    if (docs_dir / "AGENT_DEVELOPMENT.md").is_file() or (docs_dir / "test_scenarios").is_dir():
+        rungs.append("design")
+
     if manifest.get("credentials"):
         rungs.append("credentials")
     if manifest.get("schedules"):

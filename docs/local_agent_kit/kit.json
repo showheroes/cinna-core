@@ -30,6 +30,11 @@
       "trigger": "the agent does anything beyond answering from its prompts"
     },
     {
+      "rung": "design",
+      "doc": "guides/13-design-patterns.md",
+      "trigger": "an external system, a send/create/sign/post, a second kind of question, or the agent will serve other people"
+    },
+    {
       "rung": "credentials",
       "doc": "guides/04-credentials.md",
       "trigger": "workflow calls any external system that needs a token, login or key"

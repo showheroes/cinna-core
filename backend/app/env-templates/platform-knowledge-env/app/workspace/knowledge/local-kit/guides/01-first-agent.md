@@ -20,6 +20,12 @@ things the user already told you.
 Answer 2 decides whether the **Credentials** rung fires. Answer 4 decides whether
 the **Schedules** rung fires. Do not add either yet — note them.
 
+Before you scaffold, hold the answers against the advisor table in
+`13-design-patterns.md` §0. If a row fired — a login that can do more than this job,
+a figure the model would have to compute, a send or a post, several kinds of
+question, colleagues relying on the answers — recommend that pattern with its reason
+in the same message as the slug, and build what the user chooses.
+
 Then propose a `slug`: lowercase, hyphenated, `^[a-z0-9][a-z0-9-]{1,62}$`, and the
 folder name. Confirm it with the user, because renaming later touches the manifest,
 the docs and the cloud reference.

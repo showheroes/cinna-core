@@ -27,7 +27,7 @@ uv run .cinna-kit/tools/kit.py list
 | Role | Where | What you do |
 |------|-------|-------------|
 | **Orchestrator** | here, at the root | Create, list, compare and coordinate agents. |
-| **Builder** | inside `Local/<slug>` | Change an agent: scripts, prompts, config, manifest. |
+| **Builder** | inside `Local/<slug>` | Change an agent: scripts, prompts, config, manifest. Recommend the design patterns whose triggers fired before building (`.cinna-kit/guides/13-design-patterns.md` §0). |
 | **Agent** | inside `Local/<slug>` | Act *as* the agent, following its `docs/WORKFLOW_PROMPT.md`. |
 
 Switching rules:

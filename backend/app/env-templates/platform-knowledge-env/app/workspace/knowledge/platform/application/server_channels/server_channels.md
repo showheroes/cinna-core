@@ -124,7 +124,7 @@ A seal is also never taken at a place that would leave a two-word message standi
 Almost everything a person writes into a bound thread is for the agent. A very small set of strings is not, and `/stop` is the first of them: it is the chat-thread equivalent of the web client's stop button, which a chat thread has no way to render.
 
 - **Exact match, nothing else.** The text has to be `/stop` and nothing more, case-insensitively, once surrounding whitespace is gone. `/stop now`, `/stopx` and a bare `stop` are ordinary messages and reach the agent. That direction is chosen deliberately: a missed command costs someone one retyped word, while a command matched too eagerly silently eats a message the person meant their assistant to read.
-- **Only inside a conversation that is already yours.** The command is recognised after every gate that admits the sender — rate limit, verification, whitelist, channel policy — and specifically *after* the check that the thread belongs to the person writing. So the authority to stop a stream is the same authority the sender already had over that conversation, including on an identity-routed thread, where the session lives in someone else's workspace but the conversation is still the sender's. (On an identity thread the sender's own identity-routing consent is re-read before the interrupt, since that is the one per-message check this shortcut bypasses.)
+- **Only inside a conversation that is already yours.** The command is recognised after every gate that admits the sender — rate limit, verification, whitelist, channel policy — and specifically *after* the binding lookup scoped to the person writing. So the authority to stop a stream is the same authority the sender already had over that conversation, including on an identity-routed thread, where the session lives in someone else's workspace but the conversation is still the sender's. (On an identity thread the sender's own identity-routing consent is re-read before the interrupt, since that is the one per-message check this shortcut bypasses.)
 - **Success says nothing.** The status notice settles with whatever the agent had said plus a stopped marker, and *that* is the acknowledgement — it is the message the reader is already looking at. A separate "stopped" reply would post the same news a second time, directly under it.
 - **"There's nothing running right now."** is the only reply the command produces, and it covers every shape of nothing: no session on the thread yet, no stream in flight, an environment the platform cannot reach. It is deliberately *not* part of the family of indistinguishable declines the rest of this feature uses, because it describes the sender's own conversation and reveals nothing about the server. An interrupt that fails for some other reason is answered with silence instead — the stop may well have landed anyway, and telling someone nothing is running while the stopped marker appears beside it is worse than saying nothing.
 - **A `/stop` as the first message of a brand-new thread is not a command.** There is no binding and nothing to stop, so it routes like any other text and is answered by whatever agent the routing picks. This is deliberate: the interception exists inside a conversation, not in front of one.
@@ -140,11 +140,15 @@ The command set is a registry: a second command is one entry and one handler, wi
 2. If the build fails outright, the binding is marked failed and the status notice is settled as "setting up your assistant failed — contact your admin".
 3. The *next* message the sender sends into that same thread deletes the failed binding and re-runs routing from scratch — a transient failure never permanently wedges the thread.
 
-### 5. Cross-user thread collision (group spaces)
+### 5. Several askers in one conversation
 
-1. Two different whitelisted people can, in principle, post into the same brand-new thread in a shared space before either message has finished routing.
-2. Whoever the system finishes creating a binding for first "owns" that thread's session going forward.
-3. The other person is told the conversation belongs to someone else and is asked to start a new thread — their message is never merged into a stranger's session, whichever step of the pipeline the collision is caught at.
+Each asker gets a separate binding, independently routed agent and session. A
+threaded space scopes that binding to the thread; a flat space scopes it to the
+conversation, so repeated questions from one person resume their session.
+Two simultaneous first questions from different people create different bindings.
+A person with no eligible agent receives their own detail-free routing decline.
+Another asker's session and permissions are never reused. Replies in group spaces
+address the asker, so agents answering different people remain distinguishable.
 
 ### 6. Sender attaches a file
 
@@ -304,7 +308,7 @@ A sender's email is trusted only because the adapter verified it came from a pay
 
 Since Phase 3 of the channels & identity unification, a channel message can open a session on an agent the **sender does not own**. That makes two ownerships diverge, and each answers a different question:
 
-- **`ChannelThreadBinding.user_id` stays the sender** — *whose thread is this?* Thread ownership is what stops one member of a group chat space from posting into another person's conversation, and it is unchanged: a second person posting into an identity-routed thread is still declined as "belongs to someone else".
+- **`ChannelThreadBinding.user_id` stays the asker.** A conversation can contain several bindings, one per asker. Each passes their own whitelist, channel policy, agent access and identity-consent checks. A second person is routed independently and cannot write into the first person's session.
 - **`session.user_id` becomes the identity owner** — *whose workspace is answering?* The agent is theirs, runs on their credentials and in their space, and the session appears in **their** session list, not the sender's. The sender's `GET /sessions/` does not return it. The owner sees a "Via Identity — {caller}" badge (from `identity_caller_name` in `session_metadata`), because they would otherwise find a conversation they never started containing a stranger's message.
 
 So `ChannelThreadBinding.agent_id` names an agent the binding's own user does not own. That is legitimate only because of the identity grant, and only for as long as the grant keeps verifying.
@@ -319,7 +323,7 @@ So `ChannelThreadBinding.agent_id` names an agent the binding's own user does no
 - A binding starts `pending_install` while an auto-installed environment builds, and messages that arrive in the meantime are parked (up to a cap; beyond it, the newest arrival is refused with an explicit "I've got a lot queued, ask again" reply rather than silently dropped).
 - It becomes `active` once the environment reaches `running` and any parked messages have been delivered in order.
 - `failed` is not a dead end: the **next** inbound message on that thread deletes the failed binding and re-routes from scratch, so a one-off build failure never wedges a thread permanently.
-- **A thread belongs to exactly one person.** If a different whitelisted person posts into a thread already bound to someone else, they're told the conversation belongs to someone else rather than being silently merged into that person's session — this applies both when the binding already existed and when two people's first messages in a brand-new thread race each other (the loser of that race gets the same refusal, whether their message is caught at the immediate-ingest step or while it's being parked behind a slower auto-install).
+- **Each asker has their own session within a conversation.** The binding key includes the asker, so a second person is independently routed. `/stop` can interrupt only the invoking asker's stream. The ingest boundary still enforces `user.id == binding.user_id`.
 - Uninstalling the bound agent cascades away the binding (next message re-routes, and the reinstall picks the same App Data back up); deleting the bound session only clears the pointer (next message opens a fresh session on the same agent).
 
 ### Two accepted divergences from the original plan
@@ -506,3 +510,61 @@ for the polled version of this diagram.
 ---
 
 *Last updated: 2026-09-01*
+
+## Conversation placement and prior context
+
+Google Chat replies in the incoming thread when the space supports threaded
+messages. In a flat group space it tries a quoted reply, then a conversation post.
+The final line `reply here` (case-insensitive, optional punctuation), or the final
+sentence after a sentence terminator, requests an in-place reply. It is stripped
+before classification and ingestion; a mid-sentence occurrence stays ordinary
+text. In a DM the trailer is stripped and placement is unchanged. Administrators
+can change the phrase (1–64 characters, not beginning with `/`).
+
+Google requires a quoted message timestamp and disallows quoting a thread reply
+into a new top-level post. Such `reply here` requests become conversation posts
+addressed to the asker. The status notice opens at the selected destination and
+becomes the reply there. Email retains its existing reply headers and body format.
+
+When summoned into an existing thread, the assistant can receive a bounded
+transcript of earlier messages and a chain of explicitly quoted messages. Quote
+chains take priority; history is selected newest-first and displayed oldest-first.
+The default total transcript budget is 5,000 characters, five quote hops, fifty
+history messages and ten historical attachments. A truncation notice asks the
+person to quote or paste the specific older message they mean. An unavailable
+history notice says the earlier conversation could not be read. Neither prevents
+the current question from reaching the assistant.
+
+The ingest ledger belongs to each asker's binding: another asker's new session
+still needs the same history. A successful backfill (including empty history) runs
+once; failed reads can be retried. Historical attachments use the existing upload
+limits and deduplication and are owned and charged to the live asker, including
+on identity-routed sessions. The session UI shows the transcript as a collapsed
+system message; the asker bubble contains their own text.
+
+Quoting a message whose earlier context was truncated lets the assistant fetch
+it again within the current turn's budget. Recreating a deleted session resets
+that binding's context receipts so the new session can receive prior context.
+
+**History is content, never authority.** It can include messages from people
+outside the sender whitelist. Historical authors are not registered, routed or
+granted access. Their text is attributed and fenced as information rather than
+instructions; embedded fence markers are neutralized. This reduces prompt
+injection exposure but cannot guarantee immunity. Operators who do not want
+ambient history can disable **Read thread history** in channel settings.
+Explicit quote-chain retrieval remains independent of that backfill toggle.
+
+Google Chat normally delivers group MESSAGE events only when the app is addressed;
+the assistant did not automatically see the earlier discussion. History reads
+require membership and Workspace administrator approval of
+`https://www.googleapis.com/auth/chat.app.messages.readonly`; existing apps need
+approval for the added scope. Channels with only `chat.bot` keep answering with
+history unavailable. The admin capability readout fails closed until a recent
+successful probe demonstrates access, and its cache expires after five minutes.
+See Google's [message listing reference](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages/list)
+and [quoted-message constraints](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages).
+
+Different askers can reach different agents or receive different declines in one
+visible thread. This follows from their individual permissions and routing; it
+is expected. Slack and Discord remain future adapters, with no implementation
+included in this feature.

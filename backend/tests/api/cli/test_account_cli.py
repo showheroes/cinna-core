@@ -1475,6 +1475,15 @@ def test_context_package_content(
         f"guides members found: {guides_members}"
     )
 
+    # ── Phase 12b: the design-patterns guide ships inside ``context/local-kit/`` ──
+    # The package index and the orchestrator's CLAUDE.md both send the assistant
+    # there before it designs an agent; a kit snapshot without guide 13 would
+    # leave both pointers dangling.
+    assert "context/local-kit/guides/13-design-patterns.md" in member_names, (
+        "context/local-kit/guides/13-design-patterns.md must be in the tarball — "
+        "run `make sync-platform-knowledge` so the kit snapshot carries guide 13"
+    )
+
     # ── Phase 13: ``context/guides/authoring-agent-prompts.md`` is present ──
     assert "context/guides/authoring-agent-prompts.md" in member_names, (
         "context/guides/authoring-agent-prompts.md must be present in the tarball — "

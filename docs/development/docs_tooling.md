@@ -86,8 +86,9 @@ python3 .cinna-core-kit/scripts/docs_index.py check [--verbose]
   or over-long one-liners, unknown domains, missing docs, unresolved `affects`; a stale registry
   block; service or route modules no doc names (allowlist:
   `.cinna-core-kit/docs_index_allowlist.txt`); `METHOD /api/v1/...` citations that are not in
-  `frontend/openapi.json`; tech docs that name no `backend/` or `frontend/` path. Warns on docs
-  registered to no feature.
+  `frontend/openapi.json`; tech docs that name no `backend/` or `frontend/` path; a cloud
+  `AGENT_DESIGN_PATTERNS.md` prompt that is not a copy of Local Agent Kit guide 13 (run
+  `make sync-platform-knowledge`). Warns on docs registered to no feature.
 
 ## How docs stay connected to code
 

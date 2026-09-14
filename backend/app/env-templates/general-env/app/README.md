@@ -25,14 +25,16 @@ In "conversation" mode, the agent uses pre-built tools and scripts from this wor
 
 ## Directory Structure
 
-- `/credentials/` - Service credentials (read-only)
-- `/databases/` - SQLite or other local databases
-- `/files/` - User-uploaded files
-- `/logs/` - Agent logs
-- `/scripts/` - Custom scripts
-- `/server/` - Optional: Custom API endpoints
-- `/docs/` - Documentation and specifications
+- `/credentials/` - Service credentials (read-only; read from scripts, never in chat)
+- `/docs/` - The agent's prompts (`WORKFLOW_PROMPT.md`, …) and `CLI_COMMANDS.yaml`
+- `/skills/` - One folder per capability, `skills/<name>/SKILL.md`
+- `/scripts/` - Custom scripts, catalogued in `scripts/README.md`
 - `/knowledge/` - Integration-specific knowledge base (API docs, schemas)
+- `/files/` - Static assets shipped with the agent (lookup tables, templates)
+- `/agent_api/` - Optional: the agent's REST API endpoints
+- `/app-data/storage/` - Durable runtime data: SQLite state, reports, `STATUS.md`
+- `/app-data/cache/` - Disposable, rebuildable caches
+- `/app-data/uploads/` - Files users attach
 
 ## Python Packages
 

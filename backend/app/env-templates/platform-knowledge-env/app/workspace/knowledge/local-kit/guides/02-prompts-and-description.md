@@ -45,6 +45,14 @@ Do not restate the folder layout, do not restate these conventions, and do not
 duplicate anything from `AGENTS.md`. `docs/WORKFLOW_PROMPT.md` is the single source
 for behaviour; the wrapper only points at it.
 
+Once the agent answers two or more kinds of question, the procedure moves into one
+skill per kind and this prompt becomes scope plus a routing table — see
+`13-design-patterns.md` §1.
+
+In the cloud the same text also lives in the agent's configuration, and the platform
+keeps the two in step in both directions. After import, change a prompt one way at a
+time — edit the doc or write the configuration, never both (guide 13 §8).
+
 ## Writing `entrypoint_prompt`
 
 It is fired automatically by a schedule, with no human present.

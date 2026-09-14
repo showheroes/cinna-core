@@ -131,7 +131,10 @@ template environment.
    the [Local Agent Kit](../local_agent_kit/local_agent_kit.md)'s conventions —
    read `context/local-kit/guides/11-go-cloud.md` when the orchestrator is
    asked to import an agent someone built locally with `cinna agent import`
-   (cinna-cli, separate repo).
+   (cinna-cli, separate repo), and `context/local-kit/guides/13-design-patterns.md`
+   before it designs any agent: the package index and the orchestrator
+   `CLAUDE.md` (which carries a copy of its §0 advisor table) both send it there,
+   so it recommends the matching pattern before building.
 4. `cinna account refresh-context` re-downloads and replaces the `context/`
    tree in place. If the download fails, the command warns and exits without
    corrupting the existing `context/` content.

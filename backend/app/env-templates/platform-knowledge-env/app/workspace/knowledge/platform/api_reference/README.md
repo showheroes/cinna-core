@@ -23,7 +23,7 @@ Each file below documents one API domain.
 | Agent Tasks | [agent_tasks.md](./agent_tasks.md) | 11 |
 | Agent Webhooks | [agent_webhooks.md](./agent_webhooks.md) | 9 |
 | Agentic Teams | [agentic_teams.md](./agentic_teams.md) | 18 |
-| Agents | [agents.md](./agents.md) | 41 |
+| Agents | [agents.md](./agents.md) | 42 |
 | Ai Credentials | [ai_credentials.md](./ai_credentials.md) | 11 |
 | App Auth | [app_auth.md](./app_auth.md) | 9 |
 | App Data | [app_data.md](./app_data.md) | 3 |

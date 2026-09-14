@@ -13,6 +13,8 @@ docs:
 
 Enable a producer agent to expose a **capability-narrowed REST API** built from plain decorated Python functions inside its container. The platform supervises the API process, harvests its OpenAPI spec, enforces declarative guardrails at the proxy edge, and lets other agents consume it as a standard `agent_api` credential — so a powerful upstream credential (an ERP key, a broad OAuth scope, a legacy API token) never leaves the producer container. Consumers call `GET /orders` the same way they would call any other endpoint; there is no LLM in the request path.
 
+The narrowing is worth it **even for a private agent that nobody else will call**: when one conversational agent needs only a slice of a broad credential, the producer holds the credential and exposes that slice, so a prompt injection or a careless script in the conversational agent reaches only what the API returns. The building guidance therefore asks producers to answer a whole user question in one call — every figure pre-computed, dates spelled out, authorization re-derived per call, honest truncation — and to keep an `agent_api/CONSUMERS.md` recording which consumer relies on which field.
+
 This is a **code-to-code** channel: deterministic, typed, and high-frequency. Contrast with A2A (intelligence-to-intelligence task delegation) and MCP (LLM-to-tool exposure). Those channels involve model inference on every call; this one never does.
 
 ---

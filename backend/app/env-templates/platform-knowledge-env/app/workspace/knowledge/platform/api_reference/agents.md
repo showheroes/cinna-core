@@ -56,6 +56,17 @@ Auto-generated from OpenAPI spec. Tag: `agents`
 
 ---
 
+## GET `/api/v1/agents/{agent_id}/skills/{name}/files`
+**List Agent Skill Files**
+
+**Path parameters:**
+- `agent_id`: uuid
+- `name`: string
+
+**Response:** `SkillFilesPublic`
+
+---
+
 ## GET `/api/v1/agents/{agent_id}/addons`
 **Get Agent Addons**
 

@@ -6,14 +6,17 @@ This snapshot is the only copy of the platform docs + API reference present
 inside the backend container at runtime; the account-CLI context-package
 endpoint serves it to local orchestrator agents.
 
-Three data sources:
+Four data sources:
   1. docs/application/ and docs/agents/ — business-logic docs (excluding *_tech* files)
   2. frontend/openapi.json — auto-generated REST API reference grouped by tag
   3. docs/local_agent_kit/ — the Local Agent Kit served by the public /agent-start surface
+  4. docs/local_agent_kit/guides/13-design-patterns.md — also copied into the cloud
+     building prompts as app_core_base/core/prompts/AGENT_DESIGN_PATTERNS.md
 
-Each source owns exactly one target subtree and only that subtree is cleared:
-knowledge/platform/ for (1)+(2), knowledge/local-kit/ for (3). knowledge/guides/
-is hand-authored in place and is never touched by this script.
+Each source owns exactly one target and only that target is replaced:
+knowledge/platform/ for (1)+(2), knowledge/local-kit/ for (3), the single
+AGENT_DESIGN_PATTERNS.md file for (4). knowledge/guides/ is hand-authored in
+place and is never touched by this script.
 
 Usage:
     python3 .cinna-core-kit/scripts/sync_platform_knowledge.py
@@ -232,6 +235,49 @@ def sync_local_agent_kit() -> int:
 
 
 # ---------------------------------------------------------------------------
+# Design-patterns guide → cloud building prompts
+# ---------------------------------------------------------------------------
+
+# Kit guide 13 is the single source for the agent design patterns. Cloud
+# building sessions never see the kit, so the guide is also copied into
+# app_core_base/core/prompts/, which every agent image bakes in at
+# /app/core/prompts/. BUILDING_AGENT.md references it by that path, which is
+# also what makes cinna-cli mirror it into synced workspaces. The copy is raw,
+# never rendered, so the guide must carry no {{placeholder}}.
+DESIGN_PATTERNS_SOURCE = KIT_SOURCE / "guides" / "13-design-patterns.md"
+DESIGN_PATTERNS_TARGET = (
+    PROJECT_ROOT
+    / "backend"
+    / "app"
+    / "env-templates"
+    / "app_core_base"
+    / "core"
+    / "prompts"
+    / "AGENT_DESIGN_PATTERNS.md"
+)
+DESIGN_PATTERNS_HEADER = (
+    "<!-- Generated from docs/local_agent_kit/guides/13-design-patterns.md by "
+    "`make sync-platform-knowledge`. Do not edit this copy: edit the kit guide "
+    "and re-run the sync. -->\n\n"
+)
+
+
+def sync_design_patterns_prompt() -> int:
+    """Copy kit guide 13 into the cloud building prompts. Returns the file count."""
+    if not DESIGN_PATTERNS_SOURCE.is_file():
+        raise SystemExit(f"ERROR: design-patterns guide not found at {DESIGN_PATTERNS_SOURCE}")
+    body = DESIGN_PATTERNS_SOURCE.read_text(encoding="utf-8")
+    if "{{" in body:
+        raise SystemExit(
+            "ERROR: guides/13-design-patterns.md carries a {{placeholder}}; the cloud "
+            "prompt copy is never rendered, so it would reach agents verbatim"
+        )
+    DESIGN_PATTERNS_TARGET.write_text(DESIGN_PATTERNS_HEADER + body, encoding="utf-8")
+    print(f"  Wrote {DESIGN_PATTERNS_TARGET.relative_to(PROJECT_ROOT)}")
+    return 1
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -248,19 +294,23 @@ def main() -> None:
         shutil.rmtree(TARGET)
     TARGET.mkdir(parents=True)
 
-    print("[1/3] Copying feature documentation (excluding _tech files)...")
+    print("[1/4] Copying feature documentation (excluding _tech files)...")
     doc_count = sync_docs()
 
     print()
-    print("[2/3] Generating API reference from OpenAPI spec...")
+    print("[2/4] Generating API reference from OpenAPI spec...")
     api_count = sync_api_reference()
 
     print()
-    print("[3/3] Syncing local agent kit...")
+    print("[3/4] Syncing local agent kit...")
     kit_count = sync_local_agent_kit()
 
     print()
-    print(f"Sync complete. Total files: {doc_count + api_count + kit_count}")
+    print("[4/4] Copying the design-patterns guide into the cloud building prompts...")
+    design_count = sync_design_patterns_prompt()
+
+    print()
+    print(f"Sync complete. Total files: {doc_count + api_count + kit_count + design_count}")
 
 
 if __name__ == "__main__":

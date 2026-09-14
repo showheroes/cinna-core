@@ -380,6 +380,28 @@ def test_the_knowledge_rung_is_adopted_by_skills_alone(
     assert "knowledge" in kit_module._rungs_present(scaffolded_agent, manifest)
 
 
+def test_the_design_rung_is_adopted_by_its_record_or_its_scenarios(
+    kit_module, scaffolded_agent: Path
+) -> None:
+    """The `design` rung is advice first, so its artefacts are documents.
+
+    Either the record of that advice (`docs/AGENT_DEVELOPMENT.md`) or the
+    regression set it asks for (`docs/test_scenarios/`) adopts it. The scaffold
+    ships neither, so a freshly created agent must not report the rung — the
+    same false-positive trap the knowledge rung's README exclusion guards.
+    """
+    manifest = json.loads((scaffolded_agent / "cinna-agent.json").read_text(encoding="utf-8"))
+
+    assert "design" not in kit_module._rungs_present(scaffolded_agent, manifest)
+
+    (scaffolded_agent / "docs" / "test_scenarios").mkdir()
+    assert "design" in kit_module._rungs_present(scaffolded_agent, manifest)
+
+    (scaffolded_agent / "docs" / "test_scenarios").rmdir()
+    (scaffolded_agent / "docs" / "AGENT_DEVELOPMENT.md").write_text("# Dev map\n", encoding="utf-8")
+    assert "design" in kit_module._rungs_present(scaffolded_agent, manifest)
+
+
 def test_new_refuses_to_overwrite_an_existing_agent(tmp_path: Path) -> None:
     assert run_kit("new", "dup-agent", "--root", str(tmp_path)).returncode == 0
     second = run_kit("new", "dup-agent", "--root", str(tmp_path))
@@ -770,6 +792,21 @@ def test_every_ladder_doc_exists() -> None:
     assert ladder, "kit.json must declare the capability ladder"
     missing = [rung["doc"] for rung in ladder if not (KIT_DIR / rung["doc"]).is_file()]
     assert missing == [], f"ladder documents missing from the kit: {missing}"
+
+
+def test_the_design_guide_carries_the_advisor_table() -> None:
+    """Guide 13's §0 is the source every always-loaded prompt copies.
+
+    `BUILDING_AGENT.md`, the cinna-cli templates and the account package all
+    point at this heading by number; a rename here would leave them pointing at
+    nothing. The table header row is pinned for the same reason.
+    """
+    guide = (KIT_DIR / "guides" / "13-design-patterns.md").read_text(encoding="utf-8")
+    assert "## 0. The advisor table" in guide
+    assert "| When you notice… | Recommend… (pattern) |" in guide
+    # The guide is also copied raw into the cloud prompts directory, where no
+    # placeholder is ever rendered.
+    assert "{{" not in guide
 
 
 def test_kit_json_declares_the_paths_the_tool_uses() -> None:

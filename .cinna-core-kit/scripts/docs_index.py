@@ -789,6 +789,26 @@ def cmd_check(args):
                     anchoring.append("%s: tech doc names no backend/ or frontend/ path" % p)
     section("tech docs are anchored to code paths", anchoring)
 
+    # Kit guide 13 is copied into the cloud building prompts by
+    # sync_platform_knowledge.py; the copy carries a generated header, so the
+    # source must appear in it verbatim.
+    design_source = "docs/local_agent_kit/guides/13-design-patterns.md"
+    design_prompt = "backend/app/env-templates/app_core_base/core/prompts/AGENT_DESIGN_PATTERNS.md"
+    design_drift = []
+    if os.path.isfile(os.path.join(ROOT, design_source)):
+        with open(os.path.join(ROOT, design_source), encoding="utf-8") as fh:
+            source_text = fh.read()
+        prompt_path = os.path.join(ROOT, design_prompt)
+        prompt_text = ""
+        if os.path.isfile(prompt_path):
+            with open(prompt_path, encoding="utf-8") as fh:
+                prompt_text = fh.read()
+        if source_text not in prompt_text:
+            design_drift.append(
+                "%s is not a copy of %s — run `make sync-platform-knowledge`" % (design_prompt, design_source)
+            )
+    section("cloud design-patterns prompt is synced from kit guide 13", design_drift)
+
     unregistered = [
         d for d in idx.docs
         if d not in idx.owner and d != "docs/README.md"

@@ -47,12 +47,15 @@ Use `AskUserQuestion` when you genuinely need input you cannot infer:
 
 - the agent's job is ambiguous, or several readings are valid;
 - a required credential does not exist yet;
-- a design choice materially changes the result (CSV or SQLite, one agent or two);
+- a design choice materially changes the result (one agent or two, where a credential
+  lives);
 - an assumption would silently decide something for the user (timezone, date format,
   which mailbox).
 
-Ask specific questions with options, grouped into one message, and say why you need
-the answer. Do not ask what the user already told you, and do not ask about things
+For a design choice, lead with a recommendation rather than a bare menu: put the
+option `guides/13-design-patterns.md` §0 points to first, mark it
+"(Recommended)", and give its reason in the description. Ask specific questions with
+options, grouped into one message, and say why you need the answer. Do not ask what the user already told you, and do not ask about things
 the guides already decide — folder layout, file names, conventions.
 
 ## Habits that fit this kit

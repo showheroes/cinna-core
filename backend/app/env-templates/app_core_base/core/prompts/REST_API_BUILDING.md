@@ -12,6 +12,13 @@ a broad OAuth scope, a legacy API token) with a **narrow, validated API**. The
 powerful credential never leaves this container — the proxy is the only egress.
 Other agents consume only the surface you choose to expose.
 
+**This holds even for a private agent.** When one conversational agent needs only
+a slice of a broad credential — time-off figures from an HR login that can also
+read salaries — put the credential here and expose just that slice. The
+credential's reach, not the number of consumers, decides whether a producer is
+worth it: a prompt injection or a careless script in the conversational agent can
+reach only what this API returns.
+
 This is **code-to-code**: there is no LLM in the loop when a caller hits your
 endpoints. It is for deterministic, typed, high-frequency function calls. (If
 you want intelligence-mediated delegation, use A2A or handover instead.)
@@ -40,6 +47,12 @@ Keep helpers, tests, and scratch files **out of** `agent_api/` — put them unde
 `scripts/` or another non-discovered location. If a helper genuinely must sit
 beside the API, prefix it with a double underscore (e.g. `__helpers.py`) so the
 glob skips it.
+
+For the same reason, **never import one endpoint module from another**: discovery
+has already loaded it, and a second import registers its routes twice. Code that
+several modules — or a scheduled script — need belongs in a package under
+`scripts/` (for example `scripts/<system>_core/`, with no `cinna_api` import),
+added to `sys.path` by each module that uses it.
 
 ## The `cinna_api` SDK
 Import everything from one place:
@@ -102,6 +115,44 @@ API from a laptop script, server, or cron job with an issued API key. Their
 identity is baked into the key itself, so `me.user_id` / `me.has_scope(...)`
 resolve exactly as they would for a peer agent's connection. Write **one**
 authorization path; don't special-case "is this a container or a person."
+
+## Response Design — One Call Answers the Question
+
+Your consumer is usually a conversation model, often a small, fast one. Shape every
+endpoint so one call answers a whole user question and the model only quotes
+(`/app/core/prompts/AGENT_DESIGN_PATTERNS.md` §3–§4):
+
+- **Pre-compute every figure and verdict** the answer needs — totals, remaining
+  and at-risk amounts, `days_until_…`, an `urgency` or `enough` verdict. If a
+  consumer would have to add, subtract or compare, the field is missing here. Say
+  so in the docstring: *"Every figure the answer needs is pre-computed; do not
+  re-derive it from raw dates."*
+- **Spell out dates** (`{"date": "2026-09-15", "weekday": "Tuesday"}`) and add
+  `<field>_local` siblings to timestamps — models get weekdays wrong.
+- **Carry context and honesty:** who, which period and which scope the answer
+  covers; `warnings`; `data_fetched_at`; and `truncated: true` whenever a cap bit.
+  Silent truncation reads as "that's everything".
+- **Project long lists:** a `view=summary` parameter that returns only the fields
+  a list needs, so 25 rows fit one tool output.
+- **Authorize from your data, on every call.** Re-derive "may this caller see that
+  record" from the system of record; an id the caller passes names a target, it
+  never grants access. Remove the fields a caller may not see, and document that a
+  limited row is a complete answer.
+- **Errors are answers:** `409` with the candidates and enough detail to choose,
+  `404` with the valid values, `403` with the rule in plain words and what the
+  caller can have instead.
+- **Name the sensitive fields.** A `FIELDS` tuple of what you read, a
+  `FIELDS_NEVER_READ` tuple of what you must not, and one function every read of
+  the sensitive model goes through, checking both.
+
+### `CONSUMERS.md` — the contract no consumer's test will catch
+
+Keep `agent_api/CONSUMERS.md` beside the code: which consumer agent calls which
+endpoint, which fields it relies on, and why. End it with the change rules —
+additive changes are safe; renaming, removing or retyping a field is breaking (grep
+the consumers first); changing a classification is breaking even when the shape
+holds; after any change re-harvest the spec and smoke-test each consumer from its
+own environment; update this file in the same change.
 
 ## Naming Your API (OpenAPI metadata)
 Label the spec by defining these **module-level constants** in any of your

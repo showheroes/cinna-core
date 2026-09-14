@@ -425,7 +425,17 @@ inside a `<pre>`.
 
 ## Kit content sync (`.cinna-core-kit/scripts/sync_platform_knowledge.py`)
 
-Step `[3/3]`, `sync_local_agent_kit()`:
+Step `[4/4]`, `sync_design_patterns_prompt()`, runs after the kit copy: guide 13
+(`guides/13-design-patterns.md`) is also written **raw** to
+`backend/app/env-templates/app_core_base/core/prompts/AGENT_DESIGN_PATTERNS.md`
+behind a one-line "generated — do not edit" HTML comment, because cloud building
+sessions and cinna-cli synced workspaces never see the kit. The copy is never
+rendered, so the step refuses a guide containing `{{`; `docs_index.py check`
+fails when the prompt no longer contains the guide verbatim, and
+`test_the_design_guide_carries_the_advisor_table` pins the §0 heading the other
+channels' copied tables point at.
+
+Step `[3/4]`, `sync_local_agent_kit()`:
 
 - Clears (`rmtree`) and rebuilds only `knowledge/local-kit/` — `knowledge/platform/`
   (steps 1–2) and the hand-authored `knowledge/guides/` are untouched.
@@ -678,6 +688,12 @@ and the `docs` role text dropped "one doc per local skill". A skill is
   `README.md` excluded. Checking only `knowledge/` would tell an author who went
   all-in on skills that they had not climbed a rung they had, and the ladder
   check would then send them back to the guide they followed.
+- **The `design` rung** (guide 13, after `scripts` in `kit.json`'s ladder) is
+  reported by `_rungs_present` when `docs/AGENT_DEVELOPMENT.md` or
+  `docs/test_scenarios/` exists — the scaffold ships neither, so a fresh agent
+  never shows it (`test_the_design_rung_is_adopted_by_its_record_or_its_scenarios`).
+  Guidance only: both are domain docs under the existing `docs/` role, so the
+  contract stays at 1.1.0.
 - **The scaffold gains `templates/agent/skills/README.md`**, picked up by the
   contract tarball automatically (`templates/**` is a declared member subset).
 - **`templates/agent/AGENTS.md` carries an explicit read-the-`SKILL.md` rule.**

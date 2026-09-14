@@ -20,7 +20,7 @@ curl -sL {{KIT_BASE_URL}}/kit.tar.gz | tar xz
 rm -rf .cinna-kit && mv cinna-kit .cinna-kit
 ```
 
-After that the entire kit — all twelve guides, the schema, the templates and the
+After that the entire kit — all thirteen guides, the schema, the templates and the
 tool — is on disk and needs no further requests. Read from `.cinna-kit/`, never from
 the network.
 

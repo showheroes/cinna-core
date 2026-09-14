@@ -82,11 +82,28 @@ agent into it with one command.
   four-way verdict from the same table in `CHANGELOG.md`.
 - **Capability ladder** — The kit's core teaching device. An agent starts with
   nothing but a prompt and grows one rung at a time, only when a rung's trigger
-  fires (prompts → scripts/data → credentials → schedules → status reporting →
-  CLI commands → knowledge/local skills → multi-agent → go cloud). The assistant
-  re-walks the ladder after every substantive change and is told, explicitly, to
-  add nothing whose trigger hasn't fired — a hard anti-over-engineering rule, not
-  a preference.
+  fires (prompts → scripts/data → design patterns → credentials → schedules →
+  status reporting → CLI commands → knowledge/local skills → multi-agent → go
+  cloud). The assistant re-walks the ladder after every substantive change and is
+  told, explicitly, to add nothing whose trigger hasn't fired — a hard
+  anti-over-engineering rule, not a preference.
+- **Design patterns and the advisor duty** — Guide 13
+  (`guides/13-design-patterns.md`) lifts the house style of agents running in
+  production into one guide: skills behind a routing table, an external
+  credential held by one narrow producer API even for a private agent, one
+  pre-computed payload per question so the model never does arithmetic, SQLite
+  state under `app-data/storage/`, side effects behind a gate, `--dry-run`,
+  idempotency key and audit log, recorded test scenarios under
+  `docs/test_scenarios/`, a strong building model with a small conversation
+  model, and a `docs/AGENT_DEVELOPMENT.md` with a defects log. Its §0 advisor
+  table makes the assistant *recommend* a pattern with its reason when a trigger
+  fires, before building, and then build what the user chooses. The guide is the
+  single source for every channel: `make sync-platform-knowledge` also copies it
+  raw into the cloud building prompts as `AGENT_DESIGN_PATTERNS.md` (so it must
+  carry no placeholder), the §0 table is copied into `BUILDING_AGENT.md` and the
+  cinna-cli `CLAUDE.md` templates, and the account context package ships it
+  inside `context/local-kit/`. `kit.py list` reports the `design` rung once an
+  agent has `docs/AGENT_DEVELOPMENT.md` or `docs/test_scenarios/`.
 - **The three roles** — the assistant switches between *Orchestrator* (root
   folder; creates/lists/coordinates agents), *Builder* (inside one agent's
   folder; writes its scripts, prompts, config, manifest), and *Agent* (inside

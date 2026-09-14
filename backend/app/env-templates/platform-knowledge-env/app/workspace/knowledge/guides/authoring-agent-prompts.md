@@ -25,7 +25,7 @@ by a **different system at a different moment** — do not conflate them.
 | Field | What it is | When it fires | How it should look |
 |-------|-----------|---------------|--------------------|
 | `description` | Human-facing summary of what the agent does | Discovery (agent cards, A2A card); also feeds router-trigger / A2A skill generation | One clear sentence describing capability & purpose. *"Reconciles Stripe payouts against the ledger and flags mismatches."* |
-| `workflow_prompt` | The **conversation-mode system prompt** — the agent's real execution instructions | Every conversation-mode session (the main prompt) | Operational: which scripts to run, how to parse their output (JSON/CSV), how to present results, decision logic. The agent is a *bridge* — it runs scripts, parses, and rephrases conversationally. |
+| `workflow_prompt` | The **conversation-mode system prompt** — the agent's real execution instructions | Every conversation-mode session (the main prompt) | Operational: which scripts to run, how to parse their output (JSON/CSV), how to present results, decision logic. The agent is a *bridge* — it runs scripts, parses, and rephrases conversationally, quoting every figure from the output and never computing one. Once the agent answers two or more kinds of question it becomes **scope + a routing table** (skill → the questions it owns, in the user's words); the procedures live in `skills/<name>/SKILL.md`. |
 | `entrypoint_prompt` | A short, human-like trigger message (1–2 sentences) | First user message for scheduled / automated runs | Conversational, **not** technical. ✅ *"What is my time-off balance?"* ❌ *"Query Odoo API and return JSON."* Must be **self-contained** — it is sent automatically with nobody there to fill anything in, so never leave a placeholder in it. |
 | `refiner_prompt` | Instructions for turning a vague request into a structured task | During AI task refinement, before execution | Default-fill rules + mandatory fields. *"If no period is given, default to the current week. Always capture account id and currency."* |
 | `router_trigger_prompt` | A single capability-verb sentence used to route incoming messages to this agent | Only by the routing classifier (`AgentClassifier.classify`) — never in any system prompt. Four consumers share it: Server Channels Pass 1 and Pass 2, App MCP Stage 1, and identity Stage 2 | *"Reconciles Stripe payouts and flags ledger mismatches."* Describes *when to route here*, not how to behave. |
@@ -168,13 +168,18 @@ persisted `prompts.json` is easier to iterate.
 
 ### How it reaches the environment (you don't have to push it)
 
-The agent **config (database) is the source of truth.** Writing these fields is
-enough: the three document-backed prompts (`workflow_prompt`,
-`entrypoint_prompt`, `refiner_prompt`) are written into the container's
-`docs/*.md` automatically on the next environment start/activation (the prompt
-reconcile seeds them DB→env when the env files are still empty — the fresh-agent
-case). `router_trigger_prompt`, `example_prompts`, and `description` are
-config-only and take effect immediately.
+The three document-backed prompts (`workflow_prompt`, `entrypoint_prompt`,
+`refiner_prompt`) exist twice — as fields of the agent config and as the
+container's `docs/*.md` files — and the platform reconciles the two **in both
+directions**: a change on one side flows to the other, and when both changed
+since the last reconcile the later write wins. Writing the fields is enough: they
+reach `docs/*.md` automatically on the next environment start/activation (or at
+once with `sync-prompts`, below), and an edit to the synced docs flows back into
+the config the same way. That is why this guide calls the config authoritative
+while the Local Agent Kit calls `docs/WORKFLOW_PROMPT.md` "the single source":
+both hold, as long as each change takes **one** path (see the one-path rule).
+`router_trigger_prompt`, `example_prompts`, and `description` are config-only and
+take effect immediately.
 
 If the environment is **already running** and you want the doc prompts pushed in
 *right now* instead of on next start:
@@ -228,6 +233,10 @@ are yours to author — you have the full build context and are the better autho
 4. `cinna agent show <name> --prompts` to confirm.
 5. If the env is already running and you want the docs live immediately,
    `cinna api POST agents/<id>/sync-prompts`.
+6. If the agent has recorded test scenarios (`docs/test_scenarios/`), re-run them
+   with `cinna chat` — a prompt edit is a behaviour change, and so is a model or
+   provider switch. How to record and run them:
+   `context/local-kit/guides/13-design-patterns.md` §9.
 
 An agent whose `description` and prompts match its actual behavior is the mark of
 a finished build.

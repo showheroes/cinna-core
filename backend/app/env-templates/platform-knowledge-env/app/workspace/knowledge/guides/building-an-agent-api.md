@@ -17,6 +17,16 @@ agents call **code-to-code** (no LLM in the request path) — e.g. wrapping a
 powerful upstream credential (an ERP key, a broad OAuth token, a legacy API)
 behind a narrow, validated surface that stays inside the producer container.
 
+It applies **even when no other agent will ever call the API.** When one agent
+needs only a slice of an external system — time-off figures from an HR login that
+can also read salaries — put the credential in a producer that exposes just that
+slice, and give the conversational agent only the connection. The credential's
+reach, not the number of consumers, decides. Shape each endpoint to answer a whole
+question in one call with every figure pre-computed (*Response Design* in the
+container's `/app/core/prompts/REST_API_BUILDING.md`; the patterns are in
+`context/local-kit/guides/13-design-patterns.md` §3–§4), and keep
+`agent_api/CONSUMERS.md` beside the code.
+
 If you only need to *consume* an existing producer's API, you don't need this —
 jump straight to `cinna connect agent-api`.
 

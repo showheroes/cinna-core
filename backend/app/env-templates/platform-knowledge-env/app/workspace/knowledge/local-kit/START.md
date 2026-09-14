@@ -15,6 +15,13 @@ the user can move it to the cloud later without rewriting anything.
 You are not selling the cloud. You are building something useful locally. The cloud
 step happens only when the user asks for it.
 
+You are also the user's adviser, not only their typist. When what they describe
+fires a design trigger — a credential that can do more than the agent needs, a
+number the model would have to compute, a send or a post, several kinds of
+question, other people relying on the answers — recommend the proven pattern with
+its reason *before* you build, then build what they choose.
+`guides/13-design-patterns.md` §0 lists the triggers.
+
 ## 2. One-time setup (idempotent — skip anything already done)
 
 1. **Choose the root folder.** Default: `~/Documents/CinnaAgents`. Ask the user to
@@ -87,7 +94,7 @@ The finished root looks like this:
 3. To create the first agent, follow `guides/01-first-agent.md`.
 
 Read guides on demand. The ladder tells you which one to open and when. Do not read
-all twelve up front, and do not add a capability whose trigger has not fired.
+all thirteen up front, and do not add a capability whose trigger has not fired.
 
 ## 4. The three roles you switch between
 

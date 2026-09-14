@@ -22,6 +22,7 @@ Kit version `{{KIT_VERSION}}` · contract version in `CONTRACT_VERSION` · insta
 | `guides/10-testing-locally.md` | Before declaring anything finished, and before going cloud. |
 | `guides/11-go-cloud.md` | The user asks to move an agent to {{INSTANCE_NAME}}. |
 | `guides/12-keeping-up-to-date.md` | The kit may be stale, or a convention changed under you. |
+| `guides/13-design-patterns.md` | Interviewing for any new agent (§0), and whenever the agent reaches an external system, sends or posts, answers several kinds of question, or will serve other people. |
 | `assistants/claude-code.md` | You are Claude Code. |
 | `assistants/codex.md` | You are Codex or another sandboxed CLI assistant. |
 | `assistants/cinna-desktop.md` | You are the assistant building agents inside Cinna Desktop. |
@@ -52,6 +53,7 @@ concrete artefacts. Walk the table top-down after every substantive change.
 |------|----------------------|-------------------|
 | **Prompts & description** | always, before the first test | `docs/WORKFLOW_PROMPT.md`, `description`, `example_prompts`, `router_trigger_prompt` |
 | **Scripts & data** | the agent does anything beyond answering from prompts | `scripts/`, `config/`, `app-data/storage/`, cache rules |
+| **Design patterns** | an external system, a send / create / sign / post, a second kind of question, or the agent will serve other people | recommendations made and recorded in `docs/AGENT_DEVELOPMENT.md`; then whichever patterns the user accepted — skills with a routing table, a narrow client module, `docs/test_scenarios/` |
 | **Credentials** | any external system needs a token, login, key or OAuth | `credentials/.env(.example)`, `credentials/README.md`, manifest `credentials[]`, `cinna_credentials.py` usage |
 | **Schedules** | the user says daily / weekly / every / at …, or the agent should run unattended | manifest `schedules[]`, `docs/ENTRYPOINT_PROMPT.md` becomes mandatory, a `run-<name>` Makefile target |
 | **Status reporting** | the agent runs unattended, or performs long-running checks | `scripts/update_status.py` usage, `app-data/storage/STATUS.md`, `status_refresh_command`, a `status` CLI command |

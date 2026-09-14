@@ -323,6 +323,9 @@ When a session is created for a task, the system prompt includes a task context 
 ├── core/                          # System code (from shared app_core_base, read-only mount, baked into Docker image)
 │   ├── prompts/
 │   │   ├── BUILDING_AGENT.md      # Building mode system prompt
+│   │   ├── AGENT_DESIGN_PATTERNS.md  # Generated from Local Agent Kit guide 13 (read on demand)
+│   │   ├── COMPLEX_AGENT_DESIGN.md   # Skills, cache/state, side effects, OK pattern (read on demand)
+│   │   ├── REST_API_BUILDING.md   # Producer agent API + response design (read on demand)
 │   │   └── WEBAPP_BUILDING.md     # Webapp building instructions (read by agent on demand)
 │   ├── server/                    # FastAPI server application
 │   │   ├── routes.py              # HTTP endpoints + session context helper + webapp endpoints

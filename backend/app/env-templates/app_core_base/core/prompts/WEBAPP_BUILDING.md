@@ -54,7 +54,7 @@ def main():
     params = json.loads(sys.stdin.read() or '{}')
 
     # Example: query a database
-    db_path = '/app/workspace/files/data.db'
+    db_path = '/app/workspace/app-data/storage/data.db'  # runtime data: app-data/, never files/
     conn = sqlite3.connect(db_path)
     cursor = conn.execute(
         "SELECT * FROM sales WHERE date >= ? LIMIT ?",
