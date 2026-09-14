@@ -19,13 +19,13 @@ catalog) plus the Local Agent Kit contract bump.
 | Adapters | `.../core/server/adapters/{base,claude_code_sdk_adapter,opencode_sdk_adapter}.py` | `SUPPORTS_SKILLS`, `skills_changed` keyword, `Skill` pre-allow, `/instance/dispose`, `skills.paths`, `stop()` |
 | Container installer | `.../core/server/agent_env_service.py::_ensure_catalog_plugin` | Download / verify / safe-extract a catalog archive, synthesise `plugin.json` |
 | Backend cache service | `backend/app/services/agents/agent_skills_service.py` | Pull, normalise and cache the index on `AgentEnvironment` |
-| Read routes | `backend/app/api/routes/agent_skills.py` | `GET/POST /agents/{id}/skills*`, `GET .../skills/{name}/content` |
+| Read routes | `backend/app/api/routes/agent_skills.py` | `GET/POST /agents/{id}/skills*`, `GET .../skills/{name}/content`, `GET .../skills/{name}/files` |
 | Catalog models | `backend/app/models/skills/{skill_package,skill_package_revision,schemas}.py` | Tables + wire shapes |
 | Catalog service | `backend/app/services/skills/skill_catalog_service.py` | Publish, browse, manage, install, upgrade, archive |
 | Coded failures | `backend/app/services/skills/exceptions.py` | `SkillCatalogError` + `STATUS_BY_CODE` + `http_error_for` |
 | Catalog routes | `backend/app/api/routes/skills.py` | `/skills/...` and the agent-scoped publish/install verbs |
 | Slash command | `backend/app/services/agents/commands/skills_command.py` | `/skills` document |
-| Wake helper | `backend/app/services/agents/environment_resolver.py::wake_suspended_environment` | Shared by the status and skills refresh buttons |
+| Wake helper | `backend/app/services/agents/environment_resolver.py::wake_suspended_environment` | Shared by the status and skills refresh buttons and the `SKILL.md` viewer. Resolves its adapter through `EnvironmentService.get_lifecycle_manager()` — the shared singleton every other caller uses — rather than a fresh `EnvironmentLifecycleManager()` |
 
 ### Data flow — one message
 
@@ -585,7 +585,8 @@ choose one remedy for the shared code was wrong half the time.
 | `refresh_after_action(environment, db_session, force=False)` | Best-effort, rate-limited unless `force`. Never raises |
 | `force_refresh(environment, agent, db_session)` | Wakes a suspended env via `wake_suspended_environment`, then pulls. Falls back to cached rows |
 | `find_cached_skill(environment, name)` | Local wins over plugin when a name is shadowed (the index sorts `local` first) |
-| `read_skill_content(environment, name)` | `(path, text, truncated)`. Path comes from the **cached index**, never from `name` — that is what keeps this from being a workspace file-read endpoint wearing a skill's name. Cap `MAX_CONTENT_BYTES = 256 KB`, decoded with `errors="replace"` |
+| `read_skill_content(environment, name, agent=None)` | `(path, text, truncated)`. Path comes from the **cached index**, never from `name` — that is what keeps this from being a workspace file-read endpoint wearing a skill's name. Wakes a suspended env via `wake_suspended_environment` **after** the cache lookup, so an unknown name never starts a container. Cap `MAX_CONTENT_BYTES = 256 KB`, decoded with `errors="replace"` |
+| `list_skill_files(environment, name)` | `(path, files, count, total_bytes)`, read host-side at `<ENV_INSTANCES_DIR>/<env id>/app/workspace/<entry.path>` (plugin folders included). Folder from the **cached index**, which the container writes, so `_is_skill_folder_path` admits only `skills/<name>` and `plugins/<mkt>/<plugin>/skills/<name>` (no `.`/`..`/empty parts — `"."` would otherwise list the whole workspace). `_walk_skill_folder` opens each component with `O_NOFOLLOW` and walks with `os.fwalk(follow_symlinks=False)`, so a symlink swapped in after the check is refused at any depth; skips `SKIP_DIR_NAMES` and non-regular files, like the index walk that measured `size_bytes`. `None` → 404; missing workspace raises `SkillsIndexUnavailableError("workspace_unavailable")` → 503 |
 | `handle_post_action_event(event_data)` | Registered event handler |
 
 ### Event registration
@@ -654,7 +655,8 @@ client), before `agents.router`.
 |---------------|-----------|
 | `GET /agents/{agent_id}/skills` | Cache-only — safe to poll, never wakes a container |
 | `POST /agents/{agent_id}/skills/refresh` | Wakes a suspended env, re-reads, returns the same shape. **Never fails** on an unreachable environment: the body carries the cached rows plus an `error` code. Bypasses the 30 s limit |
-| `GET /agents/{agent_id}/skills/{name}/content` | `SkillContentPublic`. 503 when the env is unreachable. Two distinct 404s: "Skill not found" versus "SKILL.md not found — refresh the skills list" when the index still lists it but the file is gone |
+| `GET /agents/{agent_id}/skills/{name}/content` | `SkillContentPublic`. Wakes a suspended env first; 503 when the env is still unreachable — "waking up — try again" while it is `activating`/`starting` (a parallel wake), otherwise "unavailable — start it" (stopped, errored, or the wake failed). Two distinct 404s: "Skill not found" versus "SKILL.md not found — refresh the skills list" when the index still lists it but the file is gone |
+| `GET /agents/{agent_id}/skills/{name}/files` | `SkillFilesPublic` (rows are `SkillRevisionFilePublic`, capped at `MAX_LISTED_FILES`; `count` / `total_size_bytes` cover the whole folder). Host-side, never wakes a container. Same two 404s as `/content` ("Skill folder not found — refresh…"); 503 when the workspace is not on disk |
 
 Access is `AgentService.user_can_access` (superusers bypass), so the read gate
 and the capability reply cannot disagree about who the agent belongs to.
@@ -1244,7 +1246,8 @@ plainly exists.
 | ~~`Agents/AgentSkillsCard.tsx`~~ → `Agents/Addons/AddonsCard.tsx` | Query key was `["agent", agentId, "skills"]`, now `["agent", agentId, "addons"]`; Refresh mutation. A 200 with `result.error` toasts a **failure** — the route never fails on an unreachable env, so "Skills refreshed" over an error banner would say the opposite of the truth |
 | ~~`Agents/SkillRow.tsx`~~ → `Agents/Addons/AddonRow.tsx` | `ListRow` with version + author badges; the row itself opens its dialog, mounted only while open. `AddonRow` deliberately does **not** reuse `SkillRow`: no `meta` line, no info tooltip, a different status precedence, a different action budget |
 | ~~`Agents/AllSkillsSheet.tsx`~~ → `Agents/Addons/AllAddonsSheet.tsx` | "Show all (N)" |
-| ~~`Agents/SkillContentDialog.tsx`~~ → `Agents/SkillContentBody.tsx` | `SKILL.md` viewer body, rendered inside `AddonDetailDialog` for a single-skill row and inside `Agents/Addons/SkillDetailDialog.tsx` for one skill of a many-skill plugin. Markdown-rendered through the shared `Catalog/SkillSource.tsx`, frontmatter split off |
+| ~~`Agents/SkillContentDialog.tsx`~~ → `Agents/SkillContentBody.tsx` | `SKILL.md` viewer body, rendered in the **SKILL.md** tab of `Agents/Addons/SkillDocumentTabs.tsx` — inside `AddonDetailDialog` for a single-skill row and `Agents/Addons/SkillDetailDialog.tsx` for one skill of a many-skill plugin. Mounted only while that tab is active. Markdown-rendered through the shared `Catalog/SkillSource.tsx`, frontmatter split off |
+| `Agents/SkillContentFact.tsx` | The **Content** fact beside Path and Size in both skill dialogs: "N files" from `GET .../skills/{name}/files`, opening the catalog's `Catalog/SkillRevisionFilesSheet.tsx` with no revision label. Query key `["agent", agentId, "skills", name, "files"]`, under the prefix every re-read invalidates. A failed read says "Unavailable"; on a shadowed entry (the route resolves local-first) the value reads "N files in <other path>" in warning tone, matching `SkillContentBody`'s notice; no download action — these are the agent's own files |
 | `frontend/src/utils/skills.ts` | `skillsIndexErrorCopy`, `skillRowStatus`, `formatSkillSize`, `sortSkills`, `skillKey` — shared so the card, the row and the sheet cannot drift on sort order or on what a dot means. Still live: `utils/addons.ts` builds on it rather than duplicating it |
 | `frontend/src/components/Agents/AgentConfigTab.tsx` | Hosted the card until the Addons tab took it. Was deliberately **not** gated on `showOperationalSettings` or `readOnly`, which is why `"addons"` had to join the `agentUserTabs` set in the same change |
 | `frontend/src/components/Chat/SlashCommandPopup.tsx` | `kind === "skill"` renders a `h-5` outline `Badge`, visible text inside the `role="option"` row (so it is part of the accessible name and needs no `sr-only` twin) |
@@ -1354,7 +1357,7 @@ plan, rather than being frozen as test counts here.
 | `backend/tests/unit/test_skills_bundle_workspace.py`, `test_revision_marshaller.py`, `test_revision_format.py` | `skills_summary` in/out, `None` vs `[]` |
 | `backend/tests/unit/test_skill_catalog_archive.py` | Deterministic archive, digest stability, safe extract |
 | `backend/tests/unit/test_workspace_classification.py` | `.claude` denylisted |
-| `backend/tests/api/agents/core/agents_skills_routes_test.py` | The three read routes |
+| `backend/tests/api/agents/core/agents_skills_routes_test.py` | The four read routes: cached list, refresh, content and its two 404s, watcher-triggered refresh, no-environment fallback, opening a skill waking a suspended env (a stopped one → 503, one already `activating` → "waking up", an unknown name never starting the container), and `/files` listing folders host-side without waking the env (symlinked file/directory, `..` escape, `.`, top-level and gone folders all 404 without a listing) |
 | `backend/tests/api/agents/commands/agents_skills_command_test.py` | `/skills` |
 | `backend/tests/api/agents/bundles/agents_bundles_skills_test.py` | Publish gate end to end |
 

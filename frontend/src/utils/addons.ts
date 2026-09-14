@@ -24,6 +24,7 @@ import {
 import type {
   AddonPublic,
   LLMPluginMarketplacePluginPublic,
+  SkillCredentialDeclarationPublic,
   SkillPackageEntry,
 } from "@/client"
 import type { RowStatus } from "@/components/Common/ListRow"
@@ -36,6 +37,39 @@ import {
   skillPublisherLabel,
 } from "@/utils/skillCatalog"
 import { CREDENTIAL_MISSING_LABEL } from "@/utils/skillCredentials"
+
+/** One credential slot, as the row's flag names it. */
+export type AddonCredentialSlot = Pick<
+  SkillCredentialDeclarationPublic,
+  "slot" | "type"
+>
+
+/**
+ * Every credential slot this row needs, once each.
+ *
+ * The declarations of all its skills — a plugin's skills can share a slot —
+ * plus any slot `credential_issues` names that no cached declaration does (a
+ * catalog revision whose slot was renamed), so a slot the dot is amber about
+ * is never missing from the flag that explains it.
+ */
+export function addonCredentialSlots(
+  addon: AddonPublic,
+): AddonCredentialSlot[] {
+  const slots = new Map<string, AddonCredentialSlot>()
+  const add = (slot: string, type: string) => {
+    const key = `${type}:${slot}`
+    if (!slots.has(key)) slots.set(key, { slot, type })
+  }
+  for (const skill of addon.skills ?? []) {
+    for (const credential of skill.credentials ?? []) {
+      add(credential.slot, credential.type)
+    }
+  }
+  for (const issue of addon.credential_issues ?? []) {
+    add(issue.slot, issue.type)
+  }
+  return [...slots.values()]
+}
 
 /** The query key the Addons tab reads. */
 export function addonsQueryKey(agentId: string): readonly unknown[] {

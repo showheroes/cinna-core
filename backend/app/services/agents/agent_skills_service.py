@@ -28,8 +28,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import posixpath
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from stat import S_ISREG
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -41,6 +45,7 @@ from app.services.agents.skill_manifest import (
     MAX_SLOT_LENGTH,
     SKILL_CREDENTIAL_TYPES,
     SKILL_NAME_RE,
+    SKIP_DIR_NAMES,
     SkillEntry,
     coerce_version,
     issue_from_dict,
@@ -51,9 +56,74 @@ from app.services.environments.synced_files import SYNCED_FILES
 from app.services.environments.workspace_classification import WORKSPACE_ROOT_REL
 
 if TYPE_CHECKING:  # pragma: no cover — import cycle guard, typing only
+    from app.models.agents.agent import Agent
     from app.models.agents.agent_skills import SkillEntryPublic, SkillIssuePublic
+    from app.models.skills.schemas import SkillRevisionFilePublic
 
 logger = logging.getLogger(__name__)
+
+
+def _is_skill_folder_path(path: str | None) -> bool:
+    """True when ``path`` has the shape of a skill folder, workspace-relative.
+
+    The two ``rel_root`` shapes ``scan_skills_root`` builds entry paths from:
+    the agent's own ``skills/<name>`` and a plugin's
+    ``plugins/<mkt>/<plugin>/skills/<name>``. Anything else — ``"."``, a
+    top-level folder, a ``..`` climb — is not a skill folder, whatever the
+    index row claims.
+    """
+    if not path:
+        return False
+    parts = path.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return False
+    if len(parts) == 2:
+        return parts[0] == "skills"
+    return parts[0] == "plugins" and len(parts) >= 4 and parts[-2] == "skills"
+
+
+def _walk_skill_folder(
+    workspace: Path, rel_path: str
+) -> Iterator[tuple[str, os.stat_result]]:
+    """Yield ``(relative_posix_path, stat_result)`` for every regular file.
+
+    Descends from ``workspace`` one component at a time with ``O_NOFOLLOW`` and
+    walks by file descriptor with ``os.fwalk(follow_symlinks=False)``, so a
+    symlink the container swaps in after the path was checked — at the folder,
+    above it, or anywhere below it — is refused rather than followed off the
+    mount. Skips ``SKIP_DIR_NAMES`` like the index's own walk, in the same
+    sorted order.
+
+    Raises:
+        OSError: a component of ``rel_path`` is missing or is not a real
+            directory.
+    """
+    fd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in rel_path.split("/"):
+            next_fd = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd
+            )
+            os.close(fd)
+            fd = next_fd
+        for dir_path, dir_names, file_names, dir_fd in os.fwalk(
+            ".", dir_fd=fd, follow_symlinks=False
+        ):
+            dir_names[:] = sorted(d for d in dir_names if d not in SKIP_DIR_NAMES)
+            for file_name in sorted(file_names):
+                try:
+                    stat_result = os.stat(
+                        file_name, dir_fd=dir_fd, follow_symlinks=False
+                    )
+                except OSError:
+                    continue
+                if not S_ISREG(stat_result.st_mode):
+                    continue
+                yield posixpath.normpath(
+                    posixpath.join(dir_path, file_name)
+                ), stat_result
+    finally:
+        os.close(fd)
 
 # Module-level rate-limit bucket: env_id -> last_fetch_at (UTC). Independent of
 # the CLI-commands and status buckets by design (see the module docstring).
@@ -483,7 +553,7 @@ class AgentSkillsService:
 
     @classmethod
     async def read_skill_content(
-        cls, environment: AgentEnvironment, name: str
+        cls, environment: AgentEnvironment, name: str, agent: Agent | None = None
     ) -> tuple[str, str, bool] | None:
         """Read one skill's ``SKILL.md`` — ``(path, text, truncated)``.
 
@@ -497,6 +567,11 @@ class AgentSkillsService:
         name, and it is what makes a plugin's skill resolve inside the plugin
         folder instead of the agent's own.
 
+        Opening a skill is a user asking, so it takes the :meth:`force_refresh`
+        posture: a suspended environment is woken before the read rather than
+        reported as unavailable. The wake comes after the cache lookup, so a
+        name that is not a skill never starts a container.
+
         Raises:
             SkillsIndexUnavailableError: the environment could not be reached.
         """
@@ -504,7 +579,14 @@ class AgentSkillsService:
         if entry is None or not entry.path:
             return None
 
+        from app.services.agents.environment_resolver import (
+            wake_suspended_environment,
+        )
         from app.services.environments.environment_service import EnvironmentService
+
+        if agent is None:
+            agent = cls._load_agent(environment.agent_id)
+        await wake_suspended_environment(environment, agent, log_prefix="agent_skills")
 
         rel_path = f"{entry.path}/SKILL.md"
         adapter = EnvironmentService.get_lifecycle_manager().get_adapter(environment)
@@ -518,6 +600,74 @@ class AgentSkillsService:
 
         text, truncated = await cls._consume_stream(stream, MAX_CONTENT_BYTES)
         return rel_path, text, truncated
+
+    @classmethod
+    def list_skill_files(
+        cls, environment: AgentEnvironment, name: str
+    ) -> tuple[str, list[SkillRevisionFilePublic], int, int] | None:
+        """What one skill folder carries — ``(path, files, count, total bytes)``.
+
+        ``files`` is capped at the catalog's ``MAX_LISTED_FILES``; the count and
+        the byte total always describe the whole folder. The same contract and
+        row type as ``SkillCatalogService.list_revision_files``, so one Sheet
+        renders a published revision and a workspace folder alike.
+
+        Read **host-side** off the workspace bind mount, as the publish path and
+        :meth:`_backfill_local_versions` read it: names and sizes need no
+        container, so a suspended agent answers without being woken. Plugin
+        folders live under the same mount, so a plugin's skill resolves too.
+
+        The folder comes from the cached index, never from ``name`` — the rule
+        :meth:`read_skill_content` follows — and that index is written by a
+        process inside the agent's own container, so it is untrusted twice over:
+        the path must have one of the two shapes a skill folder has
+        (:func:`_is_skill_folder_path`), or ``"."`` would list the whole
+        workspace; and the folder is opened and walked by file descriptor
+        (:func:`_walk_skill_folder`), so a symlink swapped in after that check
+        is refused instead of followed off the mount. The exclusions are the
+        index walk's own (``SKIP_DIR_NAMES``, symlinks at every depth), so the
+        dialog's Size fact and this total describe the same files.
+
+        Returns ``None`` when the cache holds no such skill, or when its folder
+        is gone, is not a skill folder, or is reached through a symlink; the
+        caller tells the first case from the rest with :meth:`find_cached_skill`.
+
+        Raises:
+            SkillsIndexUnavailableError: the workspace is not on disk at all —
+                an environment that has never started.
+        """
+        from app.models.skills.schemas import SkillRevisionFilePublic
+        from app.services.skills.skill_catalog_service import MAX_LISTED_FILES
+
+        entry = cls.find_cached_skill(environment, name)
+        if entry is None or not _is_skill_folder_path(entry.path):
+            return None
+
+        workspace = (
+            Path(settings.ENV_INSTANCES_DIR) / str(environment.id) / WORKSPACE_ROOT_REL
+        )
+        if not workspace.is_dir():
+            raise SkillsIndexUnavailableError("workspace_unavailable")
+
+        files: list[SkillRevisionFilePublic] = []
+        count = 0
+        total_bytes = 0
+        try:
+            for relative, stat_result in _walk_skill_folder(workspace, entry.path):
+                count += 1
+                total_bytes += stat_result.st_size
+                if len(files) < MAX_LISTED_FILES:
+                    files.append(
+                        SkillRevisionFilePublic(
+                            path=relative,
+                            size_bytes=stat_result.st_size,
+                            is_executable=bool(stat_result.st_mode & 0o111),
+                        )
+                    )
+        except OSError:
+            # A component of the folder is missing or is not a real directory.
+            return None
+        return entry.path, files, count, total_bytes
 
     @staticmethod
     async def _consume_stream(stream, max_bytes: int) -> tuple[str, bool]:

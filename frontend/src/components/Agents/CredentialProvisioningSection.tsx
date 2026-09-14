@@ -44,6 +44,7 @@ import {
   SDK_CREDENTIAL_COMPATIBILITY,
   sdkExpectedCredentialType,
 } from "@/components/Environments/EnvironmentConfigForm"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -358,70 +359,78 @@ export function CredentialProvisioningSection({
             const value = valueFor(cred)
             const rowDrift = driftByName[cred.name]
             return (
-              <div
-                key={cred.id}
-                className="flex items-start justify-between gap-4 py-2"
-              >
-                <div className="min-w-0 space-y-1.5">
-                  <CredentialTypeBadge type={cred.type} />
-                  <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
-                    <span>detected from</span>
-                    <Badge asChild variant="outline">
-                      <Link
-                        to="/credential/$credentialId"
-                        params={{ credentialId: cred.id }}
-                      >
-                        {cred.name}
-                      </Link>
-                    </Badge>
-                    {!cred.allow_sharing && !cred.allow_template_sharing && (
-                      <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
-                        <AlertTriangle className="h-3 w-3 shrink-0" />
-                        not shareable — enable Sharing or Template Sharing on
-                        the credential to expose it to users
-                      </span>
-                    )}
-                  </div>
-                  {rowDrift && (
-                    <div className="text-xs flex items-start gap-1.5 text-amber-700 dark:text-amber-300 max-w-md">
-                      <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
-                      <span>
-                        Installers still receive the previously published
-                        setting ({providedByLabel(rowDrift.snapshot)}).
-                        Republish the bundle to apply "
-                        {providedByLabel(rowDrift.live)}".
-                      </span>
+              <div key={cred.id} className="space-y-2 py-2">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 space-y-1.5">
+                    <CredentialTypeBadge type={cred.type} />
+                    <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
+                      <span>detected from</span>
+                      <Badge asChild variant="outline">
+                        <Link
+                          to="/credential/$credentialId"
+                          params={{ credentialId: cred.id }}
+                        >
+                          {cred.name}
+                        </Link>
+                      </Badge>
+                      {!cred.allow_sharing && !cred.allow_template_sharing && (
+                        <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          not shareable — enable Sharing or Template Sharing on
+                          the credential to expose it to users
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-                <Select
-                  value={value}
-                  onValueChange={(val) =>
-                    handleOverrideChange(cred.name, val as ProvidedBy)
-                  }
-                  disabled={savePublishSettingsMutation.isPending}
-                >
-                  <SelectTrigger className="w-[260px] shrink-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="user">User provides</SelectItem>
-                    <SelectItem
-                      value="publisher"
-                      disabled={!cred.allow_sharing}
-                    >
-                      Embedded (shared)
-                    </SelectItem>
-                    {cred.type !== "agent_api" && (
+                  </div>
+                  <Select
+                    value={value}
+                    onValueChange={(val) =>
+                      handleOverrideChange(cred.name, val as ProvidedBy)
+                    }
+                    disabled={savePublishSettingsMutation.isPending}
+                  >
+                    <SelectTrigger className="w-[260px] shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">User provides</SelectItem>
                       <SelectItem
-                        value="template"
-                        disabled={!cred.allow_template_sharing}
+                        value="publisher"
+                        disabled={!cred.allow_sharing}
                       >
-                        Template (defaults + private)
+                        Embedded (shared)
                       </SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
+                      {cred.type !== "agent_api" && (
+                        <SelectItem
+                          value="template"
+                          disabled={!cred.allow_template_sharing}
+                        >
+                          Template (defaults + private)
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Full row width, below the badges and the select: inside the
+                    left column the fixed-width select squeezed it into a
+                    one-word-per-line strip. The house warning `Alert`, like the
+                    Revisions card's "Republish to apply credential sharing
+                    changes" — the same fact, seen from this credential's row.
+                    Title and body say different things: what installers get
+                    now, and what to do about it. */}
+                {rowDrift && (
+                  <Alert className="border-warning text-warning">
+                    <AlertTriangle />
+                    <AlertTitle>
+                      Installers still get "{providedByLabel(rowDrift.snapshot)}
+                      "
+                    </AlertTitle>
+                    <AlertDescription>
+                      Republish the bundle to apply "
+                      {providedByLabel(rowDrift.live)}".
+                    </AlertDescription>
+                  </Alert>
+                )}
               </div>
             )
           })

@@ -15,6 +15,8 @@ Scenarios:
   4. A watcher signal naming ``skills/`` refreshes the cache inside the 30 s
      rate-limit window; one naming a different file does not.
   5. An agent with no environment answers an empty list, not an error.
+  6. Opening a skill wakes a suspended environment; a stopped one is a 503.
+  7. A skill folder's files are listed host-side, without waking the env.
 
 Test seam:
   The skills cache is populated by the env-start sweep
@@ -41,9 +43,12 @@ from tests.utils.bundle import (
 )
 from tests.utils.environment import (
     delete_environment,
+    get_environment,
     set_environment_auth_token,
+    set_environment_status,
     stop_environment,
 )
+from tests.utils.skill_catalog import workspace_root, write_skill
 from tests.utils.user import (
     create_random_user_with_headers,
     promote_to_developer,
@@ -532,3 +537,246 @@ def test_an_agent_without_an_environment_answers_empty_not_broken(
     )
     assert r.status_code == 404
     assert "environment" in r.json()["detail"].lower()
+
+
+# ── Scenario 6: opening a skill wakes a suspended environment ──────────────
+
+
+def test_reading_a_skill_wakes_a_suspended_environment(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    patch_environment_adapter,
+    db: Session,
+) -> None:
+    """
+    ``SKILL.md`` lives in the container, so opening one takes Refresh's posture:
+    a suspended environment is woken, not reported as unavailable.
+
+    Phases:
+      1. Agent with one cached skill and its SKILL.md.
+      2. Suspend the environment; the stub stops serving files while its
+         container is down, as the Docker adapter does.
+      3. A name that is not a skill → 404, and the container stays down.
+      4. GET content → 200 with the text; the container was started once and
+         the environment is running again.
+      5. Stop the environment → 503: a stopped env needs a full start that
+         opening a dialog does not trigger.
+      6. An environment already activating → 503 that says it is waking up.
+    """
+    # ── Phase 1: a cached skill ──────────────────────────────────────────
+    adapter = _install_adapter(
+        patch_environment_adapter,
+        index=_index([_row("pdf-report")]),
+        files={"skills/pdf-report/SKILL.md": _skill_md("pdf-report")},
+    )
+    agent = create_agent_via_api(client, superuser_token_headers, name="Sleepy")
+    agent_id = agent["id"]
+    drain_tasks()
+    env_id = get_agent(client, superuser_token_headers, agent_id)[
+        "active_environment_id"
+    ]
+    content_url = f"{API}/agents/{agent_id}/skills/pdf-report/content"
+
+    # ── Phase 2: suspend; a stopped container serves nothing ─────────────
+    serve_file = adapter.fetch_workspace_item_with_meta
+
+    async def _only_while_running(path: str):
+        if await adapter.get_status() != "running":
+            raise RuntimeError("container is not running")
+        return await serve_file(path)
+
+    adapter.fetch_workspace_item_with_meta = _only_while_running
+
+    r = client.post(
+        f"{API}/environments/{env_id}/suspend", headers=superuser_token_headers
+    )
+    assert r.status_code == 200, r.text
+    assert get_environment(client, superuser_token_headers, env_id)[
+        "status"
+    ] == "suspended"
+    starts = adapter.start_calls
+
+    # ── Phase 3: an unknown name never starts a container ────────────────
+    r = client.get(
+        f"{API}/agents/{agent_id}/skills/ghost/content",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 404
+    assert adapter.start_calls == starts, (
+        "a name that is not a skill must not wake the environment"
+    )
+
+    # ── Phase 4: opening the skill wakes it ──────────────────────────────
+    r = client.get(content_url, headers=superuser_token_headers)
+    assert r.status_code == 200, r.text
+    assert "Step one." in r.json()["content"]
+    assert adapter.start_calls == starts + 1
+    assert get_environment(client, superuser_token_headers, env_id)[
+        "status"
+    ] == "running"
+
+    # ── Phase 5: a stopped environment is not started from a dialog ──────
+    stop_environment(client, superuser_token_headers, env_id)
+
+    r = client.get(content_url, headers=superuser_token_headers)
+    assert r.status_code == 503
+    assert "unavailable" in r.json()["detail"].lower()
+    assert adapter.start_calls == starts + 1
+
+    # ── Phase 6: a wake already under way asks for a retry, not a start ──
+    set_environment_status(db, env_id, "activating")
+
+    r = client.get(content_url, headers=superuser_token_headers)
+    assert r.status_code == 503
+    assert "waking up" in r.json()["detail"].lower()
+    assert adapter.start_calls == starts + 1
+
+
+# ── Scenario 7: what a skill folder carries ────────────────────────────────
+
+
+def test_skill_files_are_listed_host_side_without_waking_the_environment(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    patch_environment_adapter,
+) -> None:
+    """
+    The Content fact's list: every file of one skill folder with its size and
+    run bit, read off the workspace mount rather than through the container.
+
+    Phases:
+      1. Agent whose index holds a local skill, a plugin skill, and rows the
+         container could write to point elsewhere: a ``..`` climb, the whole
+         workspace (``.``), a top-level folder, a symlinked skill folder, and a
+         folder that is gone. The files are written on the host workspace,
+         including a symlinked file and directory inside the real skill.
+      2. Suspend the environment.
+      3. Local skill → every regular file, junk and symlinks skipped, the run
+         bit kept; the environment is still suspended and was never started.
+      4. Plugin skill → resolves inside the plugin folder.
+      5. Every row that is not a real skill folder → 404 without a listing;
+         unknown name → "Skill not found".
+      6. Another user → 403/404.
+    """
+    # ── Phase 1: an index and the folders behind it ──────────────────────
+    stray_rows = {
+        "escapee": "skills/../../escapee",
+        "whole-workspace": ".",
+        "top-level": "scripts",
+        "linked": "skills/linked",
+        "gone": "skills/gone",
+    }
+    adapter = _install_adapter(
+        patch_environment_adapter,
+        index=_index(
+            [
+                _row("pdf-report", has_scripts=True),
+                _row(
+                    "from-plugin",
+                    source="plugin",
+                    plugin_ref="mkt/reporting",
+                    path="plugins/mkt/reporting/skills/from-plugin",
+                ),
+                *(_row(name, path=path) for name, path in stray_rows.items()),
+            ]
+        ),
+    )
+    agent = create_agent_via_api(client, superuser_token_headers, name="Folders")
+    agent_id = agent["id"]
+    drain_tasks()
+    env_id = get_agent(client, superuser_token_headers, agent_id)[
+        "active_environment_id"
+    ]
+
+    skill_dir = write_skill(
+        env_id,
+        "pdf-report",
+        extra={
+            "scripts/run.sh": "#!/bin/sh\necho hi\n",
+            "references/guide.md": "# Guide\n",
+            "__pycache__/cached.pyc": "junk",
+        },
+    )
+    (skill_dir / "scripts" / "run.sh").chmod(0o755)
+
+    plugin_dir = workspace_root(env_id) / "plugins/mkt/reporting/skills/from-plugin"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "SKILL.md").write_bytes(_skill_md("from-plugin"))
+
+    outside = workspace_root(env_id).parent / "escapee"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("not part of the workspace")
+
+    # Symlinks the container could plant: inside the real skill, and as a
+    # whole skill folder.
+    (skill_dir / "leak.md").symlink_to(outside / "SKILL.md")
+    (skill_dir / "outside").symlink_to(outside, target_is_directory=True)
+    (workspace_root(env_id) / "skills" / "linked").symlink_to(
+        outside, target_is_directory=True
+    )
+    scripts_dir = workspace_root(env_id) / "scripts"
+    scripts_dir.mkdir(exist_ok=True)
+    (scripts_dir / "deploy.sh").write_text("echo deploy\n")
+
+    cached = _by_name(_get_skills(client, superuser_token_headers, agent_id))
+    assert set(stray_rows) <= set(cached), (
+        "every stray row must really be in the index, or its 404 proves nothing"
+    )
+
+    def _files(name: str, headers: dict[str, str] = superuser_token_headers):
+        return client.get(
+            f"{API}/agents/{agent_id}/skills/{name}/files", headers=headers
+        )
+
+    # ── Phase 2: asleep ──────────────────────────────────────────────────
+    r = client.post(
+        f"{API}/environments/{env_id}/suspend", headers=superuser_token_headers
+    )
+    assert r.status_code == 200, r.text
+    starts = adapter.start_calls
+
+    # ── Phase 3: the local skill's folder ────────────────────────────────
+    r = _files("pdf-report")
+    assert r.status_code == 200, r.text
+    listing = r.json()
+    assert listing["name"] == "pdf-report"
+    assert listing["path"] == "skills/pdf-report"
+    assert [f["path"] for f in listing["data"]] == [
+        "SKILL.md",
+        "references/guide.md",
+        "scripts/run.sh",
+    ], "junk directories and symlinks are not part of what the skill carries"
+    assert listing["count"] == 3
+    assert listing["total_size_bytes"] == sum(
+        f["size_bytes"] for f in listing["data"]
+    )
+    assert listing["truncated"] is False
+    run_bits = {f["path"]: f["is_executable"] for f in listing["data"]}
+    assert run_bits["scripts/run.sh"] is True
+    assert run_bits["SKILL.md"] is False
+
+    assert adapter.start_calls == starts, "listing files must not start a container"
+    assert get_environment(client, superuser_token_headers, env_id)[
+        "status"
+    ] == "suspended"
+
+    # ── Phase 4: a plugin's skill ────────────────────────────────────────
+    r = _files("from-plugin")
+    assert r.status_code == 200, r.text
+    assert [f["path"] for f in r.json()["data"]] == ["SKILL.md"]
+
+    # ── Phase 5: nothing to list ─────────────────────────────────────────
+    for name in stray_rows:
+        r = _files(name)
+        assert r.status_code == 404, f"{name}: {r.text}"
+        assert r.json()["detail"].startswith("Skill folder not found"), (
+            f"{name} is in the index, so its 404 is the stale-folder one"
+        )
+
+    r = _files("ghost")
+    assert r.status_code == 404
+    assert "Skill not found" in r.json()["detail"]
+
+    # ── Phase 6: ownership ───────────────────────────────────────────────
+    _, other_headers = create_random_user_with_headers(client)
+    assert _files("pdf-report", other_headers).status_code in (403, 404)

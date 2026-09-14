@@ -268,6 +268,7 @@ from .agents.agent_skills import (
     SkillEntryPublic,
     AgentSkillsPublic,
     SkillContentPublic,
+    SkillFilesPublic,
 )
 from .agents.addons import (
     AddonSkillPublic,
@@ -1027,6 +1028,7 @@ __all__ = [
     "SkillEntryPublic",
     "AgentSkillsPublic",
     "SkillContentPublic",
+    "SkillFilesPublic",
     # Agent addons projection
     "AddonSkillPublic",
     "AddonPublic",

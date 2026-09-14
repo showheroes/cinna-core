@@ -33,7 +33,7 @@ import { BundleRevisionRow } from "@/components/Agents/BundleRevisionRow"
 import { CredentialProvisioningSection } from "@/components/Agents/CredentialProvisioningSection"
 import { PreviewList } from "@/components/Common/PreviewList"
 import { providedByLabel } from "@/components/Credentials/providedByLabel"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -405,59 +405,51 @@ export function AgentBundleTab({ agent }: AgentBundleTabProps) {
                 The readiness gate says a related thing to the *installer*, on
                 their setup screen — a different person at a different moment,
                 and one who cannot act on it. This is the publisher's copy. */}
+            {/* The house warning `Alert` (R14a: no raw palette on a status
+                element), shared with the per-credential drift notice in
+                `CredentialProvisioningSection` so the two read as one fact. */}
             {publishNotices.length > 0 && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30 px-3 py-2 space-y-1">
-                <div className="flex items-center justify-between gap-2 text-amber-800 dark:text-amber-300">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0" />
-                    <span className="text-sm font-medium">
-                      What people who install this will get
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-xs underline shrink-0"
+              <Alert className="border-warning text-warning">
+                <AlertTriangle />
+                <AlertTitle>What people who install this will get</AlertTitle>
+                <AlertDescription>
+                  <ul className="list-inside list-disc space-y-0.5">
+                    {publishNotices.map((notice) => (
+                      <li key={notice}>{notice}</li>
+                    ))}
+                  </ul>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto px-0"
                     onClick={() => setPublishNotices([])}
                   >
                     Dismiss
-                  </button>
-                </div>
-                <ul className="space-y-0.5 pl-6 list-disc">
-                  {publishNotices.map((notice) => (
-                    <li
-                      key={notice}
-                      className="text-xs text-amber-700 dark:text-amber-300"
-                    >
-                      {notice}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                  </Button>
+                </AlertDescription>
+              </Alert>
             )}
 
             {/* Credential-sharing drift — a republish nudge when the live
                 sharing model differs from the latest published snapshot. */}
             {showDriftWarning && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30 px-3 py-2 space-y-1">
-                <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  <span className="text-sm font-medium">
-                    Republish to apply credential sharing changes
-                  </span>
-                </div>
-                <ul className="space-y-0.5 pl-6 list-disc">
-                  {driftedCredentials.map((d) => (
-                    <li
-                      key={d.name}
-                      className="text-xs text-amber-700 dark:text-amber-300"
-                    >
-                      Credentials {d.name} sharing differs from the latest
-                      published bundle (bundle:{" "}
-                      {providedByLabel(d.snapshot_provided_by)})
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <Alert className="border-warning text-warning">
+                <AlertTriangle />
+                <AlertTitle>
+                  Republish to apply credential sharing changes
+                </AlertTitle>
+                <AlertDescription>
+                  <ul className="list-inside list-disc space-y-0.5">
+                    {driftedCredentials.map((d) => (
+                      <li key={d.name}>
+                        Credentials {d.name} sharing differs from the latest
+                        published bundle (bundle:{" "}
+                        {providedByLabel(d.snapshot_provided_by)})
+                      </li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
             )}
 
             {/* Bundle ID — locked, shown only after first publish. */}

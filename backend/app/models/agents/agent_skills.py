@@ -11,6 +11,8 @@ from datetime import datetime
 
 from sqlmodel import SQLModel
 
+from app.models.skills.schemas import SkillRevisionFilePublic
+
 
 class SkillIssuePublic(SQLModel):
     """A flagged condition on a skill: a stable code plus a human sentence.
@@ -114,3 +116,21 @@ class SkillContentPublic(SQLModel):
     path: str            # workspace-relative path to the SKILL.md itself
     content: str
     truncated: bool = False  # True when the body was cut at the size cap
+
+
+class SkillFilesPublic(SQLModel):
+    """What one skill folder in the agent's workspace carries — names and sizes.
+
+    The agent-side twin of ``SkillRevisionFilesPublic``: the same row type, so
+    one Sheet renders either list, and the same cap contract — ``count`` and
+    ``total_size_bytes`` describe the whole folder, ``data`` its first
+    ``MAX_LISTED_FILES`` files.
+    """
+
+    agent_id: uuid.UUID
+    name: str
+    path: str  # workspace-relative path to the skill folder
+    data: list[SkillRevisionFilePublic] = []
+    count: int = 0
+    total_size_bytes: int = 0
+    truncated: bool = False

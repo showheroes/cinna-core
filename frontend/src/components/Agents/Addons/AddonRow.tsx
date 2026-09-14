@@ -36,7 +36,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { addonNoun, addonRowStatus } from "@/utils/addons"
-import { AddonLocalBadge, AddonPublishedFlag } from "./AddonBadges"
+import {
+  AddonCredentialsFlag,
+  AddonLocalBadge,
+  AddonPublishedFlag,
+} from "./AddonBadges"
 import { AddonDetailDialog } from "./AddonDetailDialog"
 import { ShareSkillDialog } from "./ShareSkillDialog"
 import { type SyncReporter, useAddonRowMutations } from "./useAddonRowMutations"
@@ -94,6 +98,7 @@ export function AddonRow({
   const isLocal = addon.source === "local"
   const canManage = !!addon.can_manage && !!link
   const skills = addon.skills ?? []
+  const unusableCredentials = addon.credential_issues?.length ?? 0
 
   const { update, upgrade, uninstall, isPending } = useAddonRowMutations(
     agentId,
@@ -256,7 +261,14 @@ export function AddonRow({
     <div
       role="button"
       tabIndex={0}
-      aria-label={`Details of the ${noun} ${name}`}
+      // `role="button"` makes the label the row's whole accessible name, so the
+      // flags' `sr-only` text is never read. The one flag that means something
+      // is wrong is restated here; the passive ones wait in Details.
+      aria-label={`Details of the ${noun} ${name}${
+        unusableCredentials > 0
+          ? `, ${unusableCredentials} ${unusableCredentials === 1 ? "credential" : "credentials"} not usable`
+          : ""
+      }`}
       className="cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       onClick={openDetails}
       onKeyDown={(e) => {
@@ -320,7 +332,11 @@ export function AddonRow({
           </>
         }
         flags={
-          <>
+          // Wider than `ListRow`'s own `gap-1.5`: this row can put two or three
+          // glyph-only flags side by side (key, published, update), and at 6 px
+          // they read as one smudge rather than separate facts.
+          <span className="flex items-center gap-2.5">
+            <AddonCredentialsFlag addon={addon} />
             {/* "It is in the catalog" is a passive per-row fact the user reads
                 and cannot click, so it is a glyph here rather than a third
                 badge on the contested title line. */}
@@ -332,7 +348,7 @@ export function AddonRow({
                 label={updateFlagLabel}
               />
             )}
-          </>
+          </span>
         }
       >
         {/* A write in flight takes the menu's slot: a spinner where the `⋯`

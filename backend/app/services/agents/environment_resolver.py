@@ -81,12 +81,12 @@ async def wake_suspended_environment(
 
     from app.core.db import create_session
     from app.models import Agent as AgentModel, AgentEnvironment
-    from app.services.environments.environment_lifecycle import (
-        EnvironmentLifecycleManager,
-    )
+    from app.services.environments.environment_service import EnvironmentService
 
     try:
-        lifecycle = EnvironmentLifecycleManager()
+        # The shared manager, not a fresh one: it is the instance every other
+        # caller resolves adapters through.
+        lifecycle = EnvironmentService.get_lifecycle_manager()
         with create_session() as session:
             fresh_env = session.get(AgentEnvironment, environment.id)
             if fresh_env is None:
@@ -147,9 +147,7 @@ async def ensure_environment_running(
             120 seconds.
     """
     from app.models import Agent, AgentEnvironment
-    from app.services.environments.environment_lifecycle import (
-        EnvironmentLifecycleManager,
-    )
+    from app.services.environments.environment_service import EnvironmentService
 
     status = environment.status
     env_id = environment.id
@@ -162,7 +160,7 @@ async def ensure_environment_running(
             f"Environment {env_id} is in error state and cannot be activated"
         )
 
-    lifecycle = EnvironmentLifecycleManager()
+    lifecycle = EnvironmentService.get_lifecycle_manager()
 
     if status == "suspended":
         logger.info(f"Activating suspended environment {env_id}")

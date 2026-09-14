@@ -27,7 +27,8 @@ interface SkillRevisionFilesSheetProps {
 
 /**
  * "What else is in this skill" — the destination of the Package card's
- * Content fact.
+ * Content fact, and of `SkillContentFact` on the agent page, which lists a
+ * workspace folder in the same row shape (no revision label there).
  *
  * A Sheet rather than a route, by P5's route-vs-Sheet test: the list needs no
  * search, sort or pagination, and a file inside an immutable snapshot has no
@@ -112,7 +113,9 @@ function SkillFileRow({ file }: { file: SkillRevisionFilePublic }) {
         file.is_executable ? (
           <RowFlag
             icon={Terminal}
-            label="Executable — the archive keeps this file's run bit"
+            // Neutral on purpose: the Sheet lists a published archive on the
+            // catalog and a workspace folder on the agent page.
+            label="Executable — this file keeps its run bit"
           />
         ) : undefined
       }

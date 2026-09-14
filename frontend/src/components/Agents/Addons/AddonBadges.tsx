@@ -1,8 +1,10 @@
-import { Upload } from "lucide-react"
+import { KeyRound, Upload } from "lucide-react"
 
 import type { AddonPublic } from "@/client"
 import { RowFlag } from "@/components/Common/ListRow"
 import { Badge } from "@/components/ui/badge"
+import { addonCredentialSlots } from "@/utils/addons"
+import { credentialTypeLabel } from "@/utils/skillCredentials"
 
 interface AddonBadgesProps {
   addon: AddonPublic
@@ -47,4 +49,38 @@ export function AddonLocalBadge({ addon }: AddonBadgesProps) {
 export function AddonPublishedFlag({ addon }: AddonBadgesProps) {
   if (addon.source !== "local" || !addon.published_package_id) return null
   return <RowFlag icon={Upload} label="Published to the skills catalog" />
+}
+
+/**
+ * **Needs credentials** — the row's skills declare credential slots, named in
+ * the tooltip with their types.
+ *
+ * A passive fact, so a flag (§2 "Row flags") and muted: for a local or
+ * marketplace skill the slots are declared, not checked. It turns `warning`
+ * only on a catalog row with `credential_issues` — the one case the server
+ * knows a slot is not usable — which is when §2 lets a flag carry colour. The
+ * `KeyRound` glyph is the one the package card's Credentials fact uses, so the
+ * same requirement reads the same in the catalog and on the agent.
+ */
+export function AddonCredentialsFlag({ addon }: AddonBadgesProps) {
+  const slots = addonCredentialSlots(addon)
+  if (slots.length === 0) return null
+
+  const noun = `${slots.length} ${slots.length === 1 ? "credential" : "credentials"}`
+  const names = slots
+    .map((slot) => `${slot.slot} (${credentialTypeLabel(slot.type)})`)
+    .join(", ")
+  const unusable = addon.credential_issues?.length ?? 0
+
+  return unusable > 0 ? (
+    <RowFlag
+      icon={KeyRound}
+      tone="warning"
+      // "Not usable", not "not set up": the reasons include a publisher who
+      // stopped sharing, which nobody on this agent failed to set up.
+      label={`Needs ${noun}, ${unusable} not usable — ${names}`}
+    />
+  ) : (
+    <RowFlag icon={KeyRound} label={`Needs ${noun} — ${names}`} />
+  )
 }

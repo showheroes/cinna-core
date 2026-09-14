@@ -4,6 +4,7 @@ Routes:
   GET  /agents/{agent_id}/skills                  — cached skill index
   POST /agents/{agent_id}/skills/refresh          — wake + re-read, same shape
   GET  /agents/{agent_id}/skills/{name}/content   — one skill's SKILL.md text
+  GET  /agents/{agent_id}/skills/{name}/files     — what one skill folder carries
   GET  /agents/{agent_id}/addons                  — plugins + skills, deduped
   POST /agents/{agent_id}/addons/refresh          — re-read, then re-project
 
@@ -27,6 +28,7 @@ from app.models import (
     AgentAddonsPublic,
     AgentSkillsPublic,
     SkillContentPublic,
+    SkillFilesPublic,
 )
 from app.services.agents.addons_service import AddonsService
 from app.services.agents.agent_skills_service import (
@@ -57,6 +59,24 @@ def _get_owned_agent(session: SessionDep, agent_id: uuid.UUID, user) -> Agent:
     ):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     return agent
+
+
+def _skill_not_found(environment, name: str, *, missing: str) -> HTTPException:
+    """The 404 for a skill read that found nothing, in one of two flavours.
+
+    Either the skill is not in the index at all, or the index still lists it
+    and ``missing`` is gone. The second tells the user their view is stale,
+    which is a different next step.
+    """
+    known = AgentSkillsService.find_cached_skill(environment, name) is not None
+    return HTTPException(
+        status_code=404,
+        detail=(
+            f"{missing} not found — refresh the skills list."
+            if known
+            else "Skill not found"
+        ),
+    )
 
 
 def _build_response(
@@ -140,9 +160,10 @@ async def get_agent_skill_content(
 ) -> Any:
     """Return one skill's ``SKILL.md`` — the text the model reads.
 
-    Reading is ``AgentSkillsService.read_skill_content``; this route only maps
-    its outcomes onto status codes: no such skill (or no file behind it) is a
-    404, an unreachable environment a 503.
+    Reading is ``AgentSkillsService.read_skill_content``, which wakes a
+    suspended environment first; this route only maps its outcomes onto status
+    codes: no such skill (or no file behind it) is a 404, an environment that is
+    still unreachable (stopped, errored, or failed to wake) a 503.
     """
     agent = _get_owned_agent(session, agent_id, current_user)
     environment = AgentStatusService.get_primary_environment(
@@ -152,30 +173,30 @@ async def get_agent_skill_content(
         raise HTTPException(status_code=404, detail="This agent has no environment")
 
     try:
-        result = await AgentSkillsService.read_skill_content(environment, name)
+        result = await AgentSkillsService.read_skill_content(
+            environment, name, agent=agent
+        )
     except SkillsIndexUnavailableError as exc:
         logger.info(
             "skill_content_unavailable agent_id=%s skill=%s reason=%s",
             agent_id, name, exc,
         )
+        # Another request already started the wake (a second dialog, a
+        # message): the container is on its way, so the next step is a retry,
+        # not a start. Re-read first: a wake that failed part-way never copied
+        # its status back onto this instance.
+        session.refresh(environment)
         raise HTTPException(
             status_code=503,
-            detail="The environment is unavailable — start it and try again.",
+            detail=(
+                "The environment is waking up — try again in a moment."
+                if environment.status in ("activating", "starting")
+                else "The environment is unavailable — start it and try again."
+            ),
         )
 
     if result is None:
-        # Two different 404s: the skill is not in the index at all, or the
-        # index still lists it and the file is gone. The second one tells the
-        # user their view is stale, which is a different next step.
-        known = AgentSkillsService.find_cached_skill(environment, name) is not None
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "SKILL.md not found — refresh the skills list."
-                if known
-                else "Skill not found"
-            ),
-        )
+        raise _skill_not_found(environment, name, missing="SKILL.md")
 
     path, content, truncated = result
     return SkillContentPublic(
@@ -184,6 +205,51 @@ async def get_agent_skill_content(
         path=path,
         content=content,
         truncated=truncated,
+    )
+
+
+@router.get("/{agent_id}/skills/{name}/files", response_model=SkillFilesPublic)
+def list_agent_skill_files(
+    agent_id: uuid.UUID,
+    name: str,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """What one skill folder carries — paths and sizes, never contents.
+
+    ``SKILL.md`` is one file of a skill; this is the rest of the answer, the
+    same list the catalog's Content fact shows for a published revision. Read
+    off the workspace mount by ``AgentSkillsService.list_skill_files``, so it
+    never wakes a container. The 404s match the content route's; a workspace
+    that is not on disk yet is a 503.
+    """
+    agent = _get_owned_agent(session, agent_id, current_user)
+    environment = AgentStatusService.get_primary_environment(
+        session, agent_id, agent.active_environment_id
+    )
+    if environment is None:
+        raise HTTPException(status_code=404, detail="This agent has no environment")
+
+    try:
+        result = AgentSkillsService.list_skill_files(environment, name)
+    except SkillsIndexUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="The workspace is not on disk yet — start the environment once.",
+        )
+
+    if result is None:
+        raise _skill_not_found(environment, name, missing="Skill folder")
+
+    path, files, count, total_bytes = result
+    return SkillFilesPublic(
+        agent_id=agent_id,
+        name=name,
+        path=path,
+        data=files,
+        count=count,
+        total_size_bytes=total_bytes,
+        truncated=count > len(files),
     )
 
 

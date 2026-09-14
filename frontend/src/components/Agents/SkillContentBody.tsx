@@ -40,6 +40,10 @@ export function SkillContentBody({
     queryKey: ["agent", agentId, "skills", skill.name, "content"],
     queryFn: () =>
       AgentsService.getAgentSkillContent({ agentId, name: skill.name }),
+    // The body now mounts per visit to its dialog tab, and each fetch goes
+    // through the container. Flipping Details ⇄ SKILL.md must not re-read it;
+    // a refresh still invalidates the prefix above.
+    staleTime: 60_000,
   })
 
   // Known before the request lands, so the path row does not pop in late.

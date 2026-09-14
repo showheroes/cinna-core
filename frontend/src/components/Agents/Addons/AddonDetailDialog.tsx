@@ -5,7 +5,7 @@ import { useState } from "react"
 
 import type { AddonPublic, SkillEntryPublic } from "@/client"
 import { SkillsService } from "@/client"
-import { SkillContentBody } from "@/components/Agents/SkillContentBody"
+import { SkillContentFact } from "@/components/Agents/SkillContentFact"
 import { SkillCredentialSlotRow } from "@/components/Catalog/SkillCredentialSlotRow"
 import { ListRow, ListRowGroup, RowInfo } from "@/components/Common/ListRow"
 import { RelativeTime } from "@/components/Common/RelativeTime"
@@ -36,7 +36,9 @@ import { skillRevisionLabel } from "@/utils/skillCatalog"
 import { ISSUE_REASON_COPY } from "@/utils/skillCredentials"
 import { formatSkillSize, skillKey, skillRowStatus } from "@/utils/skills"
 import { AddonLocalBadge } from "./AddonBadges"
+import { SkillDeclaredCredentials } from "./SkillDeclaredCredentials"
 import { SkillDetailDialog } from "./SkillDetailDialog"
+import { SkillDocumentTabs } from "./SkillDocumentTabs"
 
 interface AddonDetailDialogProps {
   agentId: string
@@ -60,13 +62,15 @@ function Fact({ label, value }: { label: string; value: React.ReactNode }) {
  *
  * A **new composition**: no house pattern covers a read-only dialog whose body
  * is facts plus a document. A row that *is* one skill (a catalog install, a
- * local folder, a `skills`-format entry) shows that skill's `SKILL.md` here,
- * rendered. A plugin that ships *n* skills lists them as rows instead, and a
- * row opens `SkillDetailDialog` — a dialog over this one, which R8 discourages
- * and which this used to avoid by swapping one skill's source into its own
- * body. That did not survive a plugin like chrome-devtools-mcp: a dozen rows
- * plus a document pane overflowed the viewport. So this dialog scrolls, and a
- * skill gets a dialog of its own.
+ * local folder, a `skills`-format entry) splits the two into tabs at the top —
+ * **Details** and **SKILL.md** (`SkillDocumentTabs`) — because stacked, every
+ * open was the facts over a page of prose. A plugin that ships *n* skills has
+ * no single document: its facts are followed by one row per skill, and a row
+ * opens `SkillDetailDialog` — a dialog over this one, which R8 discourages and
+ * which this used to avoid by swapping one skill's source into its own body.
+ * That did not survive a plugin like chrome-devtools-mcp: a dozen rows plus a
+ * document pane overflowed the viewport. So this dialog scrolls, and a skill
+ * gets a dialog of its own.
  *
  * Nothing here mutates. Every verb — enable, update, uninstall, share — stays
  * on the row that opened this (A2/R8).
@@ -166,6 +170,216 @@ export function AddonDetailDialog({
   // earned.
   const formatLabel = addonFormatLabel(addon.plugin_type)
 
+  // Everything but the document: the Details tab for a one-skill row, the head
+  // of the body for a plugin.
+  const details = (
+    <>
+      {/* Why it is flagged. Absent when the addon is healthy: an "all good"
+          panel on every open would be the row's dot said twice. */}
+      {addonIsFlagged(addon) && (
+        <Alert variant={addon.status === "error" ? "destructive" : "default"}>
+          <AlertDescription>
+            {status.label}
+            {addon.status_code === "orphan" && (
+              <> Nothing on this agent installed it.</>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Which slots are not usable, and why — rows rather than facts: a
+          slot is a user-typed id, and `Fact`'s shrink-0 label cannot hold
+          one. The same row the install dialogs showed for the same slot.
+          Keyed on the issues, not on `status_code`: a link failure
+          (`not_materialized`, `unverified`) outranks `credential_missing`
+          for the row's dot, but the slots are still unusable. */}
+      {credentialIssues.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>Credentials</Label>
+          <ListRowGroup>
+            {credentialIssues.map((issue) => {
+              const copy = ISSUE_REASON_COPY[issue.reason]
+              return (
+                <SkillCredentialSlotRow
+                  key={`${issue.type}:${issue.slot}`}
+                  slot={issue.slot}
+                  type={issue.type}
+                  status={{
+                    tone: "warning",
+                    label: copy.sentence(issue.slot),
+                  }}
+                  summary={copy.short}
+                />
+              )
+            })}
+          </ListRowGroup>
+          <Button asChild variant="link" className="h-auto px-0">
+            <Link
+              to="/agent/$agentId"
+              params={{ agentId }}
+              hash="credentials"
+              onClick={() => onOpenChange(false)}
+            >
+              Open the agent's Credentials tab
+            </Link>
+          </Button>
+        </div>
+      )}
+
+      {/* No issues: what the skill needs, so the row's key flag has
+          somewhere to point. A catalog row without issues has every slot
+          satisfied; any other source's slots are not checked server-side,
+          so they are stated rather than judged. */}
+      {credentialIssues.length === 0 && soleSkill && (
+        <SkillDeclaredCredentials
+          credentials={soleSkill.credentials ?? []}
+          summary={
+            addon.source === "catalog"
+              ? "Linked to this agent"
+              : "Declared in SKILL.md"
+          }
+        />
+      )}
+
+      {/* The facts, in the two-column shape the package card uses so the two
+          read as one product. */}
+      <div className="space-y-1.5">
+        {/* The row's own badge, repeated rather than left behind: a dialog
+            opened from a badged row that drops the badge reads as a
+            different thing than the row it came from. "Published" is a flag
+            on the row and a fact below, so it is not repeated here. */}
+        {addon.source === "local" && (
+          <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
+            <AddonLocalBadge addon={addon} />
+          </div>
+        )}
+        {addon.description && (
+          <p className="text-sm break-words text-muted-foreground">
+            {addon.description}
+          </p>
+        )}
+        {addon.version ? (
+          <Fact label="Version" value={`v${addon.version}`} />
+        ) : (
+          // Same rule as the row: an absent version is a fact on a local
+          // skill and noise on a marketplace entry.
+          addon.source === "local" && (
+            <Fact
+              label="Version"
+              value={
+                <span className="text-muted-foreground">
+                  No version in SKILL.md
+                </span>
+              }
+            />
+          )
+        )}
+        {formatLabel && <Fact label="Format" value={formatLabel} />}
+        {addon.marketplace_name && addon.source !== "local" && (
+          <Fact label="Marketplace" value={addon.marketplace_name} />
+        )}
+        {pinnedRevision && (
+          <Fact
+            label="Pinned revision"
+            value={skillRevisionLabel(pinnedRevision)}
+          />
+        )}
+        {link?.installed_commit_hash && (
+          <Fact
+            label="Commit"
+            // A hash exists to be pasted somewhere — into a `git log`, a bug
+            // report — so the value itself is the copy control: hover says
+            // so, click copies. No second input for it.
+            value={
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="max-w-full cursor-pointer truncate rounded font-mono text-sm hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    aria-label="Copy the commit hash"
+                    onClick={() => copyCommit(link.installed_commit_hash)}
+                  >
+                    {link.installed_commit_hash}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  Click to copy
+                </TooltipContent>
+              </Tooltip>
+            }
+          />
+        )}
+        {addon.repository_url && (
+          <Fact
+            label="Repository"
+            value={
+              <a
+                href={addon.repository_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block max-w-full truncate hover:underline"
+              >
+                {addon.repository_url}
+              </a>
+            }
+          />
+        )}
+        {link && (
+          <Fact
+            label="Installed"
+            // The house component, not a bare `formatDistanceToNow`: the
+            // server's naive-UTC string has to be parsed as UTC, and the
+            // hover gives the full local date.
+            value={<RelativeTime timestamp={link.created_at} showTooltip />}
+          />
+        )}
+        {modesValue && <Fact label="Modes" value={modesValue} />}
+        {soleSkill?.path && <Fact label="Path" value={soleSkill.path} />}
+        {soleSkill && (
+          <Fact label="Size" value={formatSkillSize(soleSkill.size_bytes)} />
+        )}
+        {soleSkill && <SkillContentFact agentId={agentId} skill={soleSkill} />}
+        {soleSkill && (
+          <Fact
+            label="Invocation"
+            value={
+              soleSkill.user_invocable
+                ? `From chat as /${soleSkill.name}`
+                : "Model-invoked only"
+            }
+          />
+        )}
+        {soleSkill?.has_scripts && (
+          <Fact label="Scripts" value="Ships scripts the agent can run" />
+        )}
+        {addon.published_package_id && (
+          // The word the row no longer spends a badge on. Deliberately NOT
+          // labelled "Package id": `published_package_id` is the package's
+          // **uuid**, while "package id" means the reverse-domain handle
+          // everywhere else in the product (`SkillPackageCard` prints
+          // `localhost.skill.dad-jokes` under exactly that label). Printing
+          // a uuid there gave one label two meanings. The handle is one
+          // click away through the catalog link below, which is where a
+          // publisher goes to copy it anyway.
+          <Fact label="Published" value="In the skills catalog" />
+        )}
+        {/* Links onward rather than opening the catalog in a second dialog. */}
+        {(addon.published_package_id ?? packageId) && (
+          <Button asChild variant="link" className="h-auto px-0">
+            <Link
+              to="/catalog/skills/$packageId"
+              params={{
+                packageId: (addon.published_package_id ?? packageId) as string,
+              }}
+            >
+              Open in the skills catalog
+            </Link>
+          </Button>
+        )}
+      </div>
+    </>
+  )
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Capped and scrolling: a plugin's skill list is data-driven and the
@@ -193,254 +407,73 @@ export function AddonDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Block 2 — why it is flagged. Absent when the addon is healthy: an
-            "all good" panel on every open would be the row's dot said twice. */}
-        {addonIsFlagged(addon) && (
-          <Alert variant={addon.status === "error" ? "destructive" : "default"}>
-            <AlertDescription>
-              {status.label}
-              {addon.status_code === "orphan" && (
-                <> Nothing on this agent installed it.</>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Which slots are not usable, and why — rows rather than facts: a
-            slot is a user-typed id, and `Fact`'s shrink-0 label cannot hold
-            one. The same row the install dialogs showed for the same slot.
-            Keyed on the issues, not on `status_code`: a link failure
-            (`not_materialized`, `unverified`) outranks `credential_missing`
-            for the row's dot, but the slots are still unusable. */}
-        {credentialIssues.length > 0 && (
-          <div className="space-y-1.5">
-            <Label>Credentials</Label>
-            <ListRowGroup>
-              {credentialIssues.map((issue) => {
-                const copy = ISSUE_REASON_COPY[issue.reason]
-                return (
-                  <SkillCredentialSlotRow
-                    key={`${issue.type}:${issue.slot}`}
-                    slot={issue.slot}
-                    type={issue.type}
-                    status={{
-                      tone: "warning",
-                      label: copy.sentence(issue.slot),
-                    }}
-                    summary={copy.short}
-                  />
-                )
-              })}
-            </ListRowGroup>
-            <Button asChild variant="link" className="h-auto px-0">
-              <Link
-                to="/agent/$agentId"
-                params={{ agentId }}
-                hash="credentials"
-                onClick={() => onOpenChange(false)}
-              >
-                Open the agent's Credentials tab
-              </Link>
-            </Button>
-          </div>
-        )}
-
-        {/* Block 3 — the facts, in the two-column shape the package card uses
-            so the two read as one product. */}
-        <div className="space-y-1.5">
-          {/* The row's own badge, repeated rather than left behind: a dialog
-              opened from a badged row that drops the badge reads as a
-              different thing than the row it came from. "Published" is a flag
-              on the row and a fact below, so it is not repeated here. */}
-          {addon.source === "local" && (
-            <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
-              <AddonLocalBadge addon={addon} />
-            </div>
-          )}
-          {addon.description && (
-            <p className="text-sm break-words text-muted-foreground">
-              {addon.description}
-            </p>
-          )}
-          {addon.version ? (
-            <Fact label="Version" value={`v${addon.version}`} />
-          ) : (
-            // Same rule as the row: an absent version is a fact on a local
-            // skill and noise on a marketplace entry.
-            addon.source === "local" && (
-              <Fact
-                label="Version"
-                value={
-                  <span className="text-muted-foreground">
-                    No version in SKILL.md
-                  </span>
-                }
-              />
-            )
-          )}
-          {formatLabel && <Fact label="Format" value={formatLabel} />}
-          {addon.marketplace_name && addon.source !== "local" && (
-            <Fact label="Marketplace" value={addon.marketplace_name} />
-          )}
-          {pinnedRevision && (
-            <Fact
-              label="Pinned revision"
-              value={skillRevisionLabel(pinnedRevision)}
-            />
-          )}
-          {link?.installed_commit_hash && (
-            <Fact
-              label="Commit"
-              // A hash exists to be pasted somewhere — into a `git log`, a bug
-              // report — so the value itself is the copy control: hover says
-              // so, click copies. No second input for it.
-              value={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className="max-w-full cursor-pointer truncate rounded font-mono text-sm hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                      aria-label="Copy the commit hash"
-                      onClick={() => copyCommit(link.installed_commit_hash)}
-                    >
-                      {link.installed_commit_hash}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs">
-                    Click to copy
-                  </TooltipContent>
-                </Tooltip>
-              }
-            />
-          )}
-          {addon.repository_url && (
-            <Fact
-              label="Repository"
-              value={
-                <a
-                  href={addon.repository_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block max-w-full truncate hover:underline"
-                >
-                  {addon.repository_url}
-                </a>
-              }
-            />
-          )}
-          {link && (
-            <Fact
-              label="Installed"
-              // The house component, not a bare `formatDistanceToNow`: the
-              // server's naive-UTC string has to be parsed as UTC, and the
-              // hover gives the full local date.
-              value={<RelativeTime timestamp={link.created_at} showTooltip />}
-            />
-          )}
-          {modesValue && <Fact label="Modes" value={modesValue} />}
-          {soleSkill?.path && <Fact label="Path" value={soleSkill.path} />}
-          {soleSkill && (
-            <Fact label="Size" value={formatSkillSize(soleSkill.size_bytes)} />
-          )}
-          {soleSkill && (
-            <Fact
-              label="Invocation"
-              value={
-                soleSkill.user_invocable
-                  ? `From chat as /${soleSkill.name}`
-                  : "Model-invoked only"
-              }
-            />
-          )}
-          {soleSkill?.has_scripts && (
-            <Fact label="Scripts" value="Ships scripts the agent can run" />
-          )}
-          {addon.published_package_id && (
-            // The word the row no longer spends a badge on. Deliberately NOT
-            // labelled "Package id": `published_package_id` is the package's
-            // **uuid**, while "package id" means the reverse-domain handle
-            // everywhere else in the product (`SkillPackageCard` prints
-            // `localhost.skill.dad-jokes` under exactly that label). Printing
-            // a uuid there gave one label two meanings. The handle is one
-            // click away through the catalog link below, which is where a
-            // publisher goes to copy it anyway.
-            <Fact label="Published" value="In the skills catalog" />
-          )}
-          {/* Links onward rather than opening the catalog in a second dialog. */}
-          {(addon.published_package_id ?? packageId) && (
-            <Button asChild variant="link" className="h-auto px-0">
-              <Link
-                to="/catalog/skills/$packageId"
-                params={{
-                  packageId: (addon.published_package_id ??
-                    packageId) as string,
-                }}
-              >
-                Open in the skills catalog
-              </Link>
-            </Button>
-          )}
-        </div>
-
-        {/* Block 4 — what it ships. One skill: its SKILL.md, right here. Several:
-            one row each, and the row opens the skill's own dialog. */}
-        {skills.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            This {noun} ships no skills.
-          </p>
-        ) : soleSkill ? (
-          <SkillContentBody agentId={agentId} skill={soleSkill} />
+        {/* One skill: facts and its SKILL.md as two tabs. Several: the facts,
+            then one row per skill, and the row opens the skill's own dialog. */}
+        {soleSkill ? (
+          <SkillDocumentTabs agentId={agentId} skill={soleSkill}>
+            {details}
+          </SkillDocumentTabs>
         ) : (
-          <div>
-            <p className="mb-1 text-xs text-muted-foreground">
-              Ships {skills.length} skills — open one to read it.
-            </p>
-            <ListRowGroup>
-              {skills.map((skill) => {
-                const key = skillKey(skill)
-                return (
-                  // The whole row is the control, as the plugin's own row is
-                  // on the Addons card: click, or Enter / Space, opens it.
-                  // biome-ignore lint/a11y/useSemanticElements: `ListRow` renders `div`s, which a real `<button>` cannot contain.
-                  <div
-                    key={key}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Details of the skill ${skill.name}`}
-                    className="min-w-0 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                    onClick={() => setOpenSkillKey(key)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        setOpenSkillKey(key)
-                      }
-                    }}
-                  >
-                    <ListRow
-                      status={skillRowStatus(skill)}
-                      title={skill.name}
-                      meta={skill.description}
-                      flags={
-                        <RowInfo
-                          facts={[
-                            skill.path,
-                            skill.has_scripts &&
-                              "Ships scripts the agent can run",
-                            skill.user_invocable
-                              ? `Invocable from chat as /${skill.name}`
-                              : "Model-invoked only",
-                            formatSkillSize(skill.size_bytes),
-                          ]}
-                        />
-                      }
-                    >
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </ListRow>
-                  </div>
-                )
-              })}
-            </ListRowGroup>
-          </div>
+          <>
+            {details}
+            {skills.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                This {noun} ships no skills.
+              </p>
+            ) : (
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">
+                  Ships {skills.length} skills — open one to read it.
+                </p>
+                <ListRowGroup>
+                  {skills.map((skill) => {
+                    const key = skillKey(skill)
+                    return (
+                      // The whole row is the control, as the plugin's own row
+                      // is on the Addons card: click, or Enter / Space, opens
+                      // it.
+                      // biome-ignore lint/a11y/useSemanticElements: `ListRow` renders `div`s, which a real `<button>` cannot contain.
+                      <div
+                        key={key}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Details of the skill ${skill.name}`}
+                        className="min-w-0 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        onClick={() => setOpenSkillKey(key)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            setOpenSkillKey(key)
+                          }
+                        }}
+                      >
+                        <ListRow
+                          status={skillRowStatus(skill)}
+                          title={skill.name}
+                          meta={skill.description}
+                          flags={
+                            <RowInfo
+                              facts={[
+                                skill.path,
+                                skill.has_scripts &&
+                                  "Ships scripts the agent can run",
+                                skill.user_invocable
+                                  ? `Invocable from chat as /${skill.name}`
+                                  : "Model-invoked only",
+                                formatSkillSize(skill.size_bytes),
+                              ]}
+                            />
+                          }
+                        >
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </ListRow>
+                      </div>
+                    )
+                  })}
+                </ListRowGroup>
+              </div>
+            )}
+          </>
         )}
 
         {openSkill && (

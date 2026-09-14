@@ -27678,6 +27678,56 @@ export const SkillEntryPublicSchema = {
     description: "One skill in the agent's index."
 } as const;
 
+export const SkillFilesPublicSchema = {
+    properties: {
+        agent_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Agent Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        data: {
+            items: {
+                '$ref': '#/components/schemas/SkillRevisionFilePublic'
+            },
+            type: 'array',
+            title: 'Data',
+            default: []
+        },
+        count: {
+            type: 'integer',
+            title: 'Count',
+            default: 0
+        },
+        total_size_bytes: {
+            type: 'integer',
+            title: 'Total Size Bytes',
+            default: 0
+        },
+        truncated: {
+            type: 'boolean',
+            title: 'Truncated',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['agent_id', 'name', 'path'],
+    title: 'SkillFilesPublic',
+    description: `What one skill folder in the agent's workspace carries — names and sizes.
+
+The agent-side twin of \`\`SkillRevisionFilesPublic\`\`: the same row type, so
+one Sheet renders either list, and the same cap contract — \`\`count\`\` and
+\`\`total_size_bytes\`\` describe the whole folder, \`\`data\`\` its first
+\`\`MAX_LISTED_FILES\`\` files.`
+} as const;
+
 export const SkillInstallPreviewSchema = {
     properties: {
         package_id: {

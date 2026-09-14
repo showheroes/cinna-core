@@ -312,6 +312,14 @@ shows, so an entry reads the same before and after install), a status dot with
 the server's own sentence, an update flag when one is available, and the `⋯`
 menu.
 
+A row whose skills declare **credentials** carries a key flag whose tooltip names
+each slot and its type ("Needs 1 credential — some-token.com (API Token)"). It is
+muted, because a local or marketplace skill's slots are declared but not checked,
+and turns **warning** only on a catalog row with `credential_issues`, beside the
+amber dot that already says so. Details lists the slots as the same slot rows the
+install dialogs use — "Linked to this agent" on a healthy catalog row, "Declared
+in SKILL.md" otherwise; a catalog row with issues keeps its issue list instead.
+
 A **local** row — one of the agent's own `skills/<name>/` folders — says two
 things no other source can. **Local** is a badge, taking the slot `author`
 fills on every other row: a list merging four origins has no unmarked default,
@@ -327,17 +335,22 @@ one in and says so (see
 [agent_skills § Versions live in the header](../agent_skills/agent_skills.md#versions-live-in-the-header-and-publishing-is-what-writes-them)).
 Details repeats the `Local` badge and states the published fact and the missing
 version in words. **The row itself opens Details** — click, or Enter / Space — a read-only
-dialog with the facts (source, format, marketplace, a link to the original
+dialog split into two tabs (see
+[ui_ux_guidelines § Facts and a document](../../development/frontend/ui_ux_guidelines.md)):
+**Details** — the facts (source, format, marketplace, a link to the original
 repository when the marketplace data names one, install time, modes with their
-icons, the commit hash as a click-to-copy value), and
-what it ships: a single skill's `SKILL.md`, **rendered as markdown**, inline; a
-plugin's several skills as rows, each opening its own skill dialog ("Part of the
-plugin X") with that skill's facts and rendered `SKILL.md`. The source glyph,
-the published glyph and the info tooltip are gone from the row; those facts
-live in Details. The row carries **no per-mode toggle**: the modes are chosen at
-install time and read in Details. **Refresh is offered to every viewer**,
-including a consumer of a foreign install — the read gates on access, not on
-role, and a stale index nobody can re-read is a dead end.
+icons, the commit hash as a click-to-copy value, path, size, a **Content** fact
+("N files") opening the same file-list Sheet the catalog's Package card uses,
+read host-side and never waking the environment, and invocation) — and
+**SKILL.md**, rendered as markdown, mounted only while that tab is open since
+reading it can wake a suspended environment. A plugin's several skills list as
+rows instead of a document; each opens its own skill dialog ("Part of the
+plugin X") with the same two tabs. The source glyph, the published glyph and
+the info tooltip are gone from the row; those facts live in Details. The row
+carries **no per-mode toggle**: the modes are chosen at install time and read
+in Details. **Refresh is offered to every viewer**, including a consumer of a
+foreign install — the read gates on access, not on role, and a stale index
+nobody can re-read is a dead end.
 
 ### 2. Adding one
 

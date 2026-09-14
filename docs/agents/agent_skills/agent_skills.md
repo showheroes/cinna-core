@@ -197,12 +197,25 @@ both places is two sources of truth.
 
 ### 3. Reading a SKILL.md
 
-Clicking the card's row opens a dialog with the `SKILL.md` rendered as markdown
-(frontmatter split off). A plugin that
+Clicking the card's row opens a dialog with two tabs at the top: **Details**
+(flags, credentials, facts, content) and **SKILL.md**, rendered as markdown
+(frontmatter split off) — the split the catalog's package route makes with two
+cards side by side. A plugin that
 ships several skills lists them as rows, each opening its own dialog. The path
 comes from the cached index, never from the requested name, so a
 plugin's skill resolves inside the plugin folder rather than the agent's own, and
 the endpoint can never be used as a general workspace file reader.
+
+`SKILL.md` lives in the container, so opening the **SKILL.md** tab on a
+**suspended** agent wakes it first (the Details tab never does) — the same posture as Refresh — rather than answering "unavailable". A
+**stopped** or errored environment is not started from a dialog; the viewer says
+the environment is unavailable and asks the user to start it.
+
+A skill is a folder, not just its `SKILL.md`, so the dialog's facts include
+**Content** — "N files", opening the same file list the catalog's Package card
+shows for a published revision (path, size, executable flag). The list is read
+off the workspace on the host, so it answers for a sleeping agent without waking
+it; it names files and never serves their contents.
 
 ### 4. Shipping skills in a bundle
 

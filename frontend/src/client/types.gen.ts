@@ -6707,6 +6707,24 @@ export type SkillEntryPublic = {
 };
 
 /**
+ * What one skill folder in the agent's workspace carries — names and sizes.
+ *
+ * The agent-side twin of ``SkillRevisionFilesPublic``: the same row type, so
+ * one Sheet renders either list, and the same cap contract — ``count`` and
+ * ``total_size_bytes`` describe the whole folder, ``data`` its first
+ * ``MAX_LISTED_FILES`` files.
+ */
+export type SkillFilesPublic = {
+    agent_id: string;
+    name: string;
+    path: string;
+    data?: Array<SkillRevisionFilePublic>;
+    count?: number;
+    total_size_bytes?: number;
+    truncated?: boolean;
+};
+
+/**
  * Read-only preview of the credential provisioning an install would run.
  */
 export type SkillInstallPreview = {
@@ -8568,6 +8586,13 @@ export type AgentsGetAgentSkillContentData = {
 };
 
 export type AgentsGetAgentSkillContentResponse = (SkillContentPublic);
+
+export type AgentsListAgentSkillFilesData = {
+    agentId: string;
+    name: string;
+};
+
+export type AgentsListAgentSkillFilesResponse = (SkillFilesPublic);
 
 export type AgentsGetAgentAddonsData = {
     agentId: string;
