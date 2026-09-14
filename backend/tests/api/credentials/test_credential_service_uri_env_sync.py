@@ -17,7 +17,8 @@ Covers:
   b) ``api_token`` ``credential_data`` still carries its in-data
      ``service_uri`` copy (unchanged, pre-existing behaviour).
   c) The README text contains the ``service_uri`` values and the "Slots"
-     section.
+     section, including how to check for the slot helpers and the rebuild
+     remedy, because a pre-helper container receives the same README.
   d) A credential with no ``service_uri`` has ``"service_uri": null``.
   e) Synthetic entries (e.g. ``current_user``) are never given
      ``service_uri`` / ``is_placeholder`` keys.
@@ -140,4 +141,8 @@ def test_service_uri_and_is_placeholder_are_top_level_on_every_real_entry(
     assert "odoo-billing" in readme
     assert "## Slots (service_uri)" in readme
     assert "require_slot" in readme
+    # A pre-helper container receives this README too, so it says how to
+    # check for the helpers and what to do without them.
+    assert "hasattr(credentials, 'require_slot')" in readme
+    assert "cinna agent rebuild-env" in readme
     assert "is_placeholder" in readme

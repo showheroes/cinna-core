@@ -32,7 +32,7 @@ Located at `backend/app/services/credentials/credentials_service.py:258`
 
 `get_agent_credentials_with_data()` writes both keys **beside** `credential_data`, not inside it, so neither `filter_credential_data_for_agent_env()` nor `redact_credential_data()` can reach them — both act on `credential_data` alone. That is the mechanism behind the "two fields sit outside the whitelist" rule in the business doc: the pair is type-agnostic and non-secret by construction, and putting them in `AGENT_ENV_ALLOWED_FIELDS` would mean every new credential type had to re-earn the ability to answer a skill's slot lookup.
 
-The README renderer copies the two keys through only when the entry has them, so the synthetic `current_user` / `owner_identity_token` blocks are rendered without invented values, and it documents the convention in a `## Slots (service_uri)` section.
+The README renderer copies the two keys through only when the entry has them, so the synthetic `current_user` / `owner_identity_token` blocks are rendered without invented values, and it documents the convention in a `## Slots (service_uri)` section. The backend cannot tell which container the README lands in, and a container whose core predates the slot helpers receives it too, so that section tells the agent how to check for `require_slot` and, if it is absent, to ask for an environment rebuild and read `credentials.json` by `service_uri` in the meantime.
 
 The in-`credential_data` copy of `service_uri` for `api_token` is unchanged and stays whitelisted, for scripts written against it.
 

@@ -383,6 +383,10 @@ def read_agent_credentials(
                 "notes": credential.notes,
                 "allow_sharing": credential.allow_sharing,
                 "allow_template_sharing": credential.allow_template_sharing,
+                # The slot a skill finds this credential by. Non-secret and
+                # shown for shared credentials too, like every other listing;
+                # without it a client reading this list sees every slot unfilled.
+                "service_uri": credential.service_uri,
                 "template_private_fields": list(credential.template_private_fields or []),
                 "owner_id": credential.owner_id,
                 "user_workspace_id": credential.user_workspace_id,

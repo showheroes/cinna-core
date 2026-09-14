@@ -19,7 +19,9 @@ credential whose owner is the package publisher. Bundle-only
 
 After install, :class:`SkillSlotIndex` is the one read model of how an agent's
 catalog skills' slots stand: the Addons row status, the readiness gate's D1
-exclusion and uninstall's slot release all read it.
+exclusion and uninstall's slot release all read it. The Addons projection also
+asks it about the slots a local or plugin skill declares in its ``SKILL.md``,
+which have no revision behind them.
 
 Imports are one-way: this module reads bundle helpers and the credential
 provisioner; the readiness gate imports it lazily, nothing else under
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -639,7 +642,7 @@ _CREDENTIAL_TYPE_VALUES = frozenset(member.value for member in CredentialType)
 
 @dataclass(frozen=True)
 class CredentialIssue:
-    """One catalog skill slot the agent cannot use yet."""
+    """One skill slot the agent cannot use yet."""
 
     slot: str
     type: str
@@ -669,6 +672,11 @@ class SkillSlotIndex:
     paths could leave it behind. Otherwise the reason is ``not_linked`` (no
     candidate), ``not_configured`` (a placeholder) or
     ``access_revoked``.
+
+    The same reasons judge the ``(slot, type)`` pairs a local or plugin skill
+    declares (:meth:`issues_for_declarations`). Those have no revision, so they
+    come from the environment's skill index — the only record of a workspace
+    ``SKILL.md`` — and a pre-feature container simply reports none.
     """
 
     def __init__(
@@ -687,14 +695,18 @@ class SkillSlotIndex:
         self._bundle_claimed_ids = frozenset(bundle_claimed_ids)
 
     @classmethod
-    def build_for_agent(cls, session: Session, agent: Agent) -> SkillSlotIndex:
+    def build_for_agent(
+        cls, session: Session, agent: Agent, *, with_declarations: bool = False
+    ) -> SkillSlotIndex:
         """Load the index with a constant number of queries (I11).
 
         The agent's catalog links, their revisions' specs, the agent's linked
         credentials, the share rows of the foreign ones with the agent owner,
         and — only for an agent with an installed bundle revision — that
         revision. The last three are skipped when no catalog link declares a
-        slot.
+        slot, unless ``with_declarations`` says the caller will also judge
+        declarations read from the skill index
+        (:meth:`issues_for_declarations`).
         """
         links = session.exec(
             select(AgentPluginLink.id, AgentPluginLink.skill_package_revision_id).where(
@@ -721,7 +733,7 @@ class SkillSlotIndex:
             )
             for link_id, revision_id in links
         }
-        if not any(specs_by_link.values()):
+        if not with_declarations and not any(specs_by_link.values()):
             return cls(
                 owner_id=agent.owner_id,
                 specs_by_link=specs_by_link,
@@ -771,14 +783,28 @@ class SkillSlotIndex:
         ]
 
     def issues_for_link(self, link_id: uuid.UUID) -> list[CredentialIssue]:
+        return self.issues_for_declarations(
+            (spec_slot(parsed), parsed.type)
+            for parsed in self._specs_by_link.get(link_id, [])
+        )
+
+    def issues_for_declarations(
+        self, declarations: Iterable[tuple[str, str]]
+    ) -> list[CredentialIssue]:
+        """The unusable ones among ``(slot, type)`` declarations, in order.
+
+        Also serves skills with no pinned revision — a local skill, a
+        marketplace or bundle plugin's skill — whose ``SKILL.md`` declarations
+        reach the backend only through the environment's skill index. Such an
+        index must be built ``with_declarations=True``: otherwise no linked
+        credential is loaded and every slot reads ``not_linked``.
+        """
         issues: list[CredentialIssue] = []
-        for parsed in self._specs_by_link.get(link_id, []):
-            state = self._slot_state(parsed)
+        for slot, credential_type in declarations:
+            state = self._slot_state(slot, credential_type)
             if state is not None and state.reason is not None:
                 issues.append(
-                    CredentialIssue(
-                        slot=spec_slot(parsed), type=parsed.type, reason=state.reason
-                    )
+                    CredentialIssue(slot=slot, type=credential_type, reason=state.reason)
                 )
         return issues
 
@@ -791,7 +817,7 @@ class SkillSlotIndex:
         ids: set[uuid.UUID] = set()
         for specs in self._specs_by_link.values():
             for parsed in specs:
-                state = self._slot_state(parsed)
+                state = self._slot_state(spec_slot(parsed), parsed.type)
                 if state is not None:
                     ids.update(credential.id for credential in state.candidates)
         return ids
@@ -804,15 +830,14 @@ class SkillSlotIndex:
         """
         return self.slot_credential_ids() - self._bundle_claimed_ids
 
-    def _slot_state(self, parsed: ParsedCredentialSpec) -> _SlotState | None:
-        """Candidates and satisfaction of one spec; ``None`` for an unknown type."""
-        if parsed.type not in _CREDENTIAL_TYPE_VALUES:
+    def _slot_state(self, slot: str, credential_type: str) -> _SlotState | None:
+        """Candidates and satisfaction of one slot; ``None`` for an unknown type."""
+        if credential_type not in _CREDENTIAL_TYPE_VALUES:
             return None
-        slot = spec_slot(parsed)
         candidates = tuple(
             credential
             for credential in self._linked
-            if credential_type_value(credential) == parsed.type
+            if credential_type_value(credential) == credential_type
             and credential.service_uri == slot
         )
         reason: CredentialIssueReason | None

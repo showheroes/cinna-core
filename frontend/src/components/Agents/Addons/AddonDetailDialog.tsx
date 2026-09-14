@@ -227,17 +227,13 @@ export function AddonDetailDialog({
       )}
 
       {/* No issues: what the skill needs, so the row's key flag has
-          somewhere to point. A catalog row without issues has every slot
-          satisfied; any other source's slots are not checked server-side,
-          so they are stated rather than judged. */}
+          somewhere to point. The server checks every declared slot — a
+          catalog row against its pinned revision, any other source against
+          its SKILL.md — so no issues means every slot is usable. */}
       {credentialIssues.length === 0 && soleSkill && (
         <SkillDeclaredCredentials
           credentials={soleSkill.credentials ?? []}
-          summary={
-            addon.source === "catalog"
-              ? "Linked to this agent"
-              : "Declared in SKILL.md"
-          }
+          summary="Linked to this agent"
         />
       )}
 

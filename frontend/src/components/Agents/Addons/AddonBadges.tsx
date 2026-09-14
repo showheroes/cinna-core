@@ -55,10 +55,10 @@ export function AddonPublishedFlag({ addon }: AddonBadgesProps) {
  * **Needs credentials** — the row's skills declare credential slots, named in
  * the tooltip with their types.
  *
- * A passive fact, so a flag (§2 "Row flags") and muted: for a local or
- * marketplace skill the slots are declared, not checked. It turns `warning`
- * only on a catalog row with `credential_issues` — the one case the server
- * knows a slot is not usable — which is when §2 lets a flag carry colour. The
+ * A passive fact, so a flag (§2 "Row flags") and muted while every slot is
+ * usable. It turns `warning` when the row carries `credential_issues` — the
+ * server's verdict that a slot is not usable, for any source — which is when
+ * §2 lets a flag carry colour. The
  * `KeyRound` glyph is the one the package card's Credentials fact uses, so the
  * same requirement reads the same in the catalog and on the agent.
  */

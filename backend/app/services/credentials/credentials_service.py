@@ -900,8 +900,26 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         lines.append("")
         lines.append(
             "Look a credential up by slot with "
-            "`from core.cinna_api import credentials` and "
-            "`credentials.require_slot(\"<slot>\")`."
+            "`from core.cinna_api import credentials, CredentialMissing` and "
+            "`credentials.require_slot(\"<slot>\")`, which raises "
+            "`CredentialMissing` naming the slot and the fix."
+        )
+        lines.append("")
+        # This README is written by the backend, so an environment whose core
+        # predates the slot helpers receives it too. It cannot know which
+        # container it lands in, so it says how to find out rather than
+        # recommending a helper that may raise AttributeError.
+        lines.append(
+            "The slot helpers (`by_slot`, `require_slot`, `agent_api_session`) "
+            "exist only in an environment built or rebuilt since they shipped; "
+            "a restart does not add them. Check before writing a script "
+            "against them: `python3 -c \"from core.cinna_api import credentials; "
+            "print(hasattr(credentials, 'require_slot'))\"`. If it prints "
+            "`False`, tell the user the environment needs a rebuild "
+            "(`cinna agent rebuild-env <agent>` from the CLI), and until then "
+            "read `credentials/credentials.json` directly: the entry whose "
+            "`service_uri` equals the slot and whose `is_placeholder` is not "
+            "`true`."
         )
         lines.append("")
         lines.append(

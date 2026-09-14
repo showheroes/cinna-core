@@ -154,12 +154,21 @@ class AddonsService:
 
         plugin_facts, unfetchable = AddonsService._plugin_facts(session, links)
         package_publishers = AddonsService._package_publishers(session, links)
-        # Credential slots of catalog skills: one read model, built once and
-        # only when a catalog link exists, so the credential half costs a
-        # constant number of queries (I11).
+        # Credential slots: one read model, built once, so the credential half
+        # costs a constant number of queries (I11). A catalog row is judged
+        # against its pinned revision's frozen specs; every other row — a local
+        # skill, a marketplace or bundle plugin's skills — against the
+        # declarations its index entries carry, because that workspace file is
+        # the only place such a declaration lives.
+        declares_outside_catalog = any(
+            entry.credentials for entry in entries if entry.source != "catalog"
+        )
         slot_index = (
-            SkillSlotIndex.build_for_agent(session, agent)
-            if any(link.source == PluginSource.catalog for link in links)
+            SkillSlotIndex.build_for_agent(
+                session, agent, with_declarations=declares_outside_catalog
+            )
+            if declares_outside_catalog
+            or any(link.source == PluginSource.catalog for link in links)
             else None
         )
 
@@ -245,6 +254,29 @@ class AddonsService:
                     orphans[orphan_key] = owner
                     rows.append(owner)
             owner.skills.append(skill)
+
+        # Rows with no pinned revision are judged on what their skills'
+        # ``SKILL.md`` files declare, once every skill has been folded in. A
+        # slot two skills of one plugin share is one issue, not two. Orphans
+        # are skipped: they are errors already and the next sync prunes them.
+        if slot_index is not None:
+            for row in rows:
+                if row.orphan or (
+                    row.link is not None and row.link.source == PluginSource.catalog
+                ):
+                    continue
+                declarations = dict.fromkeys(
+                    (credential.slot, credential.type)
+                    for skill in row.skills
+                    for credential in skill.credentials
+                )
+                if declarations:
+                    row.credential_issues = [
+                        AddonCredentialIssuePublic(
+                            slot=issue.slot, type=issue.type, reason=issue.reason
+                        )
+                        for issue in slot_index.issues_for_declarations(declarations)
+                    ]
 
         # Can a row's EMPTY skill list be trusted as evidence of absence?
         # Only when the index was actually read. ``None`` means we have nothing
@@ -532,9 +564,9 @@ class AddonsService:
                 row.status_code = "unverified"
                 return
 
-        # A catalog skill whose credential slot is unlinked, unfilled or no
-        # longer shared still loads, so this is a warning, not an error: the
-        # skill's scripts fail with a message naming the slot (D1).
+        # A skill whose credential slot is unlinked, unfilled or no longer
+        # shared still loads, whatever its source, so this is a warning, not an
+        # error: the skill's scripts fail with a message naming the slot (D1).
         if row.credential_issues:
             row.status = STATUS_WARNING
             row.status_code = "credential_missing"

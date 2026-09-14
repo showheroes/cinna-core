@@ -248,6 +248,8 @@ create / start / resume / rebuild:
   whose credential was never provisioned fails loudly and repairably rather than silently. The
   synthetic `current_user` / `owner_identity_token` entries never satisfy a slot. These helpers are
   new SDK code and need an **environment rebuild**; the two keys themselves reach any container.
+  The README's Slots section tells the agent the same: how to check for `require_slot`, and, if it
+  is missing, to ask for a rebuild and read `credentials.json` by `service_uri` meanwhile.
 - **Prompts** get the redacted README: `PromptGenerator._load_credentials_readme`
   (`backend/app/env-templates/app_core_base/core/server/prompt_generator.py`) inlines it into the
   building prompt under "Available Credentials" with rules telling the agent to read the values only

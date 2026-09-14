@@ -474,15 +474,21 @@ deliberately left unchanged.
 
 ### After install — `SkillSlotIndex`
 
-The one read model of how an agent's catalog-skill slots stand. Built from the
-frozen specs of the revisions the agent's `source=catalog` links pin —
-**never from the environment's skill index**, because a pre-feature container
-reports rows without credentials at all — plus the agent's linked credentials.
+The one read model of how an agent's skill slots stand. For catalog skills it is
+built from the frozen specs of the revisions the agent's `source=catalog` links
+pin — **never from the environment's skill index**, because a pre-feature
+container reports rows without credentials at all — plus the agent's linked
+credentials. A skill with no pinned revision (a local skill, a marketplace or
+bundle plugin's skill) has no record of its declarations other than its
+`SKILL.md`, so the Addons projection hands its index entries' `(slot, type)`
+pairs to `issues_for_declarations`. A pre-feature container reports none, and
+those rows stay silent.
 
 | Member | Notes |
 |--------|-------|
-| `build_for_agent(session, agent)` | Loads with a constant number of queries: the agent's catalog links, their revisions' specs, the agent's linked credentials, the share rows of the foreign ones, and (only for an agent with an installed bundle revision) that revision. The last three are skipped when no link declares a slot |
-| `issues_for_link(link_id)` → `list[CredentialIssue]` | Drives the Addons row status |
+| `build_for_agent(session, agent, *, with_declarations=False)` | Loads with a constant number of queries: the agent's catalog links, their revisions' specs, the agent's linked credentials, the share rows of the foreign ones, and (only for an agent with an installed bundle revision) that revision. The last three are skipped when no link declares a slot, unless `with_declarations` is set — the Addons projection sets it when a non-catalog index entry declares credentials |
+| `issues_for_link(link_id)` → `list[CredentialIssue]` | Drives the Addons row status of a catalog row |
+| `issues_for_declarations(pairs)` → `list[CredentialIssue]` | The same reasons for `(slot, type)` pairs read from the skill index, in order; unknown types are skipped. Drives the status of local and plugin rows |
 | `slot_credential_ids()` | Every linked credential a catalog spec on the agent points at, with no bundle subtraction — "does anything installed still declare this slot". Read by `InstallService.list_setup_credentials` to stop a kept placeholder from claiming a skill needs it |
 | `skill_provisioned_credential_ids()` | The readiness gate's exclusion: `slot_credential_ids()` **minus** the credentials the agent's bundle revision claims |
 | `specs_for_link` / `specs_except_link` | Uninstall's released/retained split, handed to `CredentialProvisioner.release_skill_slots` |

@@ -15,10 +15,10 @@ interface SkillDeclaredCredentialsProps {
  * the package card's Sheet already use — the destination of the row's key
  * flag in Details.
  *
- * Read-only and unjudged: only a catalog install's slots are checked
- * server-side (`credential_issues`), so for every other source the list states
- * what the skill declares rather than colouring a dot it cannot back up. A
- * catalog row that *does* carry issues keeps its own issue list instead.
+ * Read-only and unjudged here: the server checks every declared slot on the
+ * row (`credential_issues`), and a row that carries issues shows its own issue
+ * list instead. A plugin's single skill (`SkillDetailDialog`) states what it
+ * declares; the plugin row's issues live in `AddonDetailDialog`.
  *
  * Shared by `AddonDetailDialog` (a row that is one skill) and
  * `SkillDetailDialog` (one skill of a plugin).
