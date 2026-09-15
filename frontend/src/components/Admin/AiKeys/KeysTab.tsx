@@ -8,6 +8,7 @@ import {
   type MembershipProvisioningStatus,
 } from "@/client"
 import { DataTable } from "@/components/Common/DataTable"
+import { DEFAULT_PAGE_SIZE } from "@/components/Common/DataTablePagination"
 import { QueryErrorAlert } from "@/components/Common/QueryErrorAlert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -39,7 +40,7 @@ import {
 } from "./aiKeys"
 import { keyColumns } from "./keyColumns"
 
-const PAGE_SIZE = 25
+const PAGE_SIZE = DEFAULT_PAGE_SIZE
 
 /**
  * The loading state, shaped like the table it stands in for (§6).

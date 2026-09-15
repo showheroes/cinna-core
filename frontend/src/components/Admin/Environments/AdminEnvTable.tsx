@@ -1,13 +1,16 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   useReactTable,
   getCoreRowModel,
+  getPaginationRowModel,
   flexRender,
   createColumnHelper,
   type OnChangeFn,
+  type PaginationState,
   type RowSelectionState,
 } from "@tanstack/react-table"
 import type { AdminAgentEnvironmentPublic } from "@/client"
+import { DataTablePagination } from "@/components/Common/DataTablePagination"
 import {
   Table,
   TableBody,
@@ -295,7 +298,7 @@ const columns = [
           (table.getIsSomePageRowsSelected() && "indeterminate")
         }
         onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
-        aria-label="Select all"
+        aria-label="Select all on this page"
       />
     ),
     cell: ({ row }) => {
@@ -402,6 +405,8 @@ interface AdminEnvTableProps {
   isRebuildPending: boolean
   rowSelection: RowSelectionState
   onRowSelectionChange: OnChangeFn<RowSelectionState>
+  pagination: PaginationState
+  onPaginationChange: OnChangeFn<PaginationState>
 }
 
 export function AdminEnvTable({
@@ -410,6 +415,8 @@ export function AdminEnvTable({
   isRebuildPending,
   rowSelection,
   onRowSelectionChange,
+  pagination,
+  onPaginationChange,
 }: AdminEnvTableProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
 
@@ -417,12 +424,33 @@ export function AdminEnvTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    state: { rowSelection },
+    getPaginationRowModel: getPaginationRowModel(),
+    state: { rowSelection, pagination },
     onRowSelectionChange,
+    onPaginationChange,
+    // The list refetches every minute and on every status event while a
+    // rebuild runs; the default reset on new data would throw the admin back
+    // to page 1 each time. Filter changes reset the page in the route instead.
+    autoResetPageIndex: false,
     enableRowSelection: (row) => !TRANSITIONAL_STATUSES.has(row.original.status),
     getRowId: (row) => row.id,
   })
 
+  // A refetch can shrink the list under the current page (an environment
+  // leaves the "in use" filter); land on the last page that still exists
+  // rather than an empty one.
+  const pageCount = table.getPageCount()
+  useEffect(() => {
+    if (pagination.pageIndex > 0 && pagination.pageIndex >= pageCount) {
+      onPaginationChange((p) => ({
+        ...p,
+        pageIndex: Math.max(0, pageCount - 1),
+      }))
+    }
+  }, [pageCount, pagination.pageIndex, onPaginationChange])
+
+  // Selection spans pages: the selected row model reads every loaded row, so
+  // "Select all stale" and rows ticked on other pages all reach the rebuild.
   const selectedRows = table
     .getSelectedRowModel()
     .rows.map((r) => r.original)
@@ -514,6 +542,8 @@ export function AdminEnvTable({
           </TableBody>
         </Table>
       </div>
+
+      <DataTablePagination table={table} itemLabel="environments" />
 
       {/* Bulk rebuild confirm dialog */}
       <AdminEnvBulkRebuildDialog

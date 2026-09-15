@@ -128,6 +128,10 @@ class AdminEnvironmentService:
             .join(Agent, Agent.id == AgentEnvironment.agent_id)
             .join(User, User.id == Agent.owner_id)
             .outerjoin(AgentBundle, AgentBundle.id == Agent.bundle_uuid)
+            # A stable order, so a paged list does not reshuffle between
+            # requests: a rebuild rewrites the row, and without an ORDER BY
+            # Postgres is free to return it somewhere else next time.
+            .order_by(Agent.name, AgentEnvironment.instance_name, AgentEnvironment.id)
         )
 
         # Pre-query filters (push down what we can to the DB)

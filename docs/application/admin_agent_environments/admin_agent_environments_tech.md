@@ -157,7 +157,7 @@ Thin wrapper around the existing rebuild path. Uses `EnvironmentService.get_envi
 
 ### `list_environments`
 
-1. Executes a single SQL query joining `AgentEnvironment → Agent → User` (agent owner), **additionally LEFT JOINed to `AgentBundle` on `Agent.bundle_uuid`** so bundle enrichment needs no extra query.
+1. Executes a single SQL query joining `AgentEnvironment → Agent → User` (agent owner), **additionally LEFT JOINed to `AgentBundle` on `Agent.bundle_uuid`** so bundle enrichment needs no extra query. Ordered by agent name, instance name, then environment id, so pages stay stable while rebuilds rewrite rows.
 2. Applies `template`, `status`, `owner_id`, and `search` filters at the SQL level.
 3. Batch-loads recent session counts for all result environments in a second aggregated query (avoids N+1). Threshold: `last_message_at >= now() - 10min`.
 4. Iterates result rows. Per unique `env_name`, computes `(expected_image_tag, expected_hash)` once via `TemplateImageService` and caches them in a local dict (`_tag_cache`).
@@ -273,6 +273,8 @@ For bulk operations, events are collected in memory and inserted with a single `
 
 Refetch interval: 60 seconds. Stale time: 30 seconds.
 
+The route requests the whole filtered list (`skip=0`, `limit=500`, the backend maximum) and the table pages it in the browser. Server paging would save little — staleness and in-use are computed for every environment before the service slices — and "Select all stale" and bulk rebuild must reach every matching row, not one page. When `count` exceeds the rows returned, the summary line says only the first 500 are listed.
+
 ### WebSocket Integration
 
 On mount, the route subscribes to `EventTypes.ENVIRONMENT_STATUS_CHANGED` via `eventService.subscribe()`. On each event, the list query is invalidated (`queryClient.invalidateQueries`). The subscription is torn down on unmount.
@@ -283,12 +285,14 @@ On mount, the route subscribes to `EventTypes.ENVIRONMENT_STATUS_CHANGED` via `e
 - Checkbox column; rows in transitional statuses have `enableRowSelection = false` and render at 60% opacity.
 - Columns: Agent (name + owner email), **Bundle** (`BundleCell` — bundle ID mono/truncated with tooltip; placed immediately after Agent), Instance, Template (badge), Status (`StatusBadge`), In use (`InUseBadge`), Stale (`StaleBadge`), Model Health (`ModelHealthCell` — amber indicator when `model_health_warning`), Current tag (`ImageTagCell`), Expected tag (`ImageTagCell`), Last built, Last activity.
 - `BundleCell`: em dash when `bundle_id` is null; for a bundle row, shows the bundle ID plus an installed-version badge (`v1.4`, from `revisionLabel`); when `update_available` is true (never for publisher installs) an additional amber `→ v1.5` badge appears — deliberately amber and arrow-shaped rather than reusing `StaleBadge`'s styling, since bundle revision drift (apply-update) and image-tag staleness (rebuild) are different axes and must not read as the same problem. `revisionLabel` is imported from `frontend/src/utils/bundleRevision.ts`, the same helper used by `UpdateAvailableBanner` / `BundleInstallationCard` on the agent page.
+- Client-side pagination (30 rows by default) through the shared `DataTablePagination` footer. Pagination state is owned by the route next to row selection and reset to page 1 on any filter change; `autoResetPageIndex` is off so the 60-second refetch and status events do not jump back to page 1, and the page is clamped when a refetch shrinks the list.
+- Selection spans pages: the header checkbox selects the current page, but the selected row model covers every loaded row.
 - Bulk action bar (shown when `selectedRows.length > 0`): "N envs selected", "Rebuild Selected" button, "Clear" button.
 - Delegates confirm dialog to `AdminEnvBulkRebuildDialog`.
 
 **`AdminEnvFiltersBar`**: Template `<Select>` (populated from `data.templates`), Status `<Select>`, "Only stale" toggle `<Button>`, "Only in use" toggle `<Button>`, "Bundle update available" toggle `<Button>` (amber when active, matching the Bundle column's badge color and deliberately distinct from the stale toggle's orange — wired to the `update_available` query param via the same `true ↔ null` two-state toggle pattern as the stale/in-use buttons), debounced text search (350ms). Filter state is owned by the route component (`_layout/admin/agent-envs.tsx`).
 
-**`AdminEnvStaleBanner`**: Renders only when `staleCount > 0`. Hidden when the stale filter is already active (would produce "N of N" noise). The "Select all stale" button sets `isStale = true` on the filter, causing only stale rows to appear so the header checkbox can select all.
+**`AdminEnvStaleBanner`**: Renders only when `staleCount > 0`. Hidden when the stale filter is already active (would produce "N of N" noise). The "Select all stale" button selects every stale, non-transitional row in the loaded list — across all pages — without touching the filters (changing them would refetch and hide the banner).
 
 **`AdminEnvBulkRebuildDialog`**: Confirm dialog. Shows running/stopped/suspended split. Groups selected environments by template with agent name, instance name, and owner email for each row.
 

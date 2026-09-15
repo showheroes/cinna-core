@@ -1,7 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { RowSelectionState } from "@tanstack/react-table"
+import type { PaginationState, RowSelectionState } from "@tanstack/react-table"
 
 import { AdminEnvironmentsService } from "@/client"
 import { usePageHeader } from "@/routes/_layout"
@@ -13,6 +13,16 @@ import { AdminEnvFiltersBar, type AdminEnvFilters } from "@/components/Admin/Env
 import { AdminEnvStaleBanner } from "@/components/Admin/Environments/AdminEnvStaleBanner"
 import { AdminEnvTable, TRANSITIONAL_STATUSES } from "@/components/Admin/Environments/AdminEnvTable"
 import PendingItems from "@/components/Pending/PendingItems"
+import { DEFAULT_PAGE_SIZE } from "@/components/Common/DataTablePagination"
+
+/**
+ * The whole filtered list, paged in the browser — the backend's maximum.
+ *
+ * Paging on the server would save it little (staleness and in-use are computed
+ * for every environment before it slices), and "Select all stale" and the bulk
+ * rebuild have to reach every matching row, not the one page on screen.
+ */
+const FETCH_LIMIT = 500
 
 // ---------------------------------------------------------------------------
 // Route definition
@@ -56,6 +66,8 @@ function buildQueryFn(filters: AdminEnvFilters) {
       inUse: filters.inUse ?? undefined,
       updateAvailable: filters.updateAvailable ?? undefined,
       search: filters.search || undefined,
+      skip: 0,
+      limit: FETCH_LIMIT,
     })
 }
 
@@ -82,6 +94,11 @@ function AdminAgentEnvs() {
   // button can programmatically select stale rows without touching filters
   // (which would trigger a refetch and hide the banner).
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: DEFAULT_PAGE_SIZE,
+  })
 
   // ── Main data query ──────────────────────────────────────────────────────
   const { data, isLoading, isError } = useQuery({
@@ -202,7 +219,10 @@ function AdminAgentEnvs() {
         <AdminEnvFiltersBar
           data={data}
           filters={filters}
-          onFiltersChange={setFilters}
+          onFiltersChange={(next) => {
+            setFilters(next)
+            setPagination((p) => ({ ...p, pageIndex: 0 }))
+          }}
         />
 
         {/* Summary counts */}
@@ -220,6 +240,12 @@ function AdminAgentEnvs() {
               <strong>{data.in_use_count}</strong> in use
             </span>
           )}
+          {data.count > data.data.length && (
+            <span>
+              Only the first <strong>{data.data.length}</strong> are listed —
+              narrow the filters to reach the rest
+            </span>
+          )}
         </div>
 
         {/* Table */}
@@ -229,6 +255,8 @@ function AdminAgentEnvs() {
           isRebuildPending={bulkRebuildMutation.isPending}
           rowSelection={rowSelection}
           onRowSelectionChange={setRowSelection}
+          pagination={pagination}
+          onPaginationChange={setPagination}
         />
       </div>
     </div>

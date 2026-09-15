@@ -24,12 +24,13 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { DEFAULT_PAGE_SIZE } from "@/components/Common/DataTablePagination"
 
 export const Route = createFileRoute("/_layout/activities-all")({
   component: AllLogsPage,
 })
 
-const PAGE_SIZE = 100
+const PAGE_SIZE = DEFAULT_PAGE_SIZE
 
 function getActivityIcon(activityType: string): { icon: React.ReactNode; colorClass: string } {
   switch (activityType) {

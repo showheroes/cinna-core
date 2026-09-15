@@ -5,21 +5,12 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-} from "lucide-react"
+import { useEffect } from "react"
 
-import { Button } from "@/components/ui/button"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  DataTablePagination,
+  DEFAULT_PAGE_SIZE,
+} from "@/components/Common/DataTablePagination"
 import {
   Table,
   TableBody,
@@ -45,6 +36,10 @@ export interface DataTableServerPagination {
   /** Total matching rows on the server, not the length of this page. */
   total: number
   onPageChange: (pageIndex: number) => void
+  /**
+   * Omit to hide "Rows per page". A size change is followed by
+   * `onPageChange(0)`: the list starts over at its first page.
+   */
   onPageSizeChange?: (pageSize: number) => void
 }
 
@@ -80,40 +75,67 @@ export function DataTable<TData, TValue>({
     // renders, and `getPaginationRowModel` is a no-op once `manualPagination`
     // tells the table the slicing has already happened.
     getPaginationRowModel: getPaginationRowModel(),
-    manualPagination: manual,
-    pageCount: manual
-      ? Math.max(
-          1,
-          Math.ceil(serverPagination.total / serverPagination.pageSize),
-        )
-      : undefined,
-    state: manual
+    // The server-paging options are spread in only when they apply. The table
+    // merges options over its defaults with a plain spread, so an explicit
+    // `onPaginationChange: undefined` replaces the built-in state updater and
+    // every pager button in the client-side case silently does nothing.
+    ...(manual
       ? {
-          pagination: {
-            pageIndex: serverPagination.pageIndex,
-            pageSize: serverPagination.pageSize,
+          manualPagination: true,
+          pageCount: Math.max(
+            1,
+            Math.ceil(serverPagination.total / serverPagination.pageSize),
+          ),
+          state: {
+            pagination: {
+              pageIndex: serverPagination.pageIndex,
+              pageSize: serverPagination.pageSize,
+            },
+          },
+          onPaginationChange: (updater) => {
+            const current = {
+              pageIndex: serverPagination.pageIndex,
+              pageSize: serverPagination.pageSize,
+            }
+            const next =
+              typeof updater === "function" ? updater(current) : updater
+            // A new size starts over at the first page. The table would keep
+            // the top row in view instead, but the index it derives for that
+            // is reported separately from the size, and a caller that applies
+            // them one after the other lands somewhere depending on the order.
+            if (next.pageSize !== current.pageSize) {
+              serverPagination.onPageSizeChange?.(next.pageSize)
+              serverPagination.onPageChange(0)
+              return
+            }
+            if (next.pageIndex !== current.pageIndex) {
+              serverPagination.onPageChange(next.pageIndex)
+            }
           },
         }
-      : undefined,
-    onPaginationChange: manual
-      ? (updater) => {
-          const next =
-            typeof updater === "function"
-              ? updater({
-                  pageIndex: serverPagination.pageIndex,
-                  pageSize: serverPagination.pageSize,
-                })
-              : updater
-          if (next.pageSize !== serverPagination.pageSize) {
-            serverPagination.onPageSizeChange?.(next.pageSize)
-          }
-          if (next.pageIndex !== serverPagination.pageIndex) {
-            serverPagination.onPageChange(next.pageIndex)
-          }
-        }
-      : undefined,
+      : {
+          initialState: {
+            pagination: { pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE },
+          },
+        }),
   })
   const total = manual ? serverPagination.total : data.length
+
+  // A server-paged list can shrink under the current page (its last row
+  // deleted). Step back to the last page that still exists — the footer may
+  // already be gone, which would leave "No results found." with no way back.
+  const pageCount = table.getPageCount()
+  const serverPageIndex = serverPagination?.pageIndex
+  const onServerPageChange = serverPagination?.onPageChange
+  useEffect(() => {
+    if (
+      serverPageIndex !== undefined &&
+      serverPageIndex > 0 &&
+      serverPageIndex >= pageCount
+    ) {
+      onServerPageChange?.(pageCount - 1)
+    }
+  }, [serverPageIndex, pageCount, onServerPageChange])
 
   return (
     <div className="flex flex-col gap-4">
@@ -168,104 +190,13 @@ export function DataTable<TData, TValue>({
         </Table>
       </div>
 
-      {table.getPageCount() > 1 && (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border-t bg-muted/20">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-            <div className="text-sm text-muted-foreground">
-              Showing{" "}
-              {table.getState().pagination.pageIndex *
-                table.getState().pagination.pageSize +
-                1}{" "}
-              to{" "}
-              {Math.min(
-                (table.getState().pagination.pageIndex + 1) *
-                  table.getState().pagination.pageSize,
-                total,
-              )}{" "}
-              of <span className="font-medium text-foreground">{total}</span>{" "}
-              entries
-            </div>
-            <div className="flex items-center gap-x-2">
-              <p className="text-sm text-muted-foreground">Rows per page</p>
-              <Select
-                value={`${table.getState().pagination.pageSize}`}
-                onValueChange={(value) => {
-                  table.setPageSize(Number(value))
-                }}
-              >
-                <SelectTrigger className="h-8 w-[70px]">
-                  <SelectValue
-                    placeholder={table.getState().pagination.pageSize}
-                  />
-                </SelectTrigger>
-                <SelectContent side="top">
-                  {[5, 10, 25, 50].map((pageSize) => (
-                    <SelectItem key={pageSize} value={`${pageSize}`}>
-                      {pageSize}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-x-6">
-            <div className="flex items-center gap-x-1 text-sm text-muted-foreground">
-              <span>Page</span>
-              <span className="font-medium text-foreground">
-                {table.getState().pagination.pageIndex + 1}
-              </span>
-              <span>of</span>
-              <span className="font-medium text-foreground">
-                {table.getPageCount()}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-x-1">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => table.setPageIndex(0)}
-                disabled={!table.getCanPreviousPage()}
-              >
-                <span className="sr-only">Go to first page</span>
-                <ChevronsLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
-              >
-                <span className="sr-only">Go to previous page</span>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
-              >
-                <span className="sr-only">Go to next page</span>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-                disabled={!table.getCanNextPage()}
-              >
-                <span className="sr-only">Go to last page</span>
-                <ChevronsRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DataTablePagination
+        table={table}
+        total={total}
+        showPageSize={
+          !manual || serverPagination.onPageSizeChange !== undefined
+        }
+      />
     </div>
   )
 }

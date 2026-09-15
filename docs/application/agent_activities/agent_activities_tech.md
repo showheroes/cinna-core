@@ -168,8 +168,8 @@ type HappeningItem =
 
 A compact secondary view for the full activity history including archived entries.
 
-- Calls `ActivitiesService.listActivities({ includeArchived: true, limit: 100, skip: offset })` for paginated access
-- Pagination by 100 records, previous/next controls
+- Calls `ActivitiesService.listActivities({ includeArchived: true, limit: 30, skip: offset })` for paginated access
+- Pagination by 30 records (`DEFAULT_PAGE_SIZE` from `Common/DataTablePagination.tsx`), previous/next controls
 - No Requires Action or Happening Now sections — logs only
 - Same cross-workspace behavior (no workspace filter)
 

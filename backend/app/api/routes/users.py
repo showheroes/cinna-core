@@ -130,7 +130,9 @@ def read_users(
         statement = statement.where(User.role == role)
 
     count = session.exec(count_statement).one()
-    statement = statement.offset(skip).limit(limit)
+    # The admin list pages through this; without a stable order an edit that
+    # rewrites a row lets Postgres return it on a different page next time.
+    statement = statement.order_by(User.email, User.id).offset(skip).limit(limit)
     users = session.exec(statement).all()
 
     # One policy read for the whole page — it is the same answer for every

@@ -164,7 +164,7 @@ Each pattern names a reference implementation in this codebase. Reuse the refere
 ### P9. Manage-list route
 **Use for:** the Manage-list story.
 **Reference:** `frontend/src/routes/_layout/admin/users.tsx` + `frontend/src/components/Common/DataTable.tsx` + `frontend/src/components/Admin/columns.tsx`.
-**Skeleton:** page header (title, one primary Create button, optional secondary), `DataTable` with column definitions, per-row `UserActionsMenu`-style overflow menu, server- or client-side pagination. Filters as a toolbar above the table, never as a side card.
+**Skeleton:** page header (title, one primary Create button, optional secondary), `DataTable` with column definitions, per-row `UserActionsMenu`-style overflow menu, server- or client-side pagination via the shared `Common/DataTablePagination.tsx` footer (`DEFAULT_PAGE_SIZE` 30). Filters as a toolbar above the table, never as a side card.
 
 ---
 

@@ -15,6 +15,7 @@ import {
   type RoutingDecisionSummary,
   ServerChannelsService,
 } from "@/client"
+import { DEFAULT_PAGE_SIZE } from "@/components/Common/DataTablePagination"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -102,7 +103,7 @@ import { installRoutingRateLimitCapture } from "./routingRateLimit"
  * into the empty copy.
  */
 
-const PAGE_SIZE = 25
+const PAGE_SIZE = DEFAULT_PAGE_SIZE
 
 /** shadcn `SelectItem` cannot hold an empty value, so "no filter" needs a name. */
 const ANY = "__any__"

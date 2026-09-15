@@ -51,6 +51,8 @@ DEVELOPER_OR_ADMIN_ROLES = {UserRole.DEVELOPER.value, UserRole.ADMIN.value}
 | `PATCH` | `/api/v1/users/{user_id}` | superuser | General user update; `UserUpdate` body includes optional `role`. When `role` actually changes, emits `USER_ROLE_CHANGED`. No admin-invariant enforcement; no self-edit block (used by Admin → Users → Edit User dialog) |
 | `GET` | `/api/v1/users/?role=agent-developer` | superuser | Filter users by role |
 
+`GET /users/` orders by `User.email, User.id` before applying `skip`/`limit`, so a page stays put even when a row is edited between requests. The Admin → Users page (`admin/users.tsx`) pages this server-side through `DataTable`'s `serverPagination` (30 rows per page, via `Common/DataTablePagination`'s `DEFAULT_PAGE_SIZE`) — it previously fetched a fixed batch of 100 and paged it in the browser, which silently hid any account past that batch.
+
 The `role` field is also included in `UserPublic` (returned by `GET /users/me`) so the frontend can read it from the standard me-fetch without an extra call.
 
 ### `UserRolePublic`

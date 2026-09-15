@@ -1,24 +1,19 @@
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Suspense, useEffect } from "react"
+import { useEffect, useState } from "react"
 
 import { type UserPublic, UsersService } from "@/client"
 import AddUser from "@/components/Admin/AddUser"
 import { columns, type UserTableData } from "@/components/Admin/columns"
 import InviteUserDialog from "@/components/Admin/InviteUserDialog"
 import { DataTable } from "@/components/Common/DataTable"
+import { DEFAULT_PAGE_SIZE } from "@/components/Common/DataTablePagination"
+import { QueryErrorAlert } from "@/components/Common/QueryErrorAlert"
 import PendingUsers from "@/components/Pending/PendingUsers"
 import { Button } from "@/components/ui/button"
 import useAuth from "@/hooks/useAuth"
 import { usePageHeader } from "@/routes/_layout"
 import { APP_NAME } from "@/utils"
-
-function getUsersQueryOptions() {
-  return {
-    queryFn: () => UsersService.readUsers({ skip: 0, limit: 100 }),
-    queryKey: ["users"],
-  }
-}
 
 export const Route = createFileRoute("/_layout/admin/users")({
   component: AdminUsers,
@@ -31,9 +26,39 @@ export const Route = createFileRoute("/_layout/admin/users")({
   }),
 })
 
-function UsersTableContent() {
+// Paged on the server: fetching one fixed-size batch and paging it in the
+// browser silently hid every account past that batch, while the footer
+// reported the batch size as the total.
+function UsersTable() {
   const { user: currentUser } = useAuth()
-  const { data: users } = useSuspenseQuery(getUsersQueryOptions())
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+
+  const {
+    data: users,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    // Mutations invalidate the `["users"]` prefix, which still matches.
+    queryKey: ["users", pageIndex, pageSize],
+    queryFn: () =>
+      UsersService.readUsers({ skip: pageIndex * pageSize, limit: pageSize }),
+    // Keeps the current page on screen during a page turn instead of
+    // swapping the table for the skeleton.
+    placeholderData: keepPreviousData,
+  })
+
+  if (isError && users === undefined) {
+    return (
+      <QueryErrorAlert
+        error={error}
+        fallback="Couldn't load the users."
+        onRetry={() => refetch()}
+      />
+    )
+  }
+  if (!users) return <PendingUsers />
 
   const tableData: UserTableData[] = users.data.map((user: UserPublic) => ({
     ...user,
@@ -41,14 +66,19 @@ function UsersTableContent() {
       currentUser && "id" in currentUser ? currentUser.id === user.id : false,
   }))
 
-  return <DataTable columns={columns} data={tableData} />
-}
-
-function UsersTable() {
   return (
-    <Suspense fallback={<PendingUsers />}>
-      <UsersTableContent />
-    </Suspense>
+    <DataTable
+      columns={columns}
+      data={tableData}
+      getRowId={(user) => user.id}
+      serverPagination={{
+        pageIndex,
+        pageSize,
+        total: users.count,
+        onPageChange: setPageIndex,
+        onPageSizeChange: setPageSize,
+      }}
+    />
   )
 }
 
