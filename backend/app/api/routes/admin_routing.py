@@ -42,6 +42,7 @@ from app.models import (
     RoutingRecommendationRequest,
     RoutingReplayRequest,
     RoutingReplayResult,
+    RoutingSimulatePublic,
     RoutingSimulateRequest,
     SecurityEventCreate,
     ServerChannel,
@@ -301,7 +302,7 @@ def _require_tracing_enabled(what: str) -> None:
     )
 
 
-@router.post("/simulate", response_model=RoutingDecisionPublic)
+@router.post("/simulate", response_model=RoutingSimulatePublic)
 async def simulate_routing(
     *,
     session: SessionDep,

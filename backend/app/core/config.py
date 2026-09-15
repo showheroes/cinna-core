@@ -1065,6 +1065,21 @@ class Settings(BaseSettings):
     # and CHANNEL_CONTEXT_CHAR_BUDGET above. The operator's one-line way back
     # if quote-aware routing misroutes in practice.
     CHANNEL_QUOTE_ROUTING_ENABLED: bool = True
+    # Channel routing guidance: when the router routes nowhere it may answer
+    # instead of "contact your administrator" — a list of what the sender can
+    # reach for a `help` question ("what can you do?") or a `none` (nothing
+    # fit). The classifier only picks the shape; the text is composed from the
+    # sender's own ballot (channel_routing_guidance). Off, every reply is
+    # exactly the pre-guidance one and no guidance rides the decision; the
+    # classifier prompt still asks for `intent`, so traces keep showing what
+    # the model would have done. Simulate honours it too.
+    CHANNEL_ROUTING_GUIDANCE_ENABLED: bool = True
+    # How long a clarifying question stays answerable (clarification
+    # round-trip). Read by that round-trip only.
+    CHANNEL_ROUTING_CLARIFY_TTL_MINUTES: int = 30
+    # At most this many entries are listed in a guidance reply; the rest are
+    # summarised as "and N more".
+    CHANNEL_ROUTING_GUIDANCE_MAX_LISTED: int = Field(default=5, ge=1)
 
     # --- Server-channel inbound attachments ------------------------------
     #

@@ -30,6 +30,13 @@ three fewer moving parts, no channel to set up. Where a branch needs
 configuration that changed *after* the decision, the change is made between the
 simulate and the read, which is the real-world shape of those branches too.
 
+The one channel family simulate cannot reach is **a decision that took the
+sender's answer to a question** (`match_method="clarified"`). It follows a
+question row that only a webhook writes (simulate shows its question in
+`guidance_reply` and stores nothing), so those tests deliver the question and
+the reply through the real webhook. The question itself (`guided_clarify`) is
+still a simulate, named under a channel that can ask.
+
 *App MCP origins* are **seeded**, not simulated, and saying why is the point.
 `AppMCPRoutingService.route_message` does open an `origin="app_mcp"` capture
 now (phase 6 of `docs/plans/channels_identity_unification/` — this file used to
@@ -61,6 +68,7 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -78,9 +86,11 @@ from tests.utils.bundle import (
     make_user_and_headers,
     publish_bundle_and_make_public,
 )
+from tests.utils.channel_quote import CHANNEL_SECRETS, deliver_channel_event
 from tests.utils.identity import share_identity_agent
 from tests.utils.routing import (
     classification,
+    classifier_answer,
     get_routing_trace,
     list_routing_traces,
     patched_routing_externals,
@@ -103,6 +113,10 @@ API = settings.API_V1_STR
 #: Pinned by `_seed_app_mcp_trace` so the seeded instrument does not inherit
 #: the deployed default of the per-origin App MCP write mode.
 _APP_MCP_MODE_SETTING = "app.core.config.settings.ROUTING_TRACE_APP_MCP_MODE"
+#: On by default. A classifier that answers `none` over a non-empty ballot is a
+#: `guided` decision while this is on and a plain `no_match` while it is off, so
+#: the no-match helper below pins it either way rather than inheriting it.
+_GUIDANCE_SETTING = "app.core.config.settings.CHANNEL_ROUTING_GUIDANCE_ENABLED"
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +157,12 @@ def _routable(
 
 
 def _simulate_no_match(
-    client: TestClient, superuser_headers: dict[str, str], user_id: str, message: str
+    client: TestClient,
+    superuser_headers: dict[str, str],
+    user_id: str,
+    message: str,
+    *,
+    guidance: bool = True,
 ) -> dict:
     """A decision where the classifier ran and picked nothing.
 
@@ -154,11 +173,134 @@ def _simulate_no_match(
     an empty auto-install list, takes Pass 1's `only_one` short-circuit and
     never reaches the classifier at all — so the no-match branches below give
     their sender two eligible agents, or none.
+
+    `guidance` decides what that answer settles as when the ballot is not
+    empty. On (the default, as deployed) the sender is shown their options and
+    the decision is `guided`; off, it is the plain `no_match` the classifier
+    verdicts were written for. The answer handed to the classifier is the same
+    either way, so a test that turns it off still reaches the original branch
+    through a real classifier run rather than through an outage.
     """
-    with patched_routing_externals(classify_no_match=True):
+    with patch(_GUIDANCE_SETTING, guidance), patched_routing_externals(
+        classify_no_match=True
+    ):
         return simulate_routing(
             client, superuser_headers, message=message, as_user_id=user_id
         )
+
+
+def _clarify(best: str, *tied: str):
+    """The classifier's `clarify` answer: `best` first, then the options tied with it."""
+    return classifier_answer(
+        intent="clarify",
+        result=classification(best, intent="clarify", options=(best, *tied)),
+    )
+
+
+def _clarify_capable_channel(
+    client: TestClient, superuser_headers: dict[str, str]
+) -> dict:
+    """A Google Chat channel that can ask a question: notices plus outbound credentials.
+
+    Both are required, by the webhook and by simulate alike
+    (`RoutingTuningService._can_clarify`). Without them a `clarify` answer
+    routes its best pick, so the question verdict is unreachable.
+    """
+    return create_server_channel(
+        client,
+        superuser_headers,
+        auto_register_users=False,
+        email_whitelist="*",
+        secrets=CHANNEL_SECRETS,
+    )
+
+
+def _catalog_bundle(
+    client: TestClient, superuser_headers: dict[str, str], label: str, trigger: str
+) -> tuple[str, str]:
+    """A public bundle on the auto-install list. Returns `(bundle_uuid, display_name)`."""
+    publisher, publisher_headers = make_user_and_headers(client)
+    promote_to_developer(client, superuser_headers, publisher["id"])
+    source = _agent(client, publisher_headers, label)
+    set_router_trigger_prompt(client, publisher_headers, source["id"], trigger)
+    publish_bundle_and_make_public(client, publisher_headers, source["id"])
+    bundle_uuid = str(
+        client.get(f"{API}/agents/{source['id']}", headers=publisher_headers).json()[
+            "bundle_uuid"
+        ]
+    )
+    listing = add_auto_install_bundle(client, superuser_headers, bundle_uuid)
+    display_name = next(
+        row["display_name"] for row in listing if row["bundle_uuid"] == bundle_uuid
+    )
+    return bundle_uuid, display_name
+
+
+def _channel_trace_ids(
+    client: TestClient, superuser_headers: dict[str, str], channel: dict
+) -> set[str]:
+    page = list_routing_traces(client, superuser_headers, channel_id=channel["id"])
+    return {row["id"] for row in page["data"]}
+
+
+def _deliver(
+    client: TestClient,
+    superuser_headers: dict[str, str],
+    channel: dict,
+    sender: dict,
+    text: str,
+    *,
+    thread_key: str,
+    answer=None,
+) -> dict:
+    """One real webhook delivery, drained. Returns the one trace it wrote.
+
+    Naming no `answer` installs the refusal stub, so a delivery that must not
+    classify (the sender's reply to a question) fails loudly if it does.
+    """
+    before = _channel_trace_ids(client, superuser_headers, channel)
+    event = build_message_event(
+        thread_key=thread_key, text=text, sender_email=sender["email"]
+    )
+    resp, _, _ = deliver_channel_event(
+        client, channel, GoogleChatJWTSigner(), event, classify_result=answer
+    )
+    assert resp.status_code == 200, resp.text
+    new = _channel_trace_ids(client, superuser_headers, channel) - before
+    assert len(new) == 1, new
+    return {"id": new.pop()}
+
+
+def _ask_then_pick(
+    client: TestClient,
+    superuser_headers: dict[str, str],
+    sender: dict,
+    options: tuple[str, ...],
+    *,
+    pick: str,
+) -> tuple[dict, dict]:
+    """Ask the sender to choose between `options`, then deliver their `pick`.
+
+    Returns `(question_trace, follow_up_trace)` as read back through the trace
+    API. A webhook, not a simulate, because the follow-up is only a
+    clarification answer when a question row is waiting for it, and simulate
+    shows its question without writing one.
+    """
+    channel = _clarify_capable_channel(client, superuser_headers)
+    thread_key = f"spaces/AAA/threads/{random_lower_string()}"
+
+    asked = _deliver(
+        client, superuser_headers, channel, sender,
+        f"help me with this {random_lower_string()[:8]}",
+        thread_key=thread_key, answer=_clarify(*options),
+    )
+    question = get_routing_trace(client, superuser_headers, asked["id"])
+    assert question["outcome"] == "guided", question
+
+    answered = _deliver(
+        client, superuser_headers, channel, sender, pick, thread_key=thread_key
+    )
+    return question, get_routing_trace(client, superuser_headers, answered["id"])
 
 
 def _seed_app_mcp_trace(user_id: str) -> dict:
@@ -446,19 +588,26 @@ def test_verdict_when_no_candidates_and_auto_install_is_switched_off(
 def test_verdict_when_owned_agents_exist_but_the_classifier_matched_none(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
-    """Three eligible owned agents, classifier picks nothing.
+    """Three eligible owned agents, classifier picks nothing, guidance off.
 
     The counted noun is the diagnosis, not decoration: "3 effective routes"
     would send an admin to a routes list to look for three rows that need not
     exist, because a channel candidate has no route behind it.
+
+    Guidance is switched off because with it on the same answer is a `guided`
+    decision (`test_verdict_when_the_classifier_matched_none_and_the_sender_
+    was_shown_their_options`). Off is the only way a live decision still
+    settles a plain `no_match` over a non-empty ballot.
     """
     user, headers = _user(client, superuser_token_headers)
     agents = [_agent(client, headers, f"NoMatch{i}") for i in range(3)]
     _routable(client, headers, agents)
 
     trace = _simulate_no_match(
-        client, superuser_token_headers, user["id"], "solve this equation"
+        client, superuser_token_headers, user["id"], "solve this equation",
+        guidance=False,
     )
+    assert trace["outcome"] == "no_match", trace
     diagnosis = _diagnosis(client, superuser_token_headers, trace)
 
     assert diagnosis["code"] == "no_match"
@@ -576,6 +725,341 @@ def test_verdict_when_the_routing_pass_itself_failed(
 
 
 # ---------------------------------------------------------------------------
+# Guidance verdicts — a decision that answered the sender, or took their answer
+# ---------------------------------------------------------------------------
+
+
+def test_verdict_when_the_classifier_read_the_message_as_a_help_question(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """`guided_help`: the sender asked what the assistant can do and was shown a list.
+
+    The verdict must not say the classifier matched nothing. It answered, and
+    the answer was "this is a question about you". The remedy is about how
+    the listed trigger prompts read to the people shown them.
+    """
+    user, headers = _user(client, superuser_token_headers)
+    agents = [_agent(client, headers, f"Helpful{i}") for i in range(2)]
+    _routable(client, headers, agents)
+
+    with patched_routing_externals(classify_result=classifier_answer(intent="help")):
+        trace = simulate_routing(
+            client,
+            superuser_token_headers,
+            message="what can you do?",
+            as_user_id=user["id"],
+        )
+    assert trace["outcome"] == "guided", trace
+
+    diagnosis = _diagnosis(client, superuser_token_headers, trace)
+    assert diagnosis["code"] == "guided_help", diagnosis
+    assert diagnosis["eligible_candidate_count"] == 2
+    assert diagnosis["verdict"] == (
+        "This message did not route anywhere: the classifier read it as a "
+        "question about what the assistant can do, so the sender was answered "
+        "with a list of the options they can reach instead of being told "
+        "nothing matched. Nothing to fix here. That list shows each agent with "
+        "its trigger prompt, so rewrite any trigger prompt that would read "
+        "badly to the people shown it. If the message was a real task, widen "
+        "the trigger prompt of the agent that should have claimed it."
+    ), diagnosis
+    assert diagnosis["action"] in diagnosis["verdict"]
+
+
+def test_verdict_when_the_sender_was_asked_to_choose_between_tied_options(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """`guided_clarify`: several options fit about equally, so the sender was asked.
+
+    Named under a channel that can ask (notices plus outbound credentials).
+    Without one the same `clarify` answer routes its best pick, which is what
+    email does, and this verdict never appears.
+    """
+    user, headers = _user(client, superuser_token_headers)
+    agents = [_agent(client, headers, f"Tied{i}") for i in range(2)]
+    _routable(client, headers, agents)
+    channel = _clarify_capable_channel(client, superuser_token_headers)
+
+    with patched_routing_externals(
+        classify_result=_clarify(agents[0]["id"], agents[1]["id"])
+    ):
+        trace = simulate_routing(
+            client,
+            superuser_token_headers,
+            message="please look at this",
+            as_user_id=user["id"],
+            channel_id=channel["id"],
+        )
+    assert (trace["outcome"], trace["selected_agent_id"]) == ("guided", None), trace
+    pass1 = next(s for s in trace["stages"] if s["stage"] == "pass_1")
+    assert pass1["guidance_kind"] == "clarify", pass1
+
+    diagnosis = _diagnosis(client, superuser_token_headers, trace)
+    assert diagnosis["code"] == "guided_clarify", diagnosis
+    assert diagnosis["verdict"] == (
+        "This message did not route yet: several of the sender's options fit "
+        "it about equally, so instead of guessing, the sender was asked to "
+        "choose between them. Nothing to fix if the question was fair — the "
+        "sender's answer is routed to the option they pick. If one of the "
+        "options listed on this decision should have won outright, make its "
+        "trigger prompt more specific than the others'."
+    ), diagnosis
+    assert diagnosis["action"] in diagnosis["verdict"]
+
+
+def test_verdict_when_the_classifier_matched_none_and_the_sender_was_shown_their_options(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """`guided_no_match`: nothing fit, and (guidance on) the sender saw what does.
+
+    The finding is `no_match`'s, and so is the remedy. What changes is the
+    first half: the sender was not told "nothing matched", so a verdict saying
+    they were would describe a reply they never got.
+    """
+    user, headers = _user(client, superuser_token_headers)
+    agents = [_agent(client, headers, f"Shown{i}") for i in range(3)]
+    _routable(client, headers, agents)
+
+    trace = _simulate_no_match(
+        client, superuser_token_headers, user["id"], "solve this equation"
+    )
+    assert trace["outcome"] == "guided", trace
+
+    diagnosis = _diagnosis(client, superuser_token_headers, trace)
+    assert diagnosis["code"] == "guided_no_match", diagnosis
+    assert diagnosis["eligible_candidate_count"] == 3
+    assert diagnosis["verdict"] == (
+        "This user has 3 eligible candidates and the classifier found that "
+        "none of them fit this message, so the sender was shown the options "
+        "they can reach instead of being told nothing matched. Widen the "
+        "trigger prompt of the agent that should have won — the near-miss "
+        "scores below say which came closest — or use Draft a recommendation "
+        "to generate wording for its owner."
+    ), diagnosis
+    assert diagnosis["action"] in diagnosis["verdict"]
+
+
+def _clarified_follow_up(
+    client: TestClient, superuser_headers: dict[str, str]
+) -> tuple[dict, dict, dict]:
+    """A sender with two agents, asked to choose, who answers "2".
+
+    Returns `(follow_up_trace, not_picked, picked)`.
+    """
+    sender, headers = _user(client, superuser_headers)
+    first = _agent(client, headers, "Offered")
+    second = _agent(client, headers, "Picked")
+    _routable(client, headers, [first, second])
+
+    _, follow_up = _ask_then_pick(
+        client, superuser_headers, sender, (first["id"], second["id"]), pick="2"
+    )
+    assert (
+        follow_up["outcome"], follow_up["selected_agent_id"], follow_up["match_method"]
+    ) == ("routed", second["id"], "clarified"), follow_up
+    return follow_up, first, second
+
+
+def test_verdict_when_the_sender_picked_an_option_from_the_question(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """`clarified` on `routed`: the sender, not a classifier, chose the agent.
+
+    The routed verdict's remedy (tighten the winner's trigger prompt) would be
+    aimed at a decision no wording made. The picked agent named as the
+    expected agent is still `expected_agent_selected`.
+    """
+    trace, _, picked = _clarified_follow_up(client, superuser_token_headers)
+
+    diagnosis = _diagnosis(client, superuser_token_headers, trace)
+    assert diagnosis["code"] == "clarified", diagnosis
+    assert diagnosis["verdict"] == (
+        f"This decision settled on {picked['name']} because the sender had been "
+        f"asked to choose on their previous message and picked one of the "
+        f"options they were offered: no classifier chose between those options "
+        f"again. Nothing to fix here. A sender is asked to choose only when "
+        f"several of their options fit a message about equally, so if that "
+        f"keeps happening, make the trigger prompts of the options listed on "
+        f"that earlier decision more distinct from each other."
+    ), diagnosis
+    assert diagnosis["action"] in diagnosis["verdict"]
+
+    selected = _diagnosis(
+        client, superuser_token_headers, trace, expected_agent_id=picked["id"]
+    )
+    assert selected["code"] == "expected_agent_selected", selected
+    assert selected["verdict"] == (
+        f"{picked['name']} is the agent this decision chose. Nothing to fix — "
+        f"if the message still went nowhere, the failure is after routing "
+        f"(session setup or the outbound reply), not in it."
+    ), selected
+
+
+def test_verdict_when_the_sender_picked_a_catalog_bundle_from_the_question(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """`clarified` on `parked_install`: the pick was a bundle the sender does not own yet.
+
+    Below the routed block, a `parked_install` with no classifier pick would
+    read as a classifier that matched nothing. It is the same finding as the
+    routed pick, named by the bundle's display name.
+    """
+    sender, _ = _user(client, superuser_token_headers)
+    desk, _ = _catalog_bundle(
+        client, superuser_token_headers, "Desk", "Handle support desk tickets"
+    )
+    travel, travel_name = _catalog_bundle(
+        client, superuser_token_headers, "Travel", "Handle travel bookings"
+    )
+
+    question, trace = _ask_then_pick(
+        client, superuser_token_headers, sender, (desk, travel), pick="2"
+    )
+    pass2 = next(s for s in question["stages"] if s["stage"] == "pass_2")
+    assert pass2["guidance_kind"] == "clarify", pass2
+    assert (
+        trace["outcome"], trace["selected_bundle_uuid"], trace["match_method"]
+    ) == ("parked_install", travel, "clarified"), trace
+
+    diagnosis = _diagnosis(client, superuser_token_headers, trace)
+    assert diagnosis["code"] == "clarified", diagnosis
+    assert diagnosis["verdict"] == (
+        f"This decision settled on {travel_name} because the sender had been "
+        f"asked to choose on their previous message and picked one of the "
+        f"options they were offered: no classifier chose between those options "
+        f"again. Nothing to fix here. A sender is asked to choose only when "
+        f"several of their options fit a message about equally, so if that "
+        f"keeps happening, make the trigger prompts of the options listed on "
+        f"that earlier decision more distinct from each other."
+    ), diagnosis
+
+
+#: The bundle-list sentence of each guided code. Guidance noted on `pass_2`
+#: listed catalog bundles, so the agent-list remedy ("the agent's trigger
+#: prompt") would send the admin to an agent that does not exist.
+_CATALOG_GUIDANCE_VERDICTS = {
+    "help": (
+        "guided_help",
+        "This message did not route anywhere: the classifier read it as a "
+        "question about what the assistant can do, and the sender had no "
+        "agents of their own to list, so they were answered with catalog "
+        "bundles the platform can set up for them instead of being told "
+        "nothing matched. Nothing to fix here. That list shows each bundle "
+        "with the router trigger prompt of its published revision, so rewrite "
+        "any that would read badly to the people shown it, and take a bundle "
+        "off this channel's auto-install list if it should not be offered. If "
+        "the message was a real task, give this sender an agent of their own "
+        "with a router trigger prompt (or example prompts).",
+    ),
+    "clarify": (
+        "guided_clarify",
+        "This message did not route yet: several catalog bundles the platform "
+        "could set up for the sender fit it about equally, so instead of "
+        "installing one, the sender was asked to choose between them. Nothing "
+        "to fix if the question was fair — the sender's answer goes to the "
+        "bundle they pick. If one of the bundles listed on this decision "
+        "should have won outright, publish a revision whose router trigger "
+        "prompt is more specific than the others'.",
+    ),
+    "none": (
+        "guided_no_match",
+        "This user has 2 eligible candidates and the classifier found that "
+        "none of them fit this message; the sender had no agents of their own "
+        "to list, so they were shown catalog bundles the platform can set up "
+        "for them instead of being told nothing matched. Widen the trigger "
+        "prompt of the bundle that should have won, on the revision that gets "
+        "published — the near-miss scores below say which came closest — or "
+        "give this sender an agent of their own with a router trigger prompt "
+        "(or example prompts).",
+    ),
+}
+
+
+@pytest.mark.parametrize("intent", ["help", "clarify", "none"])
+def test_verdict_when_the_guidance_reply_listed_catalog_bundles(
+    client: TestClient, superuser_token_headers: dict[str, str], intent: str
+) -> None:
+    """Each guided code's bundle-list variant, from a live Pass 2 answer.
+
+    The sender owns nothing, so Pass 1 has an empty ballot and never
+    classifies. Pass 2 answers over two auto-install bundles and the guidance
+    lands on `pass_2`. `clarify` is named under a channel that can ask, for
+    the same reason as the agent-list test.
+    """
+    sender, _ = _user(client, superuser_token_headers)
+    desk, _ = _catalog_bundle(
+        client, superuser_token_headers, "Desk", "Handle support desk tickets"
+    )
+    travel, _ = _catalog_bundle(
+        client, superuser_token_headers, "Travel", "Handle travel bookings"
+    )
+    if intent == "clarify":
+        answer = _clarify(desk, travel)
+        channel_id = _clarify_capable_channel(client, superuser_token_headers)["id"]
+    else:
+        answer = classifier_answer(intent=intent)
+        channel_id = None
+
+    with patched_routing_externals(classify_result=answer):
+        trace = simulate_routing(
+            client,
+            superuser_token_headers,
+            message="I need help with a trip",
+            as_user_id=sender["id"],
+            channel_id=channel_id,
+        )
+    assert trace["outcome"] == "guided", trace
+    pass2 = next(s for s in trace["stages"] if s["stage"] == "pass_2")
+    assert pass2["guidance_kind"] == intent, pass2
+    assert {o["ref_id"] for o in pass2["guidance_options"]} == {desk, travel}, pass2
+
+    diagnosis = _diagnosis(client, superuser_token_headers, trace)
+    code, verdict = _CATALOG_GUIDANCE_VERDICTS[intent]
+    assert diagnosis["code"] == code, diagnosis
+    assert diagnosis["verdict"] == verdict, diagnosis
+    assert diagnosis["action"] in diagnosis["verdict"]
+
+
+def test_verdict_when_the_picked_option_was_gone_by_the_time_it_was_loaded(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """`clarified_unavailable`: the sender's pick settled `no_match`.
+
+    **Seeded**, because live this is a race: the pick is checked against the
+    sender's current ballot, and a delete that lands before that check makes
+    the reply route fresh instead. Only one between the ballot check and the
+    re-load produces this row. The verdict needs no candidate list, only
+    `match_method` and `outcome`.
+    """
+    user, _ = _user(client, superuser_token_headers)
+    trace_id = seed_routing_trace(
+        created_at=datetime.now(UTC),
+        user_id=user["id"],
+        outcome="no_match",
+        match_method="clarified",
+        message="2",
+    )
+    assert trace_id is not None, "seeded trace was not persisted"
+    trace = get_routing_trace(client, superuser_token_headers, str(trace_id))
+    assert (trace["outcome"], trace["match_method"]) == ("no_match", "clarified"), trace
+
+    diagnosis = _diagnosis(client, superuser_token_headers, trace)
+    assert diagnosis["code"] == "clarified_unavailable", diagnosis
+    assert diagnosis["verdict"] == (
+        "The sender had been asked to choose on their previous message and "
+        "picked one of the options they were offered, but when routing loaded "
+        "that option it was no longer available to them, and nothing else was "
+        "routed in its place, so this decision ended with no match. Nothing on "
+        "any agent's wording would have changed this: the picked option was "
+        "deleted, moved to another account or became unreachable while the "
+        "message was being routed. The candidate table below names why it "
+        "could not be used, and the sender's next message is routed against "
+        "their options as they stand then."
+    ), diagnosis
+    assert diagnosis["action"] in diagnosis["verdict"]
+
+
+# ---------------------------------------------------------------------------
 # Channel expected-agent verdicts answered from the trace
 # ---------------------------------------------------------------------------
 
@@ -616,19 +1100,19 @@ def test_verdict_when_the_expected_agent_was_eligible_but_not_picked(
     The trigger prompt is written to share tokens with the message so the
     near-miss score is non-zero and lands in the sentence — that overlap number
     is the difference between "it lost" and "it lost narrowly".
+
+    Guidance off, so the decision is the plain `no_match` this sentence is
+    about. With it on the agent is one of the options the sender was shown,
+    which is the next test.
     """
     user, headers = _user(client, superuser_token_headers)
-    agents = [_agent(client, headers, f"Considered{i}") for i in range(2)]
-    set_router_trigger_prompt(
-        client, headers, agents[0]["id"], "eigenvalue matrix questions"
-    )
-    set_router_trigger_prompt(
-        client, headers, agents[1]["id"], "calendar booking requests"
-    )
+    agents = _two_considered_agents(client, headers)
 
     trace = _simulate_no_match(
-        client, superuser_token_headers, user["id"], "eigenvalue matrix questions"
+        client, superuser_token_headers, user["id"], "eigenvalue matrix questions",
+        guidance=False,
     )
+    assert trace["outcome"] == "no_match", trace
     diagnosis = _diagnosis(
         client, superuser_token_headers, trace, expected_agent_id=agents[0]["id"]
     )
@@ -640,6 +1124,129 @@ def test_verdict_when_the_expected_agent_was_eligible_but_not_picked(
         f"here. Widen its trigger prompt to cover wording like this message, "
         f"or use Draft a recommendation to generate that wording for its owner."
     )
+
+
+def _two_considered_agents(client: TestClient, headers: dict[str, str]) -> list[dict]:
+    """Two eligible agents; the first one's trigger prompt IS the message used below."""
+    agents = [_agent(client, headers, f"Considered{i}") for i in range(2)]
+    set_router_trigger_prompt(
+        client, headers, agents[0]["id"], "eigenvalue matrix questions"
+    )
+    set_router_trigger_prompt(
+        client, headers, agents[1]["id"], "calendar booking requests"
+    )
+    return agents
+
+
+def test_verdict_when_the_expected_agent_was_one_of_the_options_a_guidance_reply_showed(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """Same ballot, guidance on: the agent was listed to the sender, and nothing routed.
+
+    "The classifier did not pick it" is true but misleading here, because the
+    sender was shown this agent as an option. The sentence says that, keeps
+    the overlap score, and points at the decision's own verdict for why it
+    answered instead of routing.
+    """
+    user, headers = _user(client, superuser_token_headers)
+    agents = _two_considered_agents(client, headers)
+
+    trace = _simulate_no_match(
+        client, superuser_token_headers, user["id"], "eigenvalue matrix questions"
+    )
+    assert trace["outcome"] == "guided", trace
+    diagnosis = _diagnosis(
+        client, superuser_token_headers, trace, expected_agent_id=agents[0]["id"]
+    )
+
+    assert diagnosis["code"] == "expected_agent_considered", diagnosis
+    assert diagnosis["verdict"] == (
+        f"{agents[0]['name']} was an eligible candidate (token overlap 1.00) "
+        f"and one of the options this decision's guidance reply showed the "
+        f"sender, but no agent was routed to — reachability is not the problem "
+        f"here. The decision's verdict without an expected agent says why it "
+        f"answered instead of routing. If this agent should have won outright, "
+        f"widen its trigger prompt to cover wording like this message, or use "
+        f"Draft a recommendation to generate that wording for its owner."
+    ), diagnosis
+    assert diagnosis["action"] in diagnosis["verdict"]
+
+
+def test_verdict_when_the_expected_agent_was_eligible_but_not_among_the_options_shown(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """A guided decision that listed other agents, asked about one it left out.
+
+    Live: the sender is asked to choose between two tied agents while a third,
+    whose trigger prompt is the message word for word, stays eligible and
+    unlisted. "The classifier did not pick it" would be true and beside the
+    point. What happened is that the reply showed the sender other options.
+    """
+    user, headers = _user(client, superuser_token_headers)
+    tied = [_agent(client, headers, f"Tied{i}") for i in range(2)]
+    _routable(client, headers, tied)
+    left_out = _agent(client, headers, "LeftOut")
+    set_router_trigger_prompt(
+        client, headers, left_out["id"], "eigenvalue matrix questions"
+    )
+    channel = _clarify_capable_channel(client, superuser_token_headers)
+
+    with patched_routing_externals(
+        classify_result=_clarify(tied[0]["id"], tied[1]["id"])
+    ):
+        trace = simulate_routing(
+            client,
+            superuser_token_headers,
+            message="eigenvalue matrix questions",
+            as_user_id=user["id"],
+            channel_id=channel["id"],
+        )
+    assert trace["outcome"] == "guided", trace
+    pass1 = next(s for s in trace["stages"] if s["stage"] == "pass_1")
+    assert {o["ref_id"] for o in pass1["guidance_options"]} == {
+        tied[0]["id"], tied[1]["id"]
+    }, pass1
+
+    diagnosis = _diagnosis(
+        client, superuser_token_headers, trace, expected_agent_id=left_out["id"]
+    )
+    assert diagnosis["code"] == "expected_agent_considered", diagnosis
+    assert diagnosis["verdict"] == (
+        f"{left_out['name']} was an eligible candidate (token overlap 1.00) "
+        f"but not one of the options this decision's guidance reply showed the "
+        f"sender, and no agent was routed to — reachability is not the problem "
+        f"here. The decision's verdict without an expected agent says why it "
+        f"answered instead of routing. If this agent should have won outright, "
+        f"widen its trigger prompt to cover wording like this message, or use "
+        f"Draft a recommendation to generate that wording for its owner."
+    ), diagnosis
+    assert diagnosis["action"] in diagnosis["verdict"]
+
+
+def test_verdict_when_the_expected_agent_was_offered_but_the_sender_picked_another(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """A clarified follow-up, asked about the option the sender did NOT pick.
+
+    Still `expected_agent_considered`, but no overlap score: on this decision
+    the message is the sender's answer ("2"), so a score would measure the
+    answer rather than the task. The remedy points at their earlier message.
+    """
+    trace, not_picked, _ = _clarified_follow_up(client, superuser_token_headers)
+
+    diagnosis = _diagnosis(
+        client, superuser_token_headers, trace, expected_agent_id=not_picked["id"]
+    )
+    assert diagnosis["code"] == "expected_agent_considered", diagnosis
+    assert diagnosis["verdict"] == (
+        f"{not_picked['name']} was an eligible candidate, and this decision went "
+        f"to the option the sender picked from a question they were asked on "
+        f"their previous message — reachability is not the problem here. The "
+        f"sender's pick decided where this message went. If this agent should "
+        f"have won their earlier message outright, widen its trigger prompt to "
+        f"cover wording like that one."
+    ), diagnosis
+    assert "token overlap" not in diagnosis["verdict"]
 
 
 def test_verdict_when_an_owned_agent_has_no_router_wording(

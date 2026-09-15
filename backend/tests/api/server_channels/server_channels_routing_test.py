@@ -67,6 +67,7 @@ from tests.utils.server_channel import (
     update_server_channel,
 )
 from tests.utils.routing import (
+    as_classifier_answer,
     classification,
     enter_classifier_patch,
     get_routing_trace,
@@ -84,7 +85,9 @@ _CANDIDATE_PROVIDER_TARGET = (
     "app.services.routing.channel_candidate_provider."
     "ChannelCandidateProvider.build"
 )
-_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
+#: The channel router calls `classify_answer`; App MCP still calls `classify`.
+_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify_answer"
+_APP_MCP_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
 _STREAM_TARGET = "app.services.sessions.message_service.agent_env_connector"
 
 
@@ -409,7 +412,10 @@ def test_pass1_ownership_postcondition_rejects_a_foreign_agent(
     forged = [build_channel_candidate(ref_id=foreign_agent["id"], name="Not yours")]
 
     with patch(_CANDIDATE_PROVIDER_TARGET, return_value=forged):
-        with patch(_CLASSIFY_TARGET, return_value=classification(foreign_agent["id"])):
+        with patch(
+            _CLASSIFY_TARGET,
+            return_value=as_classifier_answer(classification(foreign_agent["id"])),
+        ):
             agent = route_installed(db, sender, "hello")
 
     assert agent is None
@@ -424,7 +430,9 @@ def test_pass1_declines_when_the_classifier_names_an_agent_that_is_gone(
     forged = [build_channel_candidate(ref_id=ghost_id, name="Ghost")]
 
     with patch(_CANDIDATE_PROVIDER_TARGET, return_value=forged):
-        with patch(_CLASSIFY_TARGET, return_value=classification(ghost_id)):
+        with patch(
+            _CLASSIFY_TARGET, return_value=as_classifier_answer(classification(ghost_id))
+        ):
             agent = route_installed(db, sender, "hello")
 
     assert agent is None
@@ -921,7 +929,7 @@ def _capture_app_mcp_candidates(client, superuser_headers, sender_id: str) -> li
             mcp_ctx=None,
         )
 
-    with patch(_CLASSIFY_TARGET, side_effect=_capture):
+    with patch(_APP_MCP_CLASSIFY_TARGET, side_effect=_capture):
         with patch(_STREAM_TARGET, StubAgentEnvConnector(response_text="ok")):
             raw = asyncio.run(_run())
     drain_tasks()

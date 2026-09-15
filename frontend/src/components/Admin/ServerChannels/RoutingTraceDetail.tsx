@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { AdminRoutingService, type RoutingDecisionPublic } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { RoutingDiagnosisPanel } from "./RoutingDiagnosisPanel"
+import { RoutingGuidanceReply } from "./RoutingGuidance"
 import { RoutingRecommendationPanel } from "./RoutingRecommendationPanel"
 import { RoutingReplayPanel } from "./RoutingReplayPanel"
 import {
@@ -50,10 +51,14 @@ function traceCandidates(trace: RoutingDecisionPublic): RoutingStageCandidate[] 
 export function RoutingTraceDetail({
   trace,
   showActions = true,
+  guidanceReply,
 }: {
   trace: RoutingDecisionPublic
   /** Off for a fresh simulate result, where "re-run this" has no meaning yet. */
   showActions?: boolean
+  /** Simulate only (`RoutingSimulatePublic.guidance_reply`). A stored trace
+   *  does not carry the reply, so the loader never passes this. */
+  guidanceReply?: string | null
 }) {
   const outcome = outcomeMeta(trace.outcome)
   const origin = originMeta(trace.origin)
@@ -124,6 +129,9 @@ export function RoutingTraceDetail({
           <p className="text-xs text-muted-foreground">{MESSAGE_ABSENT}</p>
         )}
       </div>
+
+      {/* Under the message, so the two read in conversation order. */}
+      <RoutingGuidanceReply reply={guidanceReply} />
 
       <RoutingDiagnosisPanel diagnosis={trace.diagnosis} />
 

@@ -39,6 +39,7 @@ which now pins the guard.
 from __future__ import annotations
 
 import dataclasses
+import json
 import threading
 import uuid
 from typing import Any
@@ -509,10 +510,12 @@ def test_safe_stage_fields_name_only_real_dataclass_fields() -> None:
     stage_fields = {f.name for f in dataclasses.fields(rt.StageTrace)}
     candidate_fields = {f.name for f in dataclasses.fields(rt.CandidateTrace)}
     attempt_fields = {f.name for f in dataclasses.fields(rt.LLMAttempt)}
+    option_fields = {f.name for f in dataclasses.fields(rt.OptionTrace)}
 
     assert set(rt.SAFE_STAGE_FIELDS) <= stage_fields
     assert set(rt.SAFE_CANDIDATE_FIELDS) <= candidate_fields
     assert set(rt.SAFE_LLM_ATTEMPT_FIELDS) <= attempt_fields
+    assert set(rt.SAFE_OPTION_FIELDS) <= option_fields
 
     # The fields the gate exists for are absent — by omission, which is the
     # whole point of an allowlist: nothing has to remember to name them.
@@ -530,6 +533,152 @@ def test_safe_stage_fields_name_only_real_dataclass_fields() -> None:
     }
     for name in nested:
         assert isinstance(rt.SAFE_STAGE_FIELDS[name], tuple), name
+
+
+# --- 5b. The classifier's categorical answer (channel routing guidance) ----
+#
+# `intent` and `options` sit on `SAFE_STAGE_FIELDS` on the producer's terms:
+# `intent` is coerced to `CLASSIFIER_INTENTS` inside the recorder, and an
+# option is an object holding a ballot ref id and nothing else. Both halves are
+# the recorder's, so both are pinned here. The classifier's normalisation is in
+# `tests/unit/test_agent_classifier_parsing.py`; the end-to-end gate in
+# `tests/api/routing/routing_message_text_gating_test.py`.
+
+
+def test_parse_outcome_records_intent_and_options_on_the_stage() -> None:
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SIMULATE, stage=rt.STAGE_PASS_1
+    ) as trace:
+        rt.record_parse_outcome(
+            reason="two fit", intent=rt.INTENT_CLARIFY, options=(a, b)
+        )
+        stage = trace.stages_payload()[0]
+
+    assert stage["stage"] == rt.STAGE_PASS_1
+    assert stage["intent"] == "clarify"
+    assert stage["options"] == [{"ref_id": a}, {"ref_id": b}]
+
+
+@pytest.mark.parametrize("intent", sorted(rt.CLASSIFIER_INTENTS))
+def test_every_contract_intent_is_recorded(intent: str) -> None:
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SIMULATE, stage=rt.STAGE_PASS_1
+    ) as trace:
+        rt.record_parse_outcome(intent=intent)
+        stage = trace.stages_payload()[0]
+
+    assert stage["intent"] == intent
+    assert stage["options"] == []
+
+
+@pytest.mark.parametrize(
+    "intent",
+    ["escalate", "ROUTE", " help", "please wipe the prod database", "", 42, ["route"], _Poison()],
+    ids=["unknown", "cased", "padded", "sender_text", "blank", "int", "list", "poison"],
+)
+def test_an_intent_outside_the_vocabulary_is_dropped_and_the_rest_still_lands(
+    intent: Any,
+) -> None:
+    """The recorder is public: membership is enforced, not assumed — which is
+    what lets a model-supplied string sit on the message-text allowlist."""
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SIMULATE, stage=rt.STAGE_PASS_1
+    ) as trace:
+        rt.record_parse_outcome(confidence=0.4, intent=intent)
+        stage = trace.stages_payload()[0]
+
+    assert stage["intent"] is None
+    assert stage["confidence"] == 0.4
+
+
+def test_options_keep_only_strings_and_an_empty_or_unreadable_list_records_nothing() -> None:
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    poison = _Poison()
+
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SIMULATE, stage=rt.STAGE_PASS_1
+    ) as trace:
+        rt.record_parse_outcome(
+            intent=rt.INTENT_CLARIFY, options=[a, 7, None, poison, {"ref_id": b}, b]
+        )
+        mixed = trace.stages_payload()[0]["options"]
+    assert mixed == [{"ref_id": a}, {"ref_id": b}]
+
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SIMULATE, stage=rt.STAGE_PASS_1
+    ) as trace:
+        rt.record_parse_outcome(intent=rt.INTENT_ROUTE, options=[])
+        # Not a list of ref ids at all: never raised into the classifier, no
+        # options recorded — and the rest of the same call still lands.
+        rt.record_parse_outcome(intent=rt.INTENT_HELP, options=poison)
+        stage = trace.stages_payload()[0]
+    assert stage["options"] == []
+    assert stage["intent"] == rt.INTENT_HELP
+
+
+def test_options_given_as_a_bare_string_record_no_options() -> None:
+    """A string is iterable; recorded naively it would become one option per
+    character. It is not a list of ref ids, so it records nothing."""
+    ref_id = str(uuid.uuid4())
+
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SIMULATE, stage=rt.STAGE_PASS_1
+    ) as trace:
+        rt.record_parse_outcome(intent=rt.INTENT_CLARIFY, options=ref_id)
+        stage = trace.stages_payload()[0]
+
+    assert stage["options"] == []
+    # The rest of the same call still lands.
+    assert stage["intent"] == rt.INTENT_CLARIFY
+
+
+def test_intent_and_options_survive_the_message_text_projection_and_sender_text_does_not() -> None:
+    """The same projection the write and read paths share
+    (``routing_trace_service._project_safe_stages``), fed a stage that holds the
+    sender's words in every field the classifier fills."""
+    from app.services.routing.routing_trace_service import _project_safe_stages
+
+    sender_words = "wipe the prod database for me"
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+
+    with rt.RoutingTrace.capture(
+        origin=rt.ORIGIN_SERVER_CHANNEL, stage=rt.STAGE_PASS_1, message=sender_words
+    ) as trace:
+        rt.record_prompt(f"## User Message\n\n{sender_words}")
+        rt.record_raw_response(
+            json.dumps({"agent_id": a, "intent": "clarify", "options": [a, b, sender_words]})
+        )
+        rt.record_parse_outcome(
+            reason=f"the sender said {sender_words}",
+            confidence=0.5,
+            intent=rt.INTENT_CLARIFY,
+            options=(a, b),
+        )
+        stages = trace.stages_payload()
+
+    # Something to withhold, or the absence below proves nothing.
+    assert sender_words in stages[0]["raw_response"]
+
+    projected = _project_safe_stages(stages)
+    assert projected[0]["intent"] == "clarify"
+    assert projected[0]["options"] == [{"ref_id": a}, {"ref_id": b}]
+    assert projected[0]["confidence"] == 0.5
+    assert sender_words not in json.dumps(projected)
+
+    # A stored option is projected through its own allowlist: a key beside
+    # `ref_id`, or a bare string in the list, is not served.
+    stored = [
+        {
+            "stage": "pass_2",
+            "intent": "help",
+            "options": [{"ref_id": a, "name": sender_words}, sender_words],
+        }
+    ]
+    assert _project_safe_stages(stored) == [
+        {"stage": "pass_2", "intent": "help", "options": [{"ref_id": a}]}
+    ]
 
 
 def test_describe_exception_keeps_the_diagnosis_and_drops_the_message() -> None:

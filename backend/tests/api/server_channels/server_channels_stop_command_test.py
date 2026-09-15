@@ -66,7 +66,7 @@ from tests.utils.background_tasks import drain_tasks
 from tests.utils.bundle import make_user_and_headers, publish_bundle_and_make_public
 from tests.utils.environment import set_environment_status
 from tests.utils.message import list_messages
-from tests.utils.routing import refuse_to_classify
+from tests.utils.routing import as_classifier_answer, refuse_to_classify
 from tests.utils.server_channel import (
     GoogleChatJWTSigner,
     add_auto_install_bundle,
@@ -85,7 +85,7 @@ API = settings.API_V1_STR
 
 _ADAPTER = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter"
 _STREAM_TARGET = "app.services.sessions.message_service.agent_env_connector"
-_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
+_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify_answer"
 _FETCH_TARGET = f"{_ADAPTER}.fetch_attachment"
 _INTERRUPT_TARGET = (
     "app.services.sessions.message_service.MessageService.interrupt_stream"
@@ -613,7 +613,9 @@ def test_stop_while_the_thread_is_still_installing_is_never_parked(
     with ExitStack() as stack:
         stack.enter_context(signer.patched())
         stack.enter_context(patch(_STREAM_TARGET, stub))
-        stack.enter_context(patch(_CLASSIFY_TARGET, return_value=classify_result))
+        stack.enter_context(
+            patch(_CLASSIFY_TARGET, return_value=as_classifier_answer(classify_result))
+        )
         install.apply(stack)
         post_webhook(
             client,

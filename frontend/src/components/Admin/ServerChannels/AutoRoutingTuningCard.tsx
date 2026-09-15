@@ -218,7 +218,7 @@ export function AutoRoutingTuningCard() {
           </Select>
 
           <Select value={outcome} onValueChange={resetPage(setOutcome)}>
-            <SelectTrigger className="h-8 w-[10rem] text-xs">
+            <SelectTrigger className="h-8 w-[13rem] text-xs">
               <SelectValue placeholder="Any outcome" />
             </SelectTrigger>
             <SelectContent>

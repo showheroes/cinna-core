@@ -48,7 +48,7 @@ from tests.utils.server_channel import (
     list_debug_events,
     post_webhook,
 )
-from tests.utils.routing import refuse_to_classify
+from tests.utils.routing import as_classifier_answer, refuse_to_classify
 from tests.utils.session import create_session_via_api, list_sessions
 from tests.utils.user import create_random_user_with_headers, promote_to_developer
 from tests.utils.ai_credential import create_random_ai_credential
@@ -57,7 +57,7 @@ from tests.utils.utils import random_lower_string
 API = settings.API_V1_STR
 _SEND_TARGET = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter.send_message"
 _STREAM_TARGET = "app.services.sessions.message_service.agent_env_connector"
-_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
+_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify_answer"
 
 
 def _channel(client, superuser_headers, **overrides) -> dict:
@@ -95,7 +95,9 @@ def _setup_pending_install(client, superuser_headers) -> dict:
     stub = StubAgentEnvConnector(response_text="Sure thing.")
     with signer.patched(), patch(_STREAM_TARGET, stub), patch(
         _SEND_TARGET, AsyncMock(return_value="fake-ext-id")
-    ) as send_mock, patch(_CLASSIFY_TARGET, return_value=classify_result):
+    ) as send_mock, patch(
+        _CLASSIFY_TARGET, return_value=as_classifier_answer(classify_result)
+    ):
         resp = post_webhook(client, channel["webhook_token"], event, bearer_token=token)
         drain_tasks()
     assert resp.status_code == 200

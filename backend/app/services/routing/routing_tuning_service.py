@@ -62,19 +62,23 @@ from typing import Any
 
 from sqlmodel import Session as DBSession
 
+from app.models import ServerChannel
 from app.models.routing.routing_decision import (
     RoutingDecision,
     RoutingDecisionPublic,
     RoutingRecommendationPublic,
     RoutingReplayDiff,
+    RoutingSimulatePublic,
 )
-from app.models import ServerChannel
 from app.services.routing import routing_trace
 from app.services.routing.agent_classifier import QuotedContext
 from app.services.routing.routing_trace_service import RoutingTraceService
 from app.services.server_channels.channel_policy_service import (
     ChannelPolicyService,
     ResolvedChannelPolicy,
+)
+from app.services.server_channels.channel_routing_guidance import (
+    compose_guidance_reply,
 )
 from app.services.server_channels.channel_routing_service import (
     ChannelRoutingService,
@@ -146,7 +150,7 @@ class RoutingTuningService:
         quoted_text: str | None = None,
         quoted_author: str | None = None,
         quoted_agent_id: uuid.UUID | None = None,
-    ) -> RoutingDecisionPublic:
+    ) -> RoutingSimulatePublic:
         """Route ``message`` for ``user_id`` with no effects; return the trace.
 
         ``quoted_text`` / ``quoted_author`` / ``quoted_agent_id`` reproduce a
@@ -156,6 +160,13 @@ class RoutingTuningService:
         ``CHANNEL_QUOTE_ROUTING_ENABLED`` exactly as the real path does — with
         the switch off the webhook passes no quote, so neither does this, and
         the returned trace's quote fields are empty to show it.
+
+        ``guidance_reply`` on the response is the guidance reply the sender
+        would have been sent (``outcome="guided"``), composed from the decision
+        by the same function the real path uses and never sent, with the named
+        channel's markdown support (:meth:`_guidance_markdown`). It obeys
+        ``CHANNEL_ROUTING_GUIDANCE_ENABLED`` like the webhook. It is the one
+        field not read back from the stored row: the text is not stored.
 
         The decision is persisted with ``origin="simulate"`` and
         ``actor_user_id`` set, then read back through
@@ -197,6 +208,9 @@ class RoutingTuningService:
                 actor_user_id=actor_user_id,
                 quoted=quoted,
                 quoted_agent_id=quoted_agent_id,
+                guidance_enabled=settings.CHANNEL_ROUTING_GUIDANCE_ENABLED,
+                guidance_max_listed=settings.CHANNEL_ROUTING_GUIDANCE_MAX_LISTED,
+                can_clarify=RoutingTuningService._can_clarify(db, channel_id),
             )
         except Exception as exc:  # noqa: BLE001
             # ``decide`` re-raises whatever the routing pass raised, and it does
@@ -245,7 +259,67 @@ class RoutingTuningService:
                 500,
                 "The simulation ran and was stored but could not be read back.",
             )
-        return result
+        # The stored trace, read back, plus the one field no stored row holds.
+        return RoutingSimulatePublic.model_validate(
+            {
+                **result.model_dump(),
+                "guidance_reply": compose_guidance_reply(
+                    decision.guidance,
+                    markdown=RoutingTuningService._guidance_markdown(db, channel_id),
+                ),
+            }
+        )
+
+    @staticmethod
+    def _guidance_markdown(db: DBSession, channel_id: uuid.UUID | None) -> bool:
+        """Whether ``guidance_reply`` keeps markdown, as the channel's reply would.
+
+        Read through the ``supports_markdown`` the webhook composes with, so an
+        email channel's simulate shows the plain text the mail carries, not
+        ``**`` markers it never does. With no channel named the reply keeps
+        markdown, the Google Chat shape a hand-typed simulate has always shown.
+        A channel whose row does not resolve answers False, the webhook's safe
+        answer.
+        """
+        from app.services.server_channels.adapters.registry import supports_markdown
+
+        if channel_id is None:
+            return True
+        channel = db.get(ServerChannel, channel_id)
+        return channel is not None and supports_markdown(channel.channel_type)
+
+    @staticmethod
+    def _can_clarify(db: DBSession, channel_id: uuid.UUID | None) -> bool:
+        """Whether the webhook would let this decision ask a clarifying question.
+
+        It asks only with guidance on and on a transport that can follow the
+        question up (``supports_status_notice``). With no channel, or a
+        channel whose row or adapter does not resolve, this answers False and
+        a ``clarify`` decision shows its best pick, as email would route it.
+        The question itself is shown in ``guidance_reply``; no question row is
+        written.
+        """
+        from app.core.config import settings
+        from app.services.server_channels.adapters.registry import get_adapter
+        from app.services.server_channels.server_channel_service import (
+            ServerChannelService,
+        )
+
+        if not settings.CHANNEL_ROUTING_GUIDANCE_ENABLED or channel_id is None:
+            return False
+        try:
+            channel = db.get(ServerChannel, channel_id)
+            if channel is None:
+                return False
+            # Both terms the webhook requires: a notice transport to follow the
+            # question up, and an outbound credential to post it.
+            return bool(
+                get_adapter(channel.channel_type).capabilities.supports_status_notice
+                and ServerChannelService.has_outbound_credentials(channel)
+            )
+        except Exception:  # noqa: BLE001 — a diagnostic answers conservatively
+            logger.debug("Could not resolve channel %s for simulate", channel_id)
+            return False
 
     @staticmethod
     def _policy_for(

@@ -53,7 +53,7 @@ Auto-generated from OpenAPI spec. Tag: `admin-routing`
   - `quoted_message_author`: string | null
   - `quoted_agent_id`: string | null
 
-**Response:** `RoutingDecisionPublic`
+**Response:** `RoutingSimulatePublic`
 
 ---
 

@@ -30,6 +30,13 @@ is the easiest thing in this codebase to assert in a form that cannot fail. The
 binding assertion was verified by making `decide` create a binding on purpose
 and watching this file go red; the revert is recorded in the phase notes. If
 you add an absence assertion here, break the thing it guards first.
+
+**The simulate response is the stored trace read back, with one exception.**
+It carries `guidance_reply` on top of `GET /traces/{id}`'s payload. That is
+safe because the reply is composed only from ballot data the trace already
+serves (`stages[].candidates`) or a fixed identity constant, never from the
+sender's text; `test_simulate_response_is_the_stored_trace_read_back` pins the
+difference to exactly that one key.
 """
 import uuid
 
@@ -364,13 +371,19 @@ def test_simulate_response_is_the_stored_trace_read_back(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
     """
-    Condition 4: a simulate exposes exactly what a stored trace exposes.
+    Condition 4: a simulate exposes exactly what a stored trace exposes, plus
+    one documented extra.
 
     Proved by fetching the same trace through `GET /traces/{id}` and comparing
-    the two payloads for equality. They match because the route returns
-    `RoutingTraceService.get`'s output rather than projecting anything of its
-    own — if a parallel projection is ever introduced here, this goes red on
-    the first field that diverges.
+    the two payloads. The key sets differ by exactly `{"guidance_reply"}`
+    (`RoutingSimulatePublic` over `RoutingDecisionPublic`), and with that key
+    removed the payloads are equal. That extra is safe: it is composed only
+    from ballot data the trace already serves under `stages[].candidates`
+    (candidate names and trigger prompts) or a fixed identity constant, never
+    from the sender's message, so it reveals nothing a trace read does not.
+    Any other new key, or any field that diverges, goes red here — a parallel
+    projection cannot slip in. Guidance-specific values are covered in
+    `routing_simulate_guidance_reply_test.py`.
     """
     user, _, agent = _routable_user(client, superuser_token_headers)
 
@@ -380,7 +393,12 @@ def test_simulate_response_is_the_stored_trace_read_back(
         )
 
     fetched = get_routing_trace(client, superuser_token_headers, simulated["id"])
-    assert simulated == fetched
+    assert set(simulated) - set(fetched) == {"guidance_reply"}
+    assert set(fetched) - set(simulated) == set()
+    # A routed decision has nothing to guide the sender with.
+    assert simulated["outcome"] == "routed"
+    assert simulated["guidance_reply"] is None
+    assert {k: v for k, v in simulated.items() if k != "guidance_reply"} == fetched
 
     # And it is a real row on the list surface, tagged as a simulate and
     # carrying the admin who ran it — the join between the audit entry and the

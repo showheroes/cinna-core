@@ -81,7 +81,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from weakref import WeakValueDictionary
@@ -121,7 +121,10 @@ from app.services.server_channels.adapters.base import (
     ChannelReplyTarget,
     ChannelVerificationError,
 )
-from app.services.server_channels.adapters.registry import get_adapter
+from app.services.server_channels.adapters.registry import (
+    get_adapter,
+    supports_markdown,
+)
 from app.services.server_channels.channel_attachment_service import (
     ChannelAttachmentResult,
     ChannelAttachmentService,
@@ -138,6 +141,7 @@ from app.services.server_channels.channel_conversation_resolver import (
     ChannelConversationResolver,
 )
 from app.services.server_channels.channel_debug_buffer import (
+    DEBUG_GUIDED,
     DEBUG_INSTALLING,
     DEBUG_NO_MATCH,
     DEBUG_RECEIVED,
@@ -156,6 +160,17 @@ from app.services.server_channels.channel_policy_service import (
     ResolvedChannelPolicy,
 )
 from app.services.server_channels.channel_reply_policy import ChannelReplyPolicy
+from app.services.server_channels.channel_routing_clarification_service import (
+    ChannelRoutingClarificationService,
+    ClarificationSnapshot,
+)
+from app.services.server_channels.channel_routing_guidance import (
+    CHOICE_CANCEL,
+    GUIDANCE_CLARIFY,
+    compose_guidance_reply,
+    is_selector_like,
+    resolve_choice,
+)
 from app.services.server_channels.channel_routing_service import (
     ChannelRoutingService,
 )
@@ -425,7 +440,13 @@ REPLY_TOO_MANY_QUEUED = (
 # that ``ChannelOutboundService.handle_stream_interrupted`` settles into the
 # status notice is the acknowledgement.
 REPLY_NOTHING_TO_STOP = "There's nothing running right now."
-# The ONE reply in this module that is deliberately specific.
+#: The sender declined a routing question ("neither", "cancel"). Static like the
+#: rest of this family: it repeats nothing the sender wrote.
+REPLY_CLARIFY_CANCELLED = (
+    "Okay, I won't pass that one on. Send a new message whenever you need something."
+)
+# The first of two deliberately specific replies in this module (guidance
+# replies, documented after this constant, are the second).
 #
 # Every other decline above is uninformative on purpose — "you are not
 # whitelisted", "your grant was withdrawn" and "this channel is switched off"
@@ -465,6 +486,25 @@ REPLY_ATTACHMENTS_REJECTED = (
 # to shrink their file sends them to solve a problem they do not have. The
 # reason-specific hint belongs to the reason: every entry in ``_reason_phrase``
 # carries its own, rendered into ``{details}``.
+
+# **Guidance replies are the second deliberate exception**, on the same two
+# legs as ``REPLY_ATTACHMENTS_REJECTED``. They are not a constant: when
+# ``ChannelRoutingService.decide`` returns a ``RoutingGuidance``,
+# ``channel_routing_guidance.compose_guidance_reply`` writes the text that
+# takes ``REPLY_NO_MATCH``'s place.
+#
+# - **Reached only after every gate admitted the sender.** Routing is scheduled
+#   by ``process_inbound`` past the whitelist, availability and access checks,
+#   so no decline a stranger could probe for ever becomes guidance; those still
+#   share ``REPLY_DENIED``.
+# - **It is about the sender's own situation.** It lists only their own
+#   post-policy ballot (their agents, the identities that bound them) or the
+#   catalog bundles admitted for them — what they could already reach by
+#   describing a task — and nothing about who else may use this channel. No
+#   sender or quoted text reaches it: the classifier picks the shape (``help``
+#   / ``none``), the platform writes every word.
+#
+# ``CHANNEL_ROUTING_GUIDANCE_ENABLED`` off restores ``REPLY_NO_MATCH`` exactly.
 
 # ======================================================================
 # Step 6.5 — inbound attachments
@@ -914,6 +954,39 @@ class ChannelIngestProducedNoMessage(RuntimeError):
     a missing environment comes back, an activation retry succeeds — so it
     takes the transient arm, which keeps the messages.
     """
+
+
+#: Step 7.5 — what a sender's unbound message does to their open routing
+#: question (``ChannelInboundService._clarification_step``).
+_CLARIFY_NONE = "none"
+_CLARIFY_DUPLICATE = "duplicate"
+_CLARIFY_CANCELLED = "cancelled"
+_CLARIFY_CHOSEN = "chosen"
+_CLARIFY_UNREAD = "unread"
+_CLARIFY_ALREADY_ANSWERED = "already_answered"
+
+
+@dataclass(frozen=True)
+class _ClarificationStep:
+    """The step-7.5 verdict for one message. Plain data."""
+
+    action: str
+    snapshot: ClarificationSnapshot | None = None
+    chosen_ref_id: str | None = None
+    option_number: int | None = None
+
+
+@dataclass(frozen=True)
+class _ResumedMessage:
+    """A question's stored original message, rebuilt to route as it arrived."""
+
+    inbound: ChannelInboundMessage
+    thread_key: str
+    text: str
+    classification_text: str | None
+    file_ids: list[uuid.UUID]
+    external_message_id: str | None
+    external_user_id: str | None
 
 
 class ChannelNotFound(Exception):
@@ -1692,6 +1765,16 @@ class ChannelInboundService:
                         return {}
 
                     if binding.status == CHANNEL_BINDING_PENDING_INSTALL:
+                        if (
+                            inbound.external_message_id
+                            and ChannelRoutingClarificationService.has_receipt(
+                                db, binding_id, inbound.external_message_id
+                            )
+                        ):
+                            # Already handled on this binding: the answer to
+                            # the routing question that created it, redelivered.
+                            # Parking it would queue it for the agent.
+                            return {}
                         accepted = ChannelInboundService._park_message(
                             db, binding, inbound, text=text, file_ids=file_ids
                         )
@@ -1713,6 +1796,166 @@ class ChannelInboundService:
                     )
                     db.delete(binding)
                     db.commit()
+
+        # ---- 7.5. An answer to the router's own question ----
+        #
+        # With no binding, this message may answer a clarifying question the
+        # router asked on the sender's previous one (``_route_new_thread``'s
+        # clarify branch). The question is keyed like a binding, so it is read
+        # only once step 7 found none or cleared a failed one. A choice routes
+        # the ORIGINAL message. A plainly named choice ("2", "Writer") reaches
+        # no agent and is recorded on the debug feed only; a short reply only
+        # the classifier could read is delivered after the original
+        # (``_answer_clarification``). See ``_clarification_step``.
+        #
+        # Gated on ``CHANNEL_ROUTING_GUIDANCE_ENABLED``: with guidance off an
+        # open question is ignored, the message is handled exactly as before
+        # questions existed, and the row expires through the purge.
+        #
+        # The question is left standing in the space as it was asked. A choice
+        # gets a fresh status notice from ``_route_new_thread``, adopted by the
+        # binding and deleted when the reply lands, like any new thread's; a
+        # decline is answered by the static sync reply below. So nothing is
+        # left narrating "working…" with no owner.
+        step = _ClarificationStep(_CLARIFY_NONE)
+        if settings.CHANNEL_ROUTING_GUIDANCE_ENABLED:
+            step = ChannelInboundService._clarification_step(
+                db,
+                channel_id=channel_id,
+                scope_key=scope_key,
+                user_id=user_id,
+                inbound=inbound,
+                has_attachments=bool(file_ids or attachments.skipped),
+            )
+        if step.action == _CLARIFY_DUPLICATE:
+            return {}
+        if step.action == _CLARIFY_ALREADY_ANSWERED:
+            if debug_channel_id is not None:
+                ChannelDebugBuffer.record(
+                    channel_id=debug_channel_id,
+                    direction="inbound",
+                    kind=DEBUG_GUIDED,
+                    summary=(
+                        "The routing question was answered, replaced or expired "
+                        "while this reply was being read — reply dropped"
+                    ),
+                    sender_email=inbound.sender_email,
+                    sender_display_name=inbound.sender_display_name,
+                    thread_key=inbound.thread_key,
+                    detail={
+                        "stage": "clarification_answer",
+                        "resolution": "already_answered",
+                    },
+                )
+            return {}
+        if step.action == _CLARIFY_CANCELLED:
+            if debug_channel_id is not None:
+                ChannelDebugBuffer.record(
+                    channel_id=debug_channel_id,
+                    direction="inbound",
+                    kind=DEBUG_GUIDED,
+                    summary=(
+                        "Sender declined the routing question — their original "
+                        "message was dropped"
+                    ),
+                    sender_email=inbound.sender_email,
+                    sender_display_name=inbound.sender_display_name,
+                    thread_key=inbound.thread_key,
+                    detail={
+                        "stage": "clarification_answer",
+                        "resolution": "cancelled",
+                    },
+                )
+            return adapter.build_sync_response(REPLY_CLARIFY_CANCELLED, sync_target)
+        if (
+            step.action == _CLARIFY_CHOSEN
+            and step.snapshot is not None
+            and step.chosen_ref_id is not None
+        ):
+            resumed = ChannelInboundService._resume_clarified(db, step.snapshot)
+            if debug_channel_id is not None:
+                ChannelDebugBuffer.record(
+                    channel_id=debug_channel_id,
+                    direction="inbound",
+                    kind=DEBUG_GUIDED,
+                    summary=(
+                        f"Sender chose option {step.option_number} — routing "
+                        "their original message; this reply is not sent to an "
+                        "assistant"
+                    ),
+                    sender_email=inbound.sender_email,
+                    sender_display_name=inbound.sender_display_name,
+                    thread_key=inbound.thread_key,
+                    detail={
+                        "stage": "clarification_answer",
+                        "resolution": "matched",
+                        "option": str(step.option_number),
+                    },
+                )
+            ChannelInboundService._schedule(
+                ChannelInboundService._route_new_thread(
+                    inbound=resumed.inbound,
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    # This message's reading of the sender's policy: the choice
+                    # must still be on the ballot it builds.
+                    policy=policy,
+                    thread_key=resumed.thread_key,
+                    text=resumed.text,
+                    classification_text=resumed.classification_text,
+                    file_ids=resumed.file_ids,
+                    # Never attached: the original was answered with a question.
+                    redelivered_file_ids=set(),
+                    external_message_id=resumed.external_message_id,
+                    external_user_id=resumed.external_user_id,
+                    origin=_trace_origin(adapter.channel_type),
+                    chosen_ref_id=step.chosen_ref_id,
+                    answered_by_external_message_id=inbound.external_message_id,
+                ),
+                "channel_route_clarified_thread",
+            )
+            return ChannelInboundService._new_thread_ack(
+                adapter,
+                sync_target,
+                notice_supported=notice_supported,
+                outbound_configured=outbound_configured,
+            )
+        if step.action == _CLARIFY_UNREAD and step.snapshot is not None:
+            if debug_channel_id is not None:
+                ChannelDebugBuffer.record(
+                    channel_id=debug_channel_id,
+                    direction="inbound",
+                    kind=DEBUG_GUIDED,
+                    summary=(
+                        "Reply to a routing question named no option — asking "
+                        "the classifier which option it meant"
+                    ),
+                    sender_email=inbound.sender_email,
+                    sender_display_name=inbound.sender_display_name,
+                    thread_key=inbound.thread_key,
+                    detail={
+                        "stage": "clarification_answer",
+                        "resolution": "classifier",
+                    },
+                )
+            ChannelInboundService._schedule(
+                ChannelInboundService._answer_clarification(
+                    snapshot=step.snapshot,
+                    inbound=inbound,
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    policy=policy,
+                    text=text,
+                    origin=_trace_origin(adapter.channel_type),
+                ),
+                "channel_answer_clarification",
+            )
+            return ChannelInboundService._new_thread_ack(
+                adapter,
+                sync_target,
+                notice_supported=notice_supported,
+                outbound_configured=outbound_configured,
+            )
 
         # ---- 8-10. New thread: route (and possibly install) off-request ----
         #
@@ -2132,6 +2375,8 @@ class ChannelInboundService:
         file_ids: list[uuid.UUID] | None = None,
         redelivered_file_ids: set[uuid.UUID] | None = None,
         inbound: ChannelInboundMessage | None = None,
+        chosen_ref_id: str | None = None,
+        answered_by_external_message_id: str | None = None,
     ) -> None:
         """``decide()`` → bind → ingest.
 
@@ -2172,6 +2417,17 @@ class ChannelInboundService:
         carried down whichever branch this message takes — ingested with it,
         parked with it behind an auto-install, or handed to the winner of a
         binding race along with the text.
+
+        **The clarification round-trip.** Where this transport can follow a
+        question up (``notice_supported``) and guidance is on, ``decide`` may
+        answer ``clarify``: the question is stored
+        (``ChannelRoutingClarificationService.ask``) with this message and
+        settled into the notice. When the sender answers, step 7.5 calls this
+        again for the **stored** message with ``chosen_ref_id`` (the option
+        they picked, which ``decide`` only takes if policy still admits it) and
+        ``answered_by_external_message_id`` (the answer's own id). That id is
+        written as an ingest receipt on the binding this creates, so a
+        redelivered answer is never ingested.
         """
         # Resolved once, here, so the ``decide()`` call below reads as the one
         # thing it is rather than as a conditional buried in an argument list.
@@ -2229,6 +2485,11 @@ class ChannelInboundService:
             # notice below runs on a detached ``channel``, so an adapter lookup
             # off a live instance has to happen here or not at all.
             notice_supported = _status_notice_supported(channel)
+            # Read here for the same reason. A question needs both: a notice
+            # transport to follow it up, and a credential to post it at all —
+            # otherwise the row would be written for a question never shown,
+            # and the sender's next "1" consumed by it.
+            outbound_configured = _outbound_credentials_configured(channel)
 
             # Opened before the slow part, because the slow part is what it
             # exists to narrate: ``decide()`` is an LLM call, and an install
@@ -2372,6 +2633,17 @@ class ChannelInboundService:
                     origin=origin,
                     quoted=quoted,
                     quoted_agent_id=quoted_agent_id,
+                    guidance_enabled=settings.CHANNEL_ROUTING_GUIDANCE_ENABLED,
+                    guidance_max_listed=settings.CHANNEL_ROUTING_GUIDANCE_MAX_LISTED,
+                    # A question is asked only where it can be followed up:
+                    # the notice transports. Everywhere else ``clarify`` routes
+                    # the best pick, as it did before questions existed.
+                    can_clarify=(
+                        settings.CHANNEL_ROUTING_GUIDANCE_ENABLED
+                        and notice_supported
+                        and outbound_configured
+                    ),
+                    chosen_ref_id=chosen_ref_id,
                 )
                 pass1_trace = decision.pass1_trace
                 pass2_trace = decision.pass2_trace
@@ -2441,6 +2713,12 @@ class ChannelInboundService:
                         status=CHANNEL_BINDING_ACTIVE,
                         external_message_id=external_message_id,
                     )
+                    if answered_by_external_message_id:
+                        # Before the ingest, on whichever binding now holds
+                        # the thread: the answer is handled, not history.
+                        ChannelInboundService._record_answer_receipt(
+                            db, binding, answered_by_external_message_id
+                        )
                     if not created:
                         # Another delivery for this brand-new thread won the
                         # race and already picked an agent. Defer to its
@@ -2527,6 +2805,101 @@ class ChannelInboundService:
                             redelivered_file_ids=redelivered_file_ids,
                         )
                         return
+
+                # ---- Guidance: routed nowhere, and the sender is answered ----
+                # ``decide`` sets ``guidance`` only when neither pass routed and
+                # the classifier said ``help`` / ``none`` over a ballot this
+                # sender may be shown, or ``clarify`` where this transport can
+                # follow a question up. Same effects as the no-match branch
+                # below — persist, feed, settle the notice (``_reply`` where
+                # there is none, so email gets it as mail) — with the composed
+                # text in ``REPLY_NO_MATCH``'s place. The trace is already
+                # settled ``guided``.
+                guidance = decision.guidance
+                if guidance is not None:
+                    guidance_reply = (
+                        compose_guidance_reply(
+                            guidance,
+                            markdown=supports_markdown(channel.channel_type),
+                        )
+                        or REPLY_NO_MATCH
+                    )
+                    # Plain reads off frozen dataclasses, hoisted before the
+                    # record call like every argument list here (§11a Rule 2).
+                    guidance_kind = guidance.kind
+                    listed = len(guidance.entries)
+                    total = guidance.total
+                    if guidance_kind == GUIDANCE_CLARIFY:
+                        # The question's state: the options and THIS message,
+                        # stored before the question goes out so an instant
+                        # answer finds it, and before the trace so a failed
+                        # write is not a ``guided`` row for a question nobody
+                        # can answer. Replaces any question already open for
+                        # this asker in this scope.
+                        ChannelRoutingClarificationService.ask(
+                            db,
+                            channel_id=channel_id,
+                            scope_key=ChannelInboundService._scope_key_for(
+                                channel, inbound, thread_key
+                            ),
+                            user_id=user_id,
+                            thread_key=thread_key,
+                            conversation_key=(
+                                inbound.conversation_key if inbound else None
+                            ),
+                            conversation_kind=(
+                                inbound.conversation_kind if inbound else None
+                            ),
+                            options=guidance.entries,
+                            message={
+                                **ChannelInboundService._parked_entry(
+                                    text,
+                                    external_message_id,
+                                    external_user_id,
+                                    file_ids,
+                                    inbound,
+                                ),
+                                "classification_text": classification_text,
+                            },
+                            status_message_id=status_message_id,
+                            ttl_minutes=settings.CHANNEL_ROUTING_CLARIFY_TTL_MINUTES,
+                        )
+                    decision_id = await ChannelRoutingService.run_in_thread(
+                        decision.persist_call()
+                    )
+                    diagnosis = routing_trace.summarize(pass1_trace, pass2_trace)
+                    if guidance_kind == GUIDANCE_CLARIFY:
+                        headline = (
+                            "Several assistants fit — asked the sender to choose "
+                            f"between {listed} option(s)"
+                        )
+                    elif guidance_kind == routing_trace.INTENT_HELP:
+                        headline = (
+                            "Sender asked what the assistant can do — replied "
+                            f"listing {listed} of {total} option(s)"
+                        )
+                    else:
+                        headline = (
+                            "Nothing matched — replied listing "
+                            f"{listed} of {total} option(s) the sender can use"
+                        )
+                    ChannelDebugBuffer.record(
+                        channel_id=debug_channel_id,
+                        direction="inbound",
+                        kind=DEBUG_GUIDED,
+                        summary=headline + (f" — {diagnosis}" if diagnosis else ""),
+                        sender_email=sender_email,
+                        thread_key=thread_key,
+                        detail={
+                            "pass": "2" if decision.catalog_ran else "1",
+                            "guidance": guidance_kind,
+                            **_decision_detail(decision_id),
+                        },
+                    )
+                    await ChannelInboundService._settle_notice(
+                        db, channel, reply_target, status_message_id, guidance_reply
+                    )
+                    return
 
                 # ---- Pass 2 outcome: server-wide auto-install catalog ----
                 # Already run inside ``decide`` above; from here on this method
@@ -2670,6 +3043,7 @@ class ChannelInboundService:
                         # cannot need it: a ``pending_install`` binding has no
                         # session, so nothing it parks was ever attached.
                         redelivered_file_ids=redelivered_file_ids,
+                        answered_by_external_message_id=answered_by_external_message_id,
                     )
                 except Exception as exc:
                     # The park is what ``parked_install`` asserts, so a failed
@@ -3111,8 +3485,14 @@ class ChannelInboundService:
         file_ids: list[uuid.UUID] | None = None,
         redelivered_file_ids: set[uuid.UUID] | None = None,
         inbound: ChannelInboundMessage | None = None,
+        answered_by_external_message_id: str | None = None,
     ) -> ChannelThreadBinding | None:
         """Install the matched bundle and park the message until the env is up.
+
+        ``answered_by_external_message_id`` is the answer to a routing question
+        that chose this bundle. Its receipt is written straight after the
+        binding exists, with no await in between, so a redelivered answer can
+        never find the pending binding without it and be parked for the agent.
 
         ``file_ids`` are parked with the text (§3.2). Ids only, never bytes:
         the rows they name already exist, are ``temporary``, and are reclaimed
@@ -3164,6 +3544,10 @@ class ChannelInboundService:
             status=CHANNEL_BINDING_PENDING_INSTALL,
             external_message_id=external_message_id,
         )
+        if answered_by_external_message_id:
+            ChannelInboundService._record_answer_receipt(
+                db, binding, answered_by_external_message_id
+            )
         if not created:
             # Raced. Defer to the winner — parking onto an already-`active`
             # binding would strand the message, since the flush loop only ever
@@ -3245,7 +3629,25 @@ class ChannelInboundService:
         in its own try/except so one bad row never starves the rest.
 
         Returns the number of bindings advanced to ``active``.
+
+        Also purges expired routing questions first, on the same tick, so an
+        unanswered question does not outlive its TTL by more than one interval
+        when its sender never writes again. Guarded on its own: a failed purge
+        never costs a flush.
         """
+        try:
+            purged = ChannelRoutingClarificationService.purge_expired(db)
+            if purged:
+                logger.info(
+                    "%s Purged %d expired routing question(s)", _LOG_PREFIX, purged
+                )
+        except Exception:  # noqa: BLE001 — the flush below must still run
+            logger.exception("%s Routing question purge failed", _LOG_PREFIX)
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001 — never mask the real error
+                logger.exception("%s Could not roll back after the purge", _LOG_PREFIX)
+
         bindings = db.exec(
             select(ChannelThreadBinding).where(
                 ChannelThreadBinding.status == CHANNEL_BINDING_PENDING_INSTALL
@@ -4113,12 +4515,390 @@ class ChannelInboundService:
         )
 
     # ==================================================================
+    # Step 7.5 — answers to the router's own questions
+    # ==================================================================
+
+    @staticmethod
+    def _clarification_step(
+        db: DBSession,
+        *,
+        channel_id: uuid.UUID,
+        scope_key: str,
+        user_id: uuid.UUID,
+        inbound: ChannelInboundMessage,
+        has_attachments: bool,
+    ) -> _ClarificationStep:
+        """What an unbound message does to its sender's open routing question.
+
+        - No question: ``none``, and the message routes as usual.
+        - Expired: deleted here, lazily, and ``none``.
+        - A redelivery of the message the question is about: ``duplicate``.
+        - Any attachment: the question is dropped and ``none``. Files are
+          content for an agent, so this is a new request, and an answer is
+          never ingested, which would lose them.
+        - ``resolve_choice`` reads a choice or a decline: the question is
+          claimed, and only the call that deleted it proceeds (``chosen`` /
+          ``cancelled``). A concurrent answer that lost gets
+          ``already_answered``.
+        - Unread and longer than ``CLARIFY_SELECTOR_MAX_WORDS`` words: a new
+          request, as the question promised. The question is dropped and the
+          step is ``none``, with no classifier call over the options.
+        - Otherwise, a short unread reply: ``unread``. The question stays open
+          until :meth:`_answer_clarification` claims or drops it.
+
+        Synchronous, on the webhook path: one indexed ``SELECT`` for every
+        unbound message, and a ``DELETE`` only when there is a question.
+        """
+        snapshot = ChannelRoutingClarificationService.find(
+            db, channel_id=channel_id, scope_key=scope_key, user_id=user_id
+        )
+        if snapshot is None:
+            return _ClarificationStep(_CLARIFY_NONE)
+        if snapshot.is_expired():
+            ChannelRoutingClarificationService.discard(db, snapshot.id)
+            return _ClarificationStep(_CLARIFY_NONE)
+        if inbound.external_message_id and inbound.external_message_id == (
+            snapshot.message.get("external_message_id")
+        ):
+            return _ClarificationStep(_CLARIFY_DUPLICATE)
+        if has_attachments:
+            ChannelRoutingClarificationService.discard(db, snapshot.id)
+            return _ClarificationStep(_CLARIFY_NONE)
+
+        choice = resolve_choice(inbound.text, snapshot.options)
+        if choice is None:
+            if not is_selector_like(inbound.text):
+                # Longer than CLARIFY_SELECTOR_MAX_WORDS: a new request.
+                ChannelRoutingClarificationService.discard(db, snapshot.id)
+                return _ClarificationStep(_CLARIFY_NONE)
+            return _ClarificationStep(_CLARIFY_UNREAD, snapshot=snapshot)
+        if not ChannelRoutingClarificationService.claim(db, snapshot.id):
+            return _ClarificationStep(_CLARIFY_ALREADY_ANSWERED)
+        if choice == CHOICE_CANCEL:
+            return _ClarificationStep(_CLARIFY_CANCELLED, snapshot=snapshot)
+        return _ClarificationStep(
+            _CLARIFY_CHOSEN,
+            snapshot=snapshot,
+            chosen_ref_id=choice,
+            option_number=snapshot.option_number(choice),
+        )
+
+    @staticmethod
+    def _resume_clarified(
+        db: DBSession, snapshot: ClarificationSnapshot
+    ) -> _ResumedMessage:
+        """The question's original message, rebuilt the way a parked one drains.
+
+        Same reader as ``_drain_parked``: file ids parsed totally and filtered
+        against what still exists, with a note in the text for any the temp
+        GC reclaimed while the question waited.
+        """
+        entry = snapshot.message
+        inbound = ChannelInboundService._inbound_for_binding(snapshot, entry)
+        file_ids = _parse_parked_file_ids(entry.get("file_ids"), None)
+        file_ids, missing_files = _surviving_parked_file_ids(db, file_ids, None)
+        text = _compose_drained_text(entry.get("text") or "", missing_files)
+        classification_text = entry.get("classification_text")
+        return _ResumedMessage(
+            inbound=inbound,
+            thread_key=inbound.thread_key or snapshot.thread_key,
+            text=text,
+            classification_text=(
+                classification_text
+                if isinstance(classification_text, str) and classification_text
+                else None
+            ),
+            file_ids=file_ids,
+            external_message_id=entry.get("external_message_id"),
+            external_user_id=entry.get("external_user_id"),
+        )
+
+    @staticmethod
+    async def _answer_clarification(
+        *,
+        snapshot: ClarificationSnapshot,
+        inbound: ChannelInboundMessage,
+        channel_id: uuid.UUID,
+        user_id: uuid.UUID,
+        policy: ResolvedChannelPolicy,
+        text: str,
+        origin: str,
+    ) -> None:
+        """Read a free-text answer with the classifier, then route what it meant.
+
+        One classifier call over the question's options, with the answer as the
+        message and the original as quoted context
+        (``ChannelRoutingService.classify_clarification_reply``). Then:
+
+        - An option, and this call claims the question: the original message
+          routes with that choice, as a plainly named choice does. Unlike one,
+          this reply is free text the classifier interpreted and may carry
+          words of its own, so it is not receipted and not swallowed: it is
+          delivered after the original (:meth:`_deliver_reply_after_original`).
+        - An option, but the question is already gone (answered, replaced or
+          expired meanwhile): dropped. The winner is routing the original.
+        - No option, and this call claims the question: the question is
+          dropped and the answer routes as a new request, which is the right
+          reading of someone who moved on.
+        - No option, but the question is already gone: dropped too, as
+          ``already_answered``. Routed fresh it would run beside the winner's
+          original on the same scope key: a second reply, or a binding race
+          this reply could win.
+        """
+        from app.core.db import create_session
+
+        original = snapshot.message
+        chosen_ref_id = await ChannelRoutingService.classify_clarification_reply(
+            user_id=user_id,
+            policy=policy,
+            reply_text=inbound.text,
+            original_text=str(
+                original.get("classification_text") or original.get("text") or ""
+            ),
+            option_refs=snapshot.option_refs,
+        )
+
+        resumed: _ResumedMessage | None = None
+        with create_session() as db:
+            claimed = ChannelRoutingClarificationService.claim(db, snapshot.id)
+            if claimed and chosen_ref_id is not None:
+                resumed = ChannelInboundService._resume_clarified(db, snapshot)
+
+        if resumed is not None and chosen_ref_id is not None:
+            option_number = snapshot.option_number(chosen_ref_id)
+            ChannelDebugBuffer.record(
+                channel_id=channel_id,
+                direction="inbound",
+                kind=DEBUG_GUIDED,
+                summary=(
+                    f"Classifier read the reply as option {option_number} — "
+                    "routing the sender's original message, then delivering "
+                    "this reply after it"
+                ),
+                sender_email=inbound.sender_email,
+                thread_key=inbound.thread_key,
+                detail={
+                    "stage": "clarification_answer",
+                    "resolution": "classifier_matched",
+                    "option": str(option_number),
+                },
+            )
+            await ChannelInboundService._route_new_thread(
+                inbound=resumed.inbound,
+                channel_id=channel_id,
+                user_id=user_id,
+                policy=policy,
+                thread_key=resumed.thread_key,
+                text=resumed.text,
+                classification_text=resumed.classification_text,
+                file_ids=resumed.file_ids,
+                redelivered_file_ids=set(),
+                external_message_id=resumed.external_message_id,
+                external_user_id=resumed.external_user_id,
+                origin=origin,
+                chosen_ref_id=chosen_ref_id,
+                # No receipt: this reply is delivered below, not swallowed.
+            )
+            await ChannelInboundService._deliver_reply_after_original(
+                original=resumed,
+                inbound=inbound,
+                channel_id=channel_id,
+                user_id=user_id,
+                policy=policy,
+                text=text,
+            )
+            return
+
+        if chosen_ref_id is not None or not claimed:
+            # A lost claim drops the reply whatever the classifier read. With
+            # no option it is not routed as a new request either: the winner
+            # is routing the original on the same scope key, and a fresh route
+            # beside it could send the sender a second reply or win the
+            # binding race.
+            ChannelDebugBuffer.record(
+                channel_id=channel_id,
+                direction="inbound",
+                kind=DEBUG_GUIDED,
+                summary=(
+                    "The routing question was answered, replaced or expired "
+                    "while this reply was being read — reply dropped"
+                ),
+                sender_email=inbound.sender_email,
+                thread_key=inbound.thread_key,
+                detail={
+                    "stage": "clarification_answer",
+                    "resolution": "already_answered",
+                },
+            )
+            return
+
+        ChannelDebugBuffer.record(
+            channel_id=channel_id,
+            direction="inbound",
+            kind=DEBUG_GUIDED,
+            summary=(
+                "Classifier matched the reply to no option — the question was "
+                "dropped and the reply routes as a new request"
+            ),
+            sender_email=inbound.sender_email,
+            thread_key=inbound.thread_key,
+            detail={"stage": "clarification_answer", "resolution": "new_request"},
+        )
+        await ChannelInboundService._route_new_thread(
+            inbound=inbound,
+            channel_id=channel_id,
+            user_id=user_id,
+            policy=policy,
+            thread_key=inbound.thread_key or snapshot.thread_key,
+            text=text,
+            classification_text=inbound.text,
+            file_ids=[],
+            redelivered_file_ids=set(),
+            external_message_id=inbound.external_message_id,
+            external_user_id=inbound.external_user_id,
+            origin=origin,
+        )
+
+    @staticmethod
+    async def _deliver_reply_after_original(
+        *,
+        original: _ResumedMessage,
+        inbound: ChannelInboundMessage,
+        channel_id: uuid.UUID,
+        user_id: uuid.UUID,
+        policy: ResolvedChannelPolicy,
+        text: str,
+    ) -> None:
+        """Deliver a classifier-read answer on the binding its original created.
+
+        Called after ``_route_new_thread`` for the original has returned, so
+        the original was already ingested (active binding) or parked (pending
+        install). The reply then takes the lost-race hand-off
+        (:meth:`_handle_lost_race`) under the same per-binding lock: ingested
+        after the original on an active binding, appended behind it on a
+        pending one and drained in that order once the environment is up.
+
+        If the original bound nothing (no match, guidance, a new question, a
+        failed route) the reply is dropped and recorded as ``superseded``. It
+        is not routed: it is at most ``CLARIFY_SELECTOR_MAX_WORDS`` words the
+        classifier read as a choice, not a request, and routing it could ask a
+        question of its own that replaces the one just asked about the
+        original (same scope key), or send a second guidance reply. A
+        ``failed`` binding is still cleared, as step 7 self-heals, so the
+        sender's next message routes afresh.
+        """
+        from app.core.db import create_session
+
+        thread_key = inbound.thread_key or original.thread_key
+        with create_session() as db:
+            channel = db.get(ServerChannel, channel_id)
+            if channel is None:
+                return
+            binding = ChannelInboundService._get_binding(
+                db,
+                channel_id,
+                ChannelInboundService._scope_key_for(
+                    channel, original.inbound, original.thread_key
+                ),
+                user_id,
+            )
+            if binding is not None and binding.status != CHANNEL_BINDING_FAILED:
+                await ChannelInboundService._handle_lost_race(
+                    db=db,
+                    channel=channel,
+                    binding=binding,
+                    sender_user_id=user_id,
+                    thread_key=thread_key,
+                    text=text,
+                    external_message_id=inbound.external_message_id,
+                    external_user_id=inbound.external_user_id,
+                    policy=policy,
+                    file_ids=[],
+                    redelivered_file_ids=set(),
+                    inbound=inbound,
+                )
+                return
+            if binding is not None:
+                db.delete(binding)
+                db.commit()
+
+        ChannelDebugBuffer.record(
+            channel_id=channel_id,
+            direction="inbound",
+            kind=DEBUG_GUIDED,
+            summary=(
+                "The original message bound no assistant — the short reply to "
+                "the routing question was dropped, not routed"
+            ),
+            sender_email=inbound.sender_email,
+            thread_key=inbound.thread_key,
+            detail={"stage": "clarification_answer", "resolution": "superseded"},
+        )
+
+    @staticmethod
+    def _record_answer_receipt(
+        db: DBSession, binding: ChannelThreadBinding, external_message_id: str
+    ) -> None:
+        """Receipt the answer to a routing question on ``binding``. Total.
+
+        A failed write costs only redelivery protection for that one answer,
+        never the original message's routing, so it is logged and rolled back.
+        """
+        try:
+            ChannelRoutingClarificationService.record_reply_receipt(
+                db, binding.id, external_message_id
+            )
+        except Exception:  # noqa: BLE001 — see the docstring
+            logger.warning(
+                "%s Could not record the routing-answer receipt — a redelivery "
+                "of that answer may reach the agent",
+                _LOG_PREFIX,
+                exc_info=True,
+            )
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001 — never mask the real error
+                logger.debug("%s Rollback after receipt failure failed", _LOG_PREFIX)
+
+    @staticmethod
+    def _new_thread_ack(
+        adapter: ChannelAdapter,
+        sync_target: Any,
+        *,
+        notice_supported: bool,
+        outbound_configured: bool,
+    ) -> dict[str, Any]:
+        """The webhook's answer once routing runs in a background task.
+
+        The same choice step 8-10 ends with, for the reasons given there:
+        silence where the task can post its own notice, the sync ack elsewhere.
+        """
+        if notice_supported and outbound_configured:
+            return {}
+        return adapter.build_sync_response(REPLY_WORKING, sync_target)
+
+    # ==================================================================
     # Binding helpers
     # ==================================================================
 
     @staticmethod
+    def _scope_key_for(
+        channel: ServerChannel,
+        inbound: ChannelInboundMessage | None,
+        thread_key: str,
+    ) -> str:
+        """The binding key's scope for a message (bindings and questions share it)."""
+        return (
+            ChannelConversationResolver.scope_key(
+                get_adapter(channel.channel_type), inbound
+            )
+            if inbound is not None
+            else thread_key
+        )
+
+    @staticmethod
     def _inbound_for_binding(
-        binding: ChannelThreadBinding, entry: dict
+        binding: ChannelThreadBinding | ClarificationSnapshot, entry: dict
     ) -> ChannelInboundMessage:
         conversation = entry.get("conversation") or {}
         quoted_message_id = conversation.get("quoted_message_id")
@@ -4299,13 +5079,7 @@ class ChannelInboundService:
         than proceeding with its own routing result, or the binding ends up
         naming one agent while its session belongs to another.
         """
-        scope_key = (
-            ChannelConversationResolver.scope_key(
-                get_adapter(channel.channel_type), inbound
-            )
-            if inbound is not None
-            else thread_key
-        )
+        scope_key = ChannelInboundService._scope_key_for(channel, inbound, thread_key)
         channel_id, asker_id = channel.id, user.id
         binding = ChannelThreadBinding(
             server_channel_id=channel.id,
@@ -4416,36 +5190,53 @@ class ChannelInboundService:
             )
             return False
         parked.append(
-            {
-                "text": text,
-                "file_ids": [str(file_id) for file_id in file_ids or []],
-                "external_message_id": external_message_id,
-                "external_user_id": external_user_id
-                or (inbound.external_user_id if inbound else None),
-                "received_at": datetime.now(UTC).isoformat(),
-                "conversation": (
-                    {
-                        "thread_key": inbound.thread_key,
-                        "conversation_key": inbound.conversation_key,
-                        "conversation_kind": inbound.conversation_kind,
-                        "quoted_message_id": inbound.quoted_message_id,
-                        # The snapshot must survive an install wait: the
-                        # ingestion fallback reads it when the parked message
-                        # drains. Stored at rest exactly as the sender's own
-                        # text beside it already is.
-                        "quoted_message_text": inbound.quoted_message_text,
-                        "quoted_message_author": inbound.quoted_message_author,
-                        "conversation_hints": inbound.conversation_hints,
-                        "is_thread_summon": inbound.is_thread_summon,
-                    }
-                    if inbound
-                    else None
-                ),
-            }
+            ChannelInboundService._parked_entry(
+                text, external_message_id, external_user_id, file_ids, inbound
+            )
         )
         binding.pending_messages = parked
         flag_modified(binding, "pending_messages")
         return True
+
+    @staticmethod
+    def _parked_entry(
+        text: str,
+        external_message_id: str | None,
+        external_user_id: str | None = None,
+        file_ids: list[uuid.UUID] | None = None,
+        inbound: ChannelInboundMessage | None = None,
+    ) -> dict[str, Any]:
+        """One stored message, as JSON. Read back by :meth:`_inbound_for_binding`.
+
+        The parked queue's entry shape, shared with a routing question's stored
+        original message so both round-trip the same fields.
+        """
+        return {
+            "text": text,
+            "file_ids": [str(file_id) for file_id in file_ids or []],
+            "external_message_id": external_message_id,
+            "external_user_id": external_user_id
+            or (inbound.external_user_id if inbound else None),
+            "received_at": datetime.now(UTC).isoformat(),
+            "conversation": (
+                {
+                    "thread_key": inbound.thread_key,
+                    "conversation_key": inbound.conversation_key,
+                    "conversation_kind": inbound.conversation_kind,
+                    "quoted_message_id": inbound.quoted_message_id,
+                    # The snapshot must survive an install wait (and a routing
+                    # question): the ingestion fallback reads it when the
+                    # message is finally delivered. Stored at rest exactly as
+                    # the sender's own text beside it already is.
+                    "quoted_message_text": inbound.quoted_message_text,
+                    "quoted_message_author": inbound.quoted_message_author,
+                    "conversation_hints": inbound.conversation_hints,
+                    "is_thread_summon": inbound.is_thread_summon,
+                }
+                if inbound
+                else None
+            ),
+        }
 
     @staticmethod
     def _fail_binding(db: DBSession, binding: ChannelThreadBinding, error: str) -> None:

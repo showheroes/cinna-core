@@ -73,7 +73,7 @@ from tests.utils.utils import random_lower_string
 
 _ADAPTER = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter"
 _STREAM_TARGET = "app.services.sessions.message_service.agent_env_connector"
-_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
+_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify_answer"
 
 #: A service-account blob, so the channel reads as having an outbound
 #: credential. Same reason as in ``server_channels_status_notice_test.py``: a

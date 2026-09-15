@@ -25156,6 +25156,326 @@ export const RoutingReplayResultSchema = {
     description: 'The original decision, the re-run, and the diff between them.'
 } as const;
 
+export const RoutingSimulatePublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        origin: {
+            type: 'string',
+            title: 'Origin'
+        },
+        channel_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Channel Id'
+        },
+        channel_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Channel Name'
+        },
+        user_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Id'
+        },
+        user_email: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Email'
+        },
+        actor_user_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor User Id'
+        },
+        thread_key: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Thread Key'
+        },
+        message_text: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message Text'
+        },
+        message_sha256: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message Sha256'
+        },
+        message_text_hidden: {
+            type: 'boolean',
+            title: 'Message Text Hidden',
+            default: false
+        },
+        message_text_notice: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message Text Notice'
+        },
+        outcome: {
+            type: 'string',
+            title: 'Outcome'
+        },
+        match_method: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Match Method'
+        },
+        selected_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Agent Id'
+        },
+        selected_agent_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Agent Name'
+        },
+        selected_bundle_uuid: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Bundle Uuid'
+        },
+        selected_bundle_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Bundle Name'
+        },
+        confidence: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Confidence'
+        },
+        latency_ms: {
+            type: 'integer',
+            title: 'Latency Ms',
+            default: 0
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        candidate_count: {
+            type: 'integer',
+            title: 'Candidate Count',
+            default: 0
+        },
+        skipped_count: {
+            type: 'integer',
+            title: 'Skipped Count',
+            default: 0
+        },
+        provider: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider'
+        },
+        model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model'
+        },
+        stages: {
+            items: {},
+            type: 'array',
+            title: 'Stages'
+        },
+        quoted_message_text: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Message Text'
+        },
+        quoted_message_author: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Message Author'
+        },
+        quoted_agent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quoted Agent Id'
+        },
+        diagnosis: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/RoutingDiagnosisPublic'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        guidance_reply: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Guidance Reply'
+        }
+    },
+    type: 'object',
+    required: ['id', 'created_at', 'origin', 'outcome'],
+    title: 'RoutingSimulatePublic',
+    description: `\`\`POST /admin/routing/simulate\`\`'s response: the trace, plus the reply.
+
+\`\`guidance_reply\`\` is the guidance reply the sender would have been sent
+when the decision routed nowhere but answered (\`\`outcome="guided"\`\`).
+Composed from the decision, never stored and never sent — which is why it
+lives here and not on :class:\`RoutingDecisionPublic\`, where every trace
+read would carry a field that is always \`\`None\`\`. \`\`None\`\` whenever the
+simulated decision routed, parked or found nothing to say, or guidance is
+switched off. Built only from candidate names and trigger prompts this
+response already serves under \`\`stages[].candidates\`\`, never from the
+sender's message.`
+} as const;
+
 export const RoutingSimulateRequestSchema = {
     properties: {
         message: {

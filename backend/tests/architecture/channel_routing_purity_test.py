@@ -188,6 +188,11 @@ _POLICY_MODULE = (
 _CLASSIFIER_MODULE = (
     _BACKEND_ROOT / "app" / "services" / "routing" / "agent_classifier.py"
 )
+#: `RoutingDecisionResult.guidance` (channel routing guidance) is defined here,
+#: with the entries it lists, so both are walked as plain data too.
+_GUIDANCE_MODULE = (
+    _BACKEND_ROOT / "app" / "services" / "server_channels" / "channel_routing_guidance.py"
+)
 
 
 class _GuardedModule(NamedTuple):
@@ -217,6 +222,8 @@ _GUARDED: tuple[_GuardedModule, ...] = (
         also_plain_data=(
             (_POLICY_MODULE, "ResolvedChannelPolicy"),
             (_CLASSIFIER_MODULE, "QuotedContext"),
+            (_GUIDANCE_MODULE, "RoutingGuidance"),
+            (_GUIDANCE_MODULE, "GuidanceEntry"),
         ),
     ),
     _GuardedModule(
@@ -295,6 +302,18 @@ _PLAIN_DATA_ANNOTATIONS = {
     # rather than trusting the object — which is precisely why it can afford to
     # be plain data.
     "IdentityGrant",
+    # ``RoutingDecisionResult.guidance`` — channel routing guidance. A frozen
+    # dataclass (``channel_routing_guidance.py``) of a kind string, an int and
+    # a ``tuple`` of ``GuidanceEntry``, itself four strings. Both classes are
+    # on ``also_plain_data`` below, so their fields are walked too.
+    #
+    # ``tuple`` qualifies because the walk reads every name inside an
+    # annotation: ``tuple[GuidanceEntry, ...]`` passes only because
+    # ``GuidanceEntry`` does, and a ``tuple[Agent, ...]`` would still fail on
+    # ``Agent``. The container adds no way to smuggle a row across.
+    "tuple",
+    "RoutingGuidance",
+    "GuidanceEntry",
 }
 
 #: Session methods that write. ``_FORBIDDEN`` above catches effect-performing

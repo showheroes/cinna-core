@@ -272,6 +272,10 @@ def _convert_inline(text: str, masked: list[str]) -> str:
 #: link at the first ``>`` — the reader sees "Admin " as the anchor and
 #: ``Channels>`` spilled out beside it as literal text.
 _LINK_LABEL_SUBSTITUTIONS = {"<": "\u2039", ">": "\u203a", "|": "\u00a6"}
+#: Public because ``channel_routing_guidance`` neutralises owner-authored names
+#: and descriptions with the same table: text the router sends as the bot must
+#: not be able to open a Chat link or an @all mention (``<users/all>``).
+LINK_LABEL_SUBSTITUTIONS = _LINK_LABEL_SUBSTITUTIONS
 
 
 def _link(url: str, label: str) -> str:

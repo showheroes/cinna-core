@@ -69,7 +69,7 @@ from tests.utils.ai_credential import create_random_ai_credential
 from tests.utils.background_tasks import drain_tasks
 from tests.utils.bundle import make_user_and_headers, publish_bundle_and_make_public
 from tests.utils.environment import set_environment_status
-from tests.utils.routing import refuse_to_classify
+from tests.utils.routing import as_classifier_answer, refuse_to_classify
 from tests.utils.server_channel import (
     GoogleChatJWTSigner,
     add_auto_install_bundle,
@@ -90,7 +90,7 @@ _UPDATE_TARGET = f"{_ADAPTER}.update_message"
 _REPLACE_TARGET = f"{_ADAPTER}.replace_message"
 _DELETE_TARGET = f"{_ADAPTER}.delete_message"
 _STREAM_TARGET = "app.services.sessions.message_service.agent_env_connector"
-_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
+_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify_answer"
 
 # The id the mocked adapter hands back for every post. Real-shaped on purpose:
 # the pipeline stores it in a varchar column and hands it straight back to
@@ -389,7 +389,9 @@ def test_an_install_carries_the_notice_across_tasks_to_ready(
     with ExitStack() as stack:
         stack.enter_context(signer.patched())
         stack.enter_context(patch(_STREAM_TARGET, stub))
-        stack.enter_context(patch(_CLASSIFY_TARGET, return_value=classify_result))
+        stack.enter_context(
+            patch(_CLASSIFY_TARGET, return_value=as_classifier_answer(classify_result))
+        )
         chat.apply(stack)
         resp = post_webhook(
             client,
@@ -530,7 +532,9 @@ def test_setup_failure_settles_and_releases_the_notice_id(
     with ExitStack() as stack:
         stack.enter_context(signer.patched())
         stack.enter_context(patch(_STREAM_TARGET, stub))
-        stack.enter_context(patch(_CLASSIFY_TARGET, return_value=classify_result))
+        stack.enter_context(
+            patch(_CLASSIFY_TARGET, return_value=as_classifier_answer(classify_result))
+        )
         chat.apply(stack)
         resp = post_webhook(
             client,

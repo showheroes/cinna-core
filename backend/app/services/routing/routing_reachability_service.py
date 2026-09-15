@@ -164,11 +164,12 @@ logger = logging.getLogger(__name__)
 # same answer on both surfaces. (``frontend/.../routingCopy.ts`` tones every
 # ``expected_agent_*`` code by prefix, so a new one needs no client change.) A
 # code is added only for a finding with no counterpart on the other surface,
-# which today is **four**, in two pairs, each marked "channel origins only"
-# where it is declared: the ``no_candidates`` split by why Pass 2 never ran,
-# and the ``expected_agent_*`` pair further down.
+# which today is **seven**, each marked "channel origins only" where it is
+# declared: the ``no_candidates`` split by why Pass 2 never ran, and the five
+# guidance codes (``guided_*`` and ``clarified*``), because only a channel
+# pipeline answers a sender instead of routing or takes the option they picked.
 #
-# **A code may carry more than one sentence**, and two of them now do. The rule
+# **A code may carry more than one sentence**, and three of them now do. The rule
 # is the one above restated: the code names the finding, so a second sentence
 # is right exactly when the finding is unchanged and only the *remedy's
 # subject* moves — and a remedy is the half that must never be wrong.
@@ -182,8 +183,12 @@ logger = logging.getLogger(__name__)
 #   the restricting scope is the sender's own or the channel's admin default,
 #   because ``agent_scope`` is inheritable and the two live on different
 #   people's screens. Same finding, two owners.
+# - ``CODE_EXPECTED_CONSIDERED`` reads differently when the decision answered
+#   the sender with the named agent among the options, and when it followed
+#   the sender's pick of an option: the agent was still eligible and not
+#   chosen, but "the classifier did not pick it" is not what happened.
 #
-# See ``_general_verdict``.
+# See ``_general_verdict`` and ``_verdict_from_trace``.
 
 #: No expected agent named.
 CODE_ROUTED = "routed"
@@ -221,6 +226,26 @@ CODE_NO_MATCH = "no_match"
 #: card renders ``verdict`` and never picks a sentence out of that map.
 CODE_NO_CANDIDATES_CHANNEL_SCOPE = "no_candidates_channel_scope"
 CODE_NO_CANDIDATES_AUTO_INSTALL_OFF = "no_candidates_auto_install_off"
+
+#: Channel origins only (``channel_routing_guidance``). The first three are a
+#: decision that routed nowhere and answered the sender instead
+#: (``OUTCOME_GUIDED``), one per ``stages[].guidance_kind``: they asked what the
+#: assistant can do (``help``), several options fit about equally and they were
+#: asked to choose (``clarify``), or nothing fit and they were shown what they
+#: can reach (``none``). ``clarified`` is the follow-up decision that took the
+#: option they picked (``MATCH_CLARIFIED``), and ``clarified_unavailable`` is
+#: the same follow-up when that option could not be used once routing loaded
+#: it, so the decision ended ``no_match``.
+#:
+#: **Client tone is not inherited.** ``frontend/.../routingCopy.ts``'s
+#: ``diagnosisTone`` matches none of these by name or prefix, so they render
+#: neutral until it does. The verdict text is unaffected: the card renders
+#: ``verdict`` and never picks a sentence out of that map.
+CODE_GUIDED_HELP = "guided_help"
+CODE_GUIDED_CLARIFY = "guided_clarify"
+CODE_GUIDED_NO_MATCH = "guided_no_match"
+CODE_CLARIFIED = "clarified"
+CODE_CLARIFIED_UNAVAILABLE = "clarified_unavailable"
 
 #: An expected agent was named and the trace has a row for it.
 CODE_EXPECTED_SELECTED = "expected_agent_selected"
@@ -462,6 +487,14 @@ _SKIP_EXPLANATIONS: dict[str, tuple[str, str]] = {
         "Nothing to fix — a sender's own agent is meant to win over a bundle "
         "they have not installed. If the wrong one won, tighten the trigger "
         "prompt of the agent that claimed the message.",
+    ),
+    routing_trace.SKIP_PASS_1_GUIDED: (
+        "the auto-install pass could have offered it, but the sender asked "
+        "what the assistant can do and Pass 1 answered with a list of their "
+        "own options, so it was never put to the classifier",
+        "Nothing to fix — a question about the assistant is answered, not "
+        "turned into an install. A request describing a real task still "
+        "reaches the auto-install pass.",
     ),
 }
 
@@ -915,6 +948,15 @@ def _general_verdict(
     generic candidate verdicts would prescribe trigger-prompt changes that could
     not have mattered. Only a channel pipeline records ``quoted_reply`` either.
 
+    Guidance gets codes of its own, both above the candidate-shape branches. A
+    decision that answered the sender instead of routing (``guided``) leaves
+    eligible candidates behind and would otherwise read as a classifier that
+    matched nothing, which is false for a ``help`` or ``clarify`` answer. A
+    decision that took the sender's pick of an option (``clarified``) was
+    decided by the sender, not a classifier, so the routed remedy (tighten the
+    winner's trigger prompt) is aimed at the wrong decision. Only a channel
+    pipeline records either.
+
     ``db`` is here for exactly one branch — the ``no_candidates`` one, and only
     under a profile that reads channel policy, where it asks
     :func:`_channel_pass_2_block` whether this sender's channel policy is what
@@ -931,6 +973,49 @@ def _general_verdict(
             "Check the provider attempts below — a routing failure with no "
             "attempt at all means no AI credential was usable, which is a "
             "server configuration problem rather than an agent one.",
+        )
+
+    if _followed_clarification(trace):
+        # Above the routed block, and covering a parked install too: a catalog
+        # bundle the sender picked settles ``parked_install``, which the
+        # branches below would read as a classifier that matched nothing.
+        chosen = (
+            trace.selected_agent_name
+            or trace.selected_bundle_name
+            or "the selected option"
+        )
+        return (
+            CODE_CLARIFIED,
+            f"This decision settled on {chosen} because the sender had been "
+            f"asked to choose on their previous message and picked one of the "
+            f"options they were offered: no classifier chose between those "
+            f"options again.",
+            "Nothing to fix here. A sender is asked to choose only when several "
+            "of their options fit a message about equally, so if that keeps "
+            "happening, make the trigger prompts of the options listed on that "
+            "earlier decision more distinct from each other.",
+        )
+
+    if (
+        trace.match_method == routing_trace.MATCH_CLARIFIED
+        and trace.outcome == routing_trace.OUTCOME_NO_MATCH
+    ):
+        # The pick's own race, for the quoted-reply reasoning below: the option
+        # was on the ballot and gone (or unreachable) once loaded, so the
+        # generic branches would prescribe wording changes that could not have
+        # mattered. Only Pass 1 carries this: a vanished catalog bundle settles
+        # ``no_match`` before ``clarified`` is recorded.
+        return (
+            CODE_CLARIFIED_UNAVAILABLE,
+            "The sender had been asked to choose on their previous message and "
+            "picked one of the options they were offered, but when routing "
+            "loaded that option it was no longer available to them, and nothing "
+            "else was routed in its place, so this decision ended with no match.",
+            "Nothing on any agent's wording would have changed this: the picked "
+            "option was deleted, moved to another account or became unreachable "
+            "while the message was being routed. The candidate table below "
+            "names why it could not be used, and the sender's next message is "
+            "routed against their options as they stand then.",
         )
 
     if trace.outcome == routing_trace.OUTCOME_ROUTED:
@@ -1002,6 +1087,11 @@ def _general_verdict(
             "near-miss scores below and tighten the winner's trigger prompt "
             "so it stops claiming this kind of message.",
         )
+
+    if trace.outcome == routing_trace.OUTCOME_GUIDED:
+        guided = _guided_verdict(trace, eligible)
+        if guided is not None:
+            return guided
 
     if trace.match_method == routing_trace.MATCH_PINNED:
         # The mirror of the routed-by-pin sentence above, and it needs saying
@@ -1180,6 +1270,107 @@ def _general_verdict(
     )
 
 
+def _guided_verdict(
+    trace: RoutingDecisionPublic, eligible: list[dict]
+) -> tuple[str, str, str] | None:
+    """The verdict for a decision that answered the sender instead of routing.
+
+    Keyed on the ``guidance_kind`` the recorder noted, which can sit on a
+    different stage from the one that settled the outcome (a reply listing
+    Pass 1's ballot after Pass 2 ran is noted on ``pass_1``), so every stage is
+    read. ``None`` for a row that settled ``guided`` with no recognised kind,
+    which nothing produces today: the caller then falls through to the generic
+    candidate verdicts, which are coarse there but not wrong.
+
+    No sentence names what the reply listed. The stage rows already show the
+    options, and sender text never appears here, as everywhere in this module.
+
+    **The stage says what was listed.** Guidance noted on ``pass_2`` listed
+    catalog bundles — Pass 2's own ``clarify``, or a sender with nothing of
+    their own on Pass 1's ballot — and each is shown with its published
+    revision's router trigger prompt. A remedy naming "the agent's trigger
+    prompt" would send the admin to an agent that does not exist, so each kind
+    has a catalog sentence too.
+    """
+    stage = _guidance_stage(trace.stages)
+    kind = stage.get("guidance_kind") if stage is not None else None
+    catalog = stage is not None and stage.get("stage") == routing_trace.STAGE_PASS_2
+    count = _count(len(eligible), "eligible candidate")
+    if kind == routing_trace.INTENT_HELP and catalog:
+        return (
+            CODE_GUIDED_HELP,
+            "This message did not route anywhere: the classifier read it as a "
+            "question about what the assistant can do, and the sender had no "
+            "agents of their own to list, so they were answered with catalog "
+            "bundles the platform can set up for them instead of being told "
+            "nothing matched.",
+            "Nothing to fix here. That list shows each bundle with the router "
+            "trigger prompt of its published revision, so rewrite any that "
+            "would read badly to the people shown it, and take a bundle off "
+            "this channel's auto-install list if it should not be offered. If "
+            "the message was a real task, give this sender an agent of their "
+            "own with a router trigger prompt (or example prompts).",
+        )
+    if kind == routing_trace.INTENT_HELP:
+        return (
+            CODE_GUIDED_HELP,
+            "This message did not route anywhere: the classifier read it as a "
+            "question about what the assistant can do, so the sender was "
+            "answered with a list of the options they can reach instead of "
+            "being told nothing matched.",
+            "Nothing to fix here. That list shows each agent with its trigger "
+            "prompt, so rewrite any trigger prompt that would read badly to the "
+            "people shown it. If the message was a real task, widen the trigger "
+            "prompt of the agent that should have claimed it.",
+        )
+    if kind == routing_trace.INTENT_CLARIFY and catalog:
+        return (
+            CODE_GUIDED_CLARIFY,
+            "This message did not route yet: several catalog bundles the "
+            "platform could set up for the sender fit it about equally, so "
+            "instead of installing one, the sender was asked to choose between "
+            "them.",
+            "Nothing to fix if the question was fair — the sender's answer goes "
+            "to the bundle they pick. If one of the bundles listed on this "
+            "decision should have won outright, publish a revision whose router "
+            "trigger prompt is more specific than the others'.",
+        )
+    if kind == routing_trace.INTENT_CLARIFY:
+        return (
+            CODE_GUIDED_CLARIFY,
+            "This message did not route yet: several of the sender's options "
+            "fit it about equally, so instead of guessing, the sender was asked "
+            "to choose between them.",
+            "Nothing to fix if the question was fair — the sender's answer is "
+            "routed to the option they pick. If one of the options listed on "
+            "this decision should have won outright, make its trigger prompt "
+            "more specific than the others'.",
+        )
+    if kind == routing_trace.INTENT_NONE and catalog:
+        return (
+            CODE_GUIDED_NO_MATCH,
+            f"This user has {count} and the classifier found that none of them "
+            f"fit this message; the sender had no agents of their own to list, "
+            f"so they were shown catalog bundles the platform can set up for "
+            f"them instead of being told nothing matched.",
+            "Widen the trigger prompt of the bundle that should have won, on the "
+            "revision that gets published — the near-miss scores below say which "
+            "came closest — or give this sender an agent of their own with a "
+            "router trigger prompt (or example prompts).",
+        )
+    if kind == routing_trace.INTENT_NONE:
+        return (
+            CODE_GUIDED_NO_MATCH,
+            f"This user has {count} and the classifier found that none of them "
+            f"fit this message, so the sender was shown the options they can "
+            f"reach instead of being told nothing matched.",
+            "Widen the trigger prompt of the agent that should have won — the "
+            "near-miss scores below say which came closest — or use Draft a "
+            "recommendation to generate wording for its owner.",
+        )
+    return None
+
+
 def _expected_agent_verdict(
     db: DBSession,
     trace: RoutingDecisionPublic,
@@ -1288,8 +1479,9 @@ def _verdict_from_trace(
             action,
         )
 
+    ref_id = str(row.get("ref_id") or "")
     selected = str(trace.selected_agent_id or "")
-    if selected and selected == str(row.get("ref_id") or ""):
+    if selected and selected == ref_id:
         return (
             CODE_EXPECTED_SELECTED,
             f"{name} is the agent this decision chose.",
@@ -1298,10 +1490,50 @@ def _verdict_from_trace(
             "it.",
         )
 
-    closest = next(
-        (m for m in near_misses if m.ref_id == str(row.get("ref_id") or "")), None
-    )
+    # The sentences below are ``CODE_EXPECTED_CONSIDERED``'s variants (see
+    # the comment over the codes): still eligible and not chosen, so
+    # reachability is fine, but "the classifier did not pick it" is not what
+    # happened. After the sender's pick no score is quoted, because it would
+    # measure their answer to the question rather than a task.
+    if _followed_clarification(trace):
+        return (
+            CODE_EXPECTED_CONSIDERED,
+            f"{name} was an eligible candidate, and this decision went to the "
+            f"option the sender picked from a question they were asked on their "
+            f"previous message — reachability is not the problem here.",
+            "The sender's pick decided where this message went. If this agent "
+            "should have won their earlier message outright, widen its trigger "
+            "prompt to cover wording like that one.",
+        )
+
+    closest = next((m for m in near_misses if m.ref_id == ref_id), None)
     score = f" (token overlap {closest.similarity:.2f})" if closest else ""
+    guidance = (
+        _guidance_stage(trace.stages)
+        if trace.outcome == routing_trace.OUTCOME_GUIDED
+        else None
+    )
+    if guidance is not None:
+        # Listed or not, "the classifier did not pick it" is not what happened
+        # on a decision that answered instead of routing. Not listed covers the
+        # reply's cap and an agent only reachable through a person's option.
+        relation = (
+            "and one of the options this decision's guidance reply showed the "
+            "sender, but"
+            if ref_id in _guidance_option_refs(guidance)
+            else "but not one of the options this decision's guidance reply "
+            "showed the sender, and"
+        )
+        return (
+            CODE_EXPECTED_CONSIDERED,
+            f"{name} was an eligible candidate{score} {relation} no agent was "
+            f"routed to — reachability is not the problem here.",
+            "The decision's verdict without an expected agent says why it "
+            "answered instead of routing. If this agent should have won "
+            "outright, widen its trigger prompt to cover wording like this "
+            "message, or use Draft a recommendation to generate that wording "
+            "for its owner.",
+        )
     return (
         CODE_EXPECTED_CONSIDERED,
         f"{name} was an eligible candidate{score} and the classifier did not "
@@ -1537,6 +1769,44 @@ def _find_candidate(candidates: list[dict], ref_id: str) -> dict | None:
     return next(
         (c for c in candidates if str(c.get("ref_id") or "") == wanted), None
     )
+
+
+def _followed_clarification(trace: RoutingDecisionPublic) -> bool:
+    """Did this decision take the option the sender picked, and settle on it?
+
+    ``clarified`` is recorded before the pick is re-loaded, so a pick whose
+    agent vanished in between carries it on a ``no_match`` too. Only a settled
+    outcome is this finding; that race is :data:`CODE_CLARIFIED_UNAVAILABLE`.
+    """
+    return trace.match_method == routing_trace.MATCH_CLARIFIED and trace.outcome in (
+        routing_trace.OUTCOME_ROUTED,
+        routing_trace.OUTCOME_PARKED_INSTALL,
+    )
+
+
+def _guidance_stage(stages: Any) -> dict | None:
+    """The stage a guidance reply was noted on, or ``None``. The last one wins.
+
+    Defensive like :func:`_candidates`: an unrecognised ``guidance_kind`` is
+    treated as no guidance rather than guessed at.
+    """
+    found: dict | None = None
+    for stage in stages or []:
+        if (
+            isinstance(stage, dict)
+            and stage.get("guidance_kind") in routing_trace.GUIDANCE_KINDS
+        ):
+            found = stage
+    return found
+
+
+def _guidance_option_refs(stage: dict) -> set[str]:
+    """The candidate refs a guidance reply listed, from ``guidance_options``."""
+    return {
+        str(option["ref_id"])
+        for option in stage.get("guidance_options") or []
+        if isinstance(option, dict) and option.get("ref_id")
+    }
 
 
 def _agent_label(row: dict | None, agent: Agent | None, ref_id: str) -> str:

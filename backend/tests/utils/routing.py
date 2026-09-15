@@ -66,7 +66,11 @@ _BASE = f"{API}/admin/routing/traces"
 
 _SEND_TARGET = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter.send_message"
 _STREAM_TARGET = "app.services.sessions.message_service.agent_env_connector"
-_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
+#: ``classify_answer``, not ``classify``: the channel router (both passes) calls
+#: ``classify_answer`` so it can see *why* nothing was picked (guidance
+#: replies), and ``classify`` is ``classify_answer(...).result`` — so this one
+#: seam also still answers Identity Stage 2 and App MCP.
+_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify_answer"
 _ROUTE_INSTALLED_TARGET = (
     "app.services.server_channels.channel_routing_service."
     "ChannelRoutingService._route_installed"
@@ -89,14 +93,17 @@ _ROUTE_INSTALLED_TARGET = (
 #: ``ChannelRoutingService._route_installed``'s deliberate catch-all and
 #: reported to the test as an ordinary no-match.
 _UNSTUBBED_CLASSIFIER_MESSAGE = (
-    "AgentClassifier.classify was reached with no answer named, which would "
+    "AgentClassifier.classify_answer was reached with no answer named, which would "
     "call a real LLM provider. Either this scenario was not supposed to "
     "classify at all (App MCP Stage 1 takes the `only_one` short-circuit on a "
     "single effective route, and an empty candidate list short-circuits "
     "everywhere) and the setup has drifted — or it does classify and has to "
     "say what the answer is: "
     "`classify_result=<ClassificationResult>` to route, `classify_no_match="
-    "True` for a classifier that runs and finds nothing "
+    "True` for a classifier that runs and answers NONE (intent `none` — over a "
+    "non-empty ballot that is now a guidance reply), `classify_unusable=True` "
+    "for an outage or unusable reply (plain no-match), or `classify_result="
+    "classifier_answer(intent=...)` for any other answer "
     "(`post_channel_message` also takes `classify_side_effect=`). A test that "
     "needs the real render/parse path patches "
     "`app.services.routing.agent_classifier.get_provider_manager` itself and "
@@ -143,6 +150,66 @@ def classification(ref_id: Any, **fields: Any):
     return ClassificationResult(agent_id=str(ref_id), **fields)
 
 
+def classifier_answer(intent: str | None = None, result: Any = None):
+    """A ``ClassifierAnswer`` — what ``AgentClassifier.classify_answer`` returns.
+
+    Mirror the real parser when choosing one:
+
+    - ``classifier_answer(intent="help")`` / ``(intent="none")`` — the model
+      answered ``NONE``. A bare ``{"agent_id": "NONE"}`` with no ``intent``
+      parses to ``none``, so that is what ``classify_no_match`` stands for.
+    - ``classifier_answer()`` — **no usable reply** (provider outage, non-JSON,
+      malformed id, no candidates): ``intent`` is ``None`` and no guidance can
+      be built from it. See :func:`unusable_classifier_reply`.
+    - ``classifier_answer(intent="route", result=classification(ref_id))`` — a
+      pick; :func:`as_classifier_answer` builds this from a bare result.
+    """
+    from app.services.routing.agent_classifier import ClassifierAnswer
+
+    return ClassifierAnswer(intent=intent, result=result)
+
+
+def unusable_classifier_reply():
+    """The answer for an outage / unusable reply: no intent, no result."""
+    return classifier_answer()
+
+
+def as_classifier_answer(value: Any):
+    """Coerce a stub's return value to the ``ClassifierAnswer`` shape.
+
+    A ``ClassifierAnswer`` passes through. ``None`` is a model that answered
+    ``NONE`` without an intent — which the real parser reads as ``none``. Any
+    other value is a pick (a ``ClassificationResult`` or a result-shaped
+    stand-in), carried with its own ``intent`` or ``route``.
+    """
+    from app.services.routing.agent_classifier import ClassifierAnswer
+
+    if isinstance(value, ClassifierAnswer):
+        return value
+    if value is None:
+        return ClassifierAnswer(intent="none")
+    return ClassifierAnswer(intent=getattr(value, "intent", None) or "route", result=value)
+
+
+def _answering(side_effect: Any) -> Any:
+    """Wrap a callable side effect so whatever it returns is an answer.
+
+    Exceptions (instances or classes) pass straight through, so an outage
+    scenario still raises at the seam.
+    """
+    if isinstance(side_effect, BaseException) or (
+        isinstance(side_effect, type) and issubclass(side_effect, BaseException)
+    ):
+        return side_effect
+    if callable(side_effect):
+
+        def _call(*args: Any, **kwargs: Any):
+            return as_classifier_answer(side_effect(*args, **kwargs))
+
+        return _call
+    return side_effect
+
+
 def enter_classifier_patch(
     stack: ExitStack,
     *,
@@ -150,6 +217,7 @@ def enter_classifier_patch(
     classify_no_match: bool = False,
     classify_side_effect: Any = None,
     classify_via_provider: bool = False,
+    classify_unusable: bool = False,
 ) -> None:
     """Install the classifier stub both helpers below use. One decision, one place.
 
@@ -176,11 +244,21 @@ def enter_classifier_patch(
     will be shadowed, loudly rather than silently.
     """
     if classify_side_effect is not None:
-        stack.enter_context(patch(_CLASSIFY_TARGET, side_effect=classify_side_effect))
+        stack.enter_context(
+            patch(_CLASSIFY_TARGET, side_effect=_answering(classify_side_effect))
+        )
     elif classify_result is not None:
-        stack.enter_context(patch(_CLASSIFY_TARGET, return_value=classify_result))
+        stack.enter_context(
+            patch(_CLASSIFY_TARGET, return_value=as_classifier_answer(classify_result))
+        )
     elif classify_no_match:
-        stack.enter_context(patch(_CLASSIFY_TARGET, return_value=None))
+        stack.enter_context(
+            patch(_CLASSIFY_TARGET, return_value=classifier_answer(intent="none"))
+        )
+    elif classify_unusable:
+        stack.enter_context(
+            patch(_CLASSIFY_TARGET, return_value=unusable_classifier_reply())
+        )
     elif not classify_via_provider:
         stack.enter_context(patch(_CLASSIFY_TARGET, refuse_to_classify))
 
@@ -295,6 +373,7 @@ def post_channel_message(
     classify_side_effect: Any = None,
     classify_via_provider: bool = False,
     route_installed_side_effect: Any = None,
+    classify_unusable: bool = False,
 ) -> tuple[Any, Any]:
     """Deliver one verified webhook event and drain the resulting background work.
 
@@ -348,6 +427,7 @@ def post_channel_message(
             classify_no_match=classify_no_match,
             classify_side_effect=classify_side_effect,
             classify_via_provider=classify_via_provider,
+            classify_unusable=classify_unusable,
         )
         resp = post_webhook(client, channel["webhook_token"], event, bearer_token=token)
         from tests.utils.background_tasks import drain_tasks
@@ -466,6 +546,7 @@ def patched_routing_externals(
     classify_no_match: bool = False,
     classify_side_effect: Any = None,
     classify_via_provider: bool = False,
+    classify_unusable: bool = False,
 ):
     """Patch the outbound send + the classifier around a direct API call.
 
@@ -517,6 +598,7 @@ def patched_routing_externals(
             classify_no_match=classify_no_match,
             classify_side_effect=classify_side_effect,
             classify_via_provider=classify_via_provider,
+            classify_unusable=classify_unusable,
         )
         yield send_mock
 
@@ -576,12 +658,17 @@ def seed_routing_trace(
     user_id: uuid.UUID | str | None = None,
     outcome: str = "no_match",
     message: str = "seeded message",
+    match_method: str | None = None,
 ) -> uuid.UUID | None:
     """Persist a routing decision through the real recorder, then backdate it.
 
     See module docstring for why this is a documented exemption rather than
     an HTTP call. Returns the row's id (``None`` only if persistence itself
     was disabled/swallowed, which should not happen with default settings).
+
+    ``match_method`` is noted before the outcome settles, the order the router
+    uses. It exists for decisions that are only a race live, such as a
+    ``clarified`` pick whose agent was gone once loaded (``no_match``).
     """
     from app.services.routing.routing_trace import RoutingTrace
     from app.services.routing.routing_trace_service import RoutingTraceService
@@ -592,6 +679,8 @@ def seed_routing_trace(
         channel_id=channel_id,
         message=message,
     ) as trace:
+        if match_method is not None:
+            trace.note_match_method(match_method)
         trace.record_outcome(outcome)
     # Backdate AFTER the capture closes — `finish()` (run by `capture`'s
     # `__exit__`) stamps `created_at`-independent latency, not the timestamp

@@ -76,6 +76,21 @@ def get_adapter(channel_type: str) -> ChannelAdapter:
     return adapter
 
 
+def supports_markdown(channel_type: str) -> bool:
+    """Whether ``channel_type``'s transport renders markdown (a guidance reply's shape).
+
+    Total, unlike :func:`get_adapter`: False is the safe answer. Plain text
+    reads correctly everywhere, while markdown on a text/plain transport
+    (email) arrives as literal asterisks. The webhook's guidance reply and
+    simulate's ``guidance_reply`` both read it here, so the two cannot show a
+    sender different text.
+    """
+    try:
+        return get_adapter(channel_type).capabilities.supports_markdown
+    except Exception:  # noqa: BLE001 — see the docstring
+        return False
+
+
 def get_transport(channel_type: str) -> RegisteredTransport:
     """Return the adapter for ``channel_type`` together with its transport shape.
 

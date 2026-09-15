@@ -41,6 +41,16 @@ Covers three things:
    duplicate ``STREAM_COMPLETED`` is a real production event with no HTTP
    route that can produce it, so the honest reproduction is handing the bus
    subscriber the same event twice.
+6. ``get_routing_clarification`` / ``expire_routing_clarification`` — the open
+   routing question (channel routing guidance, Phase 3). The read is point 4's
+   posture: ``ChannelRoutingClarification`` is pipeline state with no read API,
+   and "a question is open for this asker" is otherwise observable only as the
+   effect of the sender's NEXT message — which consumes it. One row, by its
+   unique key, returned as plain data. The expiry write is the
+   ``seed_routing_trace`` shape of exemption: ``expires_at`` is server-assigned
+   from a TTL whose floor is one minute and no route lets a caller age a
+   question, so backdating that one column is the only way to reach the
+   lazy-delete branch and the flush-tick purge without sleeping.
 """
 from __future__ import annotations
 
@@ -729,7 +739,9 @@ def route_installed(db: Session, user, text: str, *, policy=None):
         ChannelRoutingService,
     )
 
-    agent, _ballot, _identity = ChannelRoutingService._route_installed(
+    # The fourth value is the `BallotOffer` a guidance reply may be built from
+    # (channel routing guidance) — not what this helper's callers ask about.
+    agent, _ballot, _identity, _offer = ChannelRoutingService._route_installed(
         db,
         user,
         text,
@@ -942,7 +954,73 @@ def seed_stale_draft_delivery(
     return binding.id, delivery.id
 
 
+# ---------------------------------------------------------------------------
+# Open routing question — read + expiry Rule-1 exemption (point 6)
+# ---------------------------------------------------------------------------
+
+
+def get_routing_clarification(
+    db: Session, channel_id: str | uuid.UUID, user_id: str | uuid.UUID
+) -> dict | None:
+    """The asker's open routing question on ``channel_id``, as plain data.
+
+    EXEMPTION — see point 6 of the module docstring. Looked up by channel and
+    asker (a test drives one scope per asker per channel), read with
+    ``populate_existing`` so a row the pipeline just deleted or replaced is not
+    served from the identity map. ``None`` when no question is open.
+    """
+    from app.models import ChannelRoutingClarification
+
+    row = db.exec(
+        select(ChannelRoutingClarification)
+        .where(
+            ChannelRoutingClarification.server_channel_id == uuid.UUID(str(channel_id)),
+            ChannelRoutingClarification.user_id == uuid.UUID(str(user_id)),
+        )
+        .execution_options(populate_existing=True)
+    ).first()
+    if row is None:
+        return None
+    return {
+        "id": str(row.id),
+        "scope_key": row.scope_key,
+        "options": [dict(option) for option in row.options],
+        "message": dict(row.message),
+        "status_message_id": row.status_message_id,
+        "expires_at": row.expires_at,
+    }
+
+
+def expire_routing_clarification(
+    db: Session, channel_id: str | uuid.UUID, user_id: str | uuid.UUID
+) -> None:
+    """Backdate the asker's open question so it is already expired.
+
+    EXEMPTION — see point 6 of the module docstring. Touches ``expires_at``
+    only, and asserts exactly one row moved so a test can never "expire" a
+    question that was not there.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.models import ChannelRoutingClarification
+
+    result = db.execute(
+        update(ChannelRoutingClarification)
+        .where(
+            ChannelRoutingClarification.server_channel_id == uuid.UUID(str(channel_id)),
+            ChannelRoutingClarification.user_id == uuid.UUID(str(user_id)),
+        )
+        .values(expires_at=datetime.now(UTC) - timedelta(minutes=5))
+    )
+    db.commit()
+    assert result.rowcount == 1, result.rowcount
+
+
 __all__ = [
+    "get_routing_clarification",
+    "expire_routing_clarification",
     "create_server_channel",
     "list_server_channels",
     "find_server_channel_by_type",

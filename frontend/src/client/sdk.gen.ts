@@ -1632,7 +1632,7 @@ export class AdminRoutingService {
      * the channel so a run can be told apart from one made without it.
      * @param data The data for the request.
      * @param data.requestBody
-     * @returns RoutingDecisionPublic Successful Response
+     * @returns RoutingSimulatePublic Successful Response
      * @throws ApiError
      */
     public static simulateRouting(data: AdminRoutingSimulateRoutingData): CancelablePromise<AdminRoutingSimulateRoutingResponse> {

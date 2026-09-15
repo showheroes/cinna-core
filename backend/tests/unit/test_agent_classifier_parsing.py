@@ -22,15 +22,22 @@ import pytest
 
 from app.services.routing import routing_trace
 from app.services.routing.agent_classifier import (
+    INTENT_CLARIFY,
+    INTENT_HELP,
+    INTENT_NONE,
+    INTENT_ROUTE,
+    MAX_CLARIFY_OPTIONS,
     MAX_EXAMPLE_CHARS,
     MAX_EXAMPLE_LINES,
     MAX_QUOTED_CONTEXT_CHARS,
     QUOTED_END_MARKER,
     AgentClassifier,
     Candidate,
+    ClassifierAnswer,
     QuotedContext,
     _example_lines,
     _parse_confidence,
+    _parse_intent_and_options,
     _parse_reason,
     _parse_runner_up,
     _parse_transformed_message,
@@ -70,6 +77,10 @@ def test_a_reply_omitting_every_new_field_still_routes() -> None:
     assert result.confidence is None
     assert result.reason is None
     assert result.runner_up_id is None
+    # ...and the guidance contract's two fields, which small models drop the
+    # same way: no intent beside a pick is `route`, the pre-field reading.
+    assert result.intent == INTENT_ROUTE
+    assert result.options == ()
 
 
 def test_a_reply_with_garbage_in_every_new_field_still_routes() -> None:
@@ -119,6 +130,8 @@ def test_the_advisory_fields_are_carried_through_when_present() -> None:
     assert result.confidence == 0.72
     assert result.reason == "it names a production outage"
     assert result.runner_up_id == OTHER_ID
+    # A full Phase 5 reply with none of the guidance fields is still `route`.
+    assert (result.intent, result.options) == (INTENT_ROUTE, ())
 
 
 @pytest.mark.parametrize(
@@ -180,6 +193,278 @@ def test_runner_up_must_name_a_candidate_on_the_ballot() -> None:
     assert _parse_runner_up("", known) is None
     assert _parse_runner_up(None, known) is None
     assert _parse_runner_up(12345, known) is None
+
+
+# ---------------------------------------------------------------------------
+# `intent` / `options` — channel routing guidance, Phase 1
+# ---------------------------------------------------------------------------
+#
+# `agent_id` decides; `intent` may refine it, never contradict it. Each case
+# below is a way a careless or self-contradicting reply could otherwise change
+# where a message goes, and Phase 1 promises no sender-visible change. The
+# API-observable half — both stage fields surviving the message-text gate — is
+# in `tests/api/routing/routing_message_text_gating_test.py`.
+
+# Fixed, letter-bearing ids so the case-sensitivity case is deterministic.
+THIRD_ID = "3c0ffee0-aaaa-4bbb-8ccc-00000000000c"
+FOURTH_ID = "4d0ffee0-dddd-4eee-9fff-00000000000d"
+BALLOT = {AGENT_ID, OTHER_ID, THIRD_ID, FOURTH_ID}
+
+
+def _intent(intent, options=None, *, agent_id=AGENT_ID):
+    result = _parse_intent_and_options(
+        intent, options, agent_id=agent_id, known_ids=BALLOT
+    )
+    # The invariant every case rides on: `clarify` leads with the pick it
+    # carries in `agent_id`, and nothing but `clarify` carries options.
+    if result[0] == INTENT_CLARIFY:
+        assert result[1][0] == agent_id, result
+    else:
+        assert result[1] == (), result
+    return result
+
+
+def test_the_intent_vocabulary_matches_the_prompt_contract_and_the_trace() -> None:
+    assert (INTENT_ROUTE, INTENT_CLARIFY, INTENT_HELP, INTENT_NONE) == (
+        "route",
+        "clarify",
+        "help",
+        "none",
+    )
+    # One vocabulary: the recorder coerces to the set the parser produces.
+    assert routing_trace.CLASSIFIER_INTENTS == {
+        INTENT_ROUTE,
+        INTENT_CLARIFY,
+        INTENT_HELP,
+        INTENT_NONE,
+    }
+    assert MAX_CLARIFY_OPTIONS == 3
+
+
+@pytest.mark.parametrize(
+    "intent,options,expected",
+    [
+        ("route", [], (INTENT_ROUTE, ())),
+        ("clarify", [AGENT_ID, OTHER_ID], (INTENT_CLARIFY, (AGENT_ID, OTHER_ID))),
+        ("  Clarify\n", [AGENT_ID, OTHER_ID], (INTENT_CLARIFY, (AGENT_ID, OTHER_ID))),
+        # Missing or unknown beside a pick: `route`, as before the field existed.
+        (None, None, (INTENT_ROUTE, ())),
+        ("escalate", [AGENT_ID, OTHER_ID], (INTENT_ROUTE, ())),
+        (42, [AGENT_ID, OTHER_ID], (INTENT_ROUTE, ())),
+        (["clarify"], [AGENT_ID, OTHER_ID], (INTENT_ROUTE, ())),
+        # help / none beside a real agent_id contradict it; the pick wins.
+        ("help", [], (INTENT_ROUTE, ())),
+        ("none", [], (INTENT_ROUTE, ())),
+        ("help", [AGENT_ID, OTHER_ID], (INTENT_ROUTE, ())),
+        # Options ride on `clarify` only.
+        ("route", [AGENT_ID, OTHER_ID], (INTENT_ROUTE, ())),
+    ],
+    ids=[
+        "route",
+        "clarify",
+        "clarify_padded_and_cased",
+        "missing",
+        "unknown",
+        "non_string",
+        "list",
+        "help_beside_pick",
+        "none_beside_pick",
+        "help_beside_pick_with_options",
+        "route_drops_options",
+    ],
+)
+def test_intent_beside_a_pick_is_route_or_clarify(intent, options, expected) -> None:
+    assert _intent(intent, options) == expected
+
+
+@pytest.mark.parametrize("agent_id", [None, ""], ids=["none", "blank"])
+@pytest.mark.parametrize(
+    "intent,options,expected",
+    [
+        ("help", None, INTENT_HELP),
+        (" HELP ", None, INTENT_HELP),
+        ("none", None, INTENT_NONE),
+        (None, None, INTENT_NONE),
+        ("escalate", None, INTENT_NONE),
+        ("route", None, INTENT_NONE),
+        # An option is never promoted into a pick: nothing to route, nothing to ask.
+        ("clarify", [AGENT_ID, OTHER_ID], INTENT_NONE),
+        ("route", [AGENT_ID], INTENT_NONE),
+        ("help", [AGENT_ID, OTHER_ID], INTENT_HELP),
+    ],
+    ids=[
+        "help",
+        "help_padded_and_cased",
+        "none",
+        "missing",
+        "unknown",
+        "route_without_pick",
+        "clarify_without_pick",
+        "route_with_option_without_pick",
+        "help_with_options",
+    ],
+)
+def test_intent_without_a_pick_is_help_or_none_and_never_carries_options(
+    agent_id, intent, options, expected
+) -> None:
+    assert _intent(intent, options, agent_id=agent_id) == (expected, ())
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        [],
+        None,
+        f"{AGENT_ID},{OTHER_ID}",
+        {"first": AGENT_ID, "second": OTHER_ID},
+        [AGENT_ID],
+        [AGENT_ID, AGENT_ID, f"  {AGENT_ID}\n"],
+        [str(uuid.uuid4()), "NONE", THIRD_ID.upper(), 7, None, {"ref_id": OTHER_ID}],
+    ],
+    ids=[
+        "empty",
+        "missing",
+        "string_not_list",
+        "dict_not_list",
+        "only_the_pick",
+        "the_pick_three_ways",
+        "nothing_on_the_ballot",
+    ],
+)
+def test_clarify_with_fewer_than_two_surviving_options_collapses_to_route(options) -> None:
+    """A question with one answer is not a question."""
+    assert _intent("clarify", options) == (INTENT_ROUTE, ())
+
+
+def test_the_best_pick_leads_the_options_and_counts_towards_the_two() -> None:
+    """`options` is led by `agent_id` when it is on the ballot, whether or not
+    the model listed it — so a pick plus one tied id is a two-way question."""
+    assert _intent("clarify", [OTHER_ID]) == (INTENT_CLARIFY, (AGENT_ID, OTHER_ID))
+    assert _intent("clarify", [OTHER_ID, THIRD_ID, AGENT_ID]) == (
+        INTENT_CLARIFY,
+        (AGENT_ID, OTHER_ID, THIRD_ID),
+    )
+    # The rest keep the model's preference order.
+    assert _intent("clarify", [THIRD_ID, OTHER_ID]) == (
+        INTENT_CLARIFY,
+        (AGENT_ID, THIRD_ID, OTHER_ID),
+    )
+
+
+def test_an_off_ballot_pick_never_leads_a_clarify_question() -> None:
+    """A UUID-shaped `agent_id` the ballot never held cannot be the first
+    option, and two genuine ballot options do not rescue it into `clarify`."""
+    off_ballot = str(uuid.uuid4())
+
+    assert _intent("clarify", [AGENT_ID, OTHER_ID], agent_id=off_ballot) == (
+        INTENT_ROUTE,
+        (),
+    )
+    assert _intent("clarify", [off_ballot, AGENT_ID, OTHER_ID], agent_id=off_ballot) == (
+        INTENT_ROUTE,
+        (),
+    )
+
+
+def test_clarify_options_drop_off_ballot_and_duplicate_ids() -> None:
+    """Exact match after stripping — the `runner_up` rule — then deduplicated."""
+    options = [
+        THIRD_ID,
+        str(uuid.uuid4()),
+        "NONE",
+        THIRD_ID.upper(),
+        7,
+        None,
+        {"ref_id": FOURTH_ID},
+        f"  {THIRD_ID}\n",
+        AGENT_ID,
+    ]
+    assert _intent("clarify", options) == (INTENT_CLARIFY, (AGENT_ID, THIRD_ID))
+
+
+def test_clarify_options_are_capped_after_the_best_pick_is_placed_first() -> None:
+    intent, options = _intent("clarify", [OTHER_ID, THIRD_ID, FOURTH_ID, AGENT_ID])
+
+    assert intent == INTENT_CLARIFY
+    assert options == (AGENT_ID, OTHER_ID, THIRD_ID)
+    assert len(options) == MAX_CLARIFY_OPTIONS
+
+
+def test_classify_carries_a_clarify_answer_and_still_names_the_best_pick() -> None:
+    """A consumer that ignores `intent` routes `agent_id` — the additive half."""
+    with routing_trace.RoutingTrace.capture(
+        origin=routing_trace.ORIGIN_SIMULATE,
+        stage=routing_trace.STAGE_PASS_1,
+        message="prod is down",
+    ) as trace:
+        result = _classify(
+            json.dumps(
+                {
+                    "agent_id": AGENT_ID,
+                    "intent": "clarify",
+                    "options": [OTHER_ID, str(uuid.uuid4()), AGENT_ID],
+                    "runner_up": OTHER_ID,
+                }
+            )
+        )
+        stages = trace.stages_payload()
+
+    assert result is not None
+    assert result.agent_id == AGENT_ID
+    assert result.intent == INTENT_CLARIFY
+    assert result.options == (AGENT_ID, OTHER_ID)
+    assert stages[0]["intent"] == INTENT_CLARIFY
+    assert stages[0]["options"] == [{"ref_id": AGENT_ID}, {"ref_id": OTHER_ID}]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"intent": "help"},
+        {"intent": "none", "options": [OTHER_ID]},
+        {"intent": {"nested": "object"}, "options": "not a list"},
+        {"intent": "clarify", "options": OTHER_ID},
+        {"intent": "clarify", "options": [str(uuid.uuid4())]},
+    ],
+    ids=["help", "none_with_options", "garbage", "options_string", "options_off_ballot"],
+)
+def test_classify_routes_the_pick_whatever_intent_sits_beside_it(extra) -> None:
+    result = _classify(json.dumps({"agent_id": AGENT_ID, "message": None, **extra}))
+
+    assert result is not None
+    assert result.agent_id == AGENT_ID
+    assert (result.intent, result.options) == (INTENT_ROUTE, ())
+
+
+@pytest.mark.parametrize(
+    "reply,expected_intent",
+    [
+        ({"agent_id": "NONE"}, INTENT_NONE),
+        ({"agent_id": "NONE", "intent": "none"}, INTENT_NONE),
+        ({"agent_id": "NONE", "intent": "help"}, INTENT_HELP),
+        ({"agent_id": "", "intent": "help"}, INTENT_HELP),
+        ({"agent_id": "NONE", "intent": "route"}, INTENT_NONE),
+        (
+            {"agent_id": "NONE", "intent": "clarify", "options": [AGENT_ID, OTHER_ID]},
+            INTENT_NONE,
+        ),
+    ],
+    ids=["bare", "none", "help", "blank_help", "route", "clarify_with_options"],
+)
+def test_classify_without_a_pick_is_no_match_and_traces_its_intent(
+    reply, expected_intent
+) -> None:
+    with routing_trace.RoutingTrace.capture(
+        origin=routing_trace.ORIGIN_SIMULATE,
+        stage=routing_trace.STAGE_PASS_1,
+        message="what can you do?",
+    ) as trace:
+        result = _classify(json.dumps(reply), message="what can you do?")
+        stages = trace.stages_payload()
+
+    assert result is None
+    assert stages[0]["intent"] == expected_intent
+    assert stages[0]["options"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -390,3 +675,102 @@ def test_classify_drops_a_message_field_that_copies_the_quote() -> None:
     assert quoted_result is not None and quoted_result.agent_id == AGENT_ID
     assert quoted_result.transformed_message is None
     assert plain_result is not None and plain_result.transformed_message == _QUOTE
+
+
+# ---------------------------------------------------------------------------
+# `classify_answer` — why nothing was picked (channel routing guidance, Phase 2)
+# ---------------------------------------------------------------------------
+#
+# The channel router answers a `help` / `none` with a guidance reply, so the one
+# thing `classify_answer` must never do is let an unusable reply read as the
+# model saying "nothing fits": every such path carries `intent=None`, which
+# builds no guidance and keeps the sender on `REPLY_NO_MATCH`. The API half is
+# `tests/api/server_channels/server_channels_routing_guidance_test.py`.
+
+
+def _answer(reply: str | None = None, *, candidates=CANDIDATES, side_effect=None):
+    """`(answer, whether the provider was asked)`."""
+    with patch(_PROVIDER_TARGET) as mock_pm:
+        generate = mock_pm.return_value.generate_content
+        if side_effect is not None:
+            generate.side_effect = side_effect
+        else:
+            generate.return_value = MagicMock(text=reply)
+        answer = AgentClassifier.classify_answer(candidates, "what can you do?")
+        return answer, generate.called
+
+
+def test_classify_answer_over_no_candidates_has_no_intent_and_asks_no_model() -> None:
+    answer, asked = _answer('{"agent_id": "NONE", "intent": "help"}', candidates=[])
+
+    assert isinstance(answer, ClassifierAnswer)
+    assert (answer.intent, answer.result) == (None, None)
+    assert asked is False
+
+
+@pytest.mark.parametrize(
+    "reply,side_effect",
+    [
+        (None, RuntimeError("provider cascade exhausted")),
+        ("I think nothing fits, the user wants help", None),
+        ("```json\nnot json at all\n```", None),
+        ('["help"]', None),
+        ('"none"', None),
+        (json.dumps({"agent_id": "ops-runbook", "intent": "help"}), None),
+        (json.dumps({"agent_id": 42, "intent": "none"}), None),
+    ],
+    ids=["outage", "prose", "fenced_non_json", "json_list", "json_string", "malformed_id", "non_string_id"],
+)
+def test_an_unusable_reply_carries_no_intent_whatever_it_says(reply, side_effect) -> None:
+    answer, asked = _answer(reply, side_effect=side_effect)
+
+    assert asked is True
+    assert (answer.intent, answer.result) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "reply,intent",
+    [
+        ({"agent_id": "NONE", "intent": "help"}, INTENT_HELP),
+        ({"agent_id": "NONE", "intent": "none"}, INTENT_NONE),
+        # The shape every pre-guidance model still emits reads as `none`.
+        ({"agent_id": "NONE"}, INTENT_NONE),
+        ({"agent_id": "", "intent": "help"}, INTENT_HELP),
+        ({"intent": "help"}, INTENT_HELP),
+        ({"agent_id": "NONE", "intent": "clarify", "options": [AGENT_ID, OTHER_ID]}, INTENT_NONE),
+    ],
+    ids=["help", "none", "bare_none", "blank_help", "missing_id_help", "clarify_without_pick"],
+)
+def test_an_explicit_no_pick_carries_help_or_none_and_no_result(reply, intent) -> None:
+    answer, asked = _answer(json.dumps(reply))
+
+    assert asked is True
+    assert (answer.intent, answer.result) == (intent, None)
+
+
+@pytest.mark.parametrize(
+    "extra,intent,options",
+    [
+        ({}, INTENT_ROUTE, ()),
+        ({"intent": "clarify", "options": [OTHER_ID]}, INTENT_CLARIFY, (AGENT_ID, OTHER_ID)),
+    ],
+    ids=["route", "clarify"],
+)
+def test_a_pick_carries_its_intent_and_classify_returns_the_same_result(
+    extra, intent, options
+) -> None:
+    reply = json.dumps({"agent_id": AGENT_ID, **extra})
+    with patch(_PROVIDER_TARGET) as mock_pm:
+        mock_pm.return_value.generate_content.return_value = MagicMock(text=reply)
+        answer = AgentClassifier.classify_answer(CANDIDATES, "prod is down")
+        result = AgentClassifier.classify(CANDIDATES, "prod is down")
+
+    assert answer.intent == intent
+    assert answer.result is not None
+    assert (answer.result.agent_id, answer.result.intent, answer.result.options) == (
+        AGENT_ID,
+        intent,
+        options,
+    )
+    # `classify` is `classify_answer(...).result` — the same answer, minus why.
+    assert result == answer.result

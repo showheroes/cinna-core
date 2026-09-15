@@ -123,7 +123,7 @@ When the AI router classifies a message, it also **strips routing prefixes** and
 
 1. **Single-candidate shortcut** — if the whole ballot (owned agents + identities, when enabled) holds exactly one entry, use it directly; no classification call is made.
 2. **AI classification** — the shared `AgentClassifier.classify` (the same classifier every routing consumer uses since [Auto Routing Tuning](../routing_tuning/routing_tuning.md)'s Phase 5) is called with the message and the whole ballot; each candidate is passed as `{id, name, trigger_prompt, prompt_examples}`.
-3. **No match** — an error asking the caller to be more specific.
+3. **No match** — an error asking the caller to be more specific. Since [channel routing guidance](../server_channels/server_channels.md#channel-routing-guidance-help-no-match-and-clarifying-questions) gave the classifier a categorical `intent`, a bare meta question ("what can you do?") now classifies as `help` and lands here too — App MCP only ever reads the pick (`classify`, not `classify_answer`), so it no longer gets best-picked against the ballot the way it might have before.
 
 When the winner is an identity candidate, Stage 2 (`IdentityRoutingService.route_within_identity`) picks the agent from that person's portfolio and returns the binding + assignment ids that become the `IdentityGrant` re-verified at ingest — see [Identity Routing](../identity_routing/identity_routing.md).
 

@@ -87,7 +87,11 @@ from tests.utils.environment import set_environment_status
 from tests.utils.identity import share_identity_agent
 from tests.utils.mail_server import create_imap_server, create_smtp_server
 from tests.utils.message import list_messages
-from tests.utils.routing import classification, enter_classifier_patch
+from tests.utils.routing import (
+    as_classifier_answer,
+    classification,
+    enter_classifier_patch,
+)
 from tests.utils.server_channel import (
     GoogleChatJWTSigner,
     add_auto_install_bundle,
@@ -106,7 +110,7 @@ API = settings.API_V1_STR
 _SEND_TARGET = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter.send_message"
 _STREAM_TARGET = "app.services.sessions.message_service.agent_env_connector"
 _FETCH_TARGET = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter.fetch_attachment"
-_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
+_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify_answer"
 _STORE_FILE_TARGET = "app.services.files.file_storage_service.FileStorageService.store_file"
 _EXTRACT_ATTACHMENTS_TARGET = (
     "app.services.email.polling_service.EmailPollingService._extract_attachments"
@@ -338,7 +342,9 @@ def _setup_pending_install(
         stack.enter_context(signer.patched())
         stack.enter_context(patch(_STREAM_TARGET, stub))
         stack.enter_context(patch(_SEND_TARGET, AsyncMock(return_value="fake-ext-id")))
-        stack.enter_context(patch(_CLASSIFY_TARGET, return_value=classify_result))
+        stack.enter_context(
+            patch(_CLASSIFY_TARGET, return_value=as_classifier_answer(classify_result))
+        )
         if attachment is not None:
             stack.enter_context(
                 patch(_FETCH_TARGET, AsyncMock(return_value=fetch_return_value))
@@ -768,7 +774,12 @@ def test_attachment_only_message_accepted_routes_on_filename_derived_text(
         stack.enter_context(patch(_STREAM_TARGET, stub))
         stack.enter_context(patch(_SEND_TARGET, AsyncMock(return_value="fake-ext-id")))
         stack.enter_context(patch(_FETCH_TARGET, AsyncMock(return_value=b"%PDF-1.4 fake")))
-        stack.enter_context(patch(_CLASSIFY_TARGET, side_effect=_classify))
+        stack.enter_context(
+            patch(
+                _CLASSIFY_TARGET,
+                side_effect=lambda *a, **k: as_classifier_answer(_classify(*a, **k)),
+            )
+        )
         resp = post_webhook(client, channel["webhook_token"], event, bearer_token=token)
         drain_tasks()
 

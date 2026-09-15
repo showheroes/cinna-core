@@ -5,6 +5,7 @@ the codebase imports these. This package-level surface exists so that a module
 working inside the feature can import from its own package without going
 through the 1300-line top-level ``__init__``.
 """
+from .channel_routing_clarification import ChannelRoutingClarification
 from .channel_thread_binding import (
     CHANNEL_BINDING_ACTIVE,
     CHANNEL_BINDING_FAILED,
@@ -86,6 +87,8 @@ __all__ = [
     "ServerAutoInstallBundle",
     "AutoInstallBundleAdd",
     "AutoInstallBundlePublic",
+    # Routing clarifications
+    "ChannelRoutingClarification",
     # Thread bindings
     "ChannelThreadBinding",
     "CHANNEL_BINDING_PENDING_INSTALL",

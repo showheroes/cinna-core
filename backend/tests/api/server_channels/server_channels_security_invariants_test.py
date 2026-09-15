@@ -51,14 +51,18 @@ from tests.utils.server_channel import (
     flush_pending_bindings,
     post_webhook,
 )
-from tests.utils.routing import classification, enter_classifier_patch
+from tests.utils.routing import (
+    as_classifier_answer,
+    classification,
+    enter_classifier_patch,
+)
 from tests.utils.session import get_session, list_sessions
 from tests.utils.user import create_random_user_with_headers, promote_to_developer
 from tests.utils.utils import random_lower_string
 
 API = settings.API_V1_STR
 _SEND_TARGET = "app.services.server_channels.adapters.google_chat.GoogleChatAdapter.send_message"
-_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify"
+_CLASSIFY_TARGET = "app.services.routing.agent_classifier.AgentClassifier.classify_answer"
 _STREAM_TARGET = "app.services.sessions.message_service.agent_env_connector"
 
 
@@ -131,7 +135,7 @@ def _classify_the_only_candidate(candidates, message, **kwargs):
     a bundle id is rejected as "not among the candidates", which silently turns
     the park branch under test into a plain no-match.
     """
-    return classification(candidates[0].ref_id)
+    return as_classifier_answer(classification(candidates[0].ref_id))
 
 
 # ---------------------------------------------------------------------------

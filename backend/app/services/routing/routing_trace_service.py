@@ -227,8 +227,9 @@ class RoutingTraceService:
             # (``ChannelRoutingService._record_catalog_ballot``). What still
             # prevents a collision is that the two writers are mutually
             # exclusive by construction — Pass 1 writes that stage only when it
-            # ROUTED, and ``decide`` runs Pass 2 only when Pass 1 returned
-            # nothing — so ``preceded_by`` never carries a second ``pass_2``.
+            # ended the decision (it ROUTED, picked an identity, or answered
+            # with guidance), and ``decide`` runs Pass 2 only when it did not —
+            # so ``preceded_by`` never carries a second ``pass_2``.
             # That is now a fact about ``decide``'s branching rather than about
             # which names each pass can produce. If a change makes both write in
             # one decision, merge by name here; a UI keying on the stage name

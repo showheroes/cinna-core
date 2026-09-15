@@ -6211,6 +6211,54 @@ export type RoutingReplayResult = {
 };
 
 /**
+ * ``POST /admin/routing/simulate``'s response: the trace, plus the reply.
+ *
+ * ``guidance_reply`` is the guidance reply the sender would have been sent
+ * when the decision routed nowhere but answered (``outcome="guided"``).
+ * Composed from the decision, never stored and never sent — which is why it
+ * lives here and not on :class:`RoutingDecisionPublic`, where every trace
+ * read would carry a field that is always ``None``. ``None`` whenever the
+ * simulated decision routed, parked or found nothing to say, or guidance is
+ * switched off. Built only from candidate names and trigger prompts this
+ * response already serves under ``stages[].candidates``, never from the
+ * sender's message.
+ */
+export type RoutingSimulatePublic = {
+    id: string;
+    created_at: string;
+    origin: string;
+    channel_id?: (string | null);
+    channel_name?: (string | null);
+    user_id?: (string | null);
+    user_email?: (string | null);
+    actor_user_id?: (string | null);
+    thread_key?: (string | null);
+    message_text?: (string | null);
+    message_sha256?: (string | null);
+    message_text_hidden?: boolean;
+    message_text_notice?: (string | null);
+    outcome: string;
+    match_method?: (string | null);
+    selected_agent_id?: (string | null);
+    selected_agent_name?: (string | null);
+    selected_bundle_uuid?: (string | null);
+    selected_bundle_name?: (string | null);
+    confidence?: (number | null);
+    latency_ms?: number;
+    error?: (string | null);
+    candidate_count?: number;
+    skipped_count?: number;
+    provider?: (string | null);
+    model?: (string | null);
+    stages?: Array<unknown>;
+    quoted_message_text?: (string | null);
+    quoted_message_author?: (string | null);
+    quoted_agent_id?: (string | null);
+    diagnosis?: (RoutingDiagnosisPublic | null);
+    guidance_reply?: (string | null);
+};
+
+/**
  * Run one message through routing for another user, with no effects.
  */
 export type RoutingSimulateRequest = {
@@ -8243,7 +8291,7 @@ export type AdminRoutingSimulateRoutingData = {
     requestBody: RoutingSimulateRequest;
 };
 
-export type AdminRoutingSimulateRoutingResponse = (RoutingDecisionPublic);
+export type AdminRoutingSimulateRoutingResponse = (RoutingSimulatePublic);
 
 export type AdminRoutingReplayRoutingTraceData = {
     requestBody?: (RoutingReplayRequest | null);

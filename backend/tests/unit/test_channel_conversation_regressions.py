@@ -94,6 +94,37 @@ def test_email_replies_select_the_originating_asker_and_refuse_ambiguous_legacy(
         assert queued[-1].recipient == users[bindings[0].user_id]
 
 
+def test_new_session_reset_keeps_a_clarify_answer_receipt_and_clears_every_other_row(receipt_db):
+    """A clarify-answer receipt is written before the original's session exists;
+    the reset that session triggers must keep it, or a redelivered answer reaches
+    the agent. The API half is `server_channels_routing_clarification_test.py`'s
+    redelivery tests."""
+    from app.models.server_channels.channel_thread_ingest_log import (
+        CHANNEL_INGEST_SOURCE_CLARIFY_REPLY,
+    )
+
+    db = receipt_db
+    binding = _binding(db, uuid4())
+    db.add(ChannelThreadIngestLog(
+        binding_id=binding.id, external_message_id="live-turn", source="live", char_count=5,
+    ))
+    db.add(ChannelThreadIngestLog(
+        binding_id=binding.id, external_message_id="quoted-turn", source="quoted", char_count=9,
+    ))
+    db.add(ChannelThreadIngestLog(
+        binding_id=binding.id, external_message_id="the-answer",
+        source=CHANNEL_INGEST_SOURCE_CLARIFY_REPLY,
+    ))
+    db.commit()
+
+    ContextService.reset_for_new_session(db=db, binding=binding)
+
+    rows = db.exec(select(ChannelThreadIngestLog)).all()
+    assert [(row.external_message_id, row.source) for row in rows] == [
+        ("the-answer", CHANNEL_INGEST_SOURCE_CLARIFY_REPLY)
+    ]
+
+
 def test_new_session_refetches_history_and_quotes_without_resetting_other_askers(receipt_db):
     args = _inputs()
     db = receipt_db

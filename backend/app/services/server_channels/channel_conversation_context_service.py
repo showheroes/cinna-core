@@ -22,6 +22,9 @@ from app.models import (
     ChannelThreadIngestLog,
     ServerChannel,
 )
+from app.models.server_channels.channel_thread_ingest_log import (
+    CHANNEL_INGEST_SOURCE_CLARIFY_REPLY,
+)
 from app.services.server_channels.adapters.base import (
     ChannelAdapter,
     ChannelInboundMessage,
@@ -119,12 +122,19 @@ class ChannelConversationContextService:
         before history reads. Commit before awaiting any network operation.
         Keep last_external_message_id so a retry of the last live turn stays
         deduplicated even when its session was intentionally deleted.
+
+        Also keep clarify-answer receipts. They are not context (the answer
+        was never ingested and must not be backfilled), and they are written
+        before the original's session exists, so deleting them here would let
+        a redelivered answer reach the agent. Every other receipt is discarded
+        as before.
         """
         db.exec(select(ChannelThreadBinding).where(
             ChannelThreadBinding.id == binding.id,
         ).with_for_update()).one()
         db.execute(delete(ChannelThreadIngestLog).where(
             ChannelThreadIngestLog.binding_id == binding.id,
+            ChannelThreadIngestLog.source != CHANNEL_INGEST_SOURCE_CLARIFY_REPLY,
         ))
         binding.history_backfilled_at = None
         db.add(binding)

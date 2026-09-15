@@ -12,16 +12,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { StageGuidanceLines } from "./RoutingGuidance"
 import { RoutingEmpty } from "./RoutingStateBlocks"
 import {
   formatConfidence,
   formatLatency,
+  intentLabel,
   matchMethodLabel,
   notRunLabel,
   skipReasonLabel,
   sourceLabel,
 } from "./routingCopy"
 import {
+  candidateNamesByRef,
   parseStages,
   type RoutingStage,
   type RoutingStageCandidate,
@@ -287,13 +290,17 @@ function StageBlock({
   stage,
   chosen,
   textGated,
+  names,
 }: {
   stage: RoutingStage
   chosen: string | null
   /** The message-text gate withheld the sender's words from this payload. */
   textGated: boolean
+  /** Candidate names by `ref_id` across the decision, for id-only options. */
+  names: Map<string, string>
 }) {
   const notRun = notRunLabel(stage.not_run_code)
+  const intent = intentLabel(stage.intent)
   return (
     <div className="space-y-2 rounded-lg border p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -304,9 +311,14 @@ function StageBlock({
           </Badge>
         )}
         {stage.matched_pattern && (
-          <code className="font-mono text-[11px] text-muted-foreground">
+          <code className="font-mono text-[11px] break-all text-muted-foreground">
             {stage.matched_pattern}
           </code>
+        )}
+        {intent && (
+          <span className="text-xs text-muted-foreground">
+            intent: {intent}
+          </span>
         )}
         {stage.confidence !== null && stage.confidence !== undefined && (
           <span className="text-xs text-muted-foreground">
@@ -328,6 +340,10 @@ function StageBlock({
           {notRun}
         </p>
       )}
+
+      {/* Id-only safe fields, so like `not_run_code` they render with the
+          message-text gate closed. */}
+      <StageGuidanceLines stage={stage} names={names} />
 
       {stage.reason && (
         <p className="text-xs break-words text-muted-foreground">
@@ -370,6 +386,7 @@ export function RoutingStagesView({ trace }: { trace: RoutingDecisionPublic }) {
   const stages = parseStages(trace.stages)
   const chosen = chosenRefId(trace)
   const textGated = trace.message_text_hidden === true
+  const names = candidateNamesByRef(stages)
 
   if (stages.length === 0) {
     // The recorder creates a stage eagerly on capture entry so that "this pass
@@ -392,6 +409,7 @@ export function RoutingStagesView({ trace }: { trace: RoutingDecisionPublic }) {
           stage={stage}
           chosen={chosen}
           textGated={textGated}
+          names={names}
         />
       ))}
     </div>

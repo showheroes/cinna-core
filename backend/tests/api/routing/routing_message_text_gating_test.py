@@ -745,6 +745,121 @@ def test_pass_2_not_run_code_survives_the_gate_that_withholds_its_sentence(
     assert stage_written_off.get("reason") is None, stage_written_off
 
 
+# ── The classifier's categorical answer rides the allowlist, not the text ──
+
+
+def test_classifier_intent_and_option_ref_ids_survive_the_gate_that_withholds_sender_text(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """`stages[].intent` and `stages[].options[].ref_id` are on
+    `SAFE_STAGE_FIELDS` (channel routing guidance, Phase 1); the sender's words
+    are not — and the model's reply here tries to smuggle them into `options`.
+
+    Driven through a REAL Pass 2 classify (provider mocked at classifier depth,
+    as in the `reason` test above) over a ballot of two catalog bundles, so the
+    real parse normalises a `clarify` reply: the option carrying the sender's
+    words is off the ballot and dropped, the best pick leads, and the stage
+    genuinely holds sender text in `raw_response` / `reason` for the gate to
+    act on. The sender owns nothing, so Pass 1's ballot is empty and Pass 2 is
+    the only classify.
+
+      0. Baseline — captured and read with the gate ON: both fields, and the
+         sender's words in `raw_response` and `reason`.
+      1. Read path — the same row read with the gate OFF: `intent` and the
+         option ref ids are still served; nothing in the stage carries the
+         sender's words.
+      2. Write path — captured with the gate OFF, read with it ON, so the read
+         projection cannot be what hides the text: both fields were stored,
+         the sender's words were not.
+
+    Phase 1 has no sender-visible change, so nothing here asserts on what the
+    sender is told — the channel still acts on `agent_id`. The unit halves are
+    `tests/unit/test_agent_classifier_parsing.py` (the parse) and
+    `tests/unit/test_routing_trace.py` (the recorder and the projection).
+    """
+    channel = _channel(client, superuser_token_headers)
+    best_pick = _publish_catalog_bundle(client, superuser_token_headers)
+    tied = _publish_catalog_bundle(client, superuser_token_headers)
+    expected_options = [{"ref_id": best_pick}, {"ref_id": tied}]
+
+    def _post(store_text: bool) -> tuple[str, str]:
+        sender_words = f"my printer is on fire {random_lower_string()}"
+        before = {
+            r["id"]
+            for r in list_routing_traces(
+                client, superuser_token_headers, channel_id=channel["id"]
+            )["data"]
+        }
+        signer = GoogleChatJWTSigner()
+        event = build_message_event(
+            thread_key=f"spaces/AAA/threads/{random_lower_string()}",
+            text=sender_words,
+            sender_email=f"{random_lower_string()}@example.com",
+        )
+        reply = MagicMock()
+        reply.text = json.dumps(
+            {
+                "agent_id": best_pick,
+                "intent": "clarify",
+                "options": [tied, sender_words, best_pick],
+                "message": None,
+                "confidence": 0.55,
+                "reason": f"the sender said {sender_words}",
+                "runner_up": tied,
+            }
+        )
+        with patch(_SETTING, store_text):
+            with patch(_PROVIDER_TARGET) as mock_pm:
+                mock_pm.return_value.generate_content.return_value = reply
+                resp, _ = post_channel_message(
+                    client, channel, signer, event, classify_via_provider=True
+                )
+                assert mock_pm.return_value.generate_content.call_count >= 1
+            assert resp.status_code == 200
+        page = list_routing_traces(
+            client, superuser_token_headers, channel_id=channel["id"]
+        )
+        new_ids = [r["id"] for r in page["data"] if r["id"] not in before]
+        assert len(new_ids) == 1, page["data"]
+        return new_ids[0], sender_words
+
+    def _pass2(detail: dict) -> dict:
+        stage = next((s for s in detail["stages"] if s["stage"] == "pass_2"), None)
+        assert stage is not None, detail["stages"]
+        return stage
+
+    # ── 0. Baseline: gate ON at capture and at read. ──────────────────────
+    on_id, on_words = _post(store_text=True)
+    with patch(_SETTING, True):
+        stage_on = _pass2(get_routing_trace(client, superuser_token_headers, on_id))
+    assert stage_on["intent"] == "clarify", stage_on
+    assert stage_on["options"] == expected_options, stage_on
+    assert stage_on["runner_up_id"] == tied, stage_on
+    # The stage really holds the sender's words — otherwise the absence
+    # assertions below would pass against a gate that withheld nothing.
+    assert on_words in (stage_on["raw_response"] or ""), stage_on
+    assert on_words in (stage_on["reason"] or ""), stage_on
+
+    # ── 1. Read path: the SAME row, read with the gate OFF. ───────────────
+    with patch(_SETTING, False):
+        detail_off = get_routing_trace(client, superuser_token_headers, on_id)
+    stage_off = _pass2(detail_off)
+    assert stage_off.get("intent") == "clarify", stage_off
+    assert stage_off.get("options") == expected_options, stage_off
+    assert on_words not in json.dumps(stage_off), stage_off
+    assert detail_off["message_text"] is None, detail_off
+
+    # ── 2. Write path: captured with the gate OFF, read back with it ON. ──
+    written_off_id, off_words = _post(store_text=False)
+    with patch(_SETTING, True):
+        stage_written_off = _pass2(
+            get_routing_trace(client, superuser_token_headers, written_off_id)
+        )
+    assert stage_written_off.get("intent") == "clarify", stage_written_off
+    assert stage_written_off.get("options") == expected_options, stage_written_off
+    assert off_words not in json.dumps(stage_written_off), stage_written_off
+
+
 # ── The quoted message rides the same gate; the quoted agent id does not ───
 
 

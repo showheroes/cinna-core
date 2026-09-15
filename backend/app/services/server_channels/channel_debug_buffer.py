@@ -69,6 +69,9 @@ DEBUG_REJECTED = "rejected"
 DEBUG_ROUTED = "routed"
 DEBUG_INSTALLING = "installing"
 DEBUG_NO_MATCH = "no_match"
+# Routed nowhere, but answered: the sender was sent a guidance reply (a list of
+# what they can reach) instead of the no-match sentence.
+DEBUG_GUIDED = "guided"
 DEBUG_REPLIED = "replied"
 DEBUG_SEND_FAILED = "send_failed"
 DEBUG_TEST_SEND = "test_send"

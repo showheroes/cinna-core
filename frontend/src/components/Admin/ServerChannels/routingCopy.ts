@@ -35,6 +35,10 @@ const OUTCOME_META: Record<string, Meta> = {
   no_match: { label: "No match", tone: "outline" },
   error: { label: "Error", tone: "destructive" },
   parked_install: { label: "Parked install", tone: "secondary" },
+  // Routed nowhere, but the sender was answered (help / no-fit / clarifying
+  // question) instead of being told nothing matched. Neutral like
+  // `parked_install`: not a failure, not a route.
+  guided: { label: "Answered with guidance", tone: "secondary" },
 }
 
 /**
@@ -65,6 +69,37 @@ const MATCH_METHOD_LABELS: Record<string, string> = {
   ai: "AI classifier",
   only_one: "only candidate",
   pinned: "pinned by sender",
+  quoted_reply: "reply to a quoted message",
+  clarified: "sender picked an option",
+}
+
+/**
+ * The classifier's categorical answer (`stages[].intent`).
+ *
+ * Vocabulary owner: the `INTENT_*` constants (`CLASSIFIER_INTENTS`) in
+ * `backend/app/services/routing/routing_trace.py`. Kept close to the wire words
+ * the raw LLM response shows, so the two read as one vocabulary.
+ */
+const INTENT_LABELS: Record<string, string> = {
+  route: "route",
+  clarify: "clarify",
+  help: "help",
+  none: "no fit",
+}
+
+/**
+ * The guidance reply a decision sent (`stages[].guidance_kind`), as the lead of
+ * the line that names what the reply listed. `sent` is for a row that records
+ * the kind without the listed ids — an older or malformed payload, since the
+ * backend never composes a reply that lists nothing.
+ *
+ * Vocabulary owner: `GUIDANCE_KINDS` in
+ * `backend/app/services/routing/routing_trace.py`.
+ */
+const GUIDANCE_KIND_META: Record<string, { listed: string; sent: string }> = {
+  clarify: { listed: "Asked to choose", sent: "Clarifying question sent" },
+  help: { listed: "Help reply listed", sent: "Help reply sent" },
+  none: { listed: "No-fit reply listed", sent: "No-fit reply sent" },
 }
 
 /**
@@ -85,6 +120,7 @@ const SKIP_REASON_LABELS: Record<string, string> = {
   already_installed: "Already installed",
   bundle_missing: "Bundle missing",
   pass_1_matched: "Pass 1 matched first",
+  pass_1_guided: "Pass 1 answered with guidance",
   not_installable: "Not installable",
   no_trigger_prompt: "No trigger prompt",
   identity_route: "Identity route",
@@ -154,6 +190,18 @@ export function matchMethodLabel(method: string | null | undefined): string {
   return MATCH_METHOD_LABELS[method] ?? method
 }
 
+export function intentLabel(intent: string | null | undefined): string | null {
+  if (!intent) return null
+  return INTENT_LABELS[intent] ?? intent
+}
+
+/** Lead for the guidance line; `hasListed` picks between the two wordings. */
+export function guidanceKindLead(kind: string, hasListed: boolean): string {
+  const meta = GUIDANCE_KIND_META[kind]
+  if (meta) return hasListed ? meta.listed : meta.sent
+  return hasListed ? `Guidance (${kind}) listed` : `Guidance (${kind}) sent`
+}
+
 export function skipReasonLabel(reason: string | null | undefined): string {
   if (!reason) return "Skipped"
   return SKIP_REASON_LABELS[reason] ?? reason
@@ -179,6 +227,15 @@ export function sourceLabel(source: string | null | undefined): string {
  */
 export function diagnosisTone(code: string): "ok" | "warn" | "bad" | "neutral" {
   if (code === "routed" || code === "expected_agent_selected") return "ok"
+  // Guidance verdicts: a pick taken from a clarifying question routed, and a
+  // help reply is the router doing its job. A no-fit reply is still a
+  // `no_match` for tuning purposes; a pending question waits on the sender.
+  if (code === "clarified" || code === "guided_help") return "ok"
+  // `clarified_unavailable`: the pick was no longer on the ballot, so the
+  // decision ended `no_match` — same tone.
+  if (code === "guided_no_match" || code === "clarified_unavailable")
+    return "warn"
+  if (code === "guided_clarify") return "neutral"
   if (code === "error" || code === "unavailable") return "bad"
   if (code === "expected_agent_looks_reachable") return "neutral"
   if (code.startsWith("expected_agent_") || code === "no_match") return "warn"
@@ -199,6 +256,7 @@ export const OUTCOME_FILTER_OPTIONS = [
   "routed",
   "error",
   "parked_install",
+  "guided",
 ] as const
 
 export const ORIGIN_FILTER_OPTIONS = [
@@ -281,3 +339,6 @@ export const SIMULATE_EXPLAINER =
   "Runs one message through routing as the selected user, with no effects — " +
   "no thread binding, no session, no install, no reply. It does spend a real " +
   "LLM call."
+
+/** Heading over the simulate-only guidance reply. */
+export const GUIDANCE_REPLY_HEADING = "What the sender would be told"

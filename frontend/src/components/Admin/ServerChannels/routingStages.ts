@@ -68,6 +68,22 @@ export interface RoutingStage {
    *  gate is closed. Render it independently of `reason`, never nested inside
    *  it: the gate-off case is the one it exists for. */
   not_run_code?: string | null
+  /** The classifier's normalised answer: `route` | `clarify` | `help` | `none`.
+   *  On the stage allowlist, so it survives the message-text gate. */
+  intent?: string | null
+  /** `clarify` only: the tied candidates, best pick first. Ids refer to
+   *  `candidates` entries (of this or another stage of the decision). */
+  options?: RoutingStageOption[]
+  /** Set only on the stage whose ballot a guidance reply listed:
+   *  `help` | `none` | `clarify`. */
+  guidance_kind?: string | null
+  /** The entries that reply listed, in the order it showed them. */
+  guidance_options?: RoutingStageOption[]
+}
+
+/** One option a stage records by id only — resolve its name from `candidates`. */
+export interface RoutingStageOption {
+  ref_id?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -112,6 +128,11 @@ function parseAttempt(raw: unknown): RoutingStageLLMAttempt | null {
   }
 }
 
+function parseOption(raw: unknown): RoutingStageOption | null {
+  if (!isRecord(raw)) return null
+  return { ref_id: asString(raw.ref_id) }
+}
+
 /**
  * A list field that is **absent** stays `undefined`; one that is present and
  * empty becomes `[]`.
@@ -148,7 +169,43 @@ function parseStage(raw: unknown): RoutingStage | null {
     reason: asString(raw.reason) ?? null,
     runner_up_id: asString(raw.runner_up_id) ?? null,
     not_run_code: asString(raw.not_run_code) ?? null,
+    intent: asString(raw.intent) ?? null,
+    options: parseList(raw.options, parseOption),
+    guidance_kind: asString(raw.guidance_kind) ?? null,
+    guidance_options: parseList(raw.guidance_options, parseOption),
   }
+}
+
+/**
+ * Candidate names by `ref_id`, across every stage of one decision.
+ *
+ * `options` / `guidance_options` carry ids only; the names live on the
+ * candidates the same decision already serves. A name-less candidate is not
+ * entered, so the caller falls back to the raw id rather than to a blank.
+ */
+export function candidateNamesByRef(
+  stages: RoutingStage[],
+): Map<string, string> {
+  const names = new Map<string, string>()
+  for (const stage of stages) {
+    for (const candidate of stage.candidates ?? []) {
+      if (candidate.ref_id && candidate.name && !names.has(candidate.ref_id)) {
+        names.set(candidate.ref_id, candidate.name)
+      }
+    }
+  }
+  return names
+}
+
+/** Option names in the recorded order; unresolvable ids render as themselves. */
+export function resolveOptionNames(
+  options: RoutingStageOption[] | undefined,
+  names: Map<string, string>,
+): string[] {
+  return (options ?? [])
+    .map((option) => option.ref_id)
+    .filter((refId): refId is string => !!refId)
+    .map((refId) => names.get(refId) || refId)
 }
 
 /** Narrow the generated `Array<unknown>` into something renderable. Never throws. */

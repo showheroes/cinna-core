@@ -69,7 +69,7 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
@@ -170,6 +170,18 @@ OUTCOME_ROUTED = "routed"
 OUTCOME_NO_MATCH = "no_match"
 OUTCOME_ERROR = "error"
 OUTCOME_PARKED_INSTALL = "parked_install"
+#: The decision routed nowhere and the sender was answered instead of being told
+#: nothing matched: the classifier said ``help`` or ``none`` over a ballot the
+#: sender may be shown, and the channel router composed a reply listing it
+#: (``channel_routing_guidance``). ``stages[].guidance_kind`` /
+#: ``stages[].guidance_options`` say which shape and which entries.
+#:
+#: **Not positive** for the error rule in :meth:`RoutingTrace._settle_locked`
+#: and ``RoutingTraceService.persist``: a trace carrying an ``error`` still
+#: settles as ``error``. Guidance is composed only from a usable classifier
+#: answer, so the two do not meet on a healthy path, and a row where they do
+#: belongs under ``?outcome=error``.
+OUTCOME_GUIDED = "guided"
 
 #: No producer since ``message_patterns`` was dropped everywhere (channels &
 #: identity unification, settled decision §2.9). Kept because stored
@@ -208,6 +220,13 @@ MATCH_PINNED = "pinned"
 #: Written on the ``pass_1`` stage, and on the ``identity_stage2`` stage too when
 #: the quoted agent belongs to an identity.
 MATCH_QUOTED_REPLY = "quoted_reply"
+#: The sender answered a clarifying question the router asked on their previous
+#: message, and the option they chose was still on the ballot rebuilt under
+#: their current policy, so it was taken without a classifier call. Like
+#: ``quoted_reply`` the choice only narrows that ballot. Written on the stage
+#: that took it: ``pass_1`` for an agent or identity (Stage 2 may then record a
+#: method of its own), ``pass_2`` for a catalog bundle.
+MATCH_CLARIFIED = "clarified"
 
 SKIP_ALREADY_INSTALLED = "already_installed"
 SKIP_NOT_INSTALLABLE = "not_installable"
@@ -241,6 +260,11 @@ SKIP_BUNDLE_MISSING = "bundle_missing"
 #: candidate and the classifier did not pick it" about a classifier that was
 #: never given it.
 SKIP_PASS_1_MATCHED = "pass_1_matched"
+#: :data:`SKIP_PASS_1_MATCHED`'s twin for a Pass 1 that ended the decision with
+#: a guidance reply instead of a match: the sender asked about the assistant
+#: (``help``), so the probe's bundles were never put to a classifier. Same
+#: demotion from *eligible*, for the same reason.
+SKIP_PASS_1_GUIDED = "pass_1_guided"
 #: Identity Stage 2 only: the binding is active and accessible, but has no
 #: ``IdentityBindingAssignment`` for *this* caller, so every Stage-2 path aborts
 #: on it after selecting it. Distinct from "not a candidate": it was on the
@@ -322,6 +346,40 @@ NOT_RUN_CODES: frozenset[str] = frozenset(
     }
 )
 
+#: The classifier's categorical answer — ``stages[].intent`` — as asked for by
+#: ``app_agent_router_prompt.md`` and normalised by
+#: ``agent_classifier._parse_intent_and_options``.
+#:
+#: - ``route`` — one candidate fits; ``agent_id`` names it.
+#: - ``clarify`` — two or three fit about equally; ``agent_id`` is the best
+#:   pick and ``options`` lists the tied candidates, best pick first.
+#: - ``help`` — the message is about the assistant or the platform itself.
+#: - ``none`` — a real task that no candidate fits.
+#:
+#: Defined here, with the other stage vocabularies, so
+#: :func:`record_parse_outcome` can coerce to it without importing the
+#: classifier (which imports this module). ``agent_classifier`` re-exports the
+#: four names for consumers of the contract.
+INTENT_ROUTE = "route"
+INTENT_CLARIFY = "clarify"
+INTENT_HELP = "help"
+INTENT_NONE = "none"
+
+#: The vocabulary as a set, for the same reason as :data:`NOT_RUN_CODES`: the
+#: recorder is public, so membership is enforced rather than assumed, which is
+#: what lets ``intent`` sit on :data:`SAFE_STAGE_FIELDS`.
+CLASSIFIER_INTENTS: frozenset[str] = frozenset(
+    {INTENT_ROUTE, INTENT_CLARIFY, INTENT_HELP, INTENT_NONE}
+)
+
+#: ``stages[].guidance_kind`` — the shape of guidance reply a decision sent:
+#: ``help`` / ``none``, and ``clarify`` for a clarifying question. The intent
+#: strings, reused so the two fields read as one vocabulary; a set for the
+#: reason :data:`NOT_RUN_CODES` is one — :meth:`RoutingTrace.note_guidance`
+#: enforces membership, which is what lets the field sit on
+#: :data:`SAFE_STAGE_FIELDS`.
+GUIDANCE_KINDS: frozenset[str] = frozenset({INTENT_HELP, INTENT_NONE, INTENT_CLARIFY})
+
 KIND_AGENT = "agent"
 KIND_BUNDLE = "bundle"
 
@@ -369,6 +427,18 @@ class LLMAttempt:
 
 
 @dataclass
+class OptionTrace:
+    """One candidate a ``clarify`` answer offered, by ref id only.
+
+    An object rather than a bare string so the stage allowlist projects it with
+    a nested spec, exactly like ``candidates``: the projection has no
+    list-of-scalars shape, and a list declared as a scalar is dropped.
+    """
+
+    ref_id: str
+
+
+@dataclass
 class StageTrace:
     """One routing stage: ``pass_1`` | ``pass_2`` | ``identity_stage2``."""
 
@@ -386,6 +456,16 @@ class StageTrace:
     #: was barred before it ran. The machine-readable half of ``reason``, and
     #: the half that survives the message-text gate.
     not_run_code: str | None = None
+    #: The classifier's normalised answer, one of :data:`CLASSIFIER_INTENTS`,
+    #: and — for ``clarify`` only — the candidates it offered in preference
+    #: order. ``None`` / empty when no classifier reply was parsed on the stage.
+    intent: str | None = None
+    options: list[OptionTrace] = field(default_factory=list)
+    #: Set only on the stage whose ballot a guidance reply listed (the decision
+    #: settled :data:`OUTCOME_GUIDED`): one of :data:`GUIDANCE_KINDS`, and the
+    #: listed entries' ref ids in the order the reply shows them.
+    guidance_kind: str | None = None
+    guidance_options: list[OptionTrace] = field(default_factory=list)
 
 
 # --- The message-text allowlist ---------------------------------------------
@@ -472,6 +552,9 @@ SAFE_LLM_ATTEMPT_FIELDS: tuple[str, ...] = (
     "latency_ms",
 )
 
+#: A ``clarify`` option is a ballot ref id and nothing else.
+SAFE_OPTION_FIELDS: tuple[str, ...] = ("ref_id",)
+
 #: The stage projection used on the write path *and* the read path (one
 #: definition, so the two cannot drift into gating different fields).
 #: ``prompt`` and ``raw_response`` are absent on purpose — they are the sender's
@@ -512,6 +595,23 @@ SAFE_LLM_ATTEMPT_FIELDS: tuple[str, ...] = (
 #: to its producer". **A candidate rendered from user input must be refused,
 #: and refused here, in this comment**, rather than discovered on a read
 #: surface.
+#:
+#: ``intent`` and ``options`` pass that test, each on its producer's terms.
+#: ``intent`` is coerced to :data:`CLASSIFIER_INTENTS` inside
+#: :func:`record_parse_outcome`, so a model that writes the sender's words into
+#: the JSON field records nothing. ``options[].ref_id`` carries only strings the
+#: classifier matched **exactly** against the ballot's server-built
+#: ``Candidate.ref_id`` values — the terms ``runner_up_id`` is admitted on: a
+#: reply can select among those ids, it cannot author one. Neither field holds a
+#: name, a description or anything from a quoted message.
+#:
+#: ``guidance_kind`` and ``guidance_options`` pass on the same terms.
+#: ``guidance_kind`` is coerced to :data:`GUIDANCE_KINDS` inside
+#: :meth:`RoutingTrace.note_guidance`. ``guidance_options[].ref_id`` are the
+#: server-built ``Candidate.ref_id`` values of the entries a guidance reply
+#: listed, chosen by the router from the sender's ballot — the model selects
+#: the shape, it never writes an id here. The reply's text (names, trigger
+#: prompts) is not on the trace at all.
 SAFE_STAGE_FIELDS: dict[str, tuple[str, ...] | None] = {
     "stage": None,
     "match_method": None,
@@ -519,6 +619,10 @@ SAFE_STAGE_FIELDS: dict[str, tuple[str, ...] | None] = {
     "confidence": None,
     "runner_up_id": None,
     "not_run_code": None,
+    "intent": None,
+    "options": SAFE_OPTION_FIELDS,
+    "guidance_kind": None,
+    "guidance_options": SAFE_OPTION_FIELDS,
     "candidates": SAFE_CANDIDATE_FIELDS,
     "llm_attempts": SAFE_LLM_ATTEMPT_FIELDS,
 }
@@ -985,6 +1089,33 @@ class RoutingTrace:
         except Exception:  # noqa: BLE001
             logger.debug("Routing trace note_confidence failed", exc_info=True)
 
+    def note_guidance(
+        self, kind: str, ref_ids: Sequence[str], *, stage: str | None = None
+    ) -> None:
+        """Record which guidance reply a stage's ballot produced. Never settles.
+
+        The outcome is settled separately, with
+        ``record_outcome(OUTCOME_GUIDED)``, on the **terminal** trace — which is
+        not always this one: a reply listing Pass 1's ballot after Pass 2 ran is
+        noted on Pass 1's ``pass_1`` stage and settled on Pass 2's trace. A
+        ``kind`` outside :data:`GUIDANCE_KINDS` records nothing; non-string ids
+        are dropped.
+        """
+        try:
+            if not isinstance(kind, str) or kind not in GUIDANCE_KINDS:
+                return
+            options = [
+                OptionTrace(ref_id=ref_id)
+                for ref_id in (ref_ids if isinstance(ref_ids, (list, tuple)) else ())
+                if isinstance(ref_id, str)
+            ]
+        except Exception:  # noqa: BLE001
+            logger.debug("Routing trace note_guidance failed", exc_info=True)
+            return
+        self.update_stage(
+            stage=stage, guidance_kind=kind, guidance_options=options or None
+        )
+
     def record_outcome(
         self,
         outcome: str,
@@ -1264,6 +1395,8 @@ def record_parse_outcome(
     confidence: float | None = None,
     runner_up_id: str | None = None,
     not_run_code: str | None = None,
+    intent: str | None = None,
+    options: Sequence[str] | None = None,
     stage: str | None = None,
 ) -> None:
     """What the parse made of the raw response.
@@ -1274,12 +1407,27 @@ def record_parse_outcome(
     of its own because the only caller that sets it is already writing the
     matching ``reason`` in the same statement, and splitting them across two
     calls is how the code and the sentence drift apart.
+
+    ``intent`` is coerced the same way, to :data:`CLASSIFIER_INTENTS`.
+    ``options`` are ref ids the classifier already matched against its ballot;
+    non-strings are dropped here, and an empty list records nothing.
     """
     trace = RoutingTrace.current()
     if trace is None:
         return
     try:
         clamped_reason = clamp(reason, 400)
+        known_code = not_run_code if not_run_code in NOT_RUN_CODES else None
+        known_intent = (
+            intent
+            if isinstance(intent, str) and intent in CLASSIFIER_INTENTS
+            else None
+        )
+        option_traces = [
+            OptionTrace(ref_id=ref_id)
+            for ref_id in (options if isinstance(options, (list, tuple)) else ())
+            if isinstance(ref_id, str)
+        ]
     except Exception:  # noqa: BLE001
         logger.debug("Routing trace parse outcome capture failed", exc_info=True)
         return
@@ -1288,7 +1436,9 @@ def record_parse_outcome(
         reason=clamped_reason,
         confidence=confidence,
         runner_up_id=runner_up_id,
-        not_run_code=not_run_code if not_run_code in NOT_RUN_CODES else None,
+        not_run_code=known_code,
+        intent=known_intent,
+        options=option_traces or None,
     )
 
 
@@ -1385,6 +1535,8 @@ def _summarize_one(trace: RoutingTrace) -> str:
                 for a in stage.llm_attempts
             )
             segment += f", llm=[{attempts}]"
+        if stage.guidance_kind:
+            segment += f", guidance={stage.guidance_kind}"
         if stage.reason:
             segment += f", {stage.reason}"
         parts.append(segment)
@@ -1413,10 +1565,12 @@ def summarize(*traces: RoutingTrace | None) -> str:
 __all__ = [
     "CandidateTrace",
     "LLMAttempt",
+    "OptionTrace",
     "RoutingTrace",
     "StageTrace",
     "SAFE_CANDIDATE_FIELDS",
     "SAFE_LLM_ATTEMPT_FIELDS",
+    "SAFE_OPTION_FIELDS",
     "SAFE_STAGE_FIELDS",
     "SUMMARY_MAX_CHARS",
     "TRACE_TEXT_MAX_CHARS",
@@ -1430,10 +1584,12 @@ __all__ = [
     "STAGE_PASS_1",
     "STAGE_PASS_2",
     "OUTCOME_ERROR",
+    "OUTCOME_GUIDED",
     "OUTCOME_NO_MATCH",
     "OUTCOME_PARKED_INSTALL",
     "OUTCOME_ROUTED",
     "MATCH_AI",
+    "MATCH_CLARIFIED",
     "MATCH_ONLY_ONE",
     "MATCH_PATTERN",
     "MATCH_PINNED",
@@ -1443,6 +1599,12 @@ __all__ = [
     "NOT_RUN_CODES",
     "NOT_RUN_PINNED",
     "NOT_RUN_SIMULATE_TOGGLE",
+    "CLASSIFIER_INTENTS",
+    "GUIDANCE_KINDS",
+    "INTENT_CLARIFY",
+    "INTENT_HELP",
+    "INTENT_NONE",
+    "INTENT_ROUTE",
     "SKIP_AGENT_MISSING",
     "SKIP_ALREADY_INSTALLED",
     "SKIP_BUNDLE_MISSING",
@@ -1454,6 +1616,7 @@ __all__ = [
     "SKIP_NO_REVISION",
     "SKIP_NOT_IN_CHANNEL_SCOPE",
     "SKIP_NO_TRIGGER_PROMPT",
+    "SKIP_PASS_1_GUIDED",
     "SKIP_PASS_1_MATCHED",
     "SKIP_ROUTE_INACTIVE",
     "KIND_AGENT",

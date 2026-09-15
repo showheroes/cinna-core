@@ -99,6 +99,14 @@ lets Pass 1 take an agent that is **already on this sender's ballot** (or a
 reachable agent of an identity that is) without classifying; it never puts an
 agent on the ballot.
 
+**A guidance reply leaves as a value, and nothing here sends it.** When the
+classifier answers ``help`` or ``none`` over a ballot the sender may be shown,
+``decide`` returns a :class:`RoutingGuidance` — the reply's shape and the
+entries it lists, as plain strings — and the caller composes and sends the text
+(``channel_routing_guidance.compose_guidance_reply``). Only the sender's own
+post-policy ballot, or the catalog bundles admitted for them, can be listed,
+and only when the caller passed ``guidance_enabled``.
+
 The only write the routing pass makes is the routing trace itself, and on the
 **happy path** it is deliberately outside ``decide``: the caller persists,
 because only the caller knows whether Pass 1 was the whole decision or its first
@@ -131,7 +139,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from sqlmodel import Session as DBSession, select
+from sqlmodel import Session as DBSession
+from sqlmodel import select
 
 from app.models import (
     CHANNEL_AGENT_SCOPE_ALL,
@@ -145,6 +154,16 @@ from app.models import (
 from app.services.routing import routing_trace
 from app.services.routing.routing_trace import RoutingTrace
 from app.services.routing.routing_trace_service import RoutingTraceService
+from app.services.server_channels.channel_routing_guidance import (
+    ENTRY_AGENT,
+    ENTRY_BUNDLE,
+    ENTRY_IDENTITY,
+    GUIDANCE_CLARIFY,
+    GUIDANCE_HELP,
+    GuidanceEntry,
+    RoutingGuidance,
+    build_guidance,
+)
 
 if TYPE_CHECKING:  # pragma: no cover — annotations only, see PEP 563
     from app.services.routing.agent_classifier import Candidate, QuotedContext
@@ -329,6 +348,31 @@ class IdentitySelection:
 
 
 @dataclass(frozen=True)
+class BallotOffer:
+    """A ballot as its sender may be shown it, and what the classifier made of it.
+
+    Crosses the thread hop between the passes (plain data, like
+    :class:`CatalogBallot`) so the pass that ends the decision can build its
+    :class:`RoutingGuidance`. Each shape means one thing:
+
+    - no offer (``None``) — this pass cannot support guidance: it routed,
+      answered without a model (pin, quoted reply, ``only_one``), failed, got
+      no usable classifier reply, or rejected the model's pick. Nothing is ever
+      listed off it.
+    - ``BallotOffer()`` — the ballot was built and was **empty**, so no model
+      was asked. Only then may the other pass's entries be listed instead.
+    - ``intent`` ``help`` / ``none`` with ``entries`` — the model answered
+      ``NONE`` over a non-empty ballot, and ``entries`` is that ballot.
+    - ``intent`` ``clarify`` with ``entries`` — the model picked, but said two
+      or three candidates fit about equally, and the caller allowed a question.
+      ``entries`` are those options, best pick first, all on the ballot.
+    """
+
+    intent: str | None = None
+    entries: tuple[GuidanceEntry, ...] = ()
+
+
+@dataclass(frozen=True)
 class RoutingDecisionResult:
     """What routing decided, plus the recorders that explain it.
 
@@ -360,6 +404,11 @@ class RoutingDecisionResult:
     #: ``IdentityGrant``'s own docstring). ``None`` on every other branch,
     #: which leaves the three-way owner invariant exactly as strict as it was.
     identity_grant: IdentityGrant | None = None
+    #: Set only when the decision routed nowhere **and** the sender is to be
+    #: answered with a guidance reply (``outcome="guided"`` on the terminal
+    #: trace); ``agent_id`` and ``bundle_uuid`` are then both ``None``. The
+    #: caller composes the text. Always ``None`` with guidance switched off.
+    guidance: RoutingGuidance | None = None
 
     @property
     def persist_args(self) -> tuple[RoutingTrace | None, RoutingTrace | None]:
@@ -423,8 +472,48 @@ class ChannelRoutingService:
         actor_user_id: uuid.UUID | None = None,
         quoted: QuotedContext | None = None,
         quoted_agent_id: uuid.UUID | None = None,
+        guidance_enabled: bool = False,
+        guidance_max_listed: int = 5,
+        can_clarify: bool = False,
+        chosen_ref_id: str | None = None,
     ) -> RoutingDecisionResult:
         """Route ``text`` for ``user_id``. No binding, session, install or reply.
+
+        ``guidance_enabled`` / ``guidance_max_listed`` are
+        ``CHANNEL_ROUTING_GUIDANCE_ENABLED`` / ``CHANNEL_ROUTING_GUIDANCE_MAX_
+        LISTED``, read by the caller and passed in as values, like ``policy``.
+        With guidance on, a decision that routes nowhere may carry a
+        :class:`RoutingGuidance`:
+
+        - Pass 1's classifier says ``help`` over a non-empty ballot: the ballot
+          is listed and Pass 2 does not run — a question about the assistant is
+          not a request to install one.
+        - It says ``none``: Pass 2 runs exactly as before, and a bundle it
+          matches still parks an install. Only if nothing is parked is the
+          ballot listed (at once, when Pass 2 cannot run).
+        - The ballot was empty and Pass 2's classifier says ``help`` or
+          ``none`` over the admitted catalog: the bundles are listed.
+
+        - Either pass's classifier says ``clarify`` and ``can_clarify`` is set:
+          the options are listed as a question and the decision ends (Pass 2
+          does not run after a Pass-1 question). ``can_clarify`` is the
+          caller's transport gate: the inbound path sets it only where the
+          adapter can follow a question up (``supports_status_notice``).
+          Without it ``clarify`` routes, or parks, the best pick as before.
+
+        A pin, a quoted reply, ``only_one`` and identity Stage 2 never produce
+        guidance, and neither does a pass whose classifier gave no usable
+        reply. These values ride the thread targets as trailing positionals,
+        after ``quoted_agent_id``, in this signature's order.
+
+        ``chosen_ref_id`` is the option a sender picked in answer to such a
+        question. It can only narrow what ``policy`` admits now. Pass 1 takes it
+        without classifying when it is on the ballot rebuilt under ``policy``
+        (``match_method=clarified``; an identity still goes through Stage 2).
+        A bundle still on the admitted catalog is handed to Pass 2, which parks
+        its install the same way. Anything else is classified as though no
+        choice had been made, except that a choice never earns a second
+        question: ``can_clarify`` is off for the whole decision.
 
         ``quoted`` is what the sender replied to, when the caller has one — the
         context every classifier call in this decision is given (Pass 1,
@@ -510,11 +599,21 @@ class ChannelRoutingService:
         exists for, and is separately answerable through
         ``GET /users/me/channels``.
         """
+        if chosen_ref_id is not None:
+            # This decision answers a question already asked, so it never asks
+            # another. A choice no longer on the ballot is classified, and a
+            # ``clarify`` answer routes its best pick, as on a transport that
+            # cannot ask: a second question would give the sender who picked
+            # "2" no reason why it did not take. Off for both passes, since a
+            # catalog question after a Pass-1 miss would be the same surprise.
+            can_clarify = False
         (
             agent_id,
             pass1_trace,
             ballot,
             identity,
+            pass1_offer,
+            guidance,
         ) = await ChannelRoutingService.run_in_thread(
             ChannelRoutingService._route_installed_in_thread,
             user_id,
@@ -527,7 +626,15 @@ class ChannelRoutingService:
             include_catalog,
             quoted,
             quoted_agent_id,
+            guidance_enabled,
+            guidance_max_listed,
+            can_clarify,
+            chosen_ref_id,
         )
+        if guidance is not None:
+            # Pass 1 answered the sender and ended the decision; its trace is
+            # already settled as ``guided`` and is the whole row.
+            return RoutingDecisionResult(pass1_trace=pass1_trace, guidance=guidance)
         if (
             agent_id is not None
             # Stage 1 picked a *person*. Pass 2 does not run, whether or not
@@ -549,7 +656,7 @@ class ChannelRoutingService:
                 identity_grant=identity.grant if identity is not None else None,
             )
 
-        bundle_uuid, pass2_trace = await ChannelRoutingService.run_in_thread(
+        bundle_uuid, pass2_trace, guidance = await ChannelRoutingService.run_in_thread(
             ChannelRoutingService._route_catalog_in_thread,
             user_id,
             text,
@@ -561,12 +668,18 @@ class ChannelRoutingService:
             ballot,
             quoted,
             quoted_agent_id,
+            pass1_offer,
+            guidance_enabled,
+            guidance_max_listed,
+            can_clarify,
+            chosen_ref_id,
         )
         return RoutingDecisionResult(
             bundle_uuid=bundle_uuid,
             pass1_trace=pass1_trace,
             pass2_trace=pass2_trace,
             catalog_ran=True,
+            guidance=guidance,
         )
 
     @staticmethod
@@ -652,6 +765,144 @@ class ChannelRoutingService:
         )
 
     @staticmethod
+    def _ballot_offer(
+        intent: str | None, candidates: list[Candidate], *, catalog: bool = False
+    ) -> BallotOffer | None:
+        """The offer a classifier ``NONE`` makes over ``candidates``, if any.
+
+        ``None`` unless ``intent`` is ``help`` or ``none`` — the only intents
+        ``ClassifierAnswer`` carries without a pick, and never set when the
+        reply was unusable. Every entry is a candidate the ballot builder
+        already admitted, under the sender's policy (Pass 1) or
+        ``CatalogService.user_can_install`` (Pass 2, ``catalog=True``); nothing
+        is added here.
+        """
+        if intent not in (routing_trace.INTENT_HELP, routing_trace.INTENT_NONE):
+            return None
+        return BallotOffer(
+            intent=intent,
+            entries=ChannelRoutingService._guidance_entries(candidates, catalog=catalog),
+        )
+
+    @staticmethod
+    def _clarify_offer(
+        options: tuple[str, ...], candidates: list[Candidate], *, catalog: bool = False
+    ) -> BallotOffer | None:
+        """The question a ``clarify`` answer asks, or ``None`` if it cannot ask one.
+
+        ``options`` are the classifier's ids, best pick first. Only those on
+        ``candidates`` are kept, in the model's order, and fewer than two
+        survivors is not a question: the caller then takes the best pick as
+        before. The parser already enforces both, so this is the belt.
+        """
+        by_ref = {candidate.ref_id: candidate for candidate in candidates}
+        chosen = [by_ref[ref] for ref in dict.fromkeys(options) if ref in by_ref]
+        if len(chosen) < 2:
+            return None
+        return BallotOffer(
+            intent=routing_trace.INTENT_CLARIFY,
+            entries=ChannelRoutingService._guidance_entries(chosen, catalog=catalog),
+        )
+
+    @staticmethod
+    def _guidance_entries(
+        candidates: list[Candidate], *, catalog: bool
+    ) -> tuple[GuidanceEntry, ...]:
+        """``candidates`` as the plain entries a guidance reply may name."""
+        from app.services.routing.identity_candidate_provider import (
+            parse_identity_ref,
+        )
+
+        entries: list[GuidanceEntry] = []
+        for candidate in candidates:
+            if catalog:
+                kind = ENTRY_BUNDLE
+            elif parse_identity_ref(candidate.ref_id) is not None:
+                kind = ENTRY_IDENTITY
+            else:
+                kind = ENTRY_AGENT
+            entries.append(
+                GuidanceEntry(
+                    ref_id=candidate.ref_id,
+                    name=candidate.name,
+                    description=candidate.trigger_prompt or "",
+                    kind=kind,
+                )
+            )
+        return tuple(entries)
+
+    @staticmethod
+    def _pass1_guidance(
+        offer: BallotOffer | None,
+        policy: ResolvedChannelPolicy,
+        *,
+        include_catalog: bool,
+        guidance_enabled: bool,
+        max_listed: int,
+    ) -> RoutingGuidance | None:
+        """Does Pass 1's offer end the decision with a guidance reply?
+
+        ``help`` over a non-empty ballot always does: the sender asked about
+        the assistant, and the catalog pass would answer a question they did
+        not ask. ``none`` does only when Pass 2 cannot run — read through
+        :meth:`_catalog_may_run`, the conjunction ``decide`` gates on, so the
+        two cannot disagree; otherwise Pass 2 runs and :meth:`_pass2_guidance`
+        decides after it. ``clarify`` always does: the sender is asked which of
+        their candidates they meant, and every option is listed whatever
+        ``max_listed`` says (there are at most three).
+        """
+        if not guidance_enabled or offer is None or not offer.entries:
+            return None
+        if offer.intent == routing_trace.INTENT_CLARIFY:
+            return build_guidance(
+                GUIDANCE_CLARIFY, offer.entries, max_listed=len(offer.entries)
+            )
+        if offer.intent == routing_trace.INTENT_HELP or not (
+            ChannelRoutingService._catalog_may_run(
+                policy, include_catalog=include_catalog
+            )
+        ):
+            return build_guidance(offer.intent, offer.entries, max_listed=max_listed)
+        return None
+
+    @staticmethod
+    def _pass2_guidance(
+        pass1_offer: BallotOffer | None,
+        catalog_offer: BallotOffer | None,
+        *,
+        guidance_enabled: bool,
+        max_listed: int,
+    ) -> RoutingGuidance | None:
+        """The guidance reply for a decision Pass 2 ended without parking.
+
+        Both passes must have answered. No offer from either — a pass that
+        failed, got no usable classifier reply, or rejected a pick — means no
+        guidance, and the sender gets the no-match reply as before.
+
+        - Pass 1's ballot was non-empty (its classifier said ``none``): that
+          ballot is listed. The sender's own agents come before a catalog.
+        - Pass 1's ballot was empty: the admitted bundles are listed, in the
+          shape Pass 2's classifier chose. An empty catalog lists nothing.
+
+        A catalog ``clarify`` offer is the exception to "both must have
+        answered": it is a pick awaiting the sender's confirmation, which would
+        otherwise have parked an install whatever Pass 1 said, so it is asked
+        on its own.
+        """
+        if not guidance_enabled or catalog_offer is None:
+            return None
+        if catalog_offer.intent == routing_trace.INTENT_CLARIFY:
+            return build_guidance(
+                GUIDANCE_CLARIFY,
+                catalog_offer.entries,
+                max_listed=len(catalog_offer.entries),
+            )
+        if pass1_offer is None:
+            return None
+        chosen = pass1_offer if pass1_offer.entries else catalog_offer
+        return build_guidance(chosen.intent, chosen.entries, max_listed=max_listed)
+
+    @staticmethod
     async def run_in_thread(fn: Any, *args: Any) -> Any:
         """Run a blocking callable off the event loop.
 
@@ -707,6 +958,99 @@ class ChannelRoutingService:
         return await anyio.to_thread.run_sync(functools.partial(fn, *args))
 
     @staticmethod
+    async def classify_clarification_reply(
+        *,
+        user_id: uuid.UUID,
+        policy: ResolvedChannelPolicy,
+        reply_text: str,
+        original_text: str,
+        option_refs: tuple[str, ...],
+    ) -> str | None:
+        """Which offered option a free-text answer to a question means, if any.
+
+        Called by the inbound path when ``resolve_choice`` could not read the
+        answer. One classifier call over the **options only**, each rebuilt
+        from the sender's current ballot (their agents and identities under
+        ``policy``, then the admitted catalog when Pass 2 may run), so an option
+        policy no longer admits is not offered to the model. ``reply_text`` is
+        the message; ``original_text`` is given as quoted context, never as
+        authority.
+
+        Returns an option ref, or ``None`` for ``NONE``, an unusable reply, a
+        pick off the options, no surviving options, or any failure. No trace
+        is opened: the decision that follows records ``match_method=clarified``.
+        Same purity as ``decide``: its own read-only session, off the loop.
+        """
+        return await ChannelRoutingService.run_in_thread(
+            ChannelRoutingService._classify_clarification_reply_in_thread,
+            user_id,
+            policy,
+            reply_text,
+            original_text,
+            option_refs,
+        )
+
+    @staticmethod
+    def _classify_clarification_reply_in_thread(
+        user_id: uuid.UUID,
+        policy: ResolvedChannelPolicy,
+        reply_text: str,
+        original_text: str,
+        option_refs: tuple[str, ...],
+    ) -> str | None:
+        """Thread target for :meth:`classify_clarification_reply`. Total."""
+        from app.core.db import create_session
+        from app.services.routing.agent_classifier import (
+            AgentClassifier,
+            QuotedContext,
+        )
+        from app.services.routing.channel_candidate_provider import (
+            ChannelCandidateProvider,
+        )
+        from app.services.routing.identity_candidate_provider import (
+            IdentityCandidateProvider,
+        )
+
+        if not option_refs or not reply_text:
+            return None
+        try:
+            with create_session() as db:
+                user = db.get(User, user_id)
+                if user is None:
+                    return None
+                ballot = ChannelCandidateProvider.build(db, user.id, policy=policy)
+                ballot += IdentityCandidateProvider.build(db, user.id, policy=policy)
+                by_ref = {candidate.ref_id: candidate for candidate in ballot}
+                if any(
+                    ref not in by_ref for ref in option_refs
+                ) and ChannelRoutingService._catalog_may_run(
+                    policy, include_catalog=True
+                ):
+                    catalog = ChannelRoutingService._gather_catalog_candidates(db, user)
+                    for candidate in catalog.candidates:
+                        by_ref.setdefault(candidate.ref_id, candidate)
+                candidates = [by_ref[ref] for ref in option_refs if ref in by_ref]
+                if not candidates:
+                    return None
+                answer = AgentClassifier.classify_answer(
+                    candidates,
+                    reply_text,
+                    quoted=QuotedContext(text=original_text) if original_text else None,
+                )
+        except Exception:  # noqa: BLE001 — an unread answer routes as a new request
+            logger.warning(
+                "%s Classifying a clarification answer failed for user %s",
+                _LOG_PREFIX,
+                user_id,
+                exc_info=True,
+            )
+            return None
+        result = answer.result
+        if result is None or result.agent_id not in option_refs:
+            return None
+        return result.agent_id
+
+    @staticmethod
     def _route_installed_in_thread(
         user_id: uuid.UUID,
         text: str,
@@ -718,15 +1062,26 @@ class ChannelRoutingService:
         include_catalog: bool = True,
         quoted: QuotedContext | None = None,
         quoted_agent_id: uuid.UUID | None = None,
+        guidance_enabled: bool = False,
+        guidance_max_listed: int = 5,
+        can_clarify: bool = False,
+        chosen_ref_id: str | None = None,
     ) -> tuple[
         uuid.UUID | None,
         RoutingTrace | None,
         CatalogBallot | None,
         IdentitySelection | None,
+        BallotOffer | None,
+        RoutingGuidance | None,
     ]:
         """Thread target for Pass 1. Owns its session.
 
-        Returns ``(agent id, trace, ballot, identity)``. The third element is
+        Returns ``(agent id, trace, ballot, identity, offer, guidance)``. The
+        fifth is Pass 1's :class:`BallotOffer`, handed on to Pass 2. The sixth
+        is set only when Pass 1 itself ends the decision with a guidance reply
+        (:meth:`_pass1_guidance`); its trace is then settled ``guided`` here,
+        inside the capture, and the probe's ballot recorded as for a routed
+        decision. The third element is
         Pass 2's candidate set when the single-candidate probe computed one
         *and* Pass 2 is still going to run — see :class:`CatalogBallot` and the
         recording rule below. The fourth is set only when Stage 1 picked a
@@ -755,10 +1110,12 @@ class ChannelRoutingService:
         with create_session() as db:
             user = db.get(User, user_id)
             if user is None:
-                return None, None, None, None
+                return None, None, None, None, None, None
             trace: RoutingTrace | None = None
             ballot: CatalogBallot | None = None
             identity: IdentitySelection | None = None
+            offer: BallotOffer | None = None
+            guidance: RoutingGuidance | None = None
             try:
                 with RoutingTrace.capture(
                     origin=origin,
@@ -772,7 +1129,12 @@ class ChannelRoutingService:
                     quoted_agent_id=quoted_agent_id,
                     stage=routing_trace.STAGE_PASS_1,
                 ) as trace:
-                    agent, ballot, identity = ChannelRoutingService._route_installed(
+                    (
+                        agent,
+                        ballot,
+                        identity,
+                        offer,
+                    ) = ChannelRoutingService._route_installed(
                         db,
                         user,
                         text,
@@ -780,9 +1142,32 @@ class ChannelRoutingService:
                         include_catalog=include_catalog,
                         quoted=quoted,
                         quoted_agent_id=quoted_agent_id,
+                        can_clarify=guidance_enabled and can_clarify,
+                        chosen_ref_id=chosen_ref_id,
                     )
                     agent_id = agent.id if agent is not None else None
-                    if agent_id is None and include_catalog and identity is None:
+                    if agent_id is None and identity is None:
+                        guidance = ChannelRoutingService._pass1_guidance(
+                            offer,
+                            policy,
+                            include_catalog=include_catalog,
+                            guidance_enabled=guidance_enabled,
+                            max_listed=guidance_max_listed,
+                        )
+                    if (
+                        agent_id is None
+                        and include_catalog
+                        and identity is None
+                        # A ``help`` reply or a ``clarify`` question ends the
+                        # decision whatever policy says, so policy is not why
+                        # Pass 2 will not run. A terminal ``none`` is reached
+                        # only because policy bars Pass 2, so the note stays
+                        # true for it.
+                        and (
+                            guidance is None
+                            or guidance.kind not in (GUIDANCE_HELP, GUIDANCE_CLARIFY)
+                        )
+                    ):
                         # Pass 1 found nothing, so ``decide`` is about to reach
                         # for Pass 2 — and this sender's policy may stop it.
                         # Said here, inside Pass 1's capture, because by the
@@ -806,7 +1191,20 @@ class ChannelRoutingService:
                         trace.record_outcome(
                             routing_trace.OUTCOME_ROUTED, selected_agent_id=agent_id
                         )
-                    if agent_id is not None or identity is not None:
+                    if guidance is not None:
+                        trace.note_guidance(
+                            guidance.kind,
+                            guidance.ref_ids,
+                            stage=routing_trace.STAGE_PASS_1,
+                        )
+                        trace.record_outcome(routing_trace.OUTCOME_GUIDED)
+                    if (
+                        agent_id is not None
+                        or identity is not None
+                        # A guidance reply ends the decision too, so Pass 2
+                        # will not run and record the probe's ballot either.
+                        or guidance is not None
+                    ):
                         # Pass 1 was terminal, so ``decide`` will not run
                         # Pass 2 — this is the ballot's only chance to be
                         # recorded, and the scan behind it genuinely happened.
@@ -823,7 +1221,13 @@ class ChannelRoutingService:
                         # path" is the rule :class:`CatalogBallot` states, and
                         # it does not have a Stage-2-shaped exception.
                         ChannelRoutingService._record_catalog_ballot(
-                            ballot, availability_only=True
+                            ballot,
+                            availability_only=True,
+                            unclassified_reason=(
+                                routing_trace.SKIP_PASS_1_GUIDED
+                                if guidance is not None
+                                else routing_trace.SKIP_PASS_1_MATCHED
+                            ),
                         )
                         ballot = None
             except Exception:
@@ -879,7 +1283,7 @@ class ChannelRoutingService:
             # ``ballot`` reaching the caller un-recorded is the same rule in the
             # other direction: Pass 2 is about to run and will record it there,
             # exactly once.
-            return agent_id, trace, ballot, identity
+            return agent_id, trace, ballot, identity, offer, guidance
 
     @staticmethod
     def _route_catalog_in_thread(
@@ -893,8 +1297,19 @@ class ChannelRoutingService:
         ballot: CatalogBallot | None = None,
         quoted: QuotedContext | None = None,
         quoted_agent_id: uuid.UUID | None = None,
-    ) -> tuple[uuid.UUID | None, RoutingTrace | None]:
-        """Thread target for Pass 2. Owns its session; returns (bundle id, trace).
+        pass1_offer: BallotOffer | None = None,
+        guidance_enabled: bool = False,
+        guidance_max_listed: int = 5,
+        can_clarify: bool = False,
+        chosen_ref_id: str | None = None,
+    ) -> tuple[uuid.UUID | None, RoutingTrace | None, RoutingGuidance | None]:
+        """Thread target for Pass 2. Owns its session.
+
+        Returns ``(bundle id, trace, guidance)``. ``guidance`` is set only when
+        nothing was parked and :meth:`_pass2_guidance` finds something to list.
+        Its stage fields go on the stage whose ballot is listed — Pass 1's
+        ``pass_1`` stage on ``pass1_trace``, or this trace's ``pass_2`` — and
+        the ``guided`` outcome on this trace, which is the terminal one.
 
         Same capture-inside-the-thread rule as Pass 1 above. ``pass1_trace`` is
         the finished Pass-1 recorder, carried in only so the error path below can
@@ -921,7 +1336,7 @@ class ChannelRoutingService:
                 # *computed*, not what is stored. Recording it would mean opening
                 # a capture and returning a recorder from a pass that did not
                 # run, which is a worse lie than a missing stage.
-                return None, None
+                return None, None, None
             trace: RoutingTrace | None = None
             try:
                 with RoutingTrace.capture(
@@ -939,10 +1354,48 @@ class ChannelRoutingService:
                     quoted_agent_id=quoted_agent_id,
                     stage=routing_trace.STAGE_PASS_2,
                 ) as trace:
-                    bundle = ChannelRoutingService._route_catalog(
-                        db, user, text, ballot=ballot, quoted=quoted
+                    bundle, catalog_offer = ChannelRoutingService._route_catalog(
+                        db,
+                        user,
+                        text,
+                        ballot=ballot,
+                        quoted=quoted,
+                        can_clarify=guidance_enabled and can_clarify,
+                        chosen_ref_id=chosen_ref_id,
                     )
                     bundle_uuid = bundle.id if bundle is not None else None
+                    guidance = (
+                        ChannelRoutingService._pass2_guidance(
+                            pass1_offer,
+                            catalog_offer,
+                            guidance_enabled=guidance_enabled,
+                            max_listed=guidance_max_listed,
+                        )
+                        if bundle_uuid is None
+                        else None
+                    )
+                    if guidance is not None:
+                        if (
+                            guidance.kind != GUIDANCE_CLARIFY
+                            and pass1_offer is not None
+                            and pass1_offer.entries
+                        ):
+                            # Pass 1's ballot is what the reply lists, so its
+                            # stage says so; the recorder is finished but still
+                            # an in-memory object, persisted by the caller.
+                            if pass1_trace is not None:
+                                pass1_trace.note_guidance(
+                                    guidance.kind,
+                                    guidance.ref_ids,
+                                    stage=routing_trace.STAGE_PASS_1,
+                                )
+                        else:
+                            trace.note_guidance(
+                                guidance.kind,
+                                guidance.ref_ids,
+                                stage=routing_trace.STAGE_PASS_2,
+                            )
+                        trace.record_outcome(routing_trace.OUTCOME_GUIDED)
             except Exception:
                 # Same as Pass 1: write the error trace the caller will never
                 # get to see, and do NOT rollback first. The ``db.rollback()``
@@ -953,7 +1406,7 @@ class ChannelRoutingService:
                 RoutingTraceService.persist(trace, preceded_by=pass1_trace)
                 raise
             # Happy path persisted by the caller, which merges both passes.
-            return bundle_uuid, trace
+            return bundle_uuid, trace, guidance
 
     @staticmethod
     def _route_installed(
@@ -965,7 +1418,11 @@ class ChannelRoutingService:
         include_catalog: bool = True,
         quoted: QuotedContext | None = None,
         quoted_agent_id: uuid.UUID | None = None,
-    ) -> tuple[Agent | None, CatalogBallot | None, IdentitySelection | None]:
+        can_clarify: bool = False,
+        chosen_ref_id: str | None = None,
+    ) -> tuple[
+        Agent | None, CatalogBallot | None, IdentitySelection | None, BallotOffer | None
+    ]:
         """Pass 1 — route the message over what the sender may address.
 
         **Order of the model-free answers:** the pin, then (once the ballot
@@ -975,7 +1432,10 @@ class ChannelRoutingService:
         at one agent on the ballot, so there is nothing for the probe to weigh
         it against.
 
-        Returns ``(agent, ballot, identity)``. The ballot is Pass 2's candidate
+        Returns ``(agent, ballot, identity, offer)``. ``offer`` is the
+        :class:`BallotOffer` a guidance reply may be built from: set only when
+        the ballot was empty, or the classifier answered ``help`` / ``none``
+        over it. The ballot is Pass 2's candidate
         set when the single-candidate probe below computed one, and ``None``
         otherwise; the caller is responsible for recording it exactly once (see
         :class:`CatalogBallot`). ``identity`` is set only when the winning
@@ -1139,6 +1599,7 @@ class ChannelRoutingService:
                     ),
                     None,
                     None,
+                    None,
                 )
 
             candidates = ChannelCandidateProvider.build(db, user.id, policy=policy)
@@ -1175,7 +1636,44 @@ class ChannelRoutingService:
                 # Zero eligible candidates: no probe, straight to Pass 2, which
                 # is the onboarding path this state exists for. Unchanged.
                 routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-                return None, None, None
+                # An empty ballot is still an offer: it is what lets Pass 2
+                # list catalog bundles instead (see ``BallotOffer``).
+                return None, None, None, BallotOffer()
+
+            if chosen_ref_id is not None:
+                # The sender answered a clarifying question. After the ballot,
+                # so the choice can only narrow what policy admits now; before
+                # the quoted preference and the probe, because the sender just
+                # named the candidate outright.
+                if chosen_ref_id in {candidate.ref_id for candidate in candidates}:
+                    agent, identity = ChannelRoutingService._route_clarified_choice(
+                        db, user, chosen_ref_id, message=text, quoted=quoted
+                    )
+                    return agent, None, identity, None
+                if parse_identity_ref(chosen_ref_id) is None:
+                    # Possibly a catalog bundle the question offered. Probed
+                    # with the same conjunction Pass 2 is gated on; a bundle
+                    # still admitted ends Pass 1 unclassified and Pass 2 takes
+                    # it, reusing this scan. Otherwise the scan is kept for the
+                    # single-candidate probe below and routing carries on.
+                    ballot = ChannelRoutingService._catalog_ballot(
+                        db,
+                        user,
+                        include_catalog=ChannelRoutingService._catalog_may_run(
+                            policy, include_catalog=include_catalog
+                        ),
+                    )
+                    if chosen_ref_id in {
+                        candidate.ref_id for candidate in ballot.candidates
+                    }:
+                        routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
+                        return None, ballot, None, None
+                logger.debug(
+                    "%s Chosen option %s is not on user %s's ballot — classifying",
+                    _LOG_PREFIX,
+                    chosen_ref_id,
+                    user.id,
+                )
 
             if quoted_agent_id is not None:
                 # After the ballot, so the preference can only choose among
@@ -1192,7 +1690,7 @@ class ChannelRoutingService:
                 )
                 if preferred is not None:
                     agent, identity = preferred
-                    return agent, None, identity
+                    return agent, None, identity, None
 
             if len(candidates) == 1:
                 # The ONLY branch that probes. See the docstring: with two or
@@ -1200,29 +1698,38 @@ class ChannelRoutingService:
                 # so what Pass 2 holds cannot change whether the classifier
                 # runs, and paying for the scan would be pure cost on the
                 # common path.
-                ballot = ChannelRoutingService._catalog_ballot(
-                    db,
-                    user,
-                    include_catalog=ChannelRoutingService._catalog_may_run(
-                        policy, include_catalog=include_catalog
-                    ),
-                )
+                if ballot is None:
+                    ballot = ChannelRoutingService._catalog_ballot(
+                        db,
+                        user,
+                        include_catalog=ChannelRoutingService._catalog_may_run(
+                            policy, include_catalog=include_catalog
+                        ),
+                    )
                 if not ballot.offers_an_alternative:
                     agent, identity = ChannelRoutingService._route_only_candidate(
                         db, user, candidates[0], message=text, quoted=quoted
                     )
-                    return agent, ballot, identity
+                    return agent, ballot, identity, None
 
-            result = AgentClassifier.classify(candidates, text, quoted=quoted)
+            answer = AgentClassifier.classify_answer(candidates, text, quoted=quoted)
+            result = answer.result
         except Exception as exc:  # noqa: BLE001 — router outage must not 500 the webhook
             logger.exception("%s Pass 1 routing failed", _LOG_PREFIX)
             routing_trace.record_error(exc)
-            return None, None, None
+            return None, None, None, None
 
         if result is None or not result.agent_id:
-            # ``classify`` already recorded *which* negative outcome this was.
+            # ``classify_answer`` already recorded *which* negative outcome this
+            # was. Only an explicit ``help`` / ``none`` makes an offer; an
+            # unusable reply carries no intent and so makes none.
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            return None, ballot, None
+            return (
+                None,
+                ballot,
+                None,
+                ChannelRoutingService._ballot_offer(answer.intent, candidates),
+            )
 
         # Recorded HERE, above the guards below, not after them.
         # ``note_match_method`` is documented to survive a later rejection on
@@ -1241,7 +1748,16 @@ class ChannelRoutingService:
                 reason="classifier picked an agent that is not among the candidates"
             )
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            return None, ballot, None
+            return None, ballot, None, None
+
+        if can_clarify and answer.intent == routing_trace.INTENT_CLARIFY:
+            # Two or three candidates fit about equally and the caller can
+            # follow a question up: ask instead of routing the best pick. The
+            # match above stays recorded — the classifier did pick.
+            clarify = ChannelRoutingService._clarify_offer(result.options, candidates)
+            if clarify is not None:
+                routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
+                return None, ballot, None, clarify
 
         # **Before the UUID parse below, and that ordering is load-bearing.**
         # An identity ref is ``identity:{owner_id}`` — deliberately not a UUID
@@ -1264,7 +1780,7 @@ class ChannelRoutingService:
                 message=result.transformed_message or text,
                 quoted=quoted,
             )
-            return agent, ballot, identity
+            return agent, ballot, identity, None
 
         try:
             agent_uuid = uuid.UUID(result.agent_id)
@@ -1286,7 +1802,7 @@ class ChannelRoutingService:
                 reason="classifier returned a value that is not a UUID"
             )
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            return None, ballot, None
+            return None, ballot, None, None
 
         agent = db.get(Agent, agent_uuid)
         if agent is None:
@@ -1296,7 +1812,7 @@ class ChannelRoutingService:
                 ref_id=result.agent_id, reason=routing_trace.SKIP_AGENT_MISSING
             )
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            return None, ballot, None
+            return None, ballot, None, None
         if agent.owner_id != user.id:
             # Unreachable on THIS path — see the docstring. Every candidate
             # that reaches here came from ``WHERE owner_id = :user_id``; the
@@ -1324,12 +1840,12 @@ class ChannelRoutingService:
                 agent.owner_id,
                 user.id,
             )
-            return None, ballot, None
+            return None, ballot, None, None
 
         logger.info(
             "%s Pass 1 matched own agent %s for user %s", _LOG_PREFIX, agent.id, user.id
         )
-        return agent, ballot, None
+        return agent, ballot, None, None
 
     @staticmethod
     def _route_pinned_agent(
@@ -1610,6 +2126,61 @@ class ChannelRoutingService:
             quoted=quoted,
             preferred_agent_id=quoted_agent_id,
         )
+
+    @staticmethod
+    def _route_clarified_choice(
+        db: DBSession,
+        user: User,
+        ref_id: str,
+        *,
+        message: str,
+        quoted: QuotedContext | None = None,
+    ) -> tuple[Agent | None, IdentitySelection | None]:
+        """Route to the ballot candidate the sender chose in answer to a question.
+
+        The caller has already checked that ``ref_id`` is on the ballot built
+        under the sender's current policy. Records ``match_method=clarified``
+        and then applies exactly what the single-candidate branch applies: an
+        identity goes through Stage 2 (which may record a method of its own),
+        and an owned agent is re-loaded under :meth:`_reload_own_agent`'s two
+        postconditions, so a concurrent delete is a recorded ``no_match``.
+        """
+        from app.services.routing.identity_candidate_provider import (
+            parse_identity_ref,
+        )
+
+        routing_trace.record_match(method=routing_trace.MATCH_CLARIFIED)
+        owner_id = parse_identity_ref(ref_id)
+        if owner_id is not None:
+            return ChannelRoutingService._route_identity(
+                db, user, owner_id, message=message, quoted=quoted
+            )
+        try:
+            agent_uuid = uuid.UUID(ref_id)
+        except ValueError:
+            # Unreachable — every non-identity Pass-1 ref is an ``Agent.id``.
+            routing_trace.record_parse_outcome(
+                reason="the chosen option's id is not a UUID"
+            )
+            routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
+            return None, None
+        agent = ChannelRoutingService._reload_own_agent(
+            db,
+            user,
+            agent_uuid=agent_uuid,
+            ref_id=ref_id,
+            route="clarified choice",
+        )
+        if agent is None:
+            return None, None
+        logger.info(
+            "%s Pass 1 routed to agent %s for user %s without classifying (the "
+            "sender chose it in answer to a clarifying question)",
+            _LOG_PREFIX,
+            agent.id,
+            user.id,
+        )
+        return agent, None
 
     @staticmethod
     def _reload_own_agent(
@@ -2051,7 +2622,10 @@ class ChannelRoutingService:
 
     @staticmethod
     def _record_catalog_ballot(
-        ballot: CatalogBallot | None, *, availability_only: bool = False
+        ballot: CatalogBallot | None,
+        *,
+        availability_only: bool = False,
+        unclassified_reason: str = routing_trace.SKIP_PASS_1_MATCHED,
     ) -> None:
         """Write one ballot into the trace — **once, and only from one caller**.
 
@@ -2092,8 +2666,10 @@ class ChannelRoutingService:
             if not ballot.skips and not ballot.candidates:
                 return
             with routing_trace.stage_scope(routing_trace.STAGE_PASS_2):
+                # ``unclassified_reason`` is SKIP_PASS_1_MATCHED unless Pass 1
+                # ended with a guidance reply (SKIP_PASS_1_GUIDED).
                 ChannelRoutingService._record_catalog_rows(
-                    ballot, unclassified_reason=routing_trace.SKIP_PASS_1_MATCHED
+                    ballot, unclassified_reason=unclassified_reason
                 )
                 routing_trace.record_parse_outcome(
                     reason=CATALOG_AVAILABILITY_ONLY_NOTE
@@ -2221,8 +2797,21 @@ class ChannelRoutingService:
         *,
         ballot: CatalogBallot | None = None,
         quoted: QuotedContext | None = None,
-    ) -> AgentBundle | None:
+        can_clarify: bool = False,
+        chosen_ref_id: str | None = None,
+    ) -> tuple[AgentBundle | None, BallotOffer | None]:
         """Pass 2 — classify against the server-wide auto-install list.
+
+        Returns ``(bundle, offer)``. ``offer`` is the catalog's
+        :class:`BallotOffer`: ``BallotOffer()`` for an empty ballot, the
+        admitted bundles when the classifier answered ``help`` / ``none``, the
+        options of a ``clarify`` answer when ``can_clarify`` is set, and
+        ``None`` on every other branch, a match included.
+
+        ``chosen_ref_id`` on this ballot is taken without classifying and parks
+        like a classifier pick, under ``match_method=clarified``. Off the
+        ballot (delisted, installed since, no longer admitted) it is ignored and
+        the catalog is classified as usual.
 
         ``ballot`` is Pass 1's already-computed scan, handed across when its
         single-candidate probe made one. Reused rather than recomputed so the
@@ -2247,25 +2836,64 @@ class ChannelRoutingService:
 
         if not ballot.candidates:
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            return None
-
-        result = AgentClassifier.classify(ballot.candidates, text, quoted=quoted)
-        if result is None or not result.agent_id:
-            routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            return None
+            return None, BallotOffer()
 
         known_ids = {c.ref_id for c in ballot.candidates}
+        if chosen_ref_id is not None and chosen_ref_id in known_ids:
+            return (
+                ChannelRoutingService._settle_catalog_pick(
+                    db, chosen_ref_id, method=routing_trace.MATCH_CLARIFIED
+                ),
+                None,
+            )
+
+        answer = AgentClassifier.classify_answer(
+            ballot.candidates, text, quoted=quoted
+        )
+        result = answer.result
+        if result is None or not result.agent_id:
+            routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
+            return None, ChannelRoutingService._ballot_offer(
+                answer.intent, ballot.candidates, catalog=True
+            )
+
         if result.agent_id not in known_ids:
             routing_trace.record_parse_outcome(
                 reason="classifier picked a bundle that is not among the candidates"
             )
             routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
-            return None
+            return None, None
 
+        if can_clarify and answer.intent == routing_trace.INTENT_CLARIFY:
+            clarify = ChannelRoutingService._clarify_offer(
+                result.options, ballot.candidates, catalog=True
+            )
+            if clarify is not None:
+                routing_trace.record_match(method=routing_trace.MATCH_AI)
+                routing_trace.record_outcome(routing_trace.OUTCOME_NO_MATCH)
+                return None, clarify
+
+        return (
+            ChannelRoutingService._settle_catalog_pick(
+                db, result.agent_id, method=routing_trace.MATCH_AI
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _settle_catalog_pick(
+        db: DBSession, ref_id: str, *, method: str
+    ) -> AgentBundle | None:
+        """Load the picked bundle and settle Pass 2 as ``parked_install``.
+
+        Shared by a classifier pick (``ai``) and a sender's clarified choice
+        (``clarified``): ``ref_id`` is on the ballot either way. A bundle that
+        vanished since the scan is its own recorded ``no_match``.
+        """
         try:
             # Unreachable while the id is on the ballot — every ``ref_id`` there
             # is ``str(bundle.id)`` — and cheaper to keep than to re-derive.
-            bundle_uuid = uuid.UUID(str(result.agent_id))
+            bundle_uuid = uuid.UUID(str(ref_id))
         except ValueError:
             routing_trace.record_parse_outcome(
                 reason="classifier returned a value that is not a UUID"
@@ -2280,7 +2908,7 @@ class ChannelRoutingService:
             # session and delisted since, which is a real state and a different
             # answer from a classifier that invented an id.
             routing_trace.mark_candidate_skipped(
-                ref_id=result.agent_id, reason=routing_trace.SKIP_BUNDLE_MISSING
+                ref_id=ref_id, reason=routing_trace.SKIP_BUNDLE_MISSING
             )
             routing_trace.record_parse_outcome(
                 reason="the chosen bundle no longer exists — it was removed "
@@ -2291,10 +2919,10 @@ class ChannelRoutingService:
 
         # Stage-level too, so the debug-feed summary shows "method=ai" for
         # Pass 2 the way it already does for Pass 1.
-        routing_trace.record_match(method=routing_trace.MATCH_AI)
+        routing_trace.record_match(method=method)
         routing_trace.record_outcome(
             routing_trace.OUTCOME_PARKED_INSTALL,
-            match_method=routing_trace.MATCH_AI,
+            match_method=method,
             selected_bundle_uuid=matched.id,
         )
         return matched

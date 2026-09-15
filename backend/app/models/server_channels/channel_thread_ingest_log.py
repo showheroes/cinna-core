@@ -9,6 +9,12 @@ from datetime import UTC, datetime
 from sqlalchemy import Column, DateTime, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
+#: ``source`` of a receipt for a message that answered the channel router's
+#: clarifying question. Never content: it marks the answer as handled so a
+#: redelivery is not ingested, and unlike every other receipt it survives
+#: ``ChannelConversationContextService.reset_for_new_session``.
+CHANNEL_INGEST_SOURCE_CLARIFY_REPLY = "clarify_reply"
+
 
 class ChannelThreadIngestLog(SQLModel, table=True):
     __tablename__ = "channel_thread_ingest_log"

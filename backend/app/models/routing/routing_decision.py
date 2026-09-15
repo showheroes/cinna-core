@@ -205,7 +205,7 @@ class RoutingDecision(SQLModel, table=True):
         default=None, foreign_key="agent.id", ondelete="SET NULL"
     )
 
-    # ``routed`` | ``no_match`` | ``error`` | ``parked_install``.
+    # ``routed`` | ``no_match`` | ``error`` | ``parked_install`` | ``guided``.
     outcome: str = Field(sa_column=Column(String(MAX_OUTCOME_CHARS), nullable=False))
 
     # ``pattern`` | ``ai`` | ``only_one`` | ``pinned`` | ``quoted_reply``.
@@ -430,6 +430,27 @@ class RoutingDecisionsPublic(SQLModel):
 # (``RoutingTraceService.get`` — see ``RoutingTuningService.simulate``). A
 # parallel model would start identical, diverge on the next field somebody adds
 # to one of them, and the divergence would be silent.
+#
+# ``RoutingSimulatePublic`` is the one addition, and it is a subclass for that
+# reason: every field a stored trace serves is inherited rather than restated,
+# and the only field it adds is one no stored trace can have.
+
+
+class RoutingSimulatePublic(RoutingDecisionPublic):
+    """``POST /admin/routing/simulate``'s response: the trace, plus the reply.
+
+    ``guidance_reply`` is the guidance reply the sender would have been sent
+    when the decision routed nowhere but answered (``outcome="guided"``).
+    Composed from the decision, never stored and never sent — which is why it
+    lives here and not on :class:`RoutingDecisionPublic`, where every trace
+    read would carry a field that is always ``None``. ``None`` whenever the
+    simulated decision routed, parked or found nothing to say, or guidance is
+    switched off. Built only from candidate names and trigger prompts this
+    response already serves under ``stages[].candidates``, never from the
+    sender's message.
+    """
+
+    guidance_reply: str | None = None
 
 
 #: Ceiling on a hand-typed simulate message. Comfortably above any real chat

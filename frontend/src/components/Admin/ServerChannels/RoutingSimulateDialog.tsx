@@ -92,7 +92,7 @@ export function RoutingSimulateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[820px] max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[820px] max-h-[85vh] overflow-y-auto overflow-x-hidden [&>*]:min-w-0">
         <DialogHeader>
           <DialogTitle>Try a message</DialogTitle>
           <DialogDescription>{SIMULATE_EXPLAINER}</DialogDescription>
@@ -173,7 +173,10 @@ export function RoutingSimulateDialog({
             />
           ) : mutation.data ? (
             <div className="border-t pt-3">
-              <RoutingTraceDetail trace={mutation.data} />
+              <RoutingTraceDetail
+                trace={mutation.data}
+                guidanceReply={mutation.data.guidance_reply}
+              />
             </div>
           ) : (
             <RoutingEmpty

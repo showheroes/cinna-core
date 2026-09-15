@@ -607,6 +607,9 @@ from .server_channels.server_auto_install_bundle import (
     AutoInstallBundlePublic,
 )
 from .server_channels.channel_thread_ingest_log import ChannelThreadIngestLog
+from .server_channels.channel_routing_clarification import (
+    ChannelRoutingClarification,
+)
 from .server_channels.channel_thread_binding import (
     ChannelThreadBinding,
     CHANNEL_BINDING_PENDING_INSTALL,
@@ -925,6 +928,7 @@ from .routing.routing_decision import (
     RoutingDecision,
     RoutingDecisionSummary,
     RoutingDecisionPublic,
+    RoutingSimulatePublic,
     RoutingDecisionsPublic,
     RoutingDiagnosisPublic,
     RoutingNearMiss,
@@ -1467,6 +1471,7 @@ __all__ = [
     "CHANNEL_BINDING_STATUSES",
     "ChannelTurnDelivery",
     "ChannelThreadIngestLog",
+    "ChannelRoutingClarification",
     "CHANNEL_DELIVERY_DRAFT",
     "CHANNEL_DELIVERY_SEALED",
     "CHANNEL_DELIVERY_FINAL",
@@ -1700,6 +1705,7 @@ __all__ = [
     "RoutingDecision",
     "RoutingDecisionSummary",
     "RoutingDecisionPublic",
+    "RoutingSimulatePublic",
     "RoutingDecisionsPublic",
     "RoutingDiagnosisPublic",
     "RoutingNearMiss",
