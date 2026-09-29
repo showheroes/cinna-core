@@ -16,6 +16,13 @@ folder role moved, or a manifest field changed meaning; a tool whose major is
 older than the folder's must refuse to operate it and ask to be updated.
 **Minor** bumps are additive and safe to ignore. See "Compatibility" below.
 
+## Desktop installs the full kit
+
+Documentation update, with no schema or contract-version change. Cinna Desktop now
+bundles the whole kit — guides, assistant notes, `tools/kit.py` — and installs it into
+`.cinna-kit/`, so `assistants/cinna-desktop.md` and the root `AGENTS.md` stop saying a
+desktop workshop may hold only the contract. `kit.py` still needs `uv` or Python 3.10+.
+
 ## Desktop local scheduling guidance
 
 Documentation update, with no schema or contract-version change. Desktop supports
