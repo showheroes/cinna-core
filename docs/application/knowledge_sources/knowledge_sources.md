@@ -1,7 +1,7 @@
 ---
 feature: knowledge_sources
 domain: [application, knowledge]
-one_liner: "Lets admins connect Git repositories of documentation that agents search semantically during sessions, public sources available to every user's agents."
+one_liner: "Lets admins connect Git repositories of documentation that agents and users search semantically, with per-source access control."
 docs:
   tech: knowledge_sources_tech.md
 ---
@@ -11,82 +11,62 @@ docs:
 
 Allows platform administrators (superusers) to connect Git repositories containing structured documentation that agents can query during sessions. Repositories are cloned, articles are extracted and indexed with vector embeddings, and agents use a two-step discovery/retrieval flow to find relevant knowledge via semantic search.
 
-Public sources are automatically available to all users' agents — no per-user opt-in is required.
+Knowledge sources are **server-wide, admin-managed resources**: every superuser can manage every source (create, edit, delete, enable/disable, check access, refresh, preview articles, export). Who may *query* a source's content (via agents, or via the CLI's knowledge search) is a separate, per-source setting: **access level**.
 
 ## Core Concepts
 
-- **Knowledge Source** - A Git repository configuration pointing to a documentation repo. Has a status lifecycle and workspace access rules. Managed exclusively by superusers
+- **Knowledge Source** - A Git repository configuration pointing to a documentation repo. Has a status lifecycle and an access level. Managed by every superuser equally; `user_id` records who created it, nothing more
+- **Access Level** - Who may *query* a source: `private` (superusers only), `public` (every active user), or `shared` (superusers plus the users on the source's share list)
 - **Article** - A single document parsed from the repository's `.ai-knowledge/settings.json` manifest, stored with content and metadata
 - **Article Chunk** - A segment of an article (default 1000 chars, 10% overlap) with a vector embedding for semantic search
 - **Check Access** - Lightweight verification (`git ls-remote`) that the repository is reachable without cloning
 - **Refresh Knowledge** - Full clone + parse + upsert + embed operation that syncs articles from the repository
 - **Content Hash** - SHA256 hash of article content used for change detection (skips unchanged articles on refresh)
-- **Public Discovery** - Flag that makes a source's articles automatically available to all users' agents, without any per-user opt-in
 
 ## Access Control Model
 
-Knowledge Sources is an **admin-only feature**. Only superusers can:
-- Create, edit, and delete knowledge sources
-- Trigger check-access and refresh operations
-- View the discoverable sources list from other admins
-- Preview individual article content and export a source
+Knowledge Sources is an **admin-only feature**. Only superusers can call any endpoint under `/api/v1/knowledge-sources`; non-superusers receive 403.
 
-Regular users do not see Knowledge Sources in the UI and cannot call its API endpoints.
+Within that, every superuser has full read/write access to **every** source — there is no per-source ownership boundary among admins. Create, edit, delete, enable/disable, check-access, refresh, list/preview articles, and export all work the same for any superuser on any source. `user_id` on a source is metadata (who created it, shown as "Created by" in the UI) and plays no role in authorization.
+
+Regular users do not see Knowledge Sources in the UI and cannot call its API endpoints. Their relationship to a source is entirely mediated by **access level** (below) through the consumer paths: the agent knowledge query tool, the per-agent CLI knowledge search, and the account CLI knowledge search.
 
 The sidebar entry lives inside the **Admin** dropdown (between Users and Plugin Marketplaces), not in the main navigation.
-
-**Read access for content and export**: Previewing article content and exporting a source follow a broader "read" boundary than strict ownership. A superuser has read access to a source if they are the owner, OR if the source is publicly discoverable (`public_discovery=True`), enabled (`is_enabled=True`), and connected (`status=connected`). This mirrors the cross-admin visibility already implied by the Discoverable Sources list — no new sharing table or permission model was introduced. All write operations (create, update, delete, enable/disable, check-access, refresh) remain strict owner-only.
 
 ## User Stories / Flows
 
 ### Create and Connect a Source (Admin)
 
 1. Admin navigates to Knowledge Sources via the Admin dropdown menu
-2. Clicks "Add Source", fills in name, Git URL, branch, optional SSH key, workspace access
-3. Source is created with status `pending`
-4. Admin clicks "Check Access" — system runs `git ls-remote` to verify connectivity
-5. On success, status transitions to `connected`
-6. Admin clicks "Refresh Knowledge" — system clones repo, parses articles, generates embeddings
-7. Articles appear in the Articles tab with titles, descriptions, tags, and features
+2. Clicks "Add Source", fills in name, Git URL, branch, optional SSH key, and picks an initial access level (Private / Public / Shared)
+3. If an SSH key is selected, it must be one of the admin's own keys (400 otherwise) — the key is later resolved by its stored id, independent of who is operating on the source
+4. Source is created with status `pending`
+5. Admin clicks "Check Access" — system runs `git ls-remote` to verify connectivity
+6. On success, status transitions to `connected`
+7. Admin clicks "Refresh Knowledge" — system clones repo, parses articles, generates embeddings
+8. Articles appear in the Articles tab with titles, descriptions, tags, and features
+9. For a Shared source, the admin adds specific users to the share list from the source's Configuration tab (Access card) after creation
 
-### Update or Remove a Source (Admin)
+### Update or Remove a Source (Any Admin)
 
-1. Admin edits source settings (name, description, branch, SSH key, workspace access) via the Edit button in the source detail header
-2. Changing branch or SSH key resets status to `pending` (re-verification needed)
-3. Git URL cannot be changed after creation (admin must delete and recreate)
-4. Deleting a source cascades to all articles and workspace permissions
-5. Public discovery toggle and enabled toggle are in the Configuration tab footer (not in the edit modal)
+1. Any admin edits source settings (name, description, branch, SSH key) via the Edit button in the source detail header
+2. Attaching or changing the SSH key requires the key to belong to the acting admin (400 otherwise) — this holds even when editing a source someone else created
+3. Changing branch or SSH key resets status to `pending` (re-verification needed)
+4. Git URL cannot be changed after creation (admin must delete and recreate)
+5. Deleting a source cascades to its articles and share-list entries. Deleting the *creator's user account* does not delete the source — `user_id` is set to `NULL` and the source keeps running
 
-### Making a Source Public or Private (Admin)
+### Setting a Source's Access Level (Any Admin)
 
-1. Admin opens the source detail page and goes to the Configuration tab
-2. Toggles the **Public** switch in the Configuration tab footer
-3. When public (`public_discovery=True`): all users' agents can query articles from this source automatically
-4. When private: only the owning admin's agents can access the source
-5. The Visibility column on the list page shows a **Public** badge (blue, with globe icon) or **Private** label for each source
+1. Admin opens the source detail page, Configuration tab, Access card
+2. Picks **Private** (superusers only), **Public** (every active user), or **Shared** (superusers plus a specific user list)
+3. Choosing Shared reveals a user picker (`UserAllowlistPicker`) to add/remove individual users
+4. The list page's Access column and the detail page's Access card both show the current level; a Shared source also shows the shared-user count
 
-### Viewing Other Admins' Public Sources (Admin)
+### Previewing an Article / Exporting a Source (Any Admin)
 
-1. Admin opens the Knowledge Sources page
-2. The **Discoverable Sources** section at the bottom lists public sources from other admins
-3. The list is read-only — no enable/disable controls — it exists for cross-admin visibility
-4. These sources are automatically included in all users' queries; no action is required
-
-### Previewing an Article (Admin)
-
-1. Admin opens a source detail page and navigates to the Articles tab
-2. Clicking any article row opens a Dialog showing the full article body rendered as Markdown
-3. The dialog title shows the article title; a loading skeleton is shown while the content fetches
-4. Works for own sources and for publicly discoverable sources the admin can see in the Discoverable Sources list
-
-### Exporting a Source as Markdown (Admin)
-
-1. Admin opens a source detail page
-2. Clicks the vertical-ellipsis menu in the page header and selects **Export as Markdown**
-3. The browser downloads a single `.md` file named `knowledge-source-{source_id}.md`
-4. The file contains a top-level heading with the source name and optional description, followed by each article as a `##`-level section (title, source file path, description blockquote, full content body), articles ordered by file path
-5. An empty source (no articles yet) produces a valid header-only document
-6. Works for own sources and for publicly discoverable sources the admin can see in the Discoverable Sources list
+1. Any admin opens a source detail page and navigates to the Articles tab; clicking a row opens a Dialog with the full article rendered as Markdown
+2. Any admin can export a source as a single Markdown file (`.md` file named `knowledge-source-{source_id}.md`) via the page header's ellipsis menu
+3. Both operations work identically regardless of who created the source or its access level — read access here is the same server-wide admin access as everything else on this router
 
 ### Agent Knowledge Query (Two-Step)
 
@@ -94,10 +74,10 @@ Agents in isolated Docker environments use a **reverse API call pattern** — th
 
 1. Agent uses the `query_integration_knowledge` tool with a query string (Step 1: Discovery)
 2. Agent environment makes an authenticated HTTP call to the backend (`POST /api/v1/knowledge/query`)
-3. Backend validates environment token, generates a query embedding, searches chunks by cosine similarity across accessible sources
+3. Backend resolves the agent's owner, generates a query embedding, and searches chunks by cosine similarity across the sources accessible to that owner (see Business Rules below)
 4. Returns top matching articles with metadata (title, description, tags, source name)
 5. Agent selects relevant articles and requests full content (Step 2: Retrieval)
-6. System validates access permissions and returns full article content
+6. System re-checks access against the same rule and returns full article content
 
 The knowledge tool is **pre-allowed** — agents can use it without requiring user approval for each call.
 
@@ -114,34 +94,34 @@ Transitions:
 - Create -> `pending`
 - Check Access success -> `connected`
 - Check Access failure -> `error`
-- SSH key deleted -> `disconnected`
 - Branch/SSH key changed -> `pending`
 
-### Workspace Access Control
+### Query Access Rule (Consumers)
 
-- **All workspaces** (`all`) - Source available to agents in any of the owner's workspaces
-- **Specific workspaces** (`specific`) - Source only available to agents in selected workspaces (managed via link table)
+This single rule — implemented once in `knowledge_access_service` — governs every consumer path: the agent knowledge query tool, per-agent CLI knowledge search, and account CLI knowledge search. A user may query a source when:
 
-Workspace filtering applies only to the owning admin's sources. Public sources from other admins are not workspace-filtered when queried by agents.
+- the source is `is_enabled=true` AND `status=connected`, AND
+- the querying user is **active**, AND
+- the source is **public**, OR the querying user is a **superuser**, OR (the source is **shared** AND the querying user is on its share list)
+
+For agent-driven queries, "the querying user" is resolved as the **agent's owner** — there is no separate agent-level or workspace-level scoping. Inactive users resolve to no accessible sources.
+
+### SSH Key Ownership and Deletion
+
+- Attaching an SSH key to a source (on create or update) requires the key to belong to the **acting admin** — any admin can be refused another admin's key (400), even though they could freely edit every other field on the source
+- Once attached, the key is resolved and decrypted **on behalf of its own owner**, not the acting admin, so any superuser's check-access/refresh works regardless of who attached the key
+- Deleting an SSH key that is still attached to any knowledge source is rejected (409) rather than silently disconnecting the source — see [SSH Keys](../ssh_keys/ssh_keys.md)
+- If a key's owning user account is deleted, the account's SSH keys cascade-delete, and the source's `ssh_key_id` is set to `NULL` (the source itself is not deleted); a subsequent check-access/refresh fails because no key is attached
 
 ### Refresh Logic
 
-- Only enabled sources with `connected` status can be refreshed
+- Only enabled sources can be refreshed (disabled sources return an error response, not an exception)
 - Shallow clone (depth=1) to minimize bandwidth
 - Articles identified by `(git_repo_id, file_path)` unique constraint
 - Content hash comparison skips unchanged articles (optimization)
 - Orphaned articles (removed from `settings.json`) are deleted
 - Embeddings regenerated only for new or updated articles
 - Source metadata updated: `last_sync_at`, `sync_commit_hash`, `status_message` with statistics
-
-### Agent Access Rules
-
-The access model is simplified: no per-user opt-in table is consulted.
-
-Agents can query knowledge from:
-- Sources owned by the agent's owner, where `is_enabled=true` and `status=connected`
-- Workspace filtering applied to own sources (if source has `specific` access type)
-- All public sources (`public_discovery=True`, `is_enabled=true`, `status=connected`) from any admin — automatically, without any user enablement step
 
 ### Repository Format
 
@@ -160,7 +140,7 @@ Settings structure: `static_articles[]` array, each with `title`, `description`,
 
 ## Architecture Overview
 
-Admin management path:
+Admin management path (any superuser, any source):
 ```
 Admin --> Frontend (Knowledge Sources page, Admin dropdown) --> Backend API (/api/v1/knowledge-sources)
                                                                       |
@@ -170,13 +150,14 @@ Admin --> Frontend (Knowledge Sources page, Admin dropdown) --> Backend API (/ap
                                                          (clone/verify)    (parse/upsert/hash)
                                                               |                    |
                                                         SSHKeyService        EmbeddingService
-                                                        (decrypt keys)      (Google Gemini)
+                                                        (decrypt owner's key) (Google Gemini)
                                                               |                    |
                                                          Temp SSH files      VectorSearchService
                                                                              (cosine similarity)
                                                                                    |
                                                                               PostgreSQL
-                                                                       (sources, articles, chunks)
+                                                                       (sources, articles, chunks,
+                                                                        user shares)
 ```
 
 Agent query path (reverse API call from Docker container to backend):
@@ -185,18 +166,19 @@ Agent (building mode)
   --> MCP tool: query_integration_knowledge
     --> Agent-Env HTTP POST /api/v1/knowledge/query
           (Authorization: Bearer <env_token> + X-Agent-Env-Id header)
-            --> Backend validates env token
-              --> EmbeddingService (query embedding)
-                --> VectorSearchService (cosine similarity)
-                  --> Article retrieval with access control
+            --> Backend resolves agent owner
+              --> knowledge_access_service (accessible source ids)
+                --> EmbeddingService (query embedding)
+                  --> VectorSearchService (cosine similarity)
+                    --> Article retrieval with access re-check
 ```
 
 ## Integration Points
 
-- **SSH Keys** - Private Git repositories use SSH keys for authentication. Deleting an SSH key disconnects associated sources. See [SSH Keys](../ssh_keys/ssh_keys.md)
+- **SSH Keys** - Private Git repositories use SSH keys for authentication. A key still attached to a source cannot be deleted (409); attaching/changing a key on a source requires it to belong to the acting admin. See [SSH Keys](../ssh_keys/ssh_keys.md)
 - **Agent Environments** - Agents query knowledge via the `/api/v1/knowledge/query` endpoint, authenticated with environment tokens. The knowledge MCP tool is registered only in building mode. See [Agent Environment Core](../../agents/agent_environment_core/agent_environment_core.md)
 - **Agent Environment Lifecycle** - `BACKEND_URL`, `AGENT_AUTH_TOKEN`, and `ENV_ID` environment variables are injected into the Docker container's `.env` file during creation/rebuild. See [Agent Environments](../../agents/agent_environments/agent_environments.md)
-- **Workspaces** - Source access can be restricted to specific workspaces via the link table. See [User Workspaces](../user_workspaces/user_workspaces.md)
+- **Cinna CLI Integration** - Per-agent and account-level CLI knowledge search both resolve access through the same central rule. See [Cinna CLI Integration](../cinna_cli_integration/cinna_cli_integration.md) and [Account CLI Workspace](../cinna_cli_integration/account_cli_workspace.md) (flow 6b)
 - **Google Gemini API** - Used for generating embeddings (`gemini-embedding-001` model, 768 dimensions)
 - **Admin Panel** - Knowledge Sources is accessible through the Admin dropdown in the sidebar, alongside Users and Plugin Marketplaces
 - **Pre-Allowed Tools** - The knowledge query tool is in the pre-allowed list, meaning agents use it without per-call user approval
@@ -204,12 +186,11 @@ Agent (building mode)
 ## Security
 
 - SSH keys decrypted only during Git operations, stored as temp files with `0o600`, cleaned up in `finally` blocks
-- All API endpoints require superuser status (`get_current_active_superuser` dependency) — non-admin requests are rejected with 403
+- All API endpoints require superuser status (`get_current_active_superuser` dependency) — non-admin requests are rejected with 403. Among superusers there is no further authorization boundary: any superuser manages any source
 - Agent knowledge endpoint uses **two-factor header auth**: `Authorization: Bearer <env_token>` + `X-Agent-Env-Id` header. Backend validates both against the database record, preventing token reuse across environments
-- Article access verified against source ownership and workspace permissions
-- Public sources are automatically accessible to all users' agents — there is no mechanism for users to disable their own access to public sources
+- Query access is enforced once, centrally, in `knowledge_access_service.accessible_sources_filter()` / `get_accessible_source_ids()` — every consumer (agent query, per-agent CLI search, account CLI search) goes through it
 - Repository access errors never expose SSH key contents in responses or logs
-- Article preview and source export use a service-level read-access check (`_get_source_for_read`): owner OR publicly discoverable source. A source that is private, disabled, or not connected is not readable by non-owners — the route returns 404 (no existence leak)
+- `check_access` and `refresh` return 404 (not a generic error) when the source id does not exist, matching the rest of the router's 404-on-missing convention
 
 ## Troubleshooting
 
@@ -217,3 +198,5 @@ Agent (building mode)
 - **Authentication failures**: Verify `ENV_ID` matches the database record. Verify `AGENT_AUTH_TOKEN` matches `environment.config["auth_token"]`. Check backend logs for specific auth failure reason
 - **Connection errors from agent-env**: Verify the agent container is on the `agent-bridge` Docker network. Check that the backend service is running
 - **Non-admin user cannot access page**: Knowledge Sources is admin-only. The sidebar entry is inside the Admin dropdown and is only visible to superusers
+- **Can't delete an SSH key**: The API returns 409 if the key is still attached to one or more knowledge sources; check or change the SSH key on those sources first
+- **Can't attach an SSH key to a source**: The key must belong to the admin performing the create/update (400 otherwise) — pick one of your own keys, or ask its owner to attach it

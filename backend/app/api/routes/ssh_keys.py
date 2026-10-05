@@ -12,7 +12,7 @@ from app.models import (
     SSHKeyUpdate,
     Message,
 )
-from app.services.users.ssh_key_service import SSHKeyService
+from app.services.users.ssh_key_service import SSHKeyInUseError, SSHKeyService
 
 router = APIRouter(prefix="/ssh-keys", tags=["ssh-keys"])
 
@@ -110,10 +110,12 @@ def delete_ssh_key(
     """
     Delete an SSH key.
 
-    Note: If this key is used by any knowledge sources, those sources will be
-    marked as disconnected.
+    Returns 409 if the key is still used by knowledge sources.
     """
-    success = SSHKeyService.delete_key(session, id, current_user.id)
+    try:
+        success = SSHKeyService.delete_key(session, id, current_user.id)
+    except SSHKeyInUseError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if not success:
         raise HTTPException(status_code=404, detail="SSH key not found")
     return Message(message="SSH key deleted successfully")

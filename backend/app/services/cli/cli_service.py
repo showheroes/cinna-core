@@ -497,14 +497,13 @@ class CLIService:
         user_id: uuid.UUID,
         query: str,
         topic: str | None = None,
-        workspace_id: uuid.UUID | None = None,
     ) -> list[dict]:
         """
         Search a user's accessible knowledge sources.
 
         User-scoped core of the knowledge search infrastructure, independent of
-        any agent. When ``workspace_id`` is ``None`` there is no workspace
-        filter (all the user's own connected sources + all public sources).
+        any agent. Access follows the central knowledge access rule
+        (public, superuser, or shared-with-user sources).
 
         Proxies to the existing knowledge search infrastructure.
         """
@@ -524,11 +523,7 @@ class CLIService:
                 model=DEFAULT_EMBEDDING_MODEL,
             )
 
-            source_ids = get_accessible_source_ids(
-                session=db,
-                user_id=user_id,
-                workspace_id=workspace_id,
-            )
+            source_ids = get_accessible_source_ids(session=db, user_id=user_id)
 
             if not source_ids:
                 return []
@@ -568,8 +563,8 @@ class CLIService:
         """
         Search the agent's configured knowledge sources.
 
-        Resolves the workspace from the agent and delegates to
-        :meth:`search_user_knowledge`.
+        Verifies the agent exists and delegates to
+        :meth:`search_user_knowledge` (access resolved for ``user_id``).
         """
         agent = db.get(Agent, agent_id)
         if not agent:
@@ -580,7 +575,6 @@ class CLIService:
             user_id=user_id,
             query=query,
             topic=topic,
-            workspace_id=agent.user_workspace_id,
         )
 
 

@@ -74,7 +74,7 @@
   - `POST /api/v1/cli/account/agents/{agent_id}/status/refresh-command` — `AccountCLIContextDep` + `require_developer`; body `AccountStatusRefreshCommandBody`; response `AccountAgentStatusResult`. Flips `status_refresh_command` via `AgentService.update_agent`. Emits `CLI_ACCOUNT_STATUS_COMMAND_SET`.
 
   **Knowledge search:**
-  - `async search_knowledge(db, user, query, topic=None) -> list[dict]` — account-level analogue of the per-agent knowledge search. No `require_developer` (read). Delegates to `CLIService.search_user_knowledge` with `workspace_id=None`. No SecurityEvent / audit (high-frequency read; mirrors the unaudited per-agent route).
+  - `async search_knowledge(db, user, query, topic=None) -> list[dict]` — account-level analogue of the per-agent knowledge search. No `require_developer` (read). Delegates to `CLIService.search_user_knowledge` (no agent, no workspace). No SecurityEvent / audit (high-frequency read; mirrors the unaudited per-agent route).
 
   **Console-chat file upload (Phase 5):**
   - `POST /api/v1/cli/account/files/upload` — `AccountCLIContextDep`; multipart `UploadFile` body; `response_model=FileUploadPublic`. Dedicated multipart route needed because the JSON-only api-proxy cannot carry a binary `multipart/form-data` body. Implemented in `backend/app/api/routes/cli.py` (function `account_upload_file`). Delegates to `FileService.create_file_upload(session=db, user_id=account_ctx.user.id, file=file)` — the same service the normal `POST /files/upload` uses, so it inherits the same size cap, MIME-type whitelist, and per-user storage quota validation. New uploads start with `status="temporary"` and become durable when referenced in a session message's `file_ids`. Returns `FileUploadPublic` (`id`, `filename`, `file_size`, `mime_type`, `status`, `uploaded_at`). Status codes: 200 / 400 (oversize / invalid MIME / quota exceeded) / 401. No new model, no migration, no config knob. No SecurityEvent — an authenticated account-user file upload is equivalent to the normal upload route's audit surface.
@@ -235,8 +235,8 @@
     (`.cinna-core-kit/scripts/sync_platform_knowledge.py`), which imports from it.
 
 - `backend/app/services/cli/cli_service.py` — `CLIService` — **refactored knowledge search core**:
-  - `async search_user_knowledge(db, *, user_id, query, topic=None, workspace_id=None) -> list[dict]` — reusable user-scoped knowledge search. Resolves accessible source IDs via `get_accessible_source_ids(user_id, workspace_id)` (public + user-owned private; `workspace_id=None` skips the workspace filter), runs vector search, and returns `[{content, source, similarity}]`. Returns `[]` on `VectorSearchError` or empty source set. Both the per-agent and account-level paths delegate here.
-  - `async search_knowledge(db, agent_id, user_id, query, topic=None) -> list[dict]` — per-agent path (unchanged behavior): resolves `workspace_id` from `agent.user_workspace_id` and delegates to `search_user_knowledge`.
+  - `async search_user_knowledge(db, *, user_id, query, topic=None) -> list[dict]` — reusable user-scoped knowledge search. Resolves accessible source IDs via `get_accessible_source_ids(session, user_id)` (central rule in `knowledge_access_service`: enabled + connected + (public OR superuser OR shared-with-user); no workspace concept), runs vector search, and returns `[{content, source, similarity}]`. Returns `[]` on `VectorSearchError` or empty source set. Both the per-agent and account-level paths delegate here.
+  - `async search_knowledge(db, agent_id, user_id, query, topic=None) -> list[dict]` — per-agent path: verifies the agent exists, then delegates to `search_user_knowledge` for `user_id` (the agent owner).
 
 - `backend/app/services/cli/account_cli_service.py` — `AccountCLIService`:
   all static methods (mirrors `CLIService` style):

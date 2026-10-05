@@ -1,9 +1,10 @@
-import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { BookOpen, AlertCircle } from "lucide-react"
+import { AlertCircle, BookOpen } from "lucide-react"
+import { useState } from "react"
 
 import type { AIKnowledgeGitRepoPublic as KnowledgeSourceRead } from "@/client"
 import { KnowledgeSourcesService } from "@/client"
+import { MarkdownViewer } from "@/components/Environment/MarkdownViewer"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -18,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -26,8 +28,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Skeleton } from "@/components/ui/skeleton"
-import { MarkdownViewer } from "@/components/Environment/MarkdownViewer"
 
 interface KnowledgeSourceArticlesTabProps {
   source: KnowledgeSourceRead
@@ -72,7 +72,8 @@ export function KnowledgeSourceArticlesTab({
               Knowledge Articles
             </CardTitle>
             <CardDescription>
-              Articles extracted from the repository ({source.article_count} total)
+              Articles extracted from the repository ({source.article_count}{" "}
+              total)
             </CardDescription>
           </div>
         </div>
@@ -97,7 +98,8 @@ export function KnowledgeSourceArticlesTab({
             <BookOpen className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold">No articles yet</h3>
             <p className="text-sm text-muted-foreground mt-2">
-              Click "Refresh Knowledge" in the Configuration tab to extract articles
+              Click "Refresh Knowledge" in the Configuration tab to extract
+              articles
             </p>
           </div>
         ) : (
@@ -128,7 +130,11 @@ export function KnowledgeSourceArticlesTab({
                         </span>
                         <div className="flex flex-wrap gap-1">
                           {article.tags.slice(0, 3).map((tag, idx) => (
-                            <Badge key={idx} variant="secondary" className="text-xs">
+                            <Badge
+                              key={idx}
+                              variant="secondary"
+                              className="text-xs"
+                            >
                               {tag}
                             </Badge>
                           ))}
@@ -138,7 +144,11 @@ export function KnowledgeSourceArticlesTab({
                             </Badge>
                           )}
                           {article.features.slice(0, 2).map((feature, idx) => (
-                            <Badge key={`f-${idx}`} variant="outline" className="text-xs">
+                            <Badge
+                              key={`f-${idx}`}
+                              variant="outline"
+                              className="text-xs"
+                            >
                               {feature}
                             </Badge>
                           ))}
@@ -164,13 +174,13 @@ export function KnowledgeSourceArticlesTab({
           if (!open) setSelectedArticleId(null)
         }}
       >
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedArticle?.title ?? "Article"}
+        <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-hidden flex flex-col gap-0 p-0 [&>*]:min-w-0">
+          <DialogHeader className="shrink-0 border-b px-6 py-4">
+            <DialogTitle className="break-words pr-6">
+              {selectedArticle?.title || "Article"}
             </DialogTitle>
           </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
             {isArticleError ? (
               <p className="text-sm text-muted-foreground p-6">
                 Failed to load article content.
@@ -183,7 +193,10 @@ export function KnowledgeSourceArticlesTab({
                 <Skeleton className="h-4 w-3/4" />
               </div>
             ) : (
-              <MarkdownViewer content={selectedArticle.content} />
+              <MarkdownViewer
+                content={selectedArticle.content}
+                className="break-words"
+              />
             )}
           </div>
         </DialogContent>

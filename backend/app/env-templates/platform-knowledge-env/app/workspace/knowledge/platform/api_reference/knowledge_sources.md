@@ -6,7 +6,6 @@ Auto-generated from OpenAPI spec. Tag: `knowledge-sources`
 **List Knowledge Sources**
 
 **Query parameters:**
-- `workspace_id`: string | null
 - `skip`: integer, default: `0`
 - `limit`: integer, default: `100`
 
@@ -21,8 +20,7 @@ Auto-generated from OpenAPI spec. Tag: `knowledge-sources`
   - `git_url`: string (required)
   - `branch`: string
   - `ssh_key_id`: string | null
-  - `workspace_access_type`: WorkspaceAccessType
-  - `workspace_ids`: array | null
+  - `access_level`: KnowledgeSourceAccessLevel
 
 **Response:** `AIKnowledgeGitRepoPublic`
 
@@ -50,9 +48,7 @@ Auto-generated from OpenAPI spec. Tag: `knowledge-sources`
   - `branch`: string | null
   - `ssh_key_id`: string | null
   - `is_enabled`: boolean | null
-  - `workspace_access_type`: WorkspaceAccessType | null
-  - `workspace_ids`: array | null
-  - `public_discovery`: boolean | null
+  - `access_level`: KnowledgeSourceAccessLevel | null
 
 **Response:** `AIKnowledgeGitRepoPublic`
 
@@ -137,11 +133,32 @@ Auto-generated from OpenAPI spec. Tag: `knowledge-sources`
 
 ---
 
-## GET `/api/v1/knowledge-sources/discoverable/list`
-**List Discoverable Sources**
+## GET `/api/v1/knowledge-sources/{source_id}/shared-users`
+**List Knowledge Source Shared Users**
 
-**Query parameters:**
-- `skip`: integer, default: `0`
-- `limit`: integer, default: `100`
+**Path parameters:**
+- `source_id`: uuid
+
+---
+
+## POST `/api/v1/knowledge-sources/{source_id}/shared-users`
+**Add Knowledge Source Shared User**
+
+**Path parameters:**
+- `source_id`: uuid
+
+**Request body** (`KnowledgeSourceShareCreate`):
+  - `user_id`: uuid (required)
+
+**Response:** `KnowledgeSourceSharedUserPublic`
+
+---
+
+## DELETE `/api/v1/knowledge-sources/{source_id}/shared-users/{user_id}`
+**Remove Knowledge Source Shared User**
+
+**Path parameters:**
+- `source_id`: uuid
+- `user_id`: uuid
 
 ---

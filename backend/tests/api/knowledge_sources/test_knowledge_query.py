@@ -40,7 +40,12 @@ from tests.stubs.knowledge_embeddings import (
     QUERY_EMBEDDING,
     RELEVANT_EMBEDDING,
 )
-from tests.utils.knowledge_source import create_knowledge_source
+from tests.utils.knowledge_source import (
+    add_shared_user,
+    create_knowledge_source,
+    remove_shared_user,
+)
+from tests.utils.user import create_random_user, user_authentication_headers
 
 _QUERY_URL = f"{settings.API_V1_STR}/knowledge/query"
 _KSBASE = f"{settings.API_V1_STR}/knowledge-sources"
@@ -274,3 +279,236 @@ def test_knowledge_query_two_step_flow(
         json={"query": payload["query"], "article_ids": [str(uuid.uuid4())]},
     )
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Access-level consumer resolution
+# ---------------------------------------------------------------------------
+
+def _agent_headers_for_owner(
+    db: Session, owner_id: uuid.UUID, auth_token: str
+) -> dict[str, str]:
+    """Insert an Agent + AgentEnvironment owned by ``owner_id`` and return the
+    Bearer/X-Agent-Env-Id header pair the knowledge/query route expects."""
+    agent = Agent(
+        name=f"Access Level Agent {auth_token[:8]}",
+        owner_id=owner_id,
+        bundle_id="localhost.test.knowledge-access",
+    )
+    db.add(agent)
+    db.flush()
+
+    env = AgentEnvironment(
+        agent_id=agent.id,
+        env_name=settings.DEFAULT_AGENT_ENV_NAME,
+        status="running",
+        is_active=True,
+        config={"auth_token": auth_token},
+    )
+    db.add(env)
+    db.flush()
+
+    return {
+        "Authorization": f"Bearer {auth_token}",
+        "X-Agent-Env-Id": str(env.id),
+    }
+
+
+def _promote_to_superuser(
+    client: TestClient, superuser_token_headers: dict[str, str], user: dict
+) -> dict[str, str]:
+    r = client.patch(
+        f"{settings.API_V1_STR}/users/{user['id']}",
+        headers=superuser_token_headers,
+        json={"is_superuser": True},
+    )
+    assert r.status_code == 200, r.text
+    return user_authentication_headers(
+        client=client, email=user["email"], password=user["_password"]
+    )
+
+
+def test_knowledge_query_access_levels(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    """
+    Consumer access resolution across all three access levels:
+      1.  Creator superuser makes a private, a public, and a shared source
+          (each connected, each holding one article matching the query vector)
+      2.  Regular-user agent discovery → only the PUBLIC article is returned
+      3.  Regular-user agent retrieval of the PRIVATE article → 403
+      4.  User added to the shared source's list → discovery now also returns
+          the SHARED article (still not the private one)
+      5.  User removed from the list → access is revoked, back to public-only
+      6.  A different superuser's agent (not the creator, not on any share
+          list) sees ALL THREE sources — "every superuser" bypass
+      7.  Disabling the public source excludes it even for a superuser agent
+    """
+    # ── Phase 1: Creator builds one source per access level ────────────────
+    levels = ["private", "public", "shared"]
+    sources: dict[str, dict] = {}
+    articles: dict[str, uuid.UUID] = {}
+
+    for level in levels:
+        source = create_knowledge_source(
+            client, superuser_token_headers, access_level=level
+        )
+        source_id = uuid.UUID(source["id"])
+        with patch(
+            "app.services.knowledge.knowledge_source_service.verify_repository_access",
+            return_value=(True, "Repository accessible"),
+        ):
+            r = client.post(
+                f"{_KSBASE}/{source_id}/check-access", headers=superuser_token_headers
+            )
+            assert r.status_code == 200
+            assert r.json()["accessible"] is True
+
+        article = _insert_article(
+            db,
+            source_id,
+            {
+                "title": f"{level.title()} Article",
+                "description": f"Article on the {level} source",
+                "tags": [level],
+                "features": [],
+                "file_path": f"articles/{level}.md",
+                "content": f"# {level.title()}\n\nContent for the {level} source.",
+            },
+            RELEVANT_EMBEDDING,
+        )
+        sources[level] = source
+        articles[level] = article.id
+
+    # ── Phase 2: Regular user agent — discovery sees PUBLIC only ──────────
+    regular_user = create_random_user(client)
+    regular_user_id = uuid.UUID(regular_user["id"])
+    regular_headers = _agent_headers_for_owner(
+        db, regular_user_id, "regular-user-token-abc"
+    )
+
+    with patch(
+        "app.services.knowledge.embedding_service.generate_query_embedding",
+        return_value=(QUERY_EMBEDDING, EMBEDDING_DIMS),
+    ):
+        r = client.post(
+            _QUERY_URL, headers=regular_headers, json={"query": "content"}
+        )
+    assert r.status_code == 200
+    returned_ids = {a["id"] for a in r.json()["articles"]}
+    assert str(articles["public"]) in returned_ids
+    assert str(articles["private"]) not in returned_ids
+    assert str(articles["shared"]) not in returned_ids
+
+    # ── Phase 3: Regular user retrieval of the PRIVATE article → 403 ──────
+    r = client.post(
+        _QUERY_URL,
+        headers=regular_headers,
+        json={"query": "content", "article_ids": [str(articles["private"])]},
+    )
+    assert r.status_code == 403
+
+    # ── Phase 4: Add regular user to the shared source's list ─────────────
+    add_shared_user(
+        client, superuser_token_headers, str(sources["shared"]["id"]), str(regular_user_id)
+    )
+
+    with patch(
+        "app.services.knowledge.embedding_service.generate_query_embedding",
+        return_value=(QUERY_EMBEDDING, EMBEDDING_DIMS),
+    ):
+        r = client.post(
+            _QUERY_URL, headers=regular_headers, json={"query": "content"}
+        )
+    returned_ids = {a["id"] for a in r.json()["articles"]}
+    assert str(articles["public"]) in returned_ids
+    assert str(articles["shared"]) in returned_ids
+    assert str(articles["private"]) not in returned_ids
+
+    # Retrieval of the now-shared article succeeds too.
+    r = client.post(
+        _QUERY_URL,
+        headers=regular_headers,
+        json={"query": "content", "article_ids": [str(articles["shared"])]},
+    )
+    assert r.status_code == 200
+
+    # ── Phase 5: Remove from list → access revoked ─────────────────────────
+    r = remove_shared_user(
+        client, superuser_token_headers, str(sources["shared"]["id"]), str(regular_user_id)
+    )
+    assert r.status_code == 200
+
+    with patch(
+        "app.services.knowledge.embedding_service.generate_query_embedding",
+        return_value=(QUERY_EMBEDDING, EMBEDDING_DIMS),
+    ):
+        r = client.post(
+            _QUERY_URL, headers=regular_headers, json={"query": "content"}
+        )
+    returned_ids = {a["id"] for a in r.json()["articles"]}
+    assert str(articles["public"]) in returned_ids
+    assert str(articles["shared"]) not in returned_ids
+
+    r = client.post(
+        _QUERY_URL,
+        headers=regular_headers,
+        json={"query": "content", "article_ids": [str(articles["shared"])]},
+    )
+    assert r.status_code == 403
+
+    # ── Phase 6: A different superuser's agent sees ALL sources ───────────
+    other_su_user = create_random_user(client)
+    _promote_to_superuser(client, superuser_token_headers, other_su_user)
+    su_headers = _agent_headers_for_owner(
+        db, uuid.UUID(other_su_user["id"]), "second-superuser-token-xyz"
+    )
+
+    with patch(
+        "app.services.knowledge.embedding_service.generate_query_embedding",
+        return_value=(QUERY_EMBEDDING, EMBEDDING_DIMS),
+    ):
+        r = client.post(_QUERY_URL, headers=su_headers, json={"query": "content"})
+    returned_ids = {a["id"] for a in r.json()["articles"]}
+    for level in levels:
+        assert str(articles[level]) in returned_ids
+
+    # ── Phase 7: Disabled source excluded even for a superuser agent ──────
+    disable_r = client.post(
+        f"{_KSBASE}/{sources['public']['id']}/disable", headers=superuser_token_headers
+    )
+    assert disable_r.status_code == 200
+
+    with patch(
+        "app.services.knowledge.embedding_service.generate_query_embedding",
+        return_value=(QUERY_EMBEDDING, EMBEDDING_DIMS),
+    ):
+        r = client.post(_QUERY_URL, headers=su_headers, json={"query": "content"})
+    returned_ids = {a["id"] for a in r.json()["articles"]}
+    assert str(articles["public"]) not in returned_ids
+    assert str(articles["private"]) in returned_ids
+    assert str(articles["shared"]) in returned_ids
+
+    # ── Phase 8: Deactivating the regular user revokes ALL access. The
+    #             AgentEnvContextDep auth guard already rejects an inactive
+    #             owner with 401 before the request ever reaches the
+    #             knowledge_access_service rule (which independently also
+    #             treats an inactive user as having no accessible sources —
+    #             see accessible_sources_filter / get_accessible_source_ids) ─
+    r = client.patch(
+        f"{settings.API_V1_STR}/users/{regular_user_id}",
+        headers=superuser_token_headers,
+        json={"is_active": False},
+    )
+    assert r.status_code == 200, r.text
+
+    with patch(
+        "app.services.knowledge.embedding_service.generate_query_embedding",
+        return_value=(QUERY_EMBEDDING, EMBEDDING_DIMS),
+    ):
+        r = client.post(
+            _QUERY_URL, headers=regular_headers, json={"query": "content"}
+        )
+    assert r.status_code == 401

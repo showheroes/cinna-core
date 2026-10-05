@@ -13,6 +13,8 @@ def create_knowledge_source(
     git_url: str | None = None,
     branch: str = "main",
     description: str | None = None,
+    access_level: str | None = None,
+    ssh_key_id: str | None = None,
 ) -> dict:
     """Create a knowledge source via POST and return the response data."""
     name = name or f"test-ks-{random_lower_string()[:16]}"
@@ -20,6 +22,10 @@ def create_knowledge_source(
     data: dict = {"name": name, "git_url": git_url, "branch": branch}
     if description is not None:
         data["description"] = description
+    if access_level is not None:
+        data["access_level"] = access_level
+    if ssh_key_id is not None:
+        data["ssh_key_id"] = ssh_key_id
     r = client.post(_BASE + "/", headers=token_headers, json=data)
     assert r.status_code == 200, r.text
     return r.json()
@@ -120,3 +126,42 @@ def export_knowledge_source(
 ):
     """GET /knowledge-sources/{id}/export and return the raw response."""
     return client.get(f"{_BASE}/{source_id}/export", headers=token_headers)
+
+
+def list_shared_users(
+    client: TestClient,
+    token_headers: dict[str, str],
+    source_id: str,
+) -> list:
+    """GET /knowledge-sources/{id}/shared-users and return the list."""
+    r = client.get(f"{_BASE}/{source_id}/shared-users", headers=token_headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def add_shared_user(
+    client: TestClient,
+    token_headers: dict[str, str],
+    source_id: str,
+    user_id: str,
+) -> dict:
+    """POST /knowledge-sources/{id}/shared-users and return the created entry."""
+    r = client.post(
+        f"{_BASE}/{source_id}/shared-users",
+        headers=token_headers,
+        json={"user_id": user_id},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def remove_shared_user(
+    client: TestClient,
+    token_headers: dict[str, str],
+    source_id: str,
+    user_id: str,
+):
+    """DELETE /knowledge-sources/{id}/shared-users/{user_id} and return the raw response."""
+    return client.delete(
+        f"{_BASE}/{source_id}/shared-users/{user_id}", headers=token_headers
+    )

@@ -71,7 +71,6 @@ async def query_knowledge(
     # Agent + owner are already resolved (and scope-verified) by the dep.
     agent = ctx.agent
     user_id = agent.owner_id
-    workspace_id = agent.user_workspace_id
 
     # Step 2: Retrieval - return full articles
     if request.article_ids:
@@ -79,11 +78,7 @@ async def query_knowledge(
 
         try:
             # Get accessible sources for permission check
-            source_ids = get_accessible_source_ids(
-                session=session,
-                user_id=user_id,
-                workspace_id=workspace_id
-            )
+            source_ids = get_accessible_source_ids(session=session, user_id=user_id)
 
             # Get full article content
             articles = get_articles_by_ids(
@@ -127,7 +122,6 @@ async def query_knowledge(
             session=session,
             query_embedding=query_embedding,
             user_id=user_id,
-            workspace_id=workspace_id,
             embedding_model=DEFAULT_EMBEDDING_MODEL,
             limit=10
         )

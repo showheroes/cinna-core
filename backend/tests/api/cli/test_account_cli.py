@@ -71,10 +71,14 @@ Notes:
 """
 import io
 import uuid
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 from app.core.config import settings
+from app.models import KnowledgeArticle, KnowledgeArticleChunk
+from tests.stubs.knowledge_embeddings import EMBEDDING_DIMS, EMBEDDING_MODEL, QUERY_EMBEDDING, RELEVANT_EMBEDDING
 from tests.utils.agent import create_agent_via_api, get_agent
 from tests.utils.background_tasks import drain_tasks
 from tests.utils.bundle import (
@@ -105,10 +109,12 @@ from tests.utils.cli import (
     revoke_cli_token,
 )
 from tests.utils.environment import delete_environment, list_environments
+from tests.utils.knowledge_source import add_shared_user, create_knowledge_source, remove_shared_user
 from tests.utils.workspace import create_random_workspace
 from tests.utils.ai_credential import create_random_ai_credential
 from tests.utils.user import (
     create_random_user,
+    create_random_user_with_headers,
     promote_to_developer,
     user_authentication_headers,
 )
@@ -3440,6 +3446,140 @@ def test_account_knowledge_search(
         f"Missing auth must be rejected on POST /account/knowledge/search, "
         f"got {r.status_code}: {r.text}"
     )
+
+
+_KSBASE = f"{settings.API_V1_STR}/knowledge-sources"
+
+
+def _insert_knowledge_chunk(db: Session, source_id: uuid.UUID, title: str) -> None:
+    """Insert one KnowledgeArticle + KnowledgeArticleChunk matching QUERY_EMBEDDING.
+
+    Mirrors the pattern in test_knowledge_query.py; ``title`` is embedded in the
+    chunk text so it is recognizable in CLIService's (string-rendered) results.
+    """
+    article = KnowledgeArticle(
+        git_repo_id=source_id,
+        title=title,
+        description=f"Article for {title}",
+        tags=["test"],
+        features=[],
+        file_path=f"articles/{title.lower().replace(' ', '-')}.md",
+        content=f"# {title}\n\nContent body.",
+        content_hash=title,
+    )
+    db.add(article)
+    db.flush()
+
+    chunk = KnowledgeArticleChunk(
+        article_id=article.id,
+        chunk_index=0,
+        chunk_text=f"Content body for {title}",
+        embedding=RELEVANT_EMBEDDING,
+        embedding_model=EMBEDDING_MODEL,
+        embedding_dimensions=EMBEDDING_DIMS,
+    )
+    db.add(chunk)
+    db.flush()
+
+
+def test_account_and_agent_knowledge_search_access_levels(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    """
+    Both consumer-facing CLI knowledge search paths (account-level and
+    per-agent) go through the central ``knowledge_access_service`` rule:
+      1.  Superuser creates a private, a public, and a shared source (each
+          connected, each holding one article/chunk matching the query vector)
+      2.  A regular user (promoted to developer so they can bootstrap CLI
+          tokens) searches via POST /account/knowledge/search → only the
+          PUBLIC article's title surfaces, not private or shared
+      3.  User added to the shared source's list → the SHARED article now
+          also surfaces (still not the private one)
+      4.  User removed from the list → back to public-only
+      5.  The same user's per-agent CLI token (POST /agents/{id}/knowledge/search)
+          shows the identical restriction (public-only), since access is
+          resolved for the agent owner
+    """
+    # ── Phase 1: Superuser builds one source per access level ─────────────
+    titles = {"private": "Private Doc", "public": "Public Doc", "shared": "Shared Doc"}
+    sources: dict[str, dict] = {}
+    for level, title in titles.items():
+        source = create_knowledge_source(client, superuser_token_headers, access_level=level)
+        source_id = uuid.UUID(source["id"])
+        with patch(
+            "app.services.knowledge.knowledge_source_service.verify_repository_access",
+            return_value=(True, "Repository accessible"),
+        ):
+            r = client.post(f"{_KSBASE}/{source_id}/check-access", headers=superuser_token_headers)
+            assert r.status_code == 200
+            assert r.json()["accessible"] is True
+        _insert_knowledge_chunk(db, source_id, title)
+        sources[level] = source
+
+    def _search_account(headers: dict[str, str]) -> str:
+        with patch(
+            "app.services.knowledge.embedding_service.generate_query_embedding",
+            return_value=(QUERY_EMBEDDING, EMBEDDING_DIMS),
+        ):
+            r = client.post(
+                f"{_BASE}/account/knowledge/search",
+                headers=headers,
+                json={"query": "doc"},
+            )
+        assert r.status_code == 200, r.text
+        return str(r.json()["results"])
+
+    # ── Phase 2: Regular user (developer role) bootstraps an account token ─
+    user, user_headers = create_random_user_with_headers(client)
+    promote_to_developer(client, superuser_token_headers, user["id"])
+    account_jwt, _ = bootstrap_account_token(client, user_headers, machine_name="Knowledge Access Machine")
+    acc_headers = account_cli_headers(account_jwt)
+
+    blob = _search_account(acc_headers)
+    assert titles["public"] in blob
+    assert titles["private"] not in blob
+    assert titles["shared"] not in blob
+
+    # ── Phase 3: Add to the shared source's list → shared now visible ─────
+    add_shared_user(client, superuser_token_headers, sources["shared"]["id"], user["id"])
+    blob = _search_account(acc_headers)
+    assert titles["public"] in blob
+    assert titles["shared"] in blob
+    assert titles["private"] not in blob
+
+    # ── Phase 4: Remove from list → reverts to public-only ────────────────
+    r = remove_shared_user(client, superuser_token_headers, sources["shared"]["id"], user["id"])
+    assert r.status_code == 200
+    blob = _search_account(acc_headers)
+    assert titles["public"] in blob
+    assert titles["shared"] not in blob
+
+    # ── Phase 5: Same restriction via the per-agent CLI search route ──────
+    # setup_default_credentials (autouse) only provisions the superuser; a
+    # freshly signed-up regular user needs their own default credential
+    # before create_agent_via_api's environment validation will pass.
+    create_random_ai_credential(client, user_headers, set_default=True)
+    agent = create_agent_via_api(client, user_headers)
+    token_resp = create_setup_token(client, user_headers, agent["id"])
+    exchange = exchange_setup_token(client, token_resp["token"], machine_name="Knowledge Agent Machine")
+    agent_cli_headers = cli_auth_headers(exchange["cli_token"])
+
+    with patch(
+        "app.services.knowledge.embedding_service.generate_query_embedding",
+        return_value=(QUERY_EMBEDDING, EMBEDDING_DIMS),
+    ):
+        r = client.post(
+            f"{_BASE}/agents/{agent['id']}/knowledge/search",
+            headers=agent_cli_headers,
+            json={"query": "doc"},
+        )
+    assert r.status_code == 200, r.text
+    agent_blob = str(r.json()["results"])
+    assert titles["public"] in agent_blob
+    assert titles["private"] not in agent_blob
+    assert titles["shared"] not in agent_blob
 
 
 # ── Scenario 21: Rate-limit note (coverage gap) ──────────────────────────────

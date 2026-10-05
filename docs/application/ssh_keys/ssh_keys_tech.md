@@ -6,7 +6,7 @@
 
 - **Model**: `backend/app/models/users/ssh_key.py` - `UserSSHKey` (table), `SSHKeyBase`, `SSHKeyPublic`, `SSHKeysPublic`, `SSHKeyGenerate`, `SSHKeyImport`, `SSHKeyUpdate`
 - **Routes**: `backend/app/api/routes/ssh_keys.py` - 6 endpoints under `/api/v1/ssh-keys`
-- **Service**: `backend/app/services/users/ssh_key_service.py` - `SSHKeyService` (static methods)
+- **Service**: `backend/app/services/users/ssh_key_service.py` - `SSHKeyService` (static methods), `SSHKeyInUseError` exception
 - **Security**: `backend/app/core/security.py` - `encrypt_field()`, `decrypt_field()`, Fernet cipher setup
 - **Migration**: `backend/app/alembic/versions/dcbfc8267939_add_user_ssh_keys_table.py`
 
@@ -49,7 +49,7 @@ Migration: `backend/app/alembic/versions/dcbfc8267939_add_user_ssh_keys_table.py
 | POST | `/generate` | Generate RSA 4096-bit key pair | `SSHKeyGenerate` | `SSHKeyPublic` |
 | POST | `/` | Import existing key pair | `SSHKeyImport` | `SSHKeyPublic` |
 | PUT | `/{id}` | Update key name | `SSHKeyUpdate` | `SSHKeyPublic` |
-| DELETE | `/{id}` | Delete SSH key | - | `Message` |
+| DELETE | `/{id}` | Delete SSH key | - | `Message`, 404 if not found/owned, 409 if used by a knowledge source |
 
 All endpoints require `CurrentUser` authentication. GET/PUT/DELETE verify ownership.
 
@@ -64,7 +64,7 @@ All endpoints require `CurrentUser` authentication. GET/PUT/DELETE verify owners
 | `get_user_keys(session, user_id)` | Lists all keys for user, ordered by `created_at` descending |
 | `get_key_by_id(session, key_id, user_id)` | Gets key with ownership verification |
 | `update_key(session, key_id, user_id, data)` | Updates name only, verifies ownership |
-| `delete_key(session, key_id, user_id)` | Deletes key with ownership verification |
+| `delete_key(session, key_id, user_id)` | Deletes key with ownership verification. Raises `SSHKeyInUseError` (route → 409) if any `AIKnowledgeGitRepo.ssh_key_id` still points at the key; the error carries the referencing source names. Local import of the knowledge model (avoids a domain coupling at module load) |
 | `get_decrypted_private_key(session, key_id, user_id)` | Returns `(private_key, passphrase)` tuple for Git operations. Never exposed via API |
 | `_calculate_fingerprint(public_key_str)` | SHA256 fingerprint in `SHA256:...` format (base64, no padding) |
 | `_validate_ssh_key_format(public_key, private_key)` | Validates public key prefix and private key PEM markers |
@@ -119,4 +119,5 @@ Key derivation: PBKDF2-HMAC-SHA256, 100,000 iterations, static salt `"credential
 - **Ownership enforcement**: Every service method checks `user_id` before returning or modifying data
 - **Fingerprint deduplication**: Prevents duplicate key imports per user
 - **Key generation**: RSA 4096-bit, PEM format (Traditional OpenSSL), OpenSSH public key format with name as comment
-- **Decryption path**: Only `get_decrypted_private_key()` -> called by `KnowledgeSourceService` for Git operations -> temp file with `0o600` -> cleanup in `finally`
+- **Decryption path**: Only `get_decrypted_private_key()` -> called by `KnowledgeSourceService` for Git operations -> temp file with `0o600` -> cleanup in `finally`. Since knowledge sources are server-wide, a refresh or check-access by any superuser decrypts the source's stored key on behalf of the key's own owner (`user_id` passed to `get_decrypted_private_key` is the key owner, not the acting admin)
+- **Delete guard**: `ai_knowledge_git_repo.ssh_key_id` has `ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED` (deferred so deleting an admin who is both a source's creator and its key's owner can satisfy both cascade paths on that row), but the service layer blocks the delete before that FK behavior is ever exercised via a normal delete call — `SSHKeyInUseError` is raised whenever a source still references the key

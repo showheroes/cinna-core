@@ -1,7 +1,12 @@
+import { useQuery } from "@tanstack/react-query"
+import { Loader2 } from "lucide-react"
 import { useState } from "react"
 import { useForm } from "react-hook-form"
-import { useQuery } from "@tanstack/react-query"
-
+import type {
+  ApiError,
+  AIKnowledgeGitRepoCreate as CreateSourceData,
+} from "@/client"
+import { KnowledgeSourcesService, SshKeysService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -13,7 +18,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -21,11 +25,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Textarea } from "@/components/ui/textarea"
 import useCustomToast from "@/hooks/useCustomToast"
-import { KnowledgeSourcesService, SshKeysService, UserWorkspacesService } from "@/client"
-import type { AIKnowledgeGitRepoCreate as CreateSourceData } from "@/client"
-import { Loader2 } from "lucide-react"
+import { handleError } from "@/utils"
+
+import { AccessLevelRadioGroup } from "./accessLevel"
 
 interface AddSourceModalProps {
   open: boolean
@@ -33,7 +37,11 @@ interface AddSourceModalProps {
   onSuccess: () => void
 }
 
-export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModalProps) {
+export function AddSourceModal({
+  open,
+  onOpenChange,
+  onSuccess,
+}: AddSourceModalProps) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCheckingAccess, setIsCheckingAccess] = useState(false)
@@ -57,13 +65,9 @@ export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModal
       git_url: "",
       branch: "main",
       ssh_key_id: undefined,
-      workspace_access_type: "all",
-      workspace_ids: [],
+      access_level: "private",
     },
   })
-
-  const workspaceAccessType = watch("workspace_access_type")
-  const selectedWorkspaceIds = watch("workspace_ids") || []
 
   // Load SSH keys
   const { data: sshKeys } = useQuery({
@@ -71,38 +75,19 @@ export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModal
     queryFn: () => SshKeysService.readSshKeys(),
   })
 
-  // Load workspaces
-  const { data: workspaces } = useQuery({
-    queryKey: ["user-workspaces"],
-    queryFn: () => UserWorkspacesService.readWorkspaces(),
-  })
-
-  const handleWorkspaceToggle = (workspaceId: string) => {
-    const currentIds = selectedWorkspaceIds || []
-    if (currentIds.includes(workspaceId)) {
-      setValue(
-        "workspace_ids",
-        currentIds.filter((id) => id !== workspaceId)
-      )
-    } else {
-      setValue("workspace_ids", [...currentIds, workspaceId])
-    }
-  }
-
   const onSubmit = async (data: CreateSourceData) => {
     setIsSubmitting(true)
     try {
       const response = await KnowledgeSourcesService.createKnowledgeSource({
-        requestBody: {
-          ...data,
-          workspace_ids: data.workspace_access_type === "specific" ? data.workspace_ids : undefined,
-        },
+        requestBody: data,
       })
       setCreatedSourceId(response.id)
-      showSuccessToast("Knowledge source created. You can now check access and refresh knowledge")
+      showSuccessToast(
+        "Knowledge source created. You can now check access and refresh knowledge",
+      )
       // Don't close yet - allow user to check access
-    } catch (error: any) {
-      showErrorToast(error.message || "Failed to create knowledge source")
+    } catch (error) {
+      handleError.bind(showErrorToast)(error as ApiError)
     } finally {
       setIsSubmitting(false)
     }
@@ -122,8 +107,8 @@ export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModal
       } else {
         showErrorToast(result.message)
       }
-    } catch (error: any) {
-      showErrorToast(error.message || "Failed to check access")
+    } catch (error) {
+      handleError.bind(showErrorToast)(error as ApiError)
     } finally {
       setIsCheckingAccess(false)
     }
@@ -182,7 +167,9 @@ export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModal
               disabled={!!createdSourceId}
             />
             {errors.git_url && (
-              <p className="text-sm text-destructive">{errors.git_url.message}</p>
+              <p className="text-sm text-destructive">
+                {errors.git_url.message}
+              </p>
             )}
           </div>
 
@@ -220,52 +207,17 @@ export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModal
           </div>
 
           <div className="space-y-2">
-            <Label>Workspace Access</Label>
-            <RadioGroup
-              value={workspaceAccessType}
-              onValueChange={(value) => setValue("workspace_access_type", value as "all" | "specific")}
+            <Label>Access</Label>
+            <AccessLevelRadioGroup
+              idPrefix="add-source-access"
+              value={watch("access_level") || "private"}
+              onChange={(level) => setValue("access_level", level)}
               disabled={!!createdSourceId}
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="all" id="all" />
-                <Label htmlFor="all" className="font-normal">
-                  All workspaces
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="specific" id="specific" />
-                <Label htmlFor="specific" className="font-normal">
-                  Specific workspaces
-                </Label>
-              </div>
-            </RadioGroup>
+            />
+            <p className="text-xs text-muted-foreground">
+              For Shared, pick the users on the source page after it is created.
+            </p>
           </div>
-
-          {workspaceAccessType === "specific" && (
-            <div className="space-y-2">
-              <Label>Select Workspaces</Label>
-              <div className="border rounded-md p-4 space-y-2 max-h-48 overflow-y-auto">
-                {workspaces?.data?.map((workspace: { id: string; name: string }) => (
-                  <div key={workspace.id} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id={`workspace-${workspace.id}`}
-                      checked={selectedWorkspaceIds.includes(workspace.id)}
-                      onChange={() => handleWorkspaceToggle(workspace.id)}
-                      disabled={!!createdSourceId}
-                      className="rounded border-gray-300"
-                    />
-                    <Label
-                      htmlFor={`workspace-${workspace.id}`}
-                      className="font-normal cursor-pointer"
-                    >
-                      {workspace.name}
-                    </Label>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {createdSourceId && accessCheckResult && (
             <div
@@ -277,7 +229,9 @@ export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModal
             >
               <p
                 className={`text-sm ${
-                  accessCheckResult.accessible ? "text-green-800 dark:text-green-300" : "text-red-800 dark:text-red-300"
+                  accessCheckResult.accessible
+                    ? "text-green-800 dark:text-green-300"
+                    : "text-red-800 dark:text-red-300"
                 }`}
               >
                 {accessCheckResult.message}
@@ -292,7 +246,9 @@ export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModal
                   Cancel
                 </Button>
                 <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isSubmitting && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
                   Create Source
                 </Button>
               </>
@@ -304,7 +260,9 @@ export function AddSourceModal({ open, onOpenChange, onSuccess }: AddSourceModal
                   onClick={handleCheckAccess}
                   disabled={isCheckingAccess}
                 >
-                  {isCheckingAccess && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isCheckingAccess && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
                   Check Access
                 </Button>
                 <Button type="button" onClick={handleClose}>

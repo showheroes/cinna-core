@@ -743,8 +743,8 @@ async def account_search_knowledge(
 
     Used by the account workspace's MCP proxy to serve knowledge_query tool
     calls from the local orchestrator agent. Scoped to the account user's
-    accessible knowledge sources (public + own private); no agent, no workspace
-    filter.
+    accessible knowledge sources (public, superuser, or shared with the user);
+    no agent.
     """
     results = await AccountCLIService.search_knowledge(
         db=db, user=account_ctx.user, query=body.query, topic=body.topic,

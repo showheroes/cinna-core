@@ -2,14 +2,16 @@
 API routes for knowledge source management.
 
 Admin-only feature: only superusers can create, manage, and configure
-knowledge sources. Public sources are automatically available to all users
-via the knowledge query tool.
+knowledge sources, and every superuser manages every source (the creator is
+recorded as metadata only). Who may *query* a source is governed by its
+``access_level`` (private / public / shared) and share list; see
+``knowledge_access_service``.
 """
 
 import uuid
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from app.api.deps import SessionDep, get_current_active_superuser
@@ -19,12 +21,17 @@ from app.models.knowledge.knowledge import (
     AIKnowledgeGitRepoPublic,
     AIKnowledgeGitRepoUpdate,
     CheckAccessResponse,
-    DiscoverableSourcePublic,
     KnowledgeArticleDetail,
     KnowledgeArticlePublic,
+    KnowledgeSourceSharedUserPublic,
+    KnowledgeSourceShareCreate,
     RefreshKnowledgeResponse,
 )
 from app.services.knowledge import knowledge_source_service
+from app.services.knowledge.knowledge_source_service import (
+    KnowledgeSourceNotFoundError,
+    KnowledgeSourceValidationError,
+)
 
 router = APIRouter(prefix="/knowledge-sources", tags=["knowledge-sources"])
 
@@ -35,23 +42,15 @@ SuperUser = Annotated[User, Depends(get_current_active_superuser)]
 def list_knowledge_sources(
     session: SessionDep,
     current_user: SuperUser,
-    workspace_id: Optional[uuid.UUID] = Query(None),
     skip: int = 0,
     limit: int = 100,
 ) -> Any:
     """
-    Retrieve knowledge sources for the current admin user.
-
-    Only superusers can manage knowledge sources.
+    List all knowledge sources on the server. Admin only.
     """
-    sources = knowledge_source_service.get_user_sources(
-        session=session,
-        user_id=current_user.id,
-        workspace_id=workspace_id,
-        skip=skip,
-        limit=limit,
+    return knowledge_source_service.list_sources(
+        session=session, skip=skip, limit=limit
     )
-    return sources
 
 
 @router.post("/", response_model=AIKnowledgeGitRepoPublic)
@@ -64,12 +63,14 @@ def create_knowledge_source(
     """
     Create a new knowledge source. Admin only.
     """
-    source = knowledge_source_service.create_source(
-        session=session,
-        user_id=current_user.id,
-        data=source_in,
-    )
-    return source
+    try:
+        return knowledge_source_service.create_source(
+            session=session,
+            user_id=current_user.id,
+            data=source_in,
+        )
+    except KnowledgeSourceValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/{source_id}", response_model=AIKnowledgeGitRepoPublic)
@@ -85,7 +86,6 @@ def get_knowledge_source(
     source = knowledge_source_service.get_source_by_id(
         session=session,
         source_id=source_id,
-        user_id=current_user.id,
     )
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
@@ -103,12 +103,15 @@ def update_knowledge_source(
     """
     Update a knowledge source. Admin only.
     """
-    source = knowledge_source_service.update_source(
-        session=session,
-        source_id=source_id,
-        user_id=current_user.id,
-        data=source_in,
-    )
+    try:
+        source = knowledge_source_service.update_source(
+            session=session,
+            source_id=source_id,
+            acting_user_id=current_user.id,
+            data=source_in,
+        )
+    except KnowledgeSourceValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     return source
@@ -127,7 +130,6 @@ def delete_knowledge_source(
     deleted = knowledge_source_service.delete_source(
         session=session,
         source_id=source_id,
-        user_id=current_user.id,
     )
     if not deleted:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
@@ -147,7 +149,6 @@ def enable_knowledge_source(
     source = knowledge_source_service.enable_source(
         session=session,
         source_id=source_id,
-        user_id=current_user.id,
     )
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
@@ -167,7 +168,6 @@ def disable_knowledge_source(
     source = knowledge_source_service.disable_source(
         session=session,
         source_id=source_id,
-        user_id=current_user.id,
     )
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
@@ -184,12 +184,13 @@ def check_knowledge_source_access(
     """
     Check if the Git repository is accessible. Admin only.
     """
-    response = knowledge_source_service.check_access(
-        session=session,
-        source_id=source_id,
-        user_id=current_user.id,
-    )
-    return response
+    try:
+        return knowledge_source_service.check_access(
+            session=session,
+            source_id=source_id,
+        )
+    except KnowledgeSourceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/{source_id}/refresh", response_model=RefreshKnowledgeResponse)
@@ -202,12 +203,13 @@ def refresh_knowledge_source(
     """
     Trigger knowledge refresh from Git repository. Admin only.
     """
-    response = knowledge_source_service.refresh_knowledge(
-        session=session,
-        source_id=source_id,
-        user_id=current_user.id,
-    )
-    return response
+    try:
+        return knowledge_source_service.refresh_knowledge(
+            session=session,
+            source_id=source_id,
+        )
+    except KnowledgeSourceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/{source_id}/articles", response_model=list[KnowledgeArticlePublic])
@@ -225,7 +227,6 @@ def list_knowledge_articles(
     articles = knowledge_source_service.get_source_articles(
         session=session,
         source_id=source_id,
-        user_id=current_user.id,
         skip=skip,
         limit=limit,
     )
@@ -264,13 +265,12 @@ def get_knowledge_article(
     """
     Get a single article's full content.
 
-    Admin only. Read access: owner OR public-discoverable source.
+    Admin only.
     """
     article = knowledge_source_service.get_article_content(
         session=session,
         source_id=source_id,
         article_id=article_id,
-        user_id=current_user.id,
     )
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
@@ -287,12 +287,11 @@ def export_knowledge_source(
     """
     Export all articles of a knowledge source as a single Markdown document.
 
-    Admin only. Read access: owner OR public-discoverable source.
+    Admin only.
     """
     doc = knowledge_source_service.export_source_markdown(
         session=session,
         source_id=source_id,
-        user_id=current_user.id,
     )
     if doc is None:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
@@ -307,25 +306,69 @@ def export_knowledge_source(
     )
 
 
-# Discoverable Sources Endpoints
+# Share list endpoints (effective when access_level == shared)
 
-@router.get("/discoverable/list", response_model=list[DiscoverableSourcePublic])
-def list_discoverable_sources(
+
+@router.get(
+    "/{source_id}/shared-users",
+    response_model=list[KnowledgeSourceSharedUserPublic],
+)
+def list_knowledge_source_shared_users(
+    *,
     session: SessionDep,
     current_user: SuperUser,
-    skip: int = 0,
-    limit: int = 100,
+    source_id: uuid.UUID,
 ) -> Any:
     """
-    List public knowledge sources from other admins. Admin only, read-only.
-
-    Shows sources marked as public_discovery=True by other admins,
-    for cross-admin visibility of globally available knowledge.
+    List users a knowledge source is shared with. Admin only.
     """
-    sources = knowledge_source_service.get_discoverable_sources(
-        session=session,
-        user_id=current_user.id,
-        skip=skip,
-        limit=limit,
-    )
-    return sources
+    try:
+        return knowledge_source_service.list_shared_users(
+            session=session, source_id=source_id
+        )
+    except KnowledgeSourceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post(
+    "/{source_id}/shared-users",
+    response_model=KnowledgeSourceSharedUserPublic,
+)
+def add_knowledge_source_shared_user(
+    *,
+    session: SessionDep,
+    current_user: SuperUser,
+    source_id: uuid.UUID,
+    share_in: KnowledgeSourceShareCreate,
+) -> Any:
+    """
+    Share a knowledge source with a user (idempotent). Admin only.
+
+    The share takes effect while the source's access level is ``shared``.
+    """
+    try:
+        return knowledge_source_service.add_shared_user(
+            session=session, source_id=source_id, user_id=share_in.user_id
+        )
+    except KnowledgeSourceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/{source_id}/shared-users/{user_id}")
+def remove_knowledge_source_shared_user(
+    *,
+    session: SessionDep,
+    current_user: SuperUser,
+    source_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> Any:
+    """
+    Remove a user from a knowledge source's share list. Admin only.
+    """
+    try:
+        knowledge_source_service.remove_shared_user(
+            session=session, source_id=source_id, user_id=user_id
+        )
+    except KnowledgeSourceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"ok": True}

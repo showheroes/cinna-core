@@ -2,7 +2,10 @@
 Knowledge management models for Git-based knowledge repositories.
 
 This module defines models for managing knowledge sources (Git repositories),
-workspace permissions, and knowledge articles with embeddings.
+their access level / user shares, and knowledge articles with embeddings.
+
+Knowledge sources are server-wide and managed by superusers only. ``user_id``
+on a source records the admin who created it; it does not scope management.
 """
 
 import uuid
@@ -10,7 +13,7 @@ from datetime import datetime, UTC
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import JSON, Column, ForeignKey, Index, Text
+from sqlalchemy import JSON, Column, ForeignKey, Index, Text, UniqueConstraint, Uuid
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -23,11 +26,17 @@ class SourceStatus(str, Enum):
     disconnected = "disconnected"
 
 
-class WorkspaceAccessType(str, Enum):
-    """Type of workspace access for a knowledge source."""
+class KnowledgeSourceAccessLevel(str, Enum):
+    """Who may query a knowledge source (via agents or CLI knowledge search).
 
-    all = "all"
-    specific = "specific"
+    - private: superusers only
+    - public: every user on the server
+    - shared: superusers plus the users listed in the source's share list
+    """
+
+    private = "private"
+    public = "public"
+    shared = "shared"
 
 
 # Knowledge Git Repository Model
@@ -38,15 +47,35 @@ class AIKnowledgeGitRepoBase(SQLModel):
     description: Optional[str] = None
     git_url: str
     branch: str = Field(default="main")
-    ssh_key_id: Optional[uuid.UUID] = Field(default=None, foreign_key="user_ssh_keys.id")
+    # SET NULL: deleting the key's owner (cascades their keys) keeps the source;
+    # the next check/refresh of a private repo then fails. Direct key deletion
+    # is guarded with a 409 in SSHKeyService.delete_key.
+    # DEFERRABLE INITIALLY DEFERRED: deleting an admin who is both creator and
+    # key owner reaches the row via two cascade paths (user_id SET NULL and
+    # user_ssh_keys CASCADE -> ssh_key_id SET NULL); an immediate FK check on
+    # the intermediate row version fails, so the check runs at commit instead.
+    ssh_key_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            Uuid,
+            ForeignKey(
+                "user_ssh_keys.id",
+                ondelete="SET NULL",
+                deferrable=True,
+                initially="DEFERRED",
+            ),
+            nullable=True,
+        ),
+    )
     is_enabled: bool = Field(default=True, index=True)
     status: SourceStatus = Field(default=SourceStatus.pending)
     status_message: Optional[str] = None
     last_checked_at: Optional[datetime] = None
     last_sync_at: Optional[datetime] = None
     sync_commit_hash: Optional[str] = None
-    workspace_access_type: WorkspaceAccessType = Field(default=WorkspaceAccessType.all)
-    public_discovery: bool = Field(default=False, index=True)
+    access_level: KnowledgeSourceAccessLevel = Field(
+        default=KnowledgeSourceAccessLevel.private, index=True
+    )
 
 
 class AIKnowledgeGitRepo(AIKnowledgeGitRepoBase, table=True):
@@ -55,15 +84,14 @@ class AIKnowledgeGitRepo(AIKnowledgeGitRepoBase, table=True):
     __tablename__ = "ai_knowledge_git_repo"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
+    # Creator (metadata only). SET NULL: deleting the admin keeps the server-wide source.
+    user_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL", nullable=True, index=True
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
-    # user: Optional["User"] = Relationship(back_populates="knowledge_repos")
-    workspace_permissions: list["AIKnowledgeGitRepoWorkspace"] = Relationship(
-        back_populates="git_repo", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
-    )
     articles: list["KnowledgeArticle"] = Relationship(
         back_populates="git_repo", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
@@ -73,10 +101,15 @@ class AIKnowledgeGitRepoPublic(AIKnowledgeGitRepoBase):
     """Public schema for knowledge git repository."""
 
     id: uuid.UUID
-    user_id: uuid.UUID
+    # Creator of the source (metadata only; every superuser manages every source).
+    # None once the creating admin has been deleted.
+    user_id: Optional[uuid.UUID] = None
+    created_by_email: Optional[str] = None
+    created_by_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     article_count: int = 0
+    shared_user_count: int = 0
 
 
 class AIKnowledgeGitRepoCreate(SQLModel):
@@ -87,8 +120,7 @@ class AIKnowledgeGitRepoCreate(SQLModel):
     git_url: str
     branch: str = "main"
     ssh_key_id: Optional[uuid.UUID] = None
-    workspace_access_type: WorkspaceAccessType = WorkspaceAccessType.all
-    workspace_ids: Optional[list[uuid.UUID]] = None
+    access_level: KnowledgeSourceAccessLevel = KnowledgeSourceAccessLevel.private
 
 
 class AIKnowledgeGitRepoUpdate(SQLModel):
@@ -99,54 +131,37 @@ class AIKnowledgeGitRepoUpdate(SQLModel):
     branch: Optional[str] = None
     ssh_key_id: Optional[uuid.UUID] = None
     is_enabled: Optional[bool] = None
-    workspace_access_type: Optional[WorkspaceAccessType] = None
-    workspace_ids: Optional[list[uuid.UUID]] = None
-    public_discovery: Optional[bool] = None
+    access_level: Optional[KnowledgeSourceAccessLevel] = None
 
 
-# Workspace Permissions Model
-class AIKnowledgeGitRepoWorkspace(SQLModel, table=True):
-    """Link table for knowledge git repository workspace permissions."""
+# User Share Model (access_level == shared)
+class AIKnowledgeGitRepoUserShare(SQLModel, table=True):
+    """Link table: users granted query access to a ``shared`` knowledge source."""
 
-    __tablename__ = "ai_knowledge_git_repo_workspaces"
+    __tablename__ = "ai_knowledge_git_repo_user_shares"
     __table_args__ = (
-        Index("idx_git_repo_workspace_unique", "git_repo_id", "user_workspace_id", unique=True),
+        UniqueConstraint("git_repo_id", "user_id", name="uq_knowledge_repo_user_share"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     git_repo_id: uuid.UUID = Field(foreign_key="ai_knowledge_git_repo.id", ondelete="CASCADE", index=True)
-    user_workspace_id: uuid.UUID = Field(foreign_key="user_workspace.id", ondelete="CASCADE", index=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    # Relationships
-    git_repo: Optional[AIKnowledgeGitRepo] = Relationship(back_populates="workspace_permissions")
-
-
-# User Enabled Discoverable Sources Model
-class UserEnabledDiscoverableSource(SQLModel, table=True):
-    """Link table for users who enabled discoverable knowledge sources."""
-
-    __tablename__ = "user_enabled_discoverable_sources"
-    __table_args__ = (
-        Index("idx_user_source_unique", "user_id", "git_repo_id", unique=True),
-    )
-
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
-    git_repo_id: uuid.UUID = Field(foreign_key="ai_knowledge_git_repo.id", ondelete="CASCADE", index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-# Discoverable Source Public Schema
-class DiscoverableSourcePublic(SQLModel):
-    """Public schema for discoverable knowledge sources (read-only admin view)."""
+class KnowledgeSourceShareCreate(SQLModel):
+    """Request body for adding a user to a knowledge source's share list."""
 
-    id: uuid.UUID
-    name: str
-    description: Optional[str] = None
-    status: SourceStatus
-    article_count: int = 0
-    owner_username: Optional[str] = None
+    user_id: uuid.UUID
+
+
+class KnowledgeSourceSharedUserPublic(SQLModel):
+    """A user on a knowledge source's share list."""
+
+    user_id: uuid.UUID
+    email: str
+    full_name: Optional[str] = None
+    created_at: datetime
 
 
 # Knowledge Article Model

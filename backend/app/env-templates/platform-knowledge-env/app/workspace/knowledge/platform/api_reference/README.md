@@ -46,7 +46,7 @@ Each file below documents one API domain.
 | Installs | [installs.md](./installs.md) | 12 |
 | Invitations | [invitations.md](./invitations.md) | 2 |
 | Knowledge | [knowledge.md](./knowledge.md) | 1 |
-| Knowledge Sources | [knowledge_sources.md](./knowledge_sources.md) | 13 |
+| Knowledge Sources | [knowledge_sources.md](./knowledge_sources.md) | 15 |
 | Llm Plugins | [llm_plugins.md](./llm_plugins.md) | 13 |
 | Mail Servers | [mail_servers.md](./mail_servers.md) | 6 |
 | Mcp Connectors | [mcp_connectors.md](./mcp_connectors.md) | 9 |

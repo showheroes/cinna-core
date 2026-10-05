@@ -30,7 +30,8 @@
 - `backend/app/models/sessions/session.py` - `user_workspace_id` on `SessionBase`, `Session`, `SessionPublic`
 - `backend/app/models/sessions/activity.py` - `user_workspace_id` on `ActivityBase`, `ActivityPublic`
 - `backend/app/models/tasks/input_task.py` - `user_workspace_id` on `InputTaskBase`, `InputTask`, `InputTaskPublic`
-- `backend/app/models/knowledge/knowledge.py` - `user_workspace_id` on `KnowledgeSource` (non-nullable, with unique index)
+
+Knowledge sources (`backend/app/models/knowledge/knowledge.py`) have no `user_workspace_id` column — workspace scoping was removed (migration `a7f55e82a224`) in favor of a per-source `access_level` (private/public/shared). See [Knowledge Sources tech](../knowledge_sources/knowledge_sources_tech.md).
 
 ### Routes with Workspace Filtering
 
@@ -39,7 +40,6 @@
 - `backend/app/api/routes/sessions.py` - same pattern
 - `backend/app/api/routes/activities.py` - same pattern
 - `backend/app/api/routes/input_tasks.py` - same pattern
-- `backend/app/api/routes/knowledge.py` - same pattern
 
 ### Frontend Routes Using Workspace Filter
 
@@ -74,7 +74,7 @@
 
 ### FK Column on Related Tables
 
-`user_workspace_id` (UUID, nullable, FK to `user_workspace.id`) added to: `agent`, `credential`, `session`, `activity`, `input_task`, `knowledge_source`
+`user_workspace_id` (UUID, nullable, FK to `user_workspace.id`) added to: `agent`, `credential`, `session`, `activity`, `input_task`
 
 Null value = entity belongs to Default workspace.
 

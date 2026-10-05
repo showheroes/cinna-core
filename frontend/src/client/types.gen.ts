@@ -2283,8 +2283,7 @@ export type AIKnowledgeGitRepoCreate = {
     git_url: string;
     branch?: string;
     ssh_key_id?: (string | null);
-    workspace_access_type?: WorkspaceAccessType;
-    workspace_ids?: (Array<(string)> | null);
+    access_level?: KnowledgeSourceAccessLevel;
 };
 
 /**
@@ -2302,13 +2301,15 @@ export type AIKnowledgeGitRepoPublic = {
     last_checked_at?: (string | null);
     last_sync_at?: (string | null);
     sync_commit_hash?: (string | null);
-    workspace_access_type?: WorkspaceAccessType;
-    public_discovery?: boolean;
+    access_level?: KnowledgeSourceAccessLevel;
     id: string;
-    user_id: string;
+    user_id?: (string | null);
+    created_by_email?: (string | null);
+    created_by_name?: (string | null);
     created_at: string;
     updated_at: string;
     article_count?: number;
+    shared_user_count?: number;
 };
 
 /**
@@ -2320,9 +2321,7 @@ export type AIKnowledgeGitRepoUpdate = {
     branch?: (string | null);
     ssh_key_id?: (string | null);
     is_enabled?: (boolean | null);
-    workspace_access_type?: (WorkspaceAccessType | null);
-    workspace_ids?: (Array<(string)> | null);
-    public_discovery?: (boolean | null);
+    access_level?: (KnowledgeSourceAccessLevel | null);
 };
 
 /**
@@ -3782,18 +3781,6 @@ export type DiscoverableAgents = {
 };
 
 /**
- * Public schema for discoverable knowledge sources (read-only admin view).
- */
-export type DiscoverableSourcePublic = {
-    id: string;
-    name: string;
-    description?: (string | null);
-    status: SourceStatus;
-    article_count?: number;
-    owner_username?: (string | null);
-};
-
-/**
  * Body of ``PATCH /agents/{agent_id}/bundle-id``.
  *
  * Only valid for the publisher install of a bundle that has not yet been
@@ -4943,6 +4930,32 @@ export type KnowledgeQueryResponseRetrieval = {
 export type KnowledgeSearchBody = {
     query: string;
     topic?: (string | null);
+};
+
+/**
+ * Who may query a knowledge source (via agents or CLI knowledge search).
+ *
+ * - private: superusers only
+ * - public: every user on the server
+ * - shared: superusers plus the users listed in the source's share list
+ */
+export type KnowledgeSourceAccessLevel = 'private' | 'public' | 'shared';
+
+/**
+ * Request body for adding a user to a knowledge source's share list.
+ */
+export type KnowledgeSourceShareCreate = {
+    user_id: string;
+};
+
+/**
+ * A user on a knowledge source's share list.
+ */
+export type KnowledgeSourceSharedUserPublic = {
+    user_id: string;
+    email: string;
+    full_name?: (string | null);
+    created_at: string;
 };
 
 /**
@@ -7996,11 +8009,6 @@ export type WipeRequest = {
 };
 
 /**
- * Type of workspace access for a knowledge source.
- */
-export type WorkspaceAccessType = 'all' | 'specific';
-
-/**
  * Optional body for the workspace-files-changed callback.
  *
  * ``changed_files`` is informational — currently used for logging only;
@@ -10710,7 +10718,6 @@ export type KnowledgeQueryKnowledgeResponse = ((KnowledgeQueryResponseDiscovery 
 export type KnowledgeSourcesListKnowledgeSourcesData = {
     limit?: number;
     skip?: number;
-    workspaceId?: (string | null);
 };
 
 export type KnowledgeSourcesListKnowledgeSourcesResponse = (Array<AIKnowledgeGitRepoPublic>);
@@ -10785,12 +10792,25 @@ export type KnowledgeSourcesExportKnowledgeSourceData = {
 
 export type KnowledgeSourcesExportKnowledgeSourceResponse = (string);
 
-export type KnowledgeSourcesListDiscoverableSourcesData = {
-    limit?: number;
-    skip?: number;
+export type KnowledgeSourcesListKnowledgeSourceSharedUsersData = {
+    sourceId: string;
 };
 
-export type KnowledgeSourcesListDiscoverableSourcesResponse = (Array<DiscoverableSourcePublic>);
+export type KnowledgeSourcesListKnowledgeSourceSharedUsersResponse = (Array<KnowledgeSourceSharedUserPublic>);
+
+export type KnowledgeSourcesAddKnowledgeSourceSharedUserData = {
+    requestBody: KnowledgeSourceShareCreate;
+    sourceId: string;
+};
+
+export type KnowledgeSourcesAddKnowledgeSourceSharedUserResponse = (KnowledgeSourceSharedUserPublic);
+
+export type KnowledgeSourcesRemoveKnowledgeSourceSharedUserData = {
+    sourceId: string;
+    userId: string;
+};
+
+export type KnowledgeSourcesRemoveKnowledgeSourceSharedUserResponse = (unknown);
 
 export type LlmPluginsCreateMarketplaceData = {
     requestBody: LLMPluginMarketplaceCreate;

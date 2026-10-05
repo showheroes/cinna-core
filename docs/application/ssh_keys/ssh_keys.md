@@ -40,7 +40,7 @@ Allows users to securely store SSH key pairs for authenticating with private Git
 
 1. User clicks edit on a key row to rename it (public/private key cannot be changed)
 2. User clicks delete to remove a key
-3. If the key is referenced by knowledge sources, those sources become `disconnected`
+3. If the key is still attached to one or more knowledge sources, deletion is rejected (409) with the list of source names; the admin must detach or change the SSH key on those sources first
 
 ## Business Rules
 
@@ -48,8 +48,8 @@ Allows users to securely store SSH key pairs for authenticating with private Git
 - **Deduplication**: Duplicate keys (same fingerprint) are rejected for the same user
 - **Encryption at rest**: Private keys and passphrases are encrypted with Fernet (AES) using the application's `ENCRYPTION_KEY`
 - **No export**: Private keys cannot be viewed or exported after storage. Only the public key is readable
-- **Cascade on delete**: Deleting a user cascades to delete all their SSH keys (FK constraint)
-- **Knowledge source impact**: Deleting an SSH key referenced by knowledge sources causes those sources to lose access (status transitions to `disconnected`)
+- **Cascade on delete**: Deleting a user cascades to delete all their SSH keys (FK constraint); a knowledge source using one of the deleted keys keeps the (now dangling) `ssh_key_id` reference set to `NULL` (`ON DELETE SET NULL`) rather than losing the source itself
+- **Knowledge source impact**: A key still attached to any knowledge source cannot be deleted — the API returns 409 with the list of source names. This is enforced independently of source ownership: since knowledge sources are admin-managed server-wide (see [Knowledge Sources](../knowledge_sources/knowledge_sources.md)), any admin's key may be attached to a source, but only the key's own owner may attach or change it (400 otherwise)
 
 ### Supported Key Types
 

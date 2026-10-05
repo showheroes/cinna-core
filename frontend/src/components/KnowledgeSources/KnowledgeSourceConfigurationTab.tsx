@@ -1,17 +1,18 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
-  GitBranch,
-  Check,
-  X,
-  Clock,
   AlertCircle,
-  RefreshCw,
+  Check,
+  Clock,
+  GitBranch,
   Key,
-  Globe,
+  type LucideIcon,
+  RefreshCw,
+  X,
 } from "lucide-react"
 
 import type { AIKnowledgeGitRepoPublic as KnowledgeSourceRead } from "@/client"
 import { KnowledgeSourcesService } from "@/client"
+import { RelativeTime } from "@/components/Common/RelativeTime"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -24,6 +25,9 @@ import {
 import { Label as UILabel } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import useCustomToast from "@/hooks/useCustomToast"
+import { handleError } from "@/utils"
+
+import { KnowledgeSourceAccessCard } from "./KnowledgeSourceAccessCard"
 
 interface KnowledgeSourceConfigurationTabProps {
   source: KnowledgeSourceRead
@@ -31,15 +35,20 @@ interface KnowledgeSourceConfigurationTabProps {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, { icon: any; className: string; label: string }> = {
+  const variants: Record<
+    string,
+    { icon: LucideIcon; className: string; label: string }
+  > = {
     connected: {
       icon: Check,
-      className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
+      className:
+        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
       label: "Connected",
     },
     pending: {
       icon: Clock,
-      className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
+      className:
+        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
       label: "Pending",
     },
     error: {
@@ -49,7 +58,8 @@ function StatusBadge({ status }: { status: string }) {
     },
     disconnected: {
       icon: X,
-      className: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300",
+      className:
+        "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300",
       label: "Disconnected",
     },
   }
@@ -66,7 +76,9 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <div className="text-sm font-medium text-muted-foreground">{children}</div>
+  return (
+    <div className="text-sm font-medium text-muted-foreground">{children}</div>
+  )
 }
 
 export function KnowledgeSourceConfigurationTab({
@@ -85,183 +97,177 @@ export function KnowledgeSourceConfigurationTab({
       showSuccessToast(
         enabled
           ? "Source is now active and available for queries"
-          : "Source is now inactive"
+          : "Source is now inactive",
       )
-      queryClient.invalidateQueries({ queryKey: ["knowledge-source", sourceId] })
+      queryClient.invalidateQueries({
+        queryKey: ["knowledge-source", sourceId],
+      })
     },
-    onError: (error: any) => {
-      showErrorToast(error.message || "Failed to update source")
-    },
+    onError: handleError.bind(showErrorToast),
   })
 
   const checkAccessMutation = useMutation({
-    mutationFn: () => KnowledgeSourcesService.checkKnowledgeSourceAccess({ sourceId }),
+    mutationFn: () =>
+      KnowledgeSourcesService.checkKnowledgeSourceAccess({ sourceId }),
     onSuccess: (result) => {
       if (result.accessible) {
         showSuccessToast(result.message)
       } else {
         showErrorToast(result.message)
       }
-      queryClient.invalidateQueries({ queryKey: ["knowledge-source", sourceId] })
+      queryClient.invalidateQueries({
+        queryKey: ["knowledge-source", sourceId],
+      })
     },
-    onError: (error: any) => {
-      showErrorToast(error.message || "Failed to check access")
-    },
+    onError: handleError.bind(showErrorToast),
   })
 
   const refreshMutation = useMutation({
-    mutationFn: () => KnowledgeSourcesService.refreshKnowledgeSource({ sourceId }),
+    mutationFn: () =>
+      KnowledgeSourcesService.refreshKnowledgeSource({ sourceId }),
     onSuccess: (result) => {
       showSuccessToast(result.message)
-      queryClient.invalidateQueries({ queryKey: ["knowledge-source", sourceId] })
-      queryClient.invalidateQueries({ queryKey: ["knowledge-articles", sourceId] })
+      queryClient.invalidateQueries({
+        queryKey: ["knowledge-source", sourceId],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["knowledge-articles", sourceId],
+      })
     },
-    onError: (error: any) => {
-      showErrorToast(error.message || "Failed to refresh knowledge")
-    },
-  })
-
-  const togglePublicDiscoveryMutation = useMutation({
-    mutationFn: (publicDiscovery: boolean) =>
-      KnowledgeSourcesService.updateKnowledgeSource({
-        sourceId,
-        requestBody: { public_discovery: publicDiscovery },
-      }),
-    onSuccess: (_, publicDiscovery) => {
-      showSuccessToast(
-        publicDiscovery
-          ? "Source is now public — available to all users"
-          : "Source is now private — only available to you"
-      )
-      queryClient.invalidateQueries({ queryKey: ["knowledge-source", sourceId] })
-      queryClient.invalidateQueries({ queryKey: ["knowledge-sources"] })
-    },
-    onError: (error: any) => {
-      showErrorToast(error.message || "Failed to update public discovery")
-    },
+    onError: handleError.bind(showErrorToast),
   })
 
   return (
-    <Card>
-      <CardHeader>
-        <div>
-          <CardTitle>Source Configuration</CardTitle>
-          <CardDescription>Git repository settings and status</CardDescription>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
           <div>
-            <Label>Git URL</Label>
-            <p className="text-sm font-mono mt-1">{source.git_url}</p>
+            <CardTitle>Source Configuration</CardTitle>
+            <CardDescription>
+              Git repository settings and status
+            </CardDescription>
           </div>
-          <div>
-            <Label>Branch</Label>
-            <div className="flex items-center gap-1 mt-1">
-              <GitBranch className="h-3 w-3" />
-              <span className="text-sm">{source.branch}</span>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Git URL</Label>
+              <p className="text-sm font-mono mt-1">{source.git_url}</p>
+            </div>
+            <div>
+              <Label>Branch</Label>
+              <div className="flex items-center gap-1 mt-1">
+                <GitBranch className="h-3 w-3" />
+                <span className="text-sm">{source.branch}</span>
+              </div>
+            </div>
+            <div>
+              <Label>SSH Key</Label>
+              <div className="flex items-center gap-1 mt-1">
+                {source.ssh_key_id ? (
+                  <>
+                    <Key className="h-3 w-3" />
+                    <span className="text-sm">Configured</span>
+                  </>
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    None (public repo)
+                  </span>
+                )}
+              </div>
+            </div>
+            <div>
+              <Label>Status</Label>
+              <div className="mt-1">
+                <StatusBadge status={source.status || "disconnected"} />
+              </div>
+            </div>
+            <div>
+              <Label>Last Sync</Label>
+              <div className="text-sm text-muted-foreground mt-1">
+                {source.last_sync_at ? (
+                  <RelativeTime timestamp={source.last_sync_at} showTooltip />
+                ) : (
+                  "Never"
+                )}
+              </div>
+            </div>
+            <div>
+              <Label>Created by</Label>
+              <p className="text-sm mt-1 break-words">
+                {source.created_by_name || source.created_by_email || (
+                  <span className="text-muted-foreground">Unknown</span>
+                )}
+              </p>
             </div>
           </div>
-          <div>
-            <Label>SSH Key</Label>
-            <div className="flex items-center gap-1 mt-1">
-              {source.ssh_key_id ? (
-                <>
-                  <Key className="h-3 w-3" />
-                  <span className="text-sm">Configured</span>
-                </>
-              ) : (
-                <span className="text-sm text-muted-foreground">None (public repo)</span>
+
+          {source.status_message && (
+            <div className="p-3 bg-muted rounded-md">
+              <p className="text-sm">{source.status_message}</p>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-4 border-t">
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <UILabel
+                  htmlFor="is_enabled"
+                  className="text-sm cursor-pointer"
+                >
+                  Enabled
+                </UILabel>
+                <Switch
+                  id="is_enabled"
+                  checked={source.is_enabled}
+                  onCheckedChange={(checked) =>
+                    toggleEnabledMutation.mutate(checked)
+                  }
+                  disabled={toggleEnabledMutation.isPending}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {source.status !== "connected" && (
+                <Button
+                  variant="outline"
+                  onClick={() => checkAccessMutation.mutate()}
+                  disabled={checkAccessMutation.isPending}
+                >
+                  {checkAccessMutation.isPending ? (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                      Checking...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="mr-2 h-4 w-4" />
+                      Check Access
+                    </>
+                  )}
+                </Button>
               )}
-            </div>
-          </div>
-          <div>
-            <Label>Status</Label>
-            <div className="mt-1">
-              <StatusBadge status={source.status || "disconnected"} />
-            </div>
-          </div>
-          <div>
-            <Label>Last Sync</Label>
-            <p className="text-sm text-muted-foreground mt-1">
-              {source.last_sync_at
-                ? new Date(source.last_sync_at).toLocaleString()
-                : "Never"}
-            </p>
-          </div>
-        </div>
-
-        {source.status_message && (
-          <div className="p-3 bg-muted rounded-md">
-            <p className="text-sm">{source.status_message}</p>
-          </div>
-        )}
-
-        <div className="flex items-center justify-between pt-4 border-t">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <UILabel htmlFor="is_enabled" className="text-sm cursor-pointer">
-                Enabled
-              </UILabel>
-              <Switch
-                id="is_enabled"
-                checked={source.is_enabled}
-                onCheckedChange={(checked) => toggleEnabledMutation.mutate(checked)}
-                disabled={toggleEnabledMutation.isPending}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Globe className="h-4 w-4 text-muted-foreground" />
-              <UILabel htmlFor="public_discovery" className="text-sm cursor-pointer">
-                Public
-              </UILabel>
-              <Switch
-                id="public_discovery"
-                checked={source.public_discovery || false}
-                onCheckedChange={(checked) => togglePublicDiscoveryMutation.mutate(checked)}
-                disabled={togglePublicDiscoveryMutation.isPending}
-              />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            {source.status !== "connected" && (
               <Button
-                variant="outline"
-                onClick={() => checkAccessMutation.mutate()}
-                disabled={checkAccessMutation.isPending}
+                onClick={() => refreshMutation.mutate()}
+                disabled={refreshMutation.isPending || !source.is_enabled}
               >
-                {checkAccessMutation.isPending ? (
+                {refreshMutation.isPending ? (
                   <>
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Checking...
+                    Refreshing...
                   </>
                 ) : (
                   <>
-                    <Check className="mr-2 h-4 w-4" />
-                    Check Access
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Refresh Knowledge
                   </>
                 )}
               </Button>
-            )}
-            <Button
-              onClick={() => refreshMutation.mutate()}
-              disabled={refreshMutation.isPending || !source.is_enabled}
-            >
-              {refreshMutation.isPending ? (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                  Refreshing...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Refresh Knowledge
-                </>
-              )}
-            </Button>
+            </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+      <KnowledgeSourceAccessCard source={source} sourceId={sourceId} />
+    </div>
   )
 }

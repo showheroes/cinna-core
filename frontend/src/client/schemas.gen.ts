@@ -951,24 +951,9 @@ export const AIKnowledgeGitRepoCreateSchema = {
             ],
             title: 'Ssh Key Id'
         },
-        workspace_access_type: {
-            '$ref': '#/components/schemas/WorkspaceAccessType',
-            default: 'all'
-        },
-        workspace_ids: {
-            anyOf: [
-                {
-                    items: {
-                        type: 'string',
-                        format: 'uuid'
-                    },
-                    type: 'array'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Workspace Ids'
+        access_level: {
+            '$ref': '#/components/schemas/KnowledgeSourceAccessLevel',
+            default: 'private'
         }
     },
     type: 'object',
@@ -1070,14 +1055,9 @@ export const AIKnowledgeGitRepoPublicSchema = {
             ],
             title: 'Sync Commit Hash'
         },
-        workspace_access_type: {
-            '$ref': '#/components/schemas/WorkspaceAccessType',
-            default: 'all'
-        },
-        public_discovery: {
-            type: 'boolean',
-            title: 'Public Discovery',
-            default: false
+        access_level: {
+            '$ref': '#/components/schemas/KnowledgeSourceAccessLevel',
+            default: 'private'
         },
         id: {
             type: 'string',
@@ -1085,9 +1065,38 @@ export const AIKnowledgeGitRepoPublicSchema = {
             title: 'Id'
         },
         user_id: {
-            type: 'string',
-            format: 'uuid',
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
             title: 'User Id'
+        },
+        created_by_email: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created By Email'
+        },
+        created_by_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created By Name'
         },
         created_at: {
             type: 'string',
@@ -1103,10 +1112,15 @@ export const AIKnowledgeGitRepoPublicSchema = {
             type: 'integer',
             title: 'Article Count',
             default: 0
+        },
+        shared_user_count: {
+            type: 'integer',
+            title: 'Shared User Count',
+            default: 0
         }
     },
     type: 'object',
-    required: ['name', 'git_url', 'id', 'user_id', 'created_at', 'updated_at'],
+    required: ['name', 'git_url', 'id', 'created_at', 'updated_at'],
     title: 'AIKnowledgeGitRepoPublic',
     description: 'Public schema for knowledge git repository.'
 } as const;
@@ -1169,41 +1183,15 @@ export const AIKnowledgeGitRepoUpdateSchema = {
             ],
             title: 'Is Enabled'
         },
-        workspace_access_type: {
+        access_level: {
             anyOf: [
                 {
-                    '$ref': '#/components/schemas/WorkspaceAccessType'
+                    '$ref': '#/components/schemas/KnowledgeSourceAccessLevel'
                 },
                 {
                     type: 'null'
                 }
             ]
-        },
-        workspace_ids: {
-            anyOf: [
-                {
-                    items: {
-                        type: 'string',
-                        format: 'uuid'
-                    },
-                    type: 'array'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Workspace Ids'
-        },
-        public_discovery: {
-            anyOf: [
-                {
-                    type: 'boolean'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Public Discovery'
         }
     },
     type: 'object',
@@ -15839,54 +15827,6 @@ export const DiscoverableAgentsSchema = {
     title: 'DiscoverableAgents'
 } as const;
 
-export const DiscoverableSourcePublicSchema = {
-    properties: {
-        id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Id'
-        },
-        name: {
-            type: 'string',
-            title: 'Name'
-        },
-        description: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Description'
-        },
-        status: {
-            '$ref': '#/components/schemas/SourceStatus'
-        },
-        article_count: {
-            type: 'integer',
-            title: 'Article Count',
-            default: 0
-        },
-        owner_username: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Owner Username'
-        }
-    },
-    type: 'object',
-    required: ['id', 'name', 'status'],
-    title: 'DiscoverableSourcePublic',
-    description: 'Public schema for discoverable knowledge sources (read-only admin view).'
-} as const;
-
 export const EditBundleIdRequestSchema = {
     properties: {
         bundle_id: {
@@ -20549,6 +20489,65 @@ export const KnowledgeSearchBodySchema = {
     type: 'object',
     required: ['query'],
     title: 'KnowledgeSearchBody'
+} as const;
+
+export const KnowledgeSourceAccessLevelSchema = {
+    type: 'string',
+    enum: ['private', 'public', 'shared'],
+    title: 'KnowledgeSourceAccessLevel',
+    description: `Who may query a knowledge source (via agents or CLI knowledge search).
+
+- private: superusers only
+- public: every user on the server
+- shared: superusers plus the users listed in the source's share list`
+} as const;
+
+export const KnowledgeSourceShareCreateSchema = {
+    properties: {
+        user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'User Id'
+        }
+    },
+    type: 'object',
+    required: ['user_id'],
+    title: 'KnowledgeSourceShareCreate',
+    description: "Request body for adding a user to a knowledge source's share list."
+} as const;
+
+export const KnowledgeSourceSharedUserPublicSchema = {
+    properties: {
+        user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'User Id'
+        },
+        email: {
+            type: 'string',
+            title: 'Email'
+        },
+        full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Full Name'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        }
+    },
+    type: 'object',
+    required: ['user_id', 'email', 'created_at'],
+    title: 'KnowledgeSourceSharedUserPublic',
+    description: "A user on a knowledge source's share list."
 } as const;
 
 export const LLMPluginMarketplaceCreateSchema = {
@@ -33657,13 +33656,6 @@ export const WipeRequestSchema = {
     },
     type: 'object',
     title: 'WipeRequest'
-} as const;
-
-export const WorkspaceAccessTypeSchema = {
-    type: 'string',
-    enum: ['all', 'specific'],
-    title: 'WorkspaceAccessType',
-    description: 'Type of workspace access for a knowledge source.'
 } as const;
 
 export const WorkspaceFilesChangedRequestSchema = {

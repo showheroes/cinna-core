@@ -347,9 +347,9 @@ class AccountCLIService:
         """
         Account-level analogue of the per-agent knowledge search.
 
-        Scoped to the account user's accessible knowledge sources (public + own
-        private). There is no agent and no workspace filter; delegates to the
-        shared user-scoped core in ``CLIService``.
+        Scoped to the account user's accessible knowledge sources (central
+        knowledge access rule). There is no agent; delegates to the shared
+        user-scoped core in ``CLIService``.
         """
         # Lazy import of the sibling service class (matches the local-import
         # convention used elsewhere in this module; the module-level import from
@@ -361,7 +361,6 @@ class AccountCLIService:
             user_id=user.id,
             query=query,
             topic=topic,
-            workspace_id=None,
         )
 
     # ── Child Token Minting ──────────────────────────────────────────────

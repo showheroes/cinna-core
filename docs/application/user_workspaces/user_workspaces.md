@@ -59,7 +59,7 @@ Workspaces let users organize agents, credentials, sessions, and tasks into sepa
 - **Stateless API** - server never tracks "active workspace" per user; frontend passes filter on each request
 - **Null means Default** - entities with `user_workspace_id = null` belong to the Default workspace
 - **Cascade delete** - deleting a workspace cascades to its `user_workspace_id` foreign keys
-- **Workspace-aware entities**: agents, credentials, sessions, activities, input tasks, knowledge sources
+- **Workspace-aware entities**: agents, credentials, sessions, activities, input tasks. Knowledge sources are server-wide and not workspace-scoped — see [Knowledge Sources](../knowledge_sources/knowledge_sources.md)
 - **Explicitly assigned entities**: agents, credentials (user picks workspace)
 - **Inherited entities**: sessions (from agent), activities (from session/agent)
 - **Deletion behavior** - if the deleted workspace was active, UI switches to Default
@@ -87,7 +87,7 @@ Frontend → Backend API → Service Layer → PostgreSQL
 - **Sessions** - inherit workspace from parent agent via `SessionService.create_session()`
 - **Activities** - inherit workspace from session/agent via `ActivityService.create_activity()`
 - **Input Tasks** - `user_workspace_id` column; filtered in list endpoint
-- **Knowledge Sources** - `user_workspace_id` column with unique constraint per git repo + workspace
+- **Knowledge Sources** - not workspace-scoped; sources are server-wide and admin-managed, with a separate per-source access level (private/public/shared) governing who may query them. See [Knowledge Sources](../knowledge_sources/knowledge_sources.md)
 
 ## Workspace Icons
 

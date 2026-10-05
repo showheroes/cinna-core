@@ -3,27 +3,24 @@ Vector search service for knowledge articles using cosine similarity.
 
 This module provides utilities for:
 - Searching article chunks by semantic similarity
-- Filtering by workspace permissions
+- Filtering by source access (see knowledge_access_service)
 - Ranking results by relevance
 """
 
 import logging
 import uuid
 from typing import List, Optional, Dict, Any
-from sqlmodel import Session, select, and_, or_
-from sqlalchemy import func
+from sqlmodel import Session, select, and_
 
 from app.models import (
     KnowledgeArticle,
     KnowledgeArticleChunk,
     AIKnowledgeGitRepo,
-    AIKnowledgeGitRepoWorkspace,
-    Agent,
-    SourceStatus,
-    WorkspaceAccessType,
     ArticleListItem,
     ArticleContent,
 )
+# Re-exported: consumers import the access resolver from this module.
+from app.services.knowledge.knowledge_access_service import get_accessible_source_ids  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -57,78 +54,6 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
         return 0.0
 
     return dot_product / (magnitude1 * magnitude2)
-
-
-def get_accessible_source_ids(
-    *,
-    session: Session,
-    user_id: uuid.UUID,
-    workspace_id: Optional[uuid.UUID] = None
-) -> List[uuid.UUID]:
-    """
-    Get list of knowledge source IDs accessible to the user.
-
-    Access model:
-    - Public sources (public_discovery=True) are available to ALL users
-    - Private sources are only available to the admin who owns them
-    - Workspace filtering applies to owner's own sources only
-
-    Args:
-        session: Database session
-        user_id: User ID
-        workspace_id: Optional workspace ID for filtering
-
-    Returns:
-        List of accessible source IDs
-    """
-    # 1. User's own sources (admin's private + public sources)
-    own_query = select(AIKnowledgeGitRepo).where(
-        and_(
-            AIKnowledgeGitRepo.user_id == user_id,
-            AIKnowledgeGitRepo.is_enabled == True,
-            AIKnowledgeGitRepo.status == SourceStatus.connected
-        )
-    )
-
-    # Apply workspace filtering if specified
-    if workspace_id:
-        own_query = own_query.where(
-            or_(
-                AIKnowledgeGitRepo.workspace_access_type == WorkspaceAccessType.all,
-                and_(
-                    AIKnowledgeGitRepo.workspace_access_type == WorkspaceAccessType.specific,
-                    AIKnowledgeGitRepo.id.in_(
-                        select(AIKnowledgeGitRepoWorkspace.git_repo_id).where(
-                            AIKnowledgeGitRepoWorkspace.user_workspace_id == workspace_id
-                        )
-                    )
-                )
-            )
-        )
-
-    own_sources = session.exec(own_query).all()
-    own_ids = [source.id for source in own_sources]
-
-    # 2. All public sources from other admins (automatically available to everyone)
-    public_query = select(AIKnowledgeGitRepo).where(
-        and_(
-            AIKnowledgeGitRepo.user_id != user_id,
-            AIKnowledgeGitRepo.public_discovery == True,
-            AIKnowledgeGitRepo.is_enabled == True,
-            AIKnowledgeGitRepo.status == SourceStatus.connected,
-        )
-    )
-
-    public_sources = session.exec(public_query).all()
-    public_ids = [source.id for source in public_sources]
-
-    all_source_ids = list(set(own_ids + public_ids))
-
-    logger.info(
-        f"Found {len(own_ids)} own sources and {len(public_ids)} "
-        f"public sources for user {user_id}"
-    )
-    return all_source_ids
 
 
 def search_article_chunks(
@@ -334,7 +259,6 @@ def search_knowledge(
     session: Session,
     query_embedding: List[float],
     user_id: uuid.UUID,
-    workspace_id: Optional[uuid.UUID] = None,
     embedding_model: str,
     limit: int = 10
 ) -> List[ArticleListItem]:
@@ -344,8 +268,7 @@ def search_knowledge(
     Args:
         session: Database session
         query_embedding: Query embedding vector
-        user_id: User ID for permission checking
-        workspace_id: Optional workspace ID for filtering
+        user_id: User ID for permission checking (agent owner for agent queries)
         embedding_model: Embedding model name
         limit: Maximum number of articles to return
 
@@ -353,11 +276,7 @@ def search_knowledge(
         List of article metadata items
     """
     # Get accessible sources
-    source_ids = get_accessible_source_ids(
-        session=session,
-        user_id=user_id,
-        workspace_id=workspace_id
-    )
+    source_ids = get_accessible_source_ids(session=session, user_id=user_id)
 
     if not source_ids:
         logger.info("No accessible knowledge sources")

@@ -17,6 +17,18 @@ from app.core.ssh_key_utils import (
 logger = logging.getLogger(__name__)
 
 
+class SSHKeyInUseError(Exception):
+    """The SSH key is referenced by knowledge sources and cannot be deleted."""
+
+    def __init__(self, source_names: list[str]) -> None:
+        self.source_names = source_names
+        super().__init__(
+            "SSH key is used by knowledge source(s): "
+            + ", ".join(source_names)
+            + ". Change their SSH key before deleting it."
+        )
+
+
 class SSHKeyService:
     """
     Service for managing SSH keys.
@@ -272,10 +284,24 @@ class SSHKeyService:
 
         Returns:
             True if deleted, False if not found or not owned by user
+
+        Raises:
+            SSHKeyInUseError: if knowledge sources still use the key
         """
         key = SSHKeyService.get_key_by_id(session, key_id, user_id)
         if not key:
             return False
+
+        # Local import: knowledge models live in another domain.
+        from app.models.knowledge.knowledge import AIKnowledgeGitRepo
+
+        source_names = session.exec(
+            select(AIKnowledgeGitRepo.name)
+            .where(AIKnowledgeGitRepo.ssh_key_id == key_id)
+            .order_by(AIKnowledgeGitRepo.name)
+        ).all()
+        if source_names:
+            raise SSHKeyInUseError(list(source_names))
 
         session.delete(key)
         session.commit()

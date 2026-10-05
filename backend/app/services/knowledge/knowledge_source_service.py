@@ -3,6 +3,11 @@ Service layer for knowledge source management.
 
 This service provides CRUD operations for Git-based knowledge repositories.
 Includes Git clone/pull operations, article parsing, and database storage.
+
+Knowledge sources are server-wide and admin-managed: every superuser can manage
+every source (route layer enforces superuser). ``user_id`` on a source records
+its creator only. Consumer (query) access is resolved in
+``knowledge_access_service``.
 """
 
 import uuid
@@ -17,14 +22,16 @@ from app.models.knowledge.knowledge import (
     AIKnowledgeGitRepoCreate,
     AIKnowledgeGitRepoPublic,
     AIKnowledgeGitRepoUpdate,
-    AIKnowledgeGitRepoWorkspace,
+    AIKnowledgeGitRepoUserShare,
     KnowledgeArticle,
     KnowledgeArticleDetail,
+    KnowledgeSourceSharedUserPublic,
     SourceStatus,
-    WorkspaceAccessType,
     CheckAccessResponse,
     RefreshKnowledgeResponse,
 )
+from app.models.users.ssh_key import UserSSHKey
+from app.models.users.user import User
 from app.services.users.ssh_key_service import SSHKeyService
 from app.services.knowledge.git_operations import (
     create_ssh_key_file,
@@ -46,6 +53,112 @@ from app.services.knowledge.knowledge_article_service import (
 logger = logging.getLogger(__name__)
 
 
+class KnowledgeSourceError(Exception):
+    """Base error for knowledge source management."""
+
+
+class KnowledgeSourceNotFoundError(KnowledgeSourceError):
+    """Knowledge source (or referenced entity) does not exist."""
+
+
+class KnowledgeSourceValidationError(KnowledgeSourceError):
+    """Request is well-formed but not acceptable (e.g. foreign SSH key)."""
+
+
+def _require_source(*, session: Session, source_id: uuid.UUID) -> AIKnowledgeGitRepo:
+    source = session.get(AIKnowledgeGitRepo, source_id)
+    if not source:
+        raise KnowledgeSourceNotFoundError("Knowledge source not found")
+    return source
+
+
+def _validate_ssh_key_ownership(
+    *,
+    session: Session,
+    ssh_key_id: uuid.UUID,
+    acting_user_id: uuid.UUID,
+) -> None:
+    """An admin may only attach one of their own SSH keys to a source.
+
+    Git operations later resolve the key by its id (see ``_load_source_ssh_key``),
+    so any admin can refresh a source regardless of who attached the key.
+    """
+    if SSHKeyService.get_key_by_id(session, ssh_key_id, acting_user_id) is None:
+        raise KnowledgeSourceValidationError(
+            "SSH key not found. Select one of your own SSH keys."
+        )
+
+
+def _load_source_ssh_key(
+    *,
+    session: Session,
+    source: AIKnowledgeGitRepo,
+) -> Optional[tuple[str, Optional[str]]]:
+    """Decrypt the SSH key stored on the source, independent of the acting admin.
+
+    The key is resolved by the source's stored ``ssh_key_id`` and decrypted on
+    behalf of the key's own owner, so a refresh or access check by any
+    superuser uses the key the source was configured with.
+    """
+    if not source.ssh_key_id:
+        return None
+    key = session.get(UserSSHKey, source.ssh_key_id)
+    if key is None:
+        return None
+    return SSHKeyService.get_decrypted_private_key(
+        session=session, key_id=key.id, user_id=key.user_id
+    )
+
+
+def _to_public_list(
+    *,
+    session: Session,
+    sources: list[AIKnowledgeGitRepo],
+) -> list[AIKnowledgeGitRepoPublic]:
+    """Convert sources to the public schema with counts and creator info (batched)."""
+    if not sources:
+        return []
+    source_ids = [source.id for source in sources]
+    creator_ids = {source.user_id for source in sources if source.user_id}
+
+    article_counts = dict(
+        session.exec(
+            select(KnowledgeArticle.git_repo_id, func.count())
+            .where(KnowledgeArticle.git_repo_id.in_(source_ids))
+            .group_by(KnowledgeArticle.git_repo_id)
+        ).all()
+    )
+    share_counts = dict(
+        session.exec(
+            select(AIKnowledgeGitRepoUserShare.git_repo_id, func.count())
+            .where(AIKnowledgeGitRepoUserShare.git_repo_id.in_(source_ids))
+            .group_by(AIKnowledgeGitRepoUserShare.git_repo_id)
+        ).all()
+    )
+    creators = {
+        user.id: user
+        for user in session.exec(select(User).where(User.id.in_(creator_ids))).all()
+    }
+
+    result = []
+    for source in sources:
+        creator = creators.get(source.user_id) if source.user_id else None
+        result.append(
+            AIKnowledgeGitRepoPublic(
+                **source.model_dump(),
+                created_by_email=creator.email if creator else None,
+                created_by_name=creator.full_name if creator else None,
+                article_count=article_counts.get(source.id, 0),
+                shared_user_count=share_counts.get(source.id, 0),
+            )
+        )
+    return result
+
+
+def _to_public(*, session: Session, source: AIKnowledgeGitRepo) -> AIKnowledgeGitRepoPublic:
+    return _to_public_list(session=session, sources=[source])[0]
+
+
 def create_source(
     *,
     session: Session,
@@ -57,13 +170,17 @@ def create_source(
 
     Args:
         session: Database session
-        user_id: ID of the user creating the source
+        user_id: ID of the admin creating the source (recorded as creator)
         data: Source creation data
 
-    Returns:
-        Created knowledge source with public schema
+    Raises:
+        KnowledgeSourceValidationError: if the SSH key is not the creator's own
     """
-    # Create the main source record
+    if data.ssh_key_id:
+        _validate_ssh_key_ownership(
+            session=session, ssh_key_id=data.ssh_key_id, acting_user_id=user_id
+        )
+
     source = AIKnowledgeGitRepo(
         user_id=user_id,
         name=data.name,
@@ -71,146 +188,49 @@ def create_source(
         git_url=data.git_url,
         branch=data.branch,
         ssh_key_id=data.ssh_key_id,
-        workspace_access_type=data.workspace_access_type,
+        access_level=data.access_level,
         status=SourceStatus.pending,
     )
     session.add(source)
-    session.flush()  # Get the source ID
-
-    # Create workspace permissions if specific workspaces selected
-    if data.workspace_access_type == WorkspaceAccessType.specific and data.workspace_ids:
-        for workspace_id in data.workspace_ids:
-            permission = AIKnowledgeGitRepoWorkspace(
-                git_repo_id=source.id,
-                user_workspace_id=workspace_id,
-            )
-            session.add(permission)
-
     session.commit()
     session.refresh(source)
 
-    # Get article count (will be 0 initially)
-    article_count = get_article_count(session=session, source_id=source.id)
-
-    return AIKnowledgeGitRepoPublic(
-        **source.model_dump(),
-        article_count=article_count,
-    )
+    return _to_public(session=session, source=source)
 
 
-def get_user_sources(
+def list_sources(
     *,
     session: Session,
-    user_id: uuid.UUID,
-    workspace_id: Optional[uuid.UUID] = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[AIKnowledgeGitRepoPublic]:
-    """
-    Get all knowledge sources for a user, optionally filtered by workspace.
-
-    Args:
-        session: Database session
-        user_id: ID of the user
-        workspace_id: Optional workspace ID to filter by
-        skip: Number of records to skip
-        limit: Maximum number of records to return
-
-    Returns:
-        List of knowledge sources
-    """
-    query = select(AIKnowledgeGitRepo).where(
-        AIKnowledgeGitRepo.user_id == user_id
-    )
-
-    if workspace_id:
-        # Filter by workspace permissions
-        query = query.where(
-            (AIKnowledgeGitRepo.workspace_access_type == WorkspaceAccessType.all)
-            | (
-                AIKnowledgeGitRepo.id.in_(
-                    select(AIKnowledgeGitRepoWorkspace.git_repo_id).where(
-                        AIKnowledgeGitRepoWorkspace.user_workspace_id == workspace_id
-                    )
-                )
-            )
-        )
-
-    query = query.offset(skip).limit(limit)
-    sources = session.exec(query).all()
-
-    # Add article counts
-    result = []
-    for source in sources:
-        article_count = get_article_count(session=session, source_id=source.id)
-        result.append(
-            AIKnowledgeGitRepoPublic(
-                **source.model_dump(),
-                article_count=article_count,
-            )
-        )
-
-    return result
+    """List all knowledge sources on the server (admin view)."""
+    sources = session.exec(
+        select(AIKnowledgeGitRepo)
+        .order_by(AIKnowledgeGitRepo.name)
+        .offset(skip)
+        .limit(limit)
+    ).all()
+    return _to_public_list(session=session, sources=list(sources))
 
 
 def get_source_by_id(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
 ) -> Optional[AIKnowledgeGitRepoPublic]:
-    """
-    Get a knowledge source by ID.
-
-    Args:
-        session: Database session
-        source_id: ID of the source
-        user_id: ID of the user (for ownership check)
-
-    Returns:
-        Knowledge source or None if not found or not owned by user
-    """
-    source = session.get(AIKnowledgeGitRepo, source_id)
-    if not source or source.user_id != user_id:
-        return None
-
-    article_count = get_article_count(session=session, source_id=source.id)
-    return AIKnowledgeGitRepoPublic(
-        **source.model_dump(),
-        article_count=article_count,
-    )
-
-
-def _get_source_for_read(
-    *,
-    session: Session,
-    source_id: uuid.UUID,
-    user_id: uuid.UUID,
-) -> Optional[AIKnowledgeGitRepo]:
-    """Return the source ORM object if the user may READ it, else None.
-
-    Read access == owner OR (public_discovery AND enabled AND connected).
-    Mirrors the boundary already implied by get_source_by_id + get_discoverable_sources.
-    """
+    """Get a knowledge source by ID, or None if it does not exist."""
     source = session.get(AIKnowledgeGitRepo, source_id)
     if not source:
         return None
-    if source.user_id == user_id:
-        return source
-    if (
-        source.public_discovery
-        and source.is_enabled
-        and source.status == SourceStatus.connected
-    ):
-        return source
-    return None
+    return _to_public(session=session, source=source)
 
 
 def update_source(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
+    acting_user_id: uuid.UUID,
     data: AIKnowledgeGitRepoUpdate,
 ) -> Optional[AIKnowledgeGitRepoPublic]:
     """
@@ -219,71 +239,47 @@ def update_source(
     Args:
         session: Database session
         source_id: ID of the source
-        user_id: ID of the user (for ownership check)
+        acting_user_id: Admin performing the update (for SSH key ownership)
         data: Update data
 
     Returns:
-        Updated knowledge source or None if not found or not owned by user
+        Updated knowledge source or None if not found
+
+    Raises:
+        KnowledgeSourceValidationError: if a newly attached SSH key is not the
+            acting admin's own
     """
     source = session.get(AIKnowledgeGitRepo, source_id)
-    if not source or source.user_id != user_id:
+    if not source:
         return None
 
-    # Check if Git config changed (requires re-verification)
-    git_config_changed = False
-    if data.branch is not None or data.ssh_key_id is not None:
-        git_config_changed = True
+    if data.ssh_key_id is not None and data.ssh_key_id != source.ssh_key_id:
+        _validate_ssh_key_ownership(
+            session=session, ssh_key_id=data.ssh_key_id, acting_user_id=acting_user_id
+        )
 
-    # Update fields
-    update_data = data.model_dump(exclude_unset=True, exclude={"workspace_ids"})
+    # Check if Git config changed (requires re-verification)
+    git_config_changed = data.branch is not None or data.ssh_key_id is not None
+
+    update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(source, field, value)
 
-    # If Git config changed, mark as pending
     if git_config_changed:
         source.status = SourceStatus.pending
         source.status_message = "Configuration updated. Please check access."
 
     source.updated_at = datetime.now(UTC)
-
-    # Update workspace permissions if changed
-    if data.workspace_ids is not None and data.workspace_access_type == WorkspaceAccessType.specific:
-        # Delete existing permissions
-        session.exec(
-            select(AIKnowledgeGitRepoWorkspace).where(
-                AIKnowledgeGitRepoWorkspace.git_repo_id == source_id
-            )
-        )
-        for perm in session.exec(
-            select(AIKnowledgeGitRepoWorkspace).where(
-                AIKnowledgeGitRepoWorkspace.git_repo_id == source_id
-            )
-        ).all():
-            session.delete(perm)
-
-        # Create new permissions
-        for workspace_id in data.workspace_ids:
-            permission = AIKnowledgeGitRepoWorkspace(
-                git_repo_id=source_id,
-                user_workspace_id=workspace_id,
-            )
-            session.add(permission)
-
     session.commit()
     session.refresh(source)
 
-    article_count = get_article_count(session=session, source_id=source.id)
-    return AIKnowledgeGitRepoPublic(
-        **source.model_dump(),
-        article_count=article_count,
-    )
+    return _to_public(session=session, source=source)
 
 
 def delete_source(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
 ) -> bool:
     """
     Delete a knowledge source.
@@ -291,13 +287,12 @@ def delete_source(
     Args:
         session: Database session
         source_id: ID of the source
-        user_id: ID of the user (for ownership check)
 
     Returns:
-        True if deleted, False if not found or not owned by user
+        True if deleted, False if not found
     """
     source = session.get(AIKnowledgeGitRepo, source_id)
-    if not source or source.user_id != user_id:
+    if not source:
         return False
 
     session.delete(source)
@@ -309,7 +304,6 @@ def enable_source(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
 ) -> Optional[AIKnowledgeGitRepoPublic]:
     """
     Enable a knowledge source.
@@ -317,13 +311,12 @@ def enable_source(
     Args:
         session: Database session
         source_id: ID of the source
-        user_id: ID of the user (for ownership check)
 
     Returns:
-        Updated knowledge source or None if not found or not owned by user
+        Updated knowledge source or None if not found
     """
     source = session.get(AIKnowledgeGitRepo, source_id)
-    if not source or source.user_id != user_id:
+    if not source:
         return None
 
     source.is_enabled = True
@@ -331,18 +324,13 @@ def enable_source(
     session.commit()
     session.refresh(source)
 
-    article_count = get_article_count(session=session, source_id=source.id)
-    return AIKnowledgeGitRepoPublic(
-        **source.model_dump(),
-        article_count=article_count,
-    )
+    return _to_public(session=session, source=source)
 
 
 def disable_source(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
 ) -> Optional[AIKnowledgeGitRepoPublic]:
     """
     Disable a knowledge source.
@@ -350,13 +338,12 @@ def disable_source(
     Args:
         session: Database session
         source_id: ID of the source
-        user_id: ID of the user (for ownership check)
 
     Returns:
-        Updated knowledge source or None if not found or not owned by user
+        Updated knowledge source or None if not found
     """
     source = session.get(AIKnowledgeGitRepo, source_id)
-    if not source or source.user_id != user_id:
+    if not source:
         return None
 
     source.is_enabled = False
@@ -364,18 +351,13 @@ def disable_source(
     session.commit()
     session.refresh(source)
 
-    article_count = get_article_count(session=session, source_id=source.id)
-    return AIKnowledgeGitRepoPublic(
-        **source.model_dump(),
-        article_count=article_count,
-    )
+    return _to_public(session=session, source=source)
 
 
 def check_access(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
 ) -> CheckAccessResponse:
     """
     Check if the Git repository is accessible.
@@ -386,17 +368,14 @@ def check_access(
     Args:
         session: Database session
         source_id: ID of the source
-        user_id: ID of the user (for ownership check)
 
     Returns:
         Access check response with accessibility status and message
+
+    Raises:
+        KnowledgeSourceNotFoundError: if the source does not exist
     """
-    source = session.get(AIKnowledgeGitRepo, source_id)
-    if not source or source.user_id != user_id:
-        return CheckAccessResponse(
-            accessible=False,
-            message="Source not found or access denied",
-        )
+    source = _require_source(session=session, source_id=source_id)
 
     ssh_key_path = None
     temp_key_context = None
@@ -404,22 +383,18 @@ def check_access(
     try:
         # If SSH key is required, decrypt it
         if source.ssh_key_id:
-            key_data = SSHKeyService.get_decrypted_private_key(
-                session=session,
-                key_id=source.ssh_key_id,
-                user_id=user_id
-            )
+            key_data = _load_source_ssh_key(session=session, source=source)
 
             if not key_data:
                 source.status = SourceStatus.error
-                source.status_message = "SSH key not found or access denied"
+                source.status_message = "SSH key attached to this source no longer exists"
                 source.last_checked_at = datetime.now(UTC)
                 source.updated_at = datetime.now(UTC)
                 session.commit()
 
                 return CheckAccessResponse(
                     accessible=False,
-                    message="SSH key not found or access denied"
+                    message="SSH key attached to this source no longer exists"
                 )
 
             private_key, passphrase = key_data
@@ -481,7 +456,6 @@ def refresh_knowledge(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
 ) -> RefreshKnowledgeResponse:
     """
     Trigger knowledge refresh from Git repository.
@@ -492,17 +466,14 @@ def refresh_knowledge(
     Args:
         session: Database session
         source_id: ID of the source
-        user_id: ID of the user (for ownership check)
 
     Returns:
         Refresh response with status and details
+
+    Raises:
+        KnowledgeSourceNotFoundError: if the source does not exist
     """
-    source = session.get(AIKnowledgeGitRepo, source_id)
-    if not source or source.user_id != user_id:
-        return RefreshKnowledgeResponse(
-            status="error",
-            message="Source not found or access denied",
-        )
+    source = _require_source(session=session, source_id=source_id)
 
     if not source.is_enabled:
         return RefreshKnowledgeResponse(
@@ -516,21 +487,17 @@ def refresh_knowledge(
     try:
         # If SSH key is required, decrypt it
         if source.ssh_key_id:
-            key_data = SSHKeyService.get_decrypted_private_key(
-                session=session,
-                key_id=source.ssh_key_id,
-                user_id=user_id
-            )
+            key_data = _load_source_ssh_key(session=session, source=source)
 
             if not key_data:
                 source.status = SourceStatus.error
-                source.status_message = "SSH key not found or access denied"
+                source.status_message = "SSH key attached to this source no longer exists"
                 source.updated_at = datetime.now(UTC)
                 session.commit()
 
                 return RefreshKnowledgeResponse(
                     status="error",
-                    message="SSH key not found or access denied"
+                    message="SSH key attached to this source no longer exists"
                 )
 
             private_key, passphrase = key_data
@@ -750,7 +717,6 @@ def get_source_articles(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
     skip: int = 0,
     limit: int = 100,
 ) -> Optional[list[KnowledgeArticle]]:
@@ -760,15 +726,14 @@ def get_source_articles(
     Args:
         session: Database session
         source_id: ID of the source
-        user_id: ID of the user (for ownership check)
         skip: Number of records to skip
         limit: Maximum number of records to return
 
     Returns:
-        List of articles or None if source not found or not owned by user
+        List of articles or None if source not found
     """
     source = session.get(AIKnowledgeGitRepo, source_id)
-    if not source or source.user_id != user_id:
+    if not source:
         return None
 
     articles = session.exec(
@@ -786,16 +751,12 @@ def get_article_content(
     session: Session,
     source_id: uuid.UUID,
     article_id: uuid.UUID,
-    user_id: uuid.UUID,
 ) -> Optional[KnowledgeArticleDetail]:
-    """Return one article's full content (incl. Markdown body) if the user may read the source.
+    """Return one article's full content (incl. Markdown body).
 
-    Read access == owner OR public-discoverable (enabled + connected).
-    Returns None if the source is unreadable OR the article does not belong to it.
+    Returns None if the source does not exist OR the article does not belong to it.
     """
-    source = _get_source_for_read(
-        session=session, source_id=source_id, user_id=user_id
-    )
+    source = session.get(AIKnowledgeGitRepo, source_id)
     if not source:
         return None
     article = session.get(KnowledgeArticle, article_id)
@@ -821,17 +782,13 @@ def export_source_markdown(
     *,
     session: Session,
     source_id: uuid.UUID,
-    user_id: uuid.UUID,
 ) -> Optional[str]:
     """Return all of a source's articles concatenated into one Markdown document.
 
-    Read access == owner OR public-discoverable (enabled + connected).
-    Returns None if the source is unreadable. An empty source returns a valid
+    Returns None if the source does not exist. An empty source returns a valid
     (header-only) document.
     """
-    source = _get_source_for_read(
-        session=session, source_id=source_id, user_id=user_id
-    )
+    source = session.get(AIKnowledgeGitRepo, source_id)
     if not source:
         return None
     articles = session.exec(
@@ -851,55 +808,93 @@ def export_source_markdown(
     return "\n".join(parts)
 
 
-def get_discoverable_sources(
+# ── User shares (access_level == shared) ─────────────────────────────────────
+
+
+def list_shared_users(
     *,
     session: Session,
-    user_id: uuid.UUID,
-    skip: int = 0,
-    limit: int = 100,
-) -> list:
+    source_id: uuid.UUID,
+) -> list[KnowledgeSourceSharedUserPublic]:
+    """List users on the source's share list (ordered by email).
+
+    Raises:
+        KnowledgeSourceNotFoundError: if the source does not exist
     """
-    Get all public knowledge sources from other admins (read-only view).
-
-    Args:
-        session: Database session
-        user_id: ID of the current user (to exclude their own sources)
-        skip: Number of records to skip
-        limit: Maximum number of records to return
-
-    Returns:
-        List of public knowledge sources with owner info
-    """
-    from app.models.knowledge.knowledge import DiscoverableSourcePublic
-    from app.models.users.user import User
-
-    query = (
-        select(AIKnowledgeGitRepo, User)
-        .join(User, AIKnowledgeGitRepo.user_id == User.id)
-        .where(
-            AIKnowledgeGitRepo.public_discovery == True,
-            AIKnowledgeGitRepo.user_id != user_id,
-            AIKnowledgeGitRepo.status == SourceStatus.connected,
+    _require_source(session=session, source_id=source_id)
+    rows = session.exec(
+        select(AIKnowledgeGitRepoUserShare, User)
+        .join(User, AIKnowledgeGitRepoUserShare.user_id == User.id)
+        .where(AIKnowledgeGitRepoUserShare.git_repo_id == source_id)
+        .order_by(User.email)
+    ).all()
+    return [
+        KnowledgeSourceSharedUserPublic(
+            user_id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            created_at=share.created_at,
         )
-        .order_by(AIKnowledgeGitRepo.name)
-        .offset(skip)
-        .limit(limit)
+        for share, user in rows
+    ]
+
+
+def add_shared_user(
+    *,
+    session: Session,
+    source_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> KnowledgeSourceSharedUserPublic:
+    """Add a user to the source's share list. Idempotent: an existing share is returned.
+
+    Raises:
+        KnowledgeSourceNotFoundError: if the source or the user does not exist
+    """
+    _require_source(session=session, source_id=source_id)
+    user = session.get(User, user_id)
+    if not user:
+        raise KnowledgeSourceNotFoundError("User not found")
+
+    share = session.exec(
+        select(AIKnowledgeGitRepoUserShare).where(
+            AIKnowledgeGitRepoUserShare.git_repo_id == source_id,
+            AIKnowledgeGitRepoUserShare.user_id == user_id,
+        )
+    ).first()
+    if share is None:
+        share = AIKnowledgeGitRepoUserShare(git_repo_id=source_id, user_id=user_id)
+        session.add(share)
+        session.commit()
+        session.refresh(share)
+
+    return KnowledgeSourceSharedUserPublic(
+        user_id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        created_at=share.created_at,
     )
 
-    sources_with_users = session.exec(query).all()
 
-    result = []
-    for source, owner in sources_with_users:
-        article_count = get_article_count(session=session, source_id=source.id)
-        result.append(
-            DiscoverableSourcePublic(
-                id=source.id,
-                name=source.name,
-                description=source.description,
-                status=source.status,
-                article_count=article_count,
-                owner_username=owner.username,
-            )
+def remove_shared_user(
+    *,
+    session: Session,
+    source_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> None:
+    """Remove a user from the source's share list.
+
+    Raises:
+        KnowledgeSourceNotFoundError: if the source does not exist or the user
+            is not on its share list
+    """
+    _require_source(session=session, source_id=source_id)
+    share = session.exec(
+        select(AIKnowledgeGitRepoUserShare).where(
+            AIKnowledgeGitRepoUserShare.git_repo_id == source_id,
+            AIKnowledgeGitRepoUserShare.user_id == user_id,
         )
-
-    return result
+    ).first()
+    if share is None:
+        raise KnowledgeSourceNotFoundError("User is not on this source's share list")
+    session.delete(share)
+    session.commit()
