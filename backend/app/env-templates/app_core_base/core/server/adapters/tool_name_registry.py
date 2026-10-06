@@ -79,6 +79,7 @@ PRE_APPROVED_TOOLS: frozenset[str] = frozenset([
     "mcp__agent_task__create_subtask",
     "mcp__agent_task__get_details",
     "mcp__agent_task__list_tasks",
+    "mcp__agent_task__handover_report",
     # MCP bridge tools (agent task) — OpenCode form ({server}_{tool})
     "agent_task_add_comment",
     "agent_task_update_status",
@@ -86,6 +87,7 @@ PRE_APPROVED_TOOLS: frozenset[str] = frozenset([
     "agent_task_create_subtask",
     "agent_task_get_details",
     "agent_task_list_tasks",
+    "agent_task_handover_report",
 ])
 
 # ---------------------------------------------------------------------------
