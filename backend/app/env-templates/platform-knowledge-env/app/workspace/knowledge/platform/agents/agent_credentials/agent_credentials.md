@@ -5,6 +5,7 @@ one_liner: "Syncs an owner's credentials into their agent environments with whit
 docs:
   tech: agent_credentials_tech.md
   oauth: oauth_credentials.md
+  oauth tech: oauth_credentials_tech.md
   whitelist: credentials_whitelist.md
   whitelist tech: credentials_whitelist_tech.md
   google SA: google_service_account.md
@@ -29,7 +30,7 @@ Agents access user-provided credentials (email, APIs, databases, OAuth services)
 - **Agent-Credential Link** - Many-to-many association between agents and credentials they can use
 - **Field Whitelisting** - Security layer that only sends explicitly allowed fields to agent environments
 - **Credential Redaction** - Sensitive values replaced with `***REDACTED***` for agent prompt context
-- **Pre-Stream Refresh** - Automatic OAuth token refresh before each agent stream session
+- **OAuth Token Refresh** - Automatic refresh on sync, every stream turn and a background sweep, plus on-demand from the container (see [OAuth Credentials](oauth_credentials.md))
 
 ## Credential Types
 
@@ -127,13 +128,9 @@ with smtplib.SMTP(smtp["host"], smtp["port"]) as server:
     server.send_message(msg)
 ```
 
-### OAuth Token Refresh Before Stream
+### OAuth Token Refresh
 
-1. User initiates a stream (conversation) with an agent
-2. System checks all OAuth credentials linked to the agent
-3. Any tokens expiring within 10 minutes are refreshed via provider API
-4. Refreshed credentials synced to agent environment
-5. Stream begins with valid tokens guaranteed for expected duration
+Tokens expiring within 30 minutes are refreshed before each credential push (environment start, sync), on every stream turn, by a 10-minute background sweep, or on demand by a script in the container. Refreshed credentials are synced to the running environment. Details: [OAuth Credentials](oauth_credentials.md#token-refresh-lifecycle).
 
 ## Business Rules
 
@@ -171,9 +168,9 @@ Credentials automatically sync to running agent environments when:
 
 ### OAuth Refresh Rules
 
-- Refresh threshold: tokens expiring within 600 seconds (10 minutes)
-- Refresh is synchronous before streaming starts (blocking)
-- Refresh failures logged but don't block streaming (graceful degradation)
+- Refresh threshold: tokens expiring within 1800 seconds (30 minutes, `OAUTH_REFRESH_THRESHOLD_SECONDS`)
+- Refresh runs on sync, per stream turn and in a background sweep; see [OAuth Credentials](oauth_credentials.md)
+- Refresh failures are recorded on the credential but don't block streaming (graceful degradation); a rejected refresh token stops automatic retries until re-authorization
 - Supported OAuth types: gmail_oauth, gmail_oauth_readonly, gdrive_oauth, gdrive_oauth_readonly, gcalendar_oauth, gcalendar_oauth_readonly
 
 ## Architecture Overview
@@ -190,7 +187,7 @@ User manages credentials (UI) → Encrypted storage (DB)
          │                                                    │
          │                                                    └→ Sync to agent container
          │
-         └→ Stream initiated → Refresh expiring OAuth tokens → Sync → Start stream
+         └→ Stream started → Refresh expiring OAuth tokens → Sync → Run turn
 ```
 
 ### File Structure in Agent Environment
@@ -305,6 +302,6 @@ Because the block carries no secrets (only the owner's public identity and their
 - Use credential IDs for lookup - IDs never change, unlike names
 - Load credentials at script start and reuse connections
 - Handle errors gracefully - credentials might be invalid or expired
-- OAuth tokens are auto-refreshed before each stream - no manual refresh needed
+- OAuth tokens are auto-refreshed (sync, each stream, background sweep); for long-running scripts call `credentials.access_token(id)` instead of caching the token
 - Never hardcode credentials - always read from the credentials file
 - Use `creds["current_user"]["email"]` to know who to notify without any per-agent config

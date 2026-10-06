@@ -417,7 +417,9 @@ class EnvironmentLifecycleManager:
         db_session.commit()
 
         from app.services.credentials.credentials_service import CredentialsService
-        credentials_data = CredentialsService.prepare_credentials_for_environment(
+        # Refreshes expiring OAuth tokens first; a refresh failure never raises
+        # (and never enters critical state) — only set_credentials below can.
+        credentials_data = await CredentialsService.prepare_fresh_credentials_for_environment(
             session=db_session,
             agent_id=agent.id
         )

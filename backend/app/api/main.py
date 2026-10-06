@@ -56,6 +56,7 @@ from app.api.routes import (
     notification_settings,
     oauth,
     oauth_credentials,
+    agent_env_credentials,
     private,
     security_events,
     server_config,
@@ -159,6 +160,7 @@ api_router.include_router(files.router)
 api_router.include_router(llm_plugins.router)
 api_router.include_router(input_tasks.router)
 api_router.include_router(task_agent_api.router)
+api_router.include_router(agent_env_credentials.router)
 api_router.include_router(task_triggers.router, prefix="/tasks", tags=["task-triggers"])
 api_router.include_router(webhooks.router, prefix="/hooks", tags=["webhooks"])
 api_router.include_router(mail_servers.router)

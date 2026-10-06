@@ -1226,6 +1226,33 @@ export type AgentCreateFlowResponse = {
     message: string;
 };
 
+/**
+ * Body of the agent-env on-demand access-token endpoint.
+ *
+ * ``min_ttl``: the caller needs the token valid for at least this many
+ * seconds; clamped server-side to ``[0, OAUTH_ON_DEMAND_MAX_MIN_TTL_SECONDS]``.
+ * ``known_expires_at``: expiry of the token the calling environment already
+ * holds. When the returned token's expiry differs (or this is omitted), the
+ * platform pushes the credential to the agent's running environments before
+ * responding.
+ */
+export type AgentCredentialAccessTokenRequest = {
+    min_ttl?: number;
+    known_expires_at?: (number | null);
+};
+
+/**
+ * A currently valid OAuth access token for a credential linked to the agent.
+ *
+ * Never carries the refresh token or refresh bookkeeping.
+ */
+export type AgentCredentialAccessTokenResponse = {
+    access_token: string;
+    token_type: string;
+    expires_at: number;
+    refreshed: boolean;
+};
+
 export type AgentCredentialLinkRequest = {
     credential_id: string;
 };
@@ -5729,6 +5756,8 @@ export type OAuthMetadataResponse = {
     scopes: (Array<(string)> | null);
     expires_at: (number | null);
     granted_at: (number | null);
+    refresh_error?: (string | null);
+    needs_reauthorization?: boolean;
 };
 
 export type OAuthRefreshResponse = {
@@ -8565,6 +8594,14 @@ export type AgentApiPublicConsumerSpecData = {
 };
 
 export type AgentApiPublicConsumerSpecResponse = (unknown);
+
+export type AgentCredentialsAgentCredentialAccessTokenData = {
+    credentialId: string;
+    requestBody: AgentCredentialAccessTokenRequest;
+    xAgentEnvId?: (string | null);
+};
+
+export type AgentCredentialsAgentCredentialAccessTokenResponse = (AgentCredentialAccessTokenResponse);
 
 export type AgentGitCheckoutAgentData = {
     requestBody: AgentCheckoutRequest;

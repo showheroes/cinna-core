@@ -363,7 +363,7 @@ from cinna_api import UploadFile, File, Query, Body, StreamingResponse, BaseMode
 ```
 
 - `api` — a pre-created `APIRouter`. `@api.get/post/put/patch/delete(...)` are pass-throughs to FastAPI decorators; all FastAPI parameter parsing, validation, and schema generation applies unchanged.
-- `credentials` — typed accessor over `/app/workspace/credentials/credentials.json`. **Reads the file fresh on every call** — the serving child is long-running; caching at import would serve stale secrets across an OAuth refresh or credential resync.
+- `credentials` — typed accessor over `/app/workspace/credentials/credentials.json`. **Reads the file fresh on every call** — the serving child is long-running; caching at import would serve stale secrets across an OAuth refresh or credential resync. `credentials.access_token(credential_id, *, min_ttl=300)` returns a Google OAuth access token valid for at least `min_ttl` seconds (synced token if long enough, else the platform's `POST /api/v1/agent/credentials/{id}/access-token`); failures raise `CredentialRefreshError(code, credential_id)` whose `str()` is written to be relayed verbatim (**needs env rebuild**). See [OAuth Credentials Tech](../agent_credentials/oauth_credentials_tech.md).
 - `error(status, detail)` — structured JSON error helper.
 - Ergonomic re-exports: `UploadFile`, `File`, `Query`, `Body`, `StreamingResponse`, `BaseModel`, `Field`.
 

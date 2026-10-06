@@ -121,6 +121,8 @@ from .credentials.credential import (
     SSHKeyCredentialData,
     MCPProviderData,
     CredentialWithData,
+    AgentCredentialAccessTokenRequest,
+    AgentCredentialAccessTokenResponse,
 )
 from .credentials.ai_credential import (
     AICredential,
@@ -1066,6 +1068,8 @@ __all__ = [
     "SSHKeyCredentialData",
     "MCPProviderData",
     "CredentialWithData",
+    "AgentCredentialAccessTokenRequest",
+    "AgentCredentialAccessTokenResponse",
     # AI Credentials
     "AICredential",
     "AICredentialCreate",

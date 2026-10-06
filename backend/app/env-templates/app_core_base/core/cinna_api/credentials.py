@@ -20,12 +20,24 @@ A skill finds its credential by **slot**: the credential's non-secret
 :class:`CredentialMissing` with a message that names the slot and the fix, so a
 script can fail in a way the agent can relay to the user verbatim.
 
+OAuth access tokens
+-------------------
+:meth:`_Credentials.access_token` returns a Google OAuth access token that is
+valid for at least ``min_ttl`` seconds: the synced token when it has enough
+life left, otherwise one fetched (and refreshed if needed) from the platform's
+``POST /api/v1/agent/credentials/{id}/access-token``. Failures raise
+:class:`CredentialRefreshError`, whose message is written for a person.
+
 This module must stay importable with no network and without ``requests``:
-:class:`AgentApiSession` is defined on first use.
+:class:`AgentApiSession` is defined on first use; the token endpoint is called
+with stdlib ``urllib``.
 """
 import json
 import logging
 import os
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -74,6 +86,69 @@ class CredentialMissing(Exception):
             "to this agent. Fix: open the agent's Credentials tab and link a "
             f"credential whose service URI (slot) is '{self.slot}'."
         )
+
+
+_REFRESH_ERROR_MESSAGES = {
+    "credential_not_linked": (
+        "credential '{cid}' is not linked to this agent. Fix: open the agent's "
+        "Credentials tab and link it."
+    ),
+    "not_refreshable": (
+        "credential '{cid}' is not a Google OAuth credential, so it has no "
+        "access token to fetch."
+    ),
+    "reauthorization_required": (
+        "Google no longer accepts the authorization for credential '{cid}'. "
+        "Fix: ask the user to re-authorize this credential in the platform's "
+        "credential settings."
+    ),
+    "provider_error": (
+        "Google could not issue a new access token for credential '{cid}' right "
+        "now. Try again in a minute."
+    ),
+    "oauth_not_configured": (
+        "Google OAuth is not configured on the platform, so the token for "
+        "credential '{cid}' cannot be refreshed. Ask a platform administrator."
+    ),
+    "refresh_in_progress": (
+        "another refresh of credential '{cid}' is in progress and the synced "
+        "token has expired. Try again in a few seconds."
+    ),
+    "unauthorized": (
+        "the platform rejected this environment's credentials while fetching "
+        "a token for credential '{cid}'. Fix: restart (or rebuild) the "
+        "environment."
+    ),
+    "unavailable": (
+        "the platform could not be reached to refresh credential '{cid}' and "
+        "the synced token has expired. Try again shortly."
+    ),
+}
+
+_TOKEN_REQUEST_TIMEOUT_SECONDS = 20
+#: Mirrors the platform's ``OAUTH_ON_DEMAND_MAX_MIN_TTL_SECONDS`` default.
+_MAX_MIN_TTL_SECONDS = 1800
+_IN_PROGRESS_RETRY_DELAY_SECONDS = 1.5
+
+
+class CredentialRefreshError(Exception):
+    """An OAuth access token could not be obtained.
+
+    ``code`` is one of ``credential_not_linked``, ``not_refreshable``,
+    ``reauthorization_required``, ``provider_error``, ``refresh_in_progress``,
+    ``oauth_not_configured``, ``unauthorized`` or ``unavailable``. ``str(exc)`` is written for a person: relay it verbatim.
+    """
+
+    def __init__(self, code: str, credential_id: str):
+        super().__init__(code, credential_id)
+        self.code = code
+        self.credential_id = credential_id
+
+    def __str__(self) -> str:
+        template = _REFRESH_ERROR_MESSAGES.get(
+            self.code, "could not get an access token for credential '{cid}' ({code})."
+        )
+        return f"{self.code}: " + template.format(cid=self.credential_id, code=self.code)
 
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -222,6 +297,101 @@ class _Credentials:
                 return cred
         return None
 
+    def access_token(self, credential_id: str, *, min_ttl: int = 300) -> str:
+        """
+        Return a Google OAuth access token valid for at least ``min_ttl`` seconds.
+
+        Uses the synced token when it has enough life left (no network);
+        otherwise asks the platform, which refreshes it if needed. Call it again
+        right before a long batch instead of holding one token. Never logs the
+        token.
+
+        Raises :class:`CredentialRefreshError` (relay ``str(exc)`` verbatim).
+        """
+        cid = str(credential_id)
+        min_ttl = max(0, min(int(min_ttl), _MAX_MIN_TTL_SECONDS))
+        entry = self.get(cid)
+        if entry is None:
+            raise CredentialRefreshError("credential_not_linked", cid)
+        data = entry.get("credential_data") or {}
+        local_token = data.get("access_token")
+        expires_at = data.get("expires_at")
+        remaining = (
+            expires_at - time.time() if isinstance(expires_at, (int, float)) else None
+        )
+        if local_token and remaining is not None and remaining > min_ttl:
+            return local_token
+
+        real_id = str(entry.get("id") or cid)
+        known_expires_at = (
+            int(expires_at) if isinstance(expires_at, (int, float)) else None
+        )
+        try:
+            try:
+                return self._fetch_access_token(real_id, min_ttl, known_expires_at)
+            except CredentialRefreshError as e:
+                if e.code != "refresh_in_progress":
+                    raise
+                # Another worker is refreshing right now: one short retry.
+                time.sleep(_IN_PROGRESS_RETRY_DELAY_SECONDS)
+                return self._fetch_access_token(real_id, min_ttl, known_expires_at)
+        except _PlatformUnavailable as e:
+            if local_token and remaining is not None and remaining > 0:
+                logger.warning(
+                    "Could not refresh credential %s via the platform (%s); "
+                    "using the synced token (%.0f s left)",
+                    real_id, e, remaining,
+                )
+                return local_token
+            raise CredentialRefreshError("unavailable", real_id) from None
+
+    @staticmethod
+    def _fetch_access_token(
+        credential_id: str, min_ttl: int, known_expires_at: int | None
+    ) -> str:
+        """POST to the platform's access-token endpoint (env vars read now)."""
+        backend_url = os.getenv("BACKEND_URL")
+        auth_token = os.getenv("AGENT_AUTH_TOKEN")
+        env_id = os.getenv("ENV_ID")
+        if not (backend_url and auth_token and env_id):
+            raise _PlatformUnavailable("platform connection settings are missing")
+
+        url = (
+            f"{backend_url.rstrip('/')}/api/v1/agent/credentials/"
+            f"{credential_id}/access-token"
+        )
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(
+                {"min_ttl": int(min_ttl), "known_expires_at": known_expires_at}
+            ).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {auth_token}",
+                "X-Agent-Env-Id": env_id,
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=_TOKEN_REQUEST_TIMEOUT_SECONDS
+            ) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise CredentialRefreshError("unauthorized", credential_id) from None
+            code = _error_code(e)
+            if code is None:
+                raise _PlatformUnavailable(f"HTTP {e.code}") from None
+            raise CredentialRefreshError(code, credential_id) from None
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            raise _PlatformUnavailable(type(e).__name__) from None
+
+        token = body.get("access_token") if isinstance(body, dict) else None
+        if not token:
+            raise _PlatformUnavailable("response had no access token")
+        return token
+
     def by_type(self, credential_type: str) -> dict | None:
         """
         Return the first credential of the given ``type`` (e.g. "odoo",
@@ -311,6 +481,21 @@ class _Credentials:
         if entry.get("is_placeholder") is True:
             raise CredentialMissing(slot, "not_configured")
         return entry
+
+
+class _PlatformUnavailable(Exception):
+    """The platform endpoint could not be used (internal; never raised to callers)."""
+
+
+def _error_code(error: "urllib.error.HTTPError") -> str | None:
+    """``detail.code`` from a platform error response, or None."""
+    try:
+        payload = json.loads(error.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    code = detail.get("code") if isinstance(detail, dict) else None
+    return code if isinstance(code, str) else None
 
 
 # Singleton accessor — stateless (no caching), safe to import once.

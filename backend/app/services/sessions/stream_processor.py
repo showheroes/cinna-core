@@ -173,6 +173,37 @@ class SessionStreamProcessor:
         async with lock:
             return await self._process_inner()
 
+    async def _refresh_agent_credentials(self) -> None:
+        """Refresh the agent's expiring OAuth tokens and push them if any changed.
+
+        Errors are logged, never raised: a stale token may still work and must
+        not block the turn.
+        """
+        from app.services.credentials.credentials_service import CredentialsService
+
+        agent_id = self.environment.agent_id if self.environment else None
+        if agent_id is None:
+            return
+        try:
+            with self.get_fresh_db_session() as db:
+                refreshed = await CredentialsService.refresh_expiring_credentials_for_agent(
+                    session=db, agent_id=agent_id
+                )
+                if refreshed:
+                    logger.info(
+                        "%s Credentials refreshed for agent %s, syncing to environments",
+                        self.log_prefix, agent_id,
+                    )
+                    await CredentialsService.sync_credentials_to_agent_environments(
+                        session=db, agent_id=agent_id
+                    )
+        except Exception as e:
+            logger.error(
+                "%s Error refreshing/syncing credentials for agent %s: %s",
+                self.log_prefix, agent_id, e,
+                exc_info=True,
+            )
+
     async def _process_inner(self) -> str:
         """Core pipeline: collect → context → mark sent → stream → return.
 
@@ -258,6 +289,13 @@ class SessionStreamProcessor:
 
         # Step 4: Notify handler that streaming is about to start
         await self.event_handler.on_stream_starting(len(all_message_ids))
+
+        # Step 4b: Refresh expiring OAuth credentials before the turn starts.
+        # Single choke point for every streaming path (UI, channel follow-up
+        # turns, A2A, MCP). Runs after on_stream_starting so the caller sees
+        # the turn start while Google is called; emits no events itself and
+        # never blocks the stream.
+        await self._refresh_agent_credentials()
 
         # Step 5: Mark all pending messages as sent before any batch starts
         with self.get_fresh_db_session() as db:

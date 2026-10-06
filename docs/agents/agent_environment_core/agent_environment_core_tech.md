@@ -262,7 +262,8 @@ The env token is a **scoped, audience-restricted JWT** (HS256) — NOT a general
 
 - `/app/core` mounted read-only (`:ro`) - LLM cannot modify server code
 - Agent restricted to `/app/workspace` for file operations
-- Credentials in `/app/workspace/credentials/` - readable by agent, not exposed to frontend
+- Credentials in `/app/workspace/credentials/` - readable by agent, not exposed to frontend. `credentials.json` is written atomically (temp file + `os.replace`) because pushes are frequent and the SDK re-reads it on every call
+- Scripts may call the backend with the env's scoped token (`AGENT_AUTH_TOKEN` + `X-Agent-Env-Id`): `POST /api/v1/agent/credentials/{id}/access-token` for OAuth access tokens (see [OAuth Credentials Tech](../agent_credentials/oauth_credentials_tech.md))
 
 ### System Prompt Injection Resistance
 

@@ -302,9 +302,20 @@ class AgentEnvService:
 
         try:
             # Write credentials.json with full data
+            # Atomic replace: scripts re-read this file on every access, so a
+            # reader must never see a half-written file.
             credentials_file = self.credentials_dir / "credentials.json"
-            with open(credentials_file, 'w', encoding='utf-8') as f:
-                json.dump(credentials_json, f, indent=2)
+            tmp_file = self.credentials_dir / "credentials.json.tmp"
+            try:
+                with open(tmp_file, 'w', encoding='utf-8') as f:
+                    json.dump(credentials_json, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_file, credentials_file)
+            except BaseException:
+                # Never leave a full-credential temp file behind.
+                tmp_file.unlink(missing_ok=True)
+                raise
             updated_files.append("credentials.json")
             logger.info(f"Updated credentials.json ({len(credentials_json)} credentials)")
 

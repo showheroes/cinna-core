@@ -798,6 +798,57 @@ class CredentialsService:
         return redacted
 
     @staticmethod
+    def _google_oauth_token_note_lines() -> list[str]:
+        """README note for a Google OAuth credential block (how tokens stay fresh)."""
+        return [
+            "**Note**: The synced access token is checked before every agent turn, on "
+            "environment start and about every 10 minutes while the environment runs, and "
+            "refreshed whenever it is close to expiry. "
+            "Get it through `credentials.access_token(...)`, which asks the platform for a "
+            "fresh one when it has less than `min_ttl` seconds left; call it again before a "
+            "long batch instead of reusing one token. If it raises `CredentialRefreshError` "
+            "with code `reauthorization_required`, tell the user to re-authorize this "
+            "credential in the platform.",
+            "",
+            "If `credentials.access_token` raises `AttributeError`, this environment was "
+            "built before the helper existed and needs a rebuild; until then use the HTTP "
+            "call in \"Google OAuth access tokens without Python\" below.",
+        ]
+
+    @staticmethod
+    def _google_oauth_http_fallback_lines() -> list[str]:
+        """README section (once) with the raw HTTP access-token call for non-Python callers."""
+        return [
+            "### Google OAuth access tokens without Python",
+            "",
+            "Any process in the environment can fetch a valid access token for a linked "
+            "Google OAuth credential (replace `<id>` with the credential ID; the response "
+            "JSON has `access_token`, `token_type`, `expires_at`, `refreshed`):",
+            "",
+            "```bash",
+            'curl -s -X POST "$BACKEND_URL/api/v1/agent/credentials/<id>/access-token" \\',
+            '  -H "Authorization: Bearer $AGENT_AUTH_TOKEN" \\',
+            '  -H "X-Agent-Env-Id: $ENV_ID" \\',
+            "  -H \"Content-Type: application/json\" \\",
+            "  -d '{\"min_ttl\":300,\"known_expires_at\":<expires_at from credentials.json>}'",
+            "```",
+            "",
+            "Send `known_expires_at` (the credential's `expires_at` from "
+            "`credentials/credentials.json`): when the returned token matches it, the platform "
+            "skips re-syncing the credentials file. Without it, every call re-syncs.",
+            "",
+            "Errors return `detail.code`: `credential_not_linked`, `not_refreshable`, "
+            "`reauthorization_required`, `provider_error` (retry later), "
+            "`refresh_in_progress` (HTTP 502 with `Retry-After: 1`; retry in a moment), "
+            "`oauth_not_configured`. HTTP 401/403 (no `detail.code`; the Python helper "
+            "reports it as `unauthorized`) means the environment's platform token was "
+            "rejected: restart or rebuild the environment. "
+            "The `credentials.access_token(...)` Python helper needs an environment rebuild on "
+            "older environments; this HTTP call works on any environment.",
+            "",
+        ]
+
+    @staticmethod
     def generate_credentials_readme(credentials: list[dict]) -> str:
         """
         Generate a README.md content for credentials with redacted sensitive data.
@@ -1110,42 +1161,34 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
                 lines.append(f"### Gmail OAuth Credential{readonly_suffix}: {cred_name}")
                 lines.append(f"**ID**: `{cred_id}`")
                 lines.append("")
-                lines.append("**Note**: Tokens are automatically refreshed by the platform. Your script will always get fresh credentials.")
+                lines.extend(CredentialsService._google_oauth_token_note_lines())
                 lines.append("")
                 lines.append("```python")
-                lines.append("import json")
+                lines.append("from core.cinna_api import credentials")
                 lines.append("from google.oauth2.credentials import Credentials")
                 lines.append("from googleapiclient.discovery import build")
                 lines.append("")
-                lines.append("# Load credentials")
-                lines.append("with open('credentials/credentials.json', 'r') as f:")
-                lines.append("    all_credentials = json.load(f)")
+                lines.append("# Use Gmail API")
+                lines.append(f"token = credentials.access_token('{cred_id}', min_ttl=300)  # refreshes via the platform if needed")
+                lines.append("creds = Credentials(token=token)")
+                lines.append("service = build('gmail', 'v1', credentials=creds)")
                 lines.append("")
-                lines.append(f"# Find credential by ID (recommended)")
-                lines.append(f"credential_id = '{cred_id}'")
-                lines.append("for cred in all_credentials:")
-                lines.append("    if cred['id'] == credential_id:")
-                lines.append("        # Use Gmail API")
-                lines.append("        creds = Credentials.from_authorized_user_info(cred['credential_data'])")
-                lines.append("        service = build('gmail', 'v1', credentials=creds)")
-                lines.append("")
-                lines.append("        # Example: List messages")
-                lines.append("        results = service.users().messages().list(userId='me', maxResults=10).execute()")
-                lines.append("        messages = results.get('messages', [])")
+                lines.append("# Example: List messages")
+                lines.append("results = service.users().messages().list(userId='me', maxResults=10).execute()")
+                lines.append("messages = results.get('messages', [])")
                 lines.append("")
                 if "readonly" not in cred_type:
-                    lines.append("        # Example: Send an email")
-                    lines.append("        from email.mime.text import MIMEText")
-                    lines.append("        import base64")
-                    lines.append("        message = MIMEText('Email body')")
-                    lines.append("        message['to'] = 'recipient@example.com'")
-                    lines.append("        message['subject'] = 'Subject'")
-                    lines.append("        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()")
-                    lines.append("        service.users().messages().send(")
-                    lines.append("            userId='me', body={'raw': raw}")
-                    lines.append("        ).execute()")
+                    lines.append("# Example: Send an email")
+                    lines.append("from email.mime.text import MIMEText")
+                    lines.append("import base64")
+                    lines.append("message = MIMEText('Email body')")
+                    lines.append("message['to'] = 'recipient@example.com'")
+                    lines.append("message['subject'] = 'Subject'")
+                    lines.append("raw = base64.urlsafe_b64encode(message.as_bytes()).decode()")
+                    lines.append("service.users().messages().send(")
+                    lines.append("    userId='me', body={'raw': raw}")
+                    lines.append(").execute()")
                     lines.append("")
-                lines.append("        break")
                 lines.append("```")
                 lines.append("")
             elif cred_type in ["gdrive_oauth", "gdrive_oauth_readonly"]:
@@ -1153,50 +1196,42 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
                 lines.append(f"### Google Drive OAuth Credential{readonly_suffix}: {cred_name}")
                 lines.append(f"**ID**: `{cred_id}`")
                 lines.append("")
-                lines.append("**Note**: Tokens are automatically refreshed by the platform. Your script will always get fresh credentials.")
+                lines.extend(CredentialsService._google_oauth_token_note_lines())
                 lines.append("")
                 lines.append("```python")
-                lines.append("import json")
+                lines.append("from core.cinna_api import credentials")
                 lines.append("from google.oauth2.credentials import Credentials")
                 lines.append("from googleapiclient.discovery import build")
                 lines.append("from googleapiclient.http import MediaFileUpload")
                 lines.append("")
-                lines.append("# Load credentials")
-                lines.append("with open('credentials/credentials.json', 'r') as f:")
-                lines.append("    all_credentials = json.load(f)")
+                lines.append("# Use Google Drive API")
+                lines.append(f"token = credentials.access_token('{cred_id}', min_ttl=300)  # refreshes via the platform if needed")
+                lines.append("creds = Credentials(token=token)")
+                lines.append("service = build('drive', 'v3', credentials=creds)")
                 lines.append("")
-                lines.append(f"# Find credential by ID (recommended)")
-                lines.append(f"credential_id = '{cred_id}'")
-                lines.append("for cred in all_credentials:")
-                lines.append("    if cred['id'] == credential_id:")
-                lines.append("        # Use Google Drive API")
-                lines.append("        creds = Credentials.from_authorized_user_info(cred['credential_data'])")
-                lines.append("        service = build('drive', 'v3', credentials=creds)")
+                lines.append("# Example: List files")
+                lines.append("results = service.files().list(")
+                lines.append("    pageSize=10,")
+                lines.append("    fields='files(id, name, mimeType)'")
+                lines.append(").execute()")
+                lines.append("files = results.get('files', [])")
                 lines.append("")
-                lines.append("        # Example: List files")
-                lines.append("        results = service.files().list(")
-                lines.append("            pageSize=10,")
-                lines.append("            fields='files(id, name, mimeType)'")
-                lines.append("        ).execute()")
-                lines.append("        files = results.get('files', [])")
-                lines.append("")
-                lines.append("        # Example: Download a file")
-                lines.append("        file_id = 'file_id_here'")
-                lines.append("        request = service.files().get_media(fileId=file_id)")
-                lines.append("        with open('downloaded_file.txt', 'wb') as f:")
-                lines.append("            f.write(request.execute())")
+                lines.append("# Example: Download a file")
+                lines.append("file_id = 'file_id_here'")
+                lines.append("request = service.files().get_media(fileId=file_id)")
+                lines.append("with open('downloaded_file.txt', 'wb') as f:")
+                lines.append("    f.write(request.execute())")
                 lines.append("")
                 if "readonly" not in cred_type:
-                    lines.append("        # Example: Upload a file")
-                    lines.append("        file_metadata = {'name': 'uploaded_file.txt'}")
-                    lines.append("        media = MediaFileUpload('local_file.txt', mimetype='text/plain')")
-                    lines.append("        file = service.files().create(")
-                    lines.append("            body=file_metadata,")
-                    lines.append("            media_body=media,")
-                    lines.append("            fields='id'")
-                    lines.append("        ).execute()")
+                    lines.append("# Example: Upload a file")
+                    lines.append("file_metadata = {'name': 'uploaded_file.txt'}")
+                    lines.append("media = MediaFileUpload('local_file.txt', mimetype='text/plain')")
+                    lines.append("file = service.files().create(")
+                    lines.append("    body=file_metadata,")
+                    lines.append("    media_body=media,")
+                    lines.append("    fields='id'")
+                    lines.append(").execute()")
                     lines.append("")
-                lines.append("        break")
                 lines.append("```")
                 lines.append("")
             elif cred_type in ["gcalendar_oauth", "gcalendar_oauth_readonly"]:
@@ -1204,55 +1239,47 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
                 lines.append(f"### Google Calendar OAuth Credential{readonly_suffix}: {cred_name}")
                 lines.append(f"**ID**: `{cred_id}`")
                 lines.append("")
-                lines.append("**Note**: Tokens are automatically refreshed by the platform. Your script will always get fresh credentials.")
+                lines.extend(CredentialsService._google_oauth_token_note_lines())
                 lines.append("")
                 lines.append("```python")
-                lines.append("import json")
                 lines.append("from datetime import datetime, timedelta")
+                lines.append("from core.cinna_api import credentials")
                 lines.append("from google.oauth2.credentials import Credentials")
                 lines.append("from googleapiclient.discovery import build")
                 lines.append("")
-                lines.append("# Load credentials")
-                lines.append("with open('credentials/credentials.json', 'r') as f:")
-                lines.append("    all_credentials = json.load(f)")
+                lines.append("# Use Google Calendar API")
+                lines.append(f"token = credentials.access_token('{cred_id}', min_ttl=300)  # refreshes via the platform if needed")
+                lines.append("creds = Credentials(token=token)")
+                lines.append("service = build('calendar', 'v3', credentials=creds)")
                 lines.append("")
-                lines.append(f"# Find credential by ID (recommended)")
-                lines.append(f"credential_id = '{cred_id}'")
-                lines.append("for cred in all_credentials:")
-                lines.append("    if cred['id'] == credential_id:")
-                lines.append("        # Use Google Calendar API")
-                lines.append("        creds = Credentials.from_authorized_user_info(cred['credential_data'])")
-                lines.append("        service = build('calendar', 'v3', credentials=creds)")
-                lines.append("")
-                lines.append("        # Example: List upcoming events")
-                lines.append("        now = datetime.utcnow().isoformat() + 'Z'")
-                lines.append("        events_result = service.events().list(")
-                lines.append("            calendarId='primary',")
-                lines.append("            timeMin=now,")
-                lines.append("            maxResults=10,")
-                lines.append("            singleEvents=True,")
-                lines.append("            orderBy='startTime'")
-                lines.append("        ).execute()")
-                lines.append("        events = events_result.get('items', [])")
+                lines.append("# Example: List upcoming events")
+                lines.append("now = datetime.utcnow().isoformat() + 'Z'")
+                lines.append("events_result = service.events().list(")
+                lines.append("    calendarId='primary',")
+                lines.append("    timeMin=now,")
+                lines.append("    maxResults=10,")
+                lines.append("    singleEvents=True,")
+                lines.append("    orderBy='startTime'")
+                lines.append(").execute()")
+                lines.append("events = events_result.get('items', [])")
                 lines.append("")
                 if "readonly" not in cred_type:
-                    lines.append("        # Example: Create an event")
-                    lines.append("        event = {")
-                    lines.append("            'summary': 'Meeting',")
-                    lines.append("            'start': {")
-                    lines.append("                'dateTime': (datetime.now() + timedelta(days=1)).isoformat(),")
-                    lines.append("                'timeZone': 'UTC',")
-                    lines.append("            },")
-                    lines.append("            'end': {")
-                    lines.append("                'dateTime': (datetime.now() + timedelta(days=1, hours=1)).isoformat(),")
-                    lines.append("                'timeZone': 'UTC',")
-                    lines.append("            },")
-                    lines.append("        }")
-                    lines.append("        created_event = service.events().insert(")
-                    lines.append("            calendarId='primary', body=event")
-                    lines.append("        ).execute()")
+                    lines.append("# Example: Create an event")
+                    lines.append("event = {")
+                    lines.append("    'summary': 'Meeting',")
+                    lines.append("    'start': {")
+                    lines.append("        'dateTime': (datetime.now() + timedelta(days=1)).isoformat(),")
+                    lines.append("        'timeZone': 'UTC',")
+                    lines.append("    },")
+                    lines.append("    'end': {")
+                    lines.append("        'dateTime': (datetime.now() + timedelta(days=1, hours=1)).isoformat(),")
+                    lines.append("        'timeZone': 'UTC',")
+                    lines.append("    },")
+                    lines.append("}")
+                    lines.append("created_event = service.events().insert(")
+                    lines.append("    calendarId='primary', body=event")
+                    lines.append(").execute()")
                     lines.append("")
-                lines.append("        break")
                 lines.append("```")
                 lines.append("")
             elif cred_type == "api_token":
@@ -1371,6 +1398,9 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
                 lines.append("        break")
                 lines.append("```")
                 lines.append("")
+
+        if any(c.get("type") in CredentialsService.OAUTH_CREDENTIAL_TYPES for c in credentials):
+            lines.extend(CredentialsService._google_oauth_http_fallback_lines())
 
         lines.append("## Best Practices")
         lines.append("")
@@ -1659,6 +1689,34 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         return manifest
 
     @staticmethod
+    async def prepare_fresh_credentials_for_environment(
+        session: Session,
+        agent_id: uuid.UUID
+    ) -> dict:
+        """
+        Refresh expiring OAuth credentials, then build the environment payload.
+
+        A refresh failure never raises out of here: the payload is still built
+        with the current tokens. Never emits events or syncs environments, so
+        it is safe to call from inside a sync.
+        """
+        try:
+            await CredentialsService.refresh_expiring_credentials_for_agent(
+                session=session,
+                agent_id=agent_id
+            )
+        except Exception as e:
+            logger.error(
+                f"Refreshing credentials for agent {agent_id} failed; "
+                f"pushing current tokens: {type(e).__name__}: {e}",
+                exc_info=True
+            )
+        return CredentialsService.prepare_credentials_for_environment(
+            session=session,
+            agent_id=agent_id
+        )
+
+    @staticmethod
     async def sync_credentials_to_agent_environments(
         session: Session,
         agent_id: uuid.UUID
@@ -1690,8 +1748,9 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
 
         logger.info(f"Syncing credentials to {len(running_environments)} running environment(s) for agent {agent_id}")
 
-        # Prepare credentials data
-        credentials_data = CredentialsService.prepare_credentials_for_environment(
+        # Refresh expiring OAuth tokens, then build the payload. Runs before the
+        # MCP manifest so refreshed oauth_dcr tokens land in it too.
+        credentials_data = await CredentialsService.prepare_fresh_credentials_for_environment(
             session=session,
             agent_id=agent_id
         )
@@ -2974,115 +3033,74 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
 
         return "complete"
 
-    # Threshold for refreshing credentials before streaming (10 minutes)
-    CREDENTIAL_REFRESH_THRESHOLD_SECONDS = 10 * 60
-
     @staticmethod
     async def refresh_expiring_credentials_for_agent(
         session: Session,
         agent_id: uuid.UUID
     ) -> bool:
         """
-        Check and refresh OAuth credentials that are expiring soon for an agent.
+        Refresh OAuth credentials linked to an agent that expire soon.
 
-        This method is called before initiating a stream to ensure all OAuth
-        credentials shared with the agent have valid access tokens for the
-        expected duration of the stream (up to 10 minutes).
+        Called before credentials are pushed to an environment (sync, env start)
+        and before every stream. A credential is refreshed when its access token
+        has at most ``settings.OAUTH_REFRESH_THRESHOLD_SECONDS`` left (read at
+        call time so tests can patch it).
 
-        Args:
-            session: Database session
-            agent_id: Agent ID to check credentials for
+        Google OAuth types go through ``OAuthRefreshService.refresh_if_needed``;
+        ``mcp_provider`` ``oauth_dcr`` rows through
+        ``_refresh_expiring_mcp_provider``. Both share the per-credential lock.
+        Never emits events, never syncs environments, never raises for a
+        failed refresh (the caller proceeds with the current token).
 
         Returns:
-            True if any credentials were refreshed, False otherwise
+            True if any credential was refreshed, False otherwise
         """
         from datetime import datetime, timezone
-        from app.services.credentials.oauth_credentials_service import OAuthCredentialsService
+        from app.services.credentials.oauth_refresh_service import OAuthRefreshService
 
-        credentials_refreshed = False
-        now = datetime.now(timezone.utc).timestamp()
-        threshold = now + CredentialsService.CREDENTIAL_REFRESH_THRESHOLD_SECONDS
-
-        # Get all credentials linked to this agent
+        threshold_seconds = settings.OAUTH_REFRESH_THRESHOLD_SECONDS
         credentials = CredentialsService.get_agent_credentials(session=session, agent_id=agent_id)
-
         if not credentials:
             logger.debug(f"No credentials linked to agent {agent_id}")
             return False
 
+        credentials_refreshed = False
         for credential in credentials:
-            # MCP-provider oauth_dcr credentials are refreshed by their own
-            # backend OAuth client (the access token, not refresh_token/secret,
-            # is the only value that reaches the container). Same pre-stream
-            # mechanism, different service. Graceful on failure: a failed refresh
-            # records status=error and the stream proceeds with the stale token.
-            if credential.type == CredentialType.MCP_PROVIDER:
-                refreshed = await CredentialsService._refresh_expiring_mcp_provider(
-                    session=session, credential=credential, threshold=threshold
-                )
-                credentials_refreshed = credentials_refreshed or refreshed
-                continue
-
-            # Only check OAuth credential types
-            if credential.type.value not in CredentialsService.OAUTH_CREDENTIAL_TYPES:
-                continue
-
             try:
-                # Decrypt credential data to check expiration
-                credential_data = CredentialsService.decrypt_credential_data(
-                    session=session,
-                    credential=credential
-                )
-
-                expires_at = credential_data.get("expires_at")
-                if expires_at is None:
-                    logger.warning(
-                        f"OAuth credential {credential.id} has no expires_at field, "
-                        f"skipping refresh check"
+                if credential.type == CredentialType.MCP_PROVIDER:
+                    # oauth_dcr tokens are refreshed by their own backend OAuth
+                    # client; only the access token reaches the container.
+                    threshold = datetime.now(timezone.utc).timestamp() + threshold_seconds
+                    refreshed = await CredentialsService._refresh_expiring_mcp_provider(
+                        session=session, credential=credential, threshold=threshold
                     )
-                    continue
-
-                # Check if credential expires within threshold
-                if expires_at <= threshold:
-                    time_until_expiry = expires_at - now
-                    logger.info(
-                        f"Credential {credential.id} ({credential.type.value}) expires in "
-                        f"{time_until_expiry:.0f} seconds, refreshing..."
+                elif credential.type.value in CredentialsService.OAUTH_CREDENTIAL_TYPES:
+                    outcome = await OAuthRefreshService.refresh_if_needed(
+                        session, credential, min_valid_seconds=threshold_seconds
                     )
-
-                    try:
-                        # Refresh the credential
-                        await OAuthCredentialsService.refresh_oauth_token(
-                            session=session,
-                            credential=credential
-                        )
-                        credentials_refreshed = True
-                        logger.info(f"Successfully refreshed credential {credential.id}")
-                    except ValueError as ve:
-                        # No refresh token available
-                        logger.warning(
-                            f"Cannot refresh credential {credential.id}: {ve}. "
-                            f"User may need to re-authorize."
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to refresh credential {credential.id}: {e}",
-                            exc_info=True
-                        )
+                    refreshed = outcome.status == "refreshed"
                 else:
-                    time_until_expiry = expires_at - now
-                    logger.debug(
-                        f"Credential {credential.id} ({credential.type.value}) is valid for "
-                        f"{time_until_expiry:.0f} more seconds, no refresh needed"
-                    )
-
+                    continue
+                credentials_refreshed = credentials_refreshed or refreshed
             except Exception as e:
                 logger.error(
-                    f"Error checking credential {credential.id}: {e}",
+                    f"Error refreshing credential {credential.id}: {type(e).__name__}: {e}",
                     exc_info=True
                 )
 
         return credentials_refreshed
+
+    @staticmethod
+    def _mcp_provider_needs_refresh(data: dict, threshold: float) -> bool:
+        """True for an authorized oauth_dcr row whose token expires by ``threshold``."""
+        if data.get("auth_mode") != "oauth_dcr":
+            return False
+        if not data.get("oauth_refresh_token"):
+            return False
+        expires_at = data.get("oauth_token_expires_at")
+        if not isinstance(expires_at, (int, float)):
+            return False
+        return expires_at <= threshold
 
     @staticmethod
     async def _refresh_expiring_mcp_provider(
@@ -3091,61 +3109,59 @@ If you need credentials for integrations (email, APIs, databases), ask the user 
         threshold: float,
     ) -> bool:
         """
-        Pre-stream refresh for an ``mcp_provider`` ``oauth_dcr`` credential.
+        Pre-push refresh for an ``mcp_provider`` ``oauth_dcr`` credential.
 
         Only ``oauth_dcr`` rows with a refresh token and an expiry within the
         threshold are refreshed; all other mcp_provider rows (agent2agent /
-        fixed_token / none / not-yet-authorized) are no-ops. Graceful on failure:
-        the refresh service records ``last_error`` (→ status ``error``) and the
-        stream proceeds with the stale token (the MCP server returns 401 and the
-        agent sees a failed tool — Reauthorize fixes it).
+        fixed_token / none / not-yet-authorized) are no-ops. Runs under the
+        same per-credential lock as Google refreshes and re-reads the row
+        after acquiring, so concurrent workers refresh once. Graceful on
+        failure: the refresh service records ``last_error`` (→ status
+        ``error``) and the caller proceeds with the stale token.
 
         Returns True if a token was refreshed.
         """
+        from app.services.credentials.oauth_refresh_service import OAuthRefreshService
         from app.services.mcp_providers.mcp_provider_oauth_service import (
             MCPProviderOAuthService,
         )
 
-        try:
-            data = CredentialsService.decrypt_credential_data(
-                session=session, credential=credential
-            )
-        except Exception as e:
-            logger.error(
-                f"Could not decrypt mcp_provider credential {credential.id}: {e}"
-            )
-            return False
+        def needs_refresh(c: Credential) -> bool:
+            try:
+                data = CredentialsService.decrypt_credential_data(session=session, credential=c)
+            except Exception as e:
+                logger.error(f"Could not decrypt mcp_provider credential {c.id}: {e}")
+                return False
+            return CredentialsService._mcp_provider_needs_refresh(data, threshold)
 
-        if data.get("auth_mode") != "oauth_dcr":
-            return False
-        if not data.get("oauth_refresh_token"):
-            return False
-        expires_at = data.get("oauth_token_expires_at")
-        if not isinstance(expires_at, (int, float)):
-            return False
-        if expires_at > threshold:
+        if not needs_refresh(credential):
             return False
 
         logger.info(
             f"MCP provider credential {credential.id} access token expiring, "
             f"refreshing..."
         )
-        try:
-            await MCPProviderOAuthService.refresh_access_token(
-                session=session, credential=credential
-            )
-            logger.info(f"Refreshed MCP provider credential {credential.id}")
-            return True
-        except ValueError as ve:
-            logger.warning(
-                f"Cannot refresh MCP provider credential {credential.id}: {ve}. "
-                f"Reauthorize required."
-            )
-        except Exception as e:
-            # The refresh service already recorded last_error; never block stream.
-            logger.error(
-                f"Failed to refresh MCP provider credential {credential.id}: {e}"
-            )
+        async with OAuthRefreshService.locked(
+            session, credential, needs_refresh=needs_refresh
+        ) as state:
+            if state != "acquired":
+                return False
+            try:
+                await MCPProviderOAuthService.refresh_access_token(
+                    session=session, credential=credential
+                )
+                logger.info(f"Refreshed MCP provider credential {credential.id}")
+                return True
+            except ValueError as ve:
+                logger.warning(
+                    f"Cannot refresh MCP provider credential {credential.id}: {ve}. "
+                    f"Reauthorize required."
+                )
+            except Exception as e:
+                # The refresh service already recorded last_error; never block.
+                logger.error(
+                    f"Failed to refresh MCP provider credential {credential.id}: {e}"
+                )
         return False
 
     # ── Categorization SSOT ──────────────────────────────────────────────────

@@ -18,6 +18,7 @@ Each file below documents one API domain.
 | Admin Routing | [admin_routing.md](./admin_routing.md) | 6 |
 | Agent Api | [agent_api.md](./agent_api.md) | 14 |
 | Agent Api Public | [agent_api_public.md](./agent_api_public.md) | 1 |
+| Agent Credentials | [agent_credentials.md](./agent_credentials.md) | 1 |
 | Agent Git | [agent_git.md](./agent_git.md) | 11 |
 | Agent Hooks | [agent_hooks.md](./agent_hooks.md) | 1 |
 | Agent Tasks | [agent_tasks.md](./agent_tasks.md) | 12 |

@@ -939,6 +939,61 @@ class Settings(BaseSettings):
     MODEL_DISCOVERY_ENABLED: bool = True
     MODEL_DISCOVERY_INTERVAL_HOURS: int = 24
 
+    # Google OAuth credential refresh.
+    # A credential whose access token has less than THRESHOLD seconds left is
+    # refreshed on sync / env start / stream start. Google access tokens live
+    # 3600 s, so the threshold must stay well below that or every sync would
+    # refresh; 30 min keeps a token valid for a long turn. COOLDOWN is the
+    # minimum gap between Google calls for one credential after a failed
+    # (provider_error) attempt. ON_DEMAND_MAX_MIN_TTL clamps the env endpoint's
+    # requested minimum remaining lifetime.
+    OAUTH_REFRESH_THRESHOLD_SECONDS: int = 1800  # 600..2400
+    OAUTH_REFRESH_COOLDOWN_SECONDS: int = 60
+    OAUTH_ON_DEMAND_MAX_MIN_TTL_SECONDS: int = 1800
+    # Background sweep: every INTERVAL minutes, refresh expiring OAuth tokens
+    # of credentials linked to agents with a running environment and push them.
+    # The interval must leave margin under the threshold (validator below), so
+    # a token in a running env never gets close to expiry between sweeps.
+    OAUTH_REFRESH_SWEEP_ENABLED: bool = True
+    OAUTH_REFRESH_SWEEP_INTERVAL_MINUTES: int = 10
+    OAUTH_REFRESH_SWEEP_BATCH_LIMIT: int = 200
+
+    @model_validator(mode="after")
+    def _validate_oauth_refresh_threshold(self) -> Self:
+        """Keep the refresh threshold inside 600..2400 seconds.
+
+        Below 10 min a long turn can start with a token that expires mid-task
+        (and the sweep interval check below would have no valid interval left);
+        above 40 min it approaches the 60-min Google token lifetime and every
+        sync would call Google.
+        """
+        value = self.OAUTH_REFRESH_THRESHOLD_SECONDS
+        if 600 <= value <= 2400:
+            return self
+        raise ValueError(
+            f"OAUTH_REFRESH_THRESHOLD_SECONDS must be between 600 and 2400 "
+            f"(got {value})."
+        )
+
+    @model_validator(mode="after")
+    def _validate_oauth_refresh_sweep_interval(self) -> Self:
+        """The sweep must run well inside the refresh threshold.
+
+        With interval >= threshold - 5 min, a token could be just above the
+        threshold at one sweep and expired (or nearly) before the next. Not
+        checked when the sweep is disabled.
+        """
+        if not self.OAUTH_REFRESH_SWEEP_ENABLED:
+            return self
+        interval = self.OAUTH_REFRESH_SWEEP_INTERVAL_MINUTES
+        limit = self.OAUTH_REFRESH_THRESHOLD_SECONDS / 60 - 5
+        if 1 <= interval < limit:
+            return self
+        raise ValueError(
+            f"OAUTH_REFRESH_SWEEP_INTERVAL_MINUTES must be at least 1 and below "
+            f"OAUTH_REFRESH_THRESHOLD_SECONDS/60 - 5 = {limit:g} (got {interval})."
+        )
+
     # Bundle auto-update convergence sweep.
     # Installs with ``update_mode="automatic"`` whose environment is idle
     # (no env at all, suspended, or stopped) are converged onto the bundle's

@@ -188,6 +188,10 @@ from app.services.credentials.model_discovery_scheduler import (
     start_scheduler as start_model_discovery_scheduler,
     shutdown_scheduler as shutdown_model_discovery_scheduler,
 )
+from app.services.credentials.oauth_refresh_scheduler import (
+    start_scheduler as start_oauth_refresh_scheduler,
+    shutdown_scheduler as shutdown_oauth_refresh_scheduler,
+)
 from app.services.credentials.key_provisioning_scheduler import (
     start_scheduler as start_key_provisioning_scheduler,
     shutdown_scheduler as shutdown_key_provisioning_scheduler,
@@ -229,6 +233,7 @@ async def lifespan(app: FastAPI):
         start_mfa_cleanup_scheduler()
         start_model_discovery_scheduler()
         start_key_provisioning_scheduler()
+        start_oauth_refresh_scheduler()
         start_routing_trace_scheduler()
         start_status_repair_scheduler()
 
@@ -454,6 +459,7 @@ async def lifespan(app: FastAPI):
         shutdown_mfa_cleanup_scheduler()
         shutdown_model_discovery_scheduler()
         shutdown_key_provisioning_scheduler()
+        shutdown_oauth_refresh_scheduler()
         shutdown_routing_trace_scheduler()
         shutdown_status_repair_scheduler()
     event_service.shutdown()

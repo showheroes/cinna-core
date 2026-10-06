@@ -6604,6 +6604,64 @@ export const AgentCreateFlowResponseSchema = {
     title: 'AgentCreateFlowResponse'
 } as const;
 
+export const AgentCredentialAccessTokenRequestSchema = {
+    properties: {
+        min_ttl: {
+            type: 'integer',
+            title: 'Min Ttl',
+            default: 300
+        },
+        known_expires_at: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Known Expires At'
+        }
+    },
+    type: 'object',
+    title: 'AgentCredentialAccessTokenRequest',
+    description: `Body of the agent-env on-demand access-token endpoint.
+
+\`\`min_ttl\`\`: the caller needs the token valid for at least this many
+seconds; clamped server-side to \`\`[0, OAUTH_ON_DEMAND_MAX_MIN_TTL_SECONDS]\`\`.
+\`\`known_expires_at\`\`: expiry of the token the calling environment already
+holds. When the returned token's expiry differs (or this is omitted), the
+platform pushes the credential to the agent's running environments before
+responding.`
+} as const;
+
+export const AgentCredentialAccessTokenResponseSchema = {
+    properties: {
+        access_token: {
+            type: 'string',
+            title: 'Access Token'
+        },
+        token_type: {
+            type: 'string',
+            title: 'Token Type'
+        },
+        expires_at: {
+            type: 'integer',
+            title: 'Expires At'
+        },
+        refreshed: {
+            type: 'boolean',
+            title: 'Refreshed'
+        }
+    },
+    type: 'object',
+    required: ['access_token', 'token_type', 'expires_at', 'refreshed'],
+    title: 'AgentCredentialAccessTokenResponse',
+    description: `A currently valid OAuth access token for a credential linked to the agent.
+
+Never carries the refresh token or refresh bookkeeping.`
+} as const;
+
 export const AgentCredentialLinkRequestSchema = {
     properties: {
         credential_id: {
@@ -23600,6 +23658,22 @@ export const OAuthMetadataResponseSchema = {
                 }
             ],
             title: 'Granted At'
+        },
+        refresh_error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Refresh Error'
+        },
+        needs_reauthorization: {
+            type: 'boolean',
+            title: 'Needs Reauthorization',
+            default: false
         }
     },
     type: 'object',

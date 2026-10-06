@@ -36,6 +36,8 @@ class OAuthMetadataResponse(BaseModel):
     scopes: list[str] | None
     expires_at: int | None
     granted_at: int | None
+    refresh_error: str | None = None
+    needs_reauthorization: bool = False
 
 
 class OAuthRefreshResponse(BaseModel):
@@ -146,7 +148,9 @@ def get_oauth_metadata(
         user_name=metadata.get("user_name"),
         scopes=metadata.get("scopes"),
         expires_at=metadata.get("expires_at"),
-        granted_at=metadata.get("granted_at")
+        granted_at=metadata.get("granted_at"),
+        refresh_error=metadata.get("refresh_error"),
+        needs_reauthorization=bool(metadata.get("needs_reauthorization", False)),
     )
 
 

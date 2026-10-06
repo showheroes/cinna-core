@@ -413,3 +413,30 @@ class CredentialDeletionImpact(SQLModel):
     active_install_count: int = 0
     skill_pbp_usages: list[CredentialSkillUsage] = []
     active_skill_install_count: int = 0
+
+
+class AgentCredentialAccessTokenRequest(SQLModel):
+    """Body of the agent-env on-demand access-token endpoint.
+
+    ``min_ttl``: the caller needs the token valid for at least this many
+    seconds; clamped server-side to ``[0, OAUTH_ON_DEMAND_MAX_MIN_TTL_SECONDS]``.
+    ``known_expires_at``: expiry of the token the calling environment already
+    holds. When the returned token's expiry differs (or this is omitted), the
+    platform pushes the credential to the agent's running environments before
+    responding.
+    """
+
+    min_ttl: int = 300
+    known_expires_at: int | None = None
+
+
+class AgentCredentialAccessTokenResponse(SQLModel):
+    """A currently valid OAuth access token for a credential linked to the agent.
+
+    Never carries the refresh token or refresh bookkeeping.
+    """
+
+    access_token: str
+    token_type: str
+    expires_at: int
+    refreshed: bool

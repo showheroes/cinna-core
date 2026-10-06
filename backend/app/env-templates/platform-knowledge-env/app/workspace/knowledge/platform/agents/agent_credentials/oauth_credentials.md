@@ -43,8 +43,9 @@ All scopes are under the `https://www.googleapis.com/auth/` prefix. Read-only va
 ### Token Status Indicators
 
 - **Active** - Token is valid and not expiring soon
-- **Expiring soon** - Token expires within 10 minutes (auto-refreshed before streams)
-- **Expired** - Token has expired (will be refreshed on next stream or manually)
+- **Expiring soon** - Token expires within 30 minutes (`OAUTH_REFRESH_THRESHOLD_SECONDS`, default 1800); the platform refreshes it automatically
+- **Expired** - Token has expired (refreshed on next sync/stream/sweep, or manually)
+- **Needs re-authorization** - Google rejected the refresh token (or none was stored); automatic refresh stops until the owner re-authorizes (metadata `needs_reauthorization: true`, last failure in `refresh_error`)
 
 ## OAuth Credential Data Structure
 
@@ -58,6 +59,7 @@ Fields stored in `Credential.encrypted_data`:
 - `granted_user_email` - Google account email (for user reference)
 - `granted_user_name` - Google account display name (for user reference)
 - `granted_at` - Unix timestamp when credential was initially granted
+- `refresh_attempted_at`, `refresh_error`, `refresh_error_kind` (`reauth_required` | `provider_error`), `refresh_error_at` - refresh bookkeeping; written on failure, cleared on success and on re-authorization
 
 ### Fields Exposed to Agent Environment (via whitelisting)
 
@@ -68,32 +70,47 @@ Excluded fields (backend-only):
 - `refresh_token` - Backend handles token refresh transparently
 - `client_secret` - Never leaves the backend server
 - `granted_at` - Not needed by agent scripts
+- `refresh_*` bookkeeping fields - backend-only (the whitelist keeps them out of the container); the owner sees only `refresh_error` / `needs_reauthorization` via the metadata endpoint
 
 ## Token Refresh Lifecycle
 
-### Pre-Stream Refresh (Synchronous)
+Google access tokens live ~1 hour. Every refresh goes through one backend primitive (`OAuthRefreshService.refresh_if_needed`), so triggers never race each other. A refresh is attempted only when the token has less than the threshold left (default **30 minutes**, setting `OAUTH_REFRESH_THRESHOLD_SECONDS`, valid 60-2400).
 
-Before each agent stream starts:
-1. System checks all OAuth credentials linked to the agent
-2. Tokens expiring within 10 minutes (600 seconds) are refreshed
-3. Refresh uses stored `refresh_token` to get a new `access_token` from Google
-4. Updated credential synced to agent environment
-5. Stream starts with guaranteed-valid tokens
+### Triggers
 
-This ensures agents always have valid tokens for the expected stream duration.
+1. **On sync** - environment start and every credential push to running environments (`sync_credentials_to_agent_environments`) refresh expiring tokens first, then push.
+2. **Per turn, every stream path** - refreshed in `SessionStreamProcessor` right after the stream starts, so UI chat, channel follow-up turns, A2A and MCP turns all get it. If anything was refreshed, the credentials are pushed to the running environment.
+3. **Background sweep** - every 10 minutes (`OAUTH_REFRESH_SWEEP_INTERVAL_MINUTES`) the leader worker refreshes expiring tokens of credentials linked to agents with a running environment and pushes them, so idle environments do not hold an expired token. Also covers `mcp_provider` `oauth_dcr` credentials.
+4. **On demand from the container** - a script calls `credentials.access_token(id)` (see below) and the platform refreshes if needed.
+5. **Owner's manual refresh** - `POST /credentials/{id}/oauth/refresh` forces a refresh and bypasses the failure state below.
 
-### Event-Driven Refresh
+With the 30-minute threshold and 10-minute sweep, a token in a running environment stays valid for at least ~20 minutes.
 
-When a credential is updated (including after token refresh):
-- Existing `event_credential_updated()` handler fires
-- Updated credential auto-synced to all linked running environments
-- Agents receive fresh tokens without interruption
+### Concurrency
 
-### Refresh Error Handling
+A refresh takes a per-credential in-process lock plus a Postgres advisory lock (non-blocking try-lock, re-read after acquiring), so concurrent triggers on one or many workers refresh once. If another worker holds the lock for ~5 s the caller proceeds with the current token. If the owner re-authorizes while a refresh is in flight, the stale refresh result is dropped.
 
-- Refresh failures are logged but don't block streaming (graceful degradation)
-- Revoked refresh tokens result in logged errors - user must re-authorize
-- Failed refresh doesn't affect other credentials or environments
+### Failure States
+
+- **`reauth_required`** - no refresh token, or Google answered `invalid_grant` / `unauthorized_client`. Automatic attempts (sync, stream, sweep, container endpoint) stop until the owner re-authorizes or manually refreshes. Re-authorization (the OAuth callback rebuilds the stored data) clears the error.
+- **`provider_error`** - Google 5xx, timeout or network failure. Retried after a 60 s cooldown (`OAUTH_REFRESH_COOLDOWN_SECONDS`).
+- Failures never block streaming or syncing: the stale token is pushed as-is and the error is recorded on the credential.
+- Known gap: `mcp_provider` `oauth_dcr` refresh has no failure cooldown; a failing one is retried on every sync, start and stream.
+
+### Agent-Facing Access Token
+
+Scripts that run longer than a token lifetime should call the SDK instead of reading `credentials.json` once:
+
+```python
+from core.cinna_api import credentials
+token = credentials.access_token(credential_id, min_ttl=300)
+```
+
+It returns the synced token when it has more than `min_ttl` seconds left (no network), otherwise asks the platform (`POST /api/v1/agent/credentials/{id}/access-token`, scoped environment token), which refreshes if needed. Only credentials linked to the calling agent and of a Google OAuth type are served. Failures raise `CredentialRefreshError` with a `code` (`credential_not_linked`, `not_refreshable`, `reauthorization_required`, `provider_error`, `refresh_in_progress`, `oauth_not_configured`, `unauthorized`, `unavailable`); relay `str(exc)` to the user. If the platform is unreachable but the synced token is still valid, that token is returned; `unauthorized` (HTTP 401/403) means the environment should be restarted or rebuilt, and has no local fallback. The generated credentials README tells agents that tokens are checked before every turn, on env start and about every 10 minutes, and that an `AttributeError` on `credentials.access_token` means the environment needs a rebuild (use the HTTP fallback).
+
+**Rebuild caveat:** the SDK lives in the per-environment copy of the core, so it exists only in environments created or rebuilt after this feature. Older environments can call the same endpoint with `curl` (documented in the generated credentials README); the backend-side refresh triggers work without a rebuild.
+
+Technical details: [OAuth Credentials Tech](oauth_credentials_tech.md).
 
 ## Security
 
@@ -121,3 +138,7 @@ When a credential is updated (including after token refresh):
 - No new environment variables needed - reuses existing Google Cloud Console OAuth app
 - Google Cloud Console requires additional redirect URI for credential OAuth callback
 - All 6 OAuth types use unified UI component and identical backend flow
+
+## Changelog
+
+- OAuth refresh hardening: single locked refresh primitive, 30-minute threshold, refresh on sync / every stream path / background sweep, recorded failure state with re-authorization, container `credentials.access_token()` and endpoint.

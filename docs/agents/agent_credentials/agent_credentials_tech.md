@@ -99,7 +99,11 @@ Four locale/communication preference columns (migration adds these to `user`):
   - `POST /api/v1/credentials/{credential_id}/oauth/authorize` - Initiate OAuth flow, returns authorization URL
   - `POST /api/v1/credentials/oauth/callback` - Handle OAuth callback, exchange code for tokens
   - `GET /api/v1/credentials/{credential_id}/oauth/metadata` - Get OAuth metadata (email, scopes, expiration)
-  - `POST /api/v1/credentials/{credential_id}/oauth/refresh` - Manually trigger token refresh
+  - `POST /api/v1/credentials/{credential_id}/oauth/refresh` - Manually trigger token refresh (forced)
+
+### Agent Environment Credential Route
+- `backend/app/api/routes/agent_env_credentials.py`
+  - `POST /api/v1/agent/credentials/{credential_id}/access-token` - Scoped env token; returns a valid Google OAuth access token, refreshing if needed. See [OAuth Credentials Tech](oauth_credentials_tech.md)
 
 ### Agent Environment Internal API
 - `backend/app/env-templates/app_core_base/core/server/routes.py`
@@ -114,7 +118,8 @@ Four locale/communication preference columns (migration adds these to `user`):
 - `redact_credential_data()` - Replaces sensitive field values with `***REDACTED***` (only for non-empty values)
 - `_process_api_token_credential()` - Converts API token input (type + template + token) to ready-to-use HTTP headers (`http_header_name` / `http_header_value`). The non-secret `service_uri` slot id is added separately in `get_agent_credentials_with_data()` (it is a `Credential` column, not part of `credential_data`)
 - `sync_credentials_to_agent_environments()` - Syncs credential files to all running environments of an agent
-- `refresh_expiring_credentials_for_agent()` - Checks OAuth tokens linked to agent, refreshes those expiring within threshold
+- `prepare_fresh_credentials_for_environment()` - Refresh step then `prepare_credentials_for_environment()`; used by env start and live sync
+- `refresh_expiring_credentials_for_agent()` - Refreshes OAuth (via `OAuthRefreshService`) and `mcp_provider` `oauth_dcr` tokens linked to the agent that expire within `settings.OAUTH_REFRESH_THRESHOLD_SECONDS`; never emits events or syncs, never raises
 - `check_credential_completeness(credential_type, credential_data)` - Returns `"complete"` or `"incomplete"` based on whether the per-type required fields are all non-empty in the decrypted `credential_data`. Used by `GET /agents/{id}/credentials` to populate the `status` field on each row
 - `event_credential_updated()` - Event handler: syncs updated credential to all linked agents' running environments
 - `event_credential_deleted()` - Event handler: syncs removal to all linked agents' running environments
@@ -150,7 +155,7 @@ New service responsible for the `current_user` credentials.json block and the "U
 
 ## Configuration
 
-- `CREDENTIAL_REFRESH_THRESHOLD_SECONDS = 600` - OAuth refresh threshold (10 minutes before expiry)
+- `OAUTH_REFRESH_THRESHOLD_SECONDS` (default 1800) - OAuth refresh threshold; other `OAUTH_REFRESH_*` settings in [OAuth Credentials Tech](oauth_credentials_tech.md)
 - Encryption uses Fernet symmetric encryption with PBKDF2-HMAC-SHA256 key derivation
 - Encryption key derived from `SECRET_KEY` environment variable (`backend/app/core/security.py`)
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Shared with user OAuth login, used for credential OAuth flows

@@ -115,14 +115,17 @@ Three distinct triggers exist:
   is still alive, the environment is put into `critical_state` with
   `cause="credential_sync_failed"`, and the exception is logged as `type(e).__name__: e` so the
   payload never lands in the log.
-- **Pre-stream OAuth refresh.** Before starting a stream on a running environment,
-  `SessionService` calls `CredentialsService.refresh_expiring_credentials_for_agent`
-  (`backend/app/services/sessions/session_service.py`). It refreshes any OAuth credential whose
-  `expires_at` falls inside `CREDENTIAL_REFRESH_THRESHOLD_SECONDS` via
-  `OAuthCredentialsService.refresh_oauth_token`, and any `mcp_provider` with `auth_mode="oauth_dcr"`
-  via `MCPProviderOAuthService.refresh_access_token`. Only if something was actually refreshed does it
-  call `sync_credentials_to_agent_environments`. Every failure path here is graceful — the stream
-  proceeds with the stale token.
+- **OAuth refresh (before push).** Env start and `sync_credentials_to_agent_environments` call
+  `CredentialsService.prepare_fresh_credentials_for_environment`, which first runs
+  `refresh_expiring_credentials_for_agent`: Google OAuth credentials expiring within
+  `OAUTH_REFRESH_THRESHOLD_SECONDS` (30 min) refresh through `OAuthRefreshService`, and `mcp_provider`
+  `auth_mode="oauth_dcr"` via `MCPProviderOAuthService.refresh_access_token`. Per stream turn,
+  `SessionStreamProcessor` (`backend/app/services/sessions/stream_processor.py`) runs the same refresh
+  after `on_stream_starting` (covers UI, channel follow-ups, A2A) and calls
+  `sync_credentials_to_agent_environments` only if something was refreshed. A 10-minute sweep
+  (`oauth_refresh_scheduler.py`) keeps idle running environments fresh, and a script can pull a token
+  via `POST /api/v1/agent/credentials/{id}/access-token`. Every failure path is graceful — the push
+  proceeds with the stale token. See [OAuth Credentials](../agents/agent_credentials/oauth_credentials.md).
 
 ### 4. `prepare_credentials_for_environment` builds the payload
 
@@ -277,7 +280,7 @@ create / start / resume / rebuild:
 | `credentials_service.py` `_rewrite_agent_api_urls_for_env` | `AGENT_ENV_BACKEND_URL` has a netloc | rewrite to container origin, or warn and keep the public URL |
 | `credentials_service.py` `_rewrite_mcp_endpoint_for_env` | `auth_mode == "agent2agent"` and `MCP_SERVER_CONTAINER_URL` set | netloc swapped, or endpoint used verbatim |
 | `credentials_service.py` `collect_mcp_provider_manifest` | `mcp_mode_<mode>` flag, `endpoint_url` present | entry emitted / skipped for this mode |
-| `credentials_service.py` `refresh_expiring_credentials_for_agent` | `expires_at <= now + threshold`, `auth_mode` | refresh + resync, or proceed with the stale token |
+| `credentials_service.py` `refresh_expiring_credentials_for_agent` | `expires_at <= now + threshold`, `auth_mode`, `refresh_error_kind` | refresh (then push), or proceed with the stale token; `reauth_required` skips attempts |
 | `install_service.py` `_try_link_publisher_credential` | publisher still owns it and `allow_sharing` still true | share + link, or fall through to an installer-owned placeholder |
 | `environment_lifecycle.py` `_usable_assigned_credential` | id exists **and** type matches the mode's SDK | treated as assigned (fallback suppressed) or not-assigned (fallback runs) |
 | `environment_lifecycle.py` `_generate_env_file` | `detect_anthropic_credential_type(key)` | `ANTHROPIC_API_KEY=` or `CLAUDE_CODE_OAUTH_TOKEN=` |
@@ -336,7 +339,7 @@ create / start / resume / rebuild:
   undisturbed, and both are wrapped so a missing owner degrades to omission rather than a failed sync.
 - **Fresh reads matter.** `cinna_api.credentials` re-reads the file on every call by design; caching it
   at import time would serve stale secrets across an OAuth refresh. The same reasoning drives the
-  pre-stream refresh being followed by an immediate resync.
+  refresh being followed by an immediate resync.
 - **A trap that has bitten: per-mode AI credential fallback.** An earlier all-or-nothing gate ("fall
   back only if *neither* mode is assigned") silently left e.g. `ANTHROPIC_API_KEY` empty for a
   `claude-code/anthropic` building mode whenever the *other* mode happened to pin a credential. The

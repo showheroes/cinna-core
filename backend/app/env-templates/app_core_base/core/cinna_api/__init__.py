@@ -57,7 +57,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .caller import Caller, caller
-from .credentials import CredentialMissing, credentials
+from .credentials import CredentialMissing, CredentialRefreshError, credentials
 from .errors import error
 
 # The single shared router the agent decorates. Discovery mounts this onto a
@@ -68,6 +68,7 @@ __all__ = [
     "api",
     "credentials",
     "CredentialMissing",
+    "CredentialRefreshError",
     "caller",
     "Caller",
     "error",
