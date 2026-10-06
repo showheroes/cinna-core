@@ -281,7 +281,11 @@ class SessionStreamProcessor:
 
             # Resolve environment if not already done (non-env-ready paths)
             if self.environment is None:
-                environment = db.get(AgentEnvironment, chat_session.environment_id) if chat_session else None
+                environment = (
+                    db.get(AgentEnvironment, chat_session.environment_id)
+                    if chat_session and chat_session.environment_id
+                    else None
+                )
                 if not environment:
                     logger.error("%s Environment not found for session %s", self.log_prefix, self.session_id)
                     return ""
